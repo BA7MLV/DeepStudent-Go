@@ -24,7 +24,7 @@ jobs:
         with:
           bun-version: 1.2.21
       - run: bun install --frozen-lockfile
-      - run: bun --cwd frontend run build
+      - run: cd frontend && bun run build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist
