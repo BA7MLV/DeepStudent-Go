@@ -43,11 +43,14 @@ root.innerHTML = `
   </div>
 `;
 
-try {
-  const health = await HealthService.health();
+async function bootRuntime() {
   const status = document.querySelector<HTMLSpanElement>("#status");
-  if (status) status.textContent = `${health.runtime} runtime: ${health.status}`;
-} catch {
-  const status = document.querySelector<HTMLSpanElement>("#status");
-  if (status) status.textContent = "runtime bridge unavailable";
+  try {
+    const health = await HealthService.health();
+    if (status) status.textContent = `${health.runtime} runtime: ${health.status}`;
+  } catch {
+    if (status) status.textContent = "runtime bridge unavailable";
+  }
 }
+
+void bootRuntime();
