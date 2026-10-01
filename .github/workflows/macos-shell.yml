@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - migration/mygo-shell-poc
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
