@@ -1,0 +1,124 @@
+:root {
+  --ds-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --ds-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --ds-radius-panel: 18px;
+  --ds-radius-row: 14px;
+  --ds-radius-control: 12px;
+  --ds-sidebar-width: 272px;
+  --ds-titlebar-height: 40px;
+  --ds-space: 14px;
+  --ds-bg: #ffffff;
+  --ds-sidebar: #f5f5f5;
+  --ds-panel: #fbfbfb;
+  --ds-panel-strong: #ffffff;
+  --ds-fg: #25272b;
+  --ds-muted: #6b7078;
+  --ds-border: #e1e2e5;
+  --ds-hover: #e9eaed;
+  --ds-active: #dedfe3;
+  --ds-accent: #3b82f6;
+  --ds-shadow: 0 18px 50px rgb(25 30 40 / 8%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ds-bg: #17181b;
+    --ds-sidebar: #202125;
+    --ds-panel: #1c1d20;
+    --ds-panel-strong: #24252a;
+    --ds-fg: #f1f2f4;
+    --ds-muted: #a2a6ae;
+    --ds-border: #34363d;
+    --ds-hover: #2b2d33;
+    --ds-active: #353841;
+    --ds-shadow: 0 18px 50px rgb(0 0 0 / 28%);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-width: 720px; min-height: 100%; }
+body {
+  background: var(--ds-bg);
+  color: var(--ds-fg);
+  font: 14px/1.5 var(--ds-font);
+  -webkit-font-smoothing: antialiased;
+  -webkit-text-size-adjust: 100%;
+}
+button, input { font: inherit; color: inherit; }
+button { border: 0; cursor: pointer; }
+
+.ds-shell {
+  display: grid;
+  grid-template-rows: var(--ds-titlebar-height) 1fr;
+  min-height: 100vh;
+  background: var(--ds-bg);
+}
+.ds-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  background: var(--ds-panel);
+  border-bottom: 1px solid var(--ds-border);
+  user-select: none;
+}
+.ds-titlebar__traffic { display: flex; gap: 7px; }
+.ds-titlebar__traffic i {
+  width: 11px; height: 11px; border-radius: 50%; display: block;
+  background: #ff5f57;
+}
+.ds-titlebar__traffic i:nth-child(2) { background: #febc2e; }
+.ds-titlebar__traffic i:nth-child(3) { background: #28c840; }
+.ds-titlebar__title { color: var(--ds-muted); font-size: 12px; }
+
+.ds-body { display: grid; grid-template-columns: var(--ds-sidebar-width) 1fr; min-height: 0; }
+.ds-sidebar {
+  display: flex; flex-direction: column; gap: 18px; padding: 18px 12px;
+  background: var(--ds-sidebar); border-right: 1px solid var(--ds-border);
+}
+.ds-brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 10px; font-weight: 650; }
+.ds-brand__mark {
+  display: grid; place-items: center; width: 28px; height: 28px;
+  border-radius: 9px; color: white; background: linear-gradient(135deg, #2563eb, #7c3aed);
+  font-size: 13px; font-weight: 700;
+}
+.ds-nav { display: grid; gap: 4px; }
+.ds-nav button {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px;
+  padding: 0 11px; border-radius: var(--ds-radius-row); text-align: left;
+  background: transparent; color: var(--ds-muted);
+}
+.ds-nav button:hover { background: var(--ds-hover); color: var(--ds-fg); }
+.ds-nav button[data-active="true"] { background: var(--ds-active); color: var(--ds-fg); font-weight: 600; }
+.ds-nav__icon { width: 20px; text-align: center; opacity: .8; }
+.ds-sidebar__footer { margin-top: auto; display: grid; gap: 4px; }
+
+.ds-main { min-width: 0; padding: 22px; overflow: auto; }
+.ds-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.ds-toolbar h1 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+.ds-toolbar__actions { display: flex; gap: 6px; }
+.ds-icon-button {
+  width: 32px; height: 32px; border-radius: var(--ds-radius-control);
+  background: transparent; color: var(--ds-muted);
+}
+.ds-icon-button:hover { background: var(--ds-hover); color: var(--ds-fg); }
+.ds-card {
+  border: 1px solid var(--ds-border); border-radius: var(--ds-radius-panel);
+  background: var(--ds-panel-strong); box-shadow: var(--ds-shadow);
+}
+.ds-empty { display: grid; place-items: center; min-height: 360px; padding: 40px; text-align: center; }
+.ds-empty h2 { margin: 0 0 8px; font-size: 18px; }
+.ds-empty p { max-width: 420px; margin: 0; color: var(--ds-muted); }
+.ds-status {
+  display: inline-flex; align-items: center; gap: 7px; margin-top: 18px;
+  padding: 7px 10px; border: 1px solid var(--ds-border); border-radius: 999px;
+  color: var(--ds-muted); font-size: 12px;
+}
+.ds-status__dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+
+@media (max-width: 860px) {
+  html, body { min-width: 0; }
+  .ds-body { grid-template-columns: 224px 1fr; }
+  :root { --ds-sidebar-width: 224px; }
+}
