@@ -9,7 +9,7 @@ export default defineConfig({
   buildCommand: "bun run build:web",
   frontendDist: "frontend/dist",
   bindings: "frontend/src/mygo.ts",
-  main: "cmd/deepstudent",
+  main: "./cmd/deepstudent",
   out: "build",
   macos: {
     minimumSystemVersion: "12.0",
