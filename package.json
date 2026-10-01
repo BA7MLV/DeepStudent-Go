@@ -4,8 +4,8 @@
   "type": "module",
   "workspaces": ["frontend"],
   "scripts": {
-    "dev:web": "bun --cwd frontend run dev",
-    "build:web": "bun --cwd frontend run build",
+    "dev:web": "cd frontend && bun run dev",
+    "build:web": "cd frontend && bun run build",
     "generate": "mygo generate",
     "build": "mygo build"
   },
