@@ -1,17 +1,55 @@
 # DeepStudent-Go
 
-Go-primary runtime migration workspace for DeepStudent.
+DeepStudent-Go is a Go-first runtime migration workspace for DeepStudent. The
+repository keeps the desktop shell and frontend migration incremental while a
+small local HTTP/SSE backend establishes provider-neutral contracts.
 
-This repository starts with a desktop shell proof of concept using [MyGo](https://github.com/egoist/mygo) and a versioned runtime boundary. The existing DeepStudent implementation remains the source of truth until the vertical slice passes its compatibility and benchmark gates.
+## Backend foundation
 
-## First milestone
+The server is a modular monolith with a deterministic offline provider by
+default. It exposes health/readiness checks, versioned API routes, structured
+errors, request IDs, exact-origin CORS, append-only session events, and a CGO-free
+SQLite WAL store. See [docs/backend-architecture.md](docs/backend-architecture.md)
+for the contracts and Mermaid architecture diagram.
 
-- MyGo desktop shell for macOS, Windows, and Linux
-- Go runtime process with a versioned JSON-RPC boundary
-- DeepSeek/OpenAI streaming adapter
-- One allow-listed read-only tool
-- Safe fallback to the existing runtime
+### Run locally
 
-## Scope guard
+```sh
+go run ./cmd/server
+```
 
-This is an incremental migration. It does not migrate the full product, delete the existing implementation, or change data schemas in the first milestone.
+The default listener is `127.0.0.1:8080` and the database is
+`data/deepstudent.db`. A JSON config file can be selected with
+`DEEPSTUDENT_CONFIG`; environment values override file values. Useful overrides:
+
+```sh
+DEEPSTUDENT_HTTP_ADDR=127.0.0.1:8080 \
+DEEPSTUDENT_DB_PATH=data/deepstudent.db \
+DEEPSTUDENT_CORS_ALLOWLIST=http://localhost:5173 \
+go run ./cmd/server
+```
+
+Try the deterministic stream:
+
+```sh
+curl -s http://127.0.0.1:8080/healthz
+curl -s -X POST http://127.0.0.1:8080/api/v1/runs \
+  -H 'content-type: application/json' -d '{"prompt":"hello"}'
+# then GET /api/v1/runs/<run_id>/events with curl -N
+```
+
+### Local Docker profile
+
+```sh
+docker compose up --build
+```
+
+The compose port is bound to `127.0.0.1:8080`; SQLite is stored in the
+`deepstudent-data` volume. Provider API keys are not part of this profile.
+
+## Desktop shell milestone
+
+The existing MyGo desktop shell remains available through `cmd/deepstudent` and
+continues to use the versioned runtime boundary in `protocol/runtime-v1.md`.
+The existing DeepStudent implementation remains the source of truth until
+compatibility and benchmark gates pass.
