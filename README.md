@@ -95,7 +95,9 @@ curl -N "http://127.0.0.1:8080/api/v1/runs/${RUN_ID}/events"
 
 The run endpoint returns `202 Accepted` and an `events_url`. SSE event types
 currently include `run.started`, `message.delta`, `run.completed`, and
-`run.error`.
+`run.error`. Runtime runs are bounded by the configured default timeout (45s by
+default); completed in-memory history is retained briefly (5 minutes) to allow
+an immediate late subscription, then released.
 
 ### Web shell
 
@@ -129,6 +131,9 @@ docker compose up --build
 
 The compose server binds to `127.0.0.1:8080` and stores SQLite in the
 `deepstudent-data` volume. Provider credentials are intentionally not included.
+The image pre-creates `/data` with the distroless non-root UID's ownership so a
+new named volume can be opened by the server. Verify this permission when
+switching volume drivers or a pre-existing host bind mount.
 
 ## Preview links
 
