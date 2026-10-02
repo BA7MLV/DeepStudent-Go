@@ -107,7 +107,10 @@ function MessageText() {
 function ChatEmptyState() {
   return (
     <div className="ds-chat-center">
+      <div className="ds-chat-welcome-mark" aria-hidden="true"><Icon name="sparkle" size={20} /></div>
+      <span className="ds-chat-kicker">DeepStudent 学习助手</span>
       <h2 id="chat-welcome-title">从理解开始，让知识成为自己的能力</h2>
+      <p>把问题带来，我们一起理解、整理，再用练习巩固</p>
     </div>
   );
 }
