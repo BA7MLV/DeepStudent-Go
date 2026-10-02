@@ -67,7 +67,10 @@ func Defaults() Config {
 		Server: ServerConfig{
 			Addr:          "127.0.0.1:8080",
 			ReadTimeout:   15 * time.Second,
-			WriteTimeout:  30 * time.Second,
+			// SSE streams are long-lived; net/http applies WriteTimeout to the
+			// entire response and would truncate a valid run after 30 seconds.
+			// Keep it disabled by default and rely on runtime/provider deadlines.
+			WriteTimeout:  0,
 			IdleTimeout:   60 * time.Second,
 			CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173"},
 		},
