@@ -40,21 +40,26 @@ allowlist. Wildcards are intentionally unsupported in the local profile.
 Configuration loads defaults, an optional JSON config file, then environment
 overrides. Provider profiles hold `apiKeyEnv` references only. Secret values are
 never represented in logs, persisted tables, event payloads, or browser JSON.
-The default provider is an offline deterministic stub. Login is disabled in the
-first profile; `internal/auth` defines the future server-side session boundary
-and requires Argon2id for any password flow.
+The default provider is an offline deterministic stub. Runtime execution applies
+the configured default timeout and bounds queued work with context cancellation.
+Login is disabled in the first profile; `internal/auth` defines the future
+server-side session boundary and requires Argon2id for any password flow.
 
 ## Persistence
 
 `internal/storage` opens SQLite with WAL and a single writer (`SetMaxOpenConns(1)`).
 The first migration creates `sessions`, `runs`, `session_events`,
 `provider_profiles`, `settings`, and `jobs` plus `schema_migrations`. Appending a
-session event calculates its sequence and inserts it in one transaction.
+session event calculates its sequence and inserts it in one transaction. The
+current foundation commits each emitted event synchronously; batching and
+separate read pooling require benchmark and replay-semantics work before they
+are enabled.
 
 ## Profiles and resource limits
 
 The `Dockerfile` builds a CGO-free server image and uses a SQLite volume. The
 compose server binds the host port to `127.0.0.1`; it is suitable for a local
 profile, while a future remote profile should add an explicit authenticated
-execution boundary. Defaults cap model tokens at 2048, runtime concurrency at
-2, and request/read/write timeouts to small finite values for a 2–4 GB machine.
+execution boundary. Defaults cap model tokens at 2048 and runtime concurrency
+at 2. Read and idle timeouts stay finite; the HTTP write timeout is disabled by
+default because `net/http` applies it to the full lifetime of SSE responses.
