@@ -29,7 +29,8 @@ func main() {
 	}
 	defer store.Close()
 	provider := runtime.NewDeterministicProvider()
-	agent := runtime.NewDeterministicRuntime(provider, store, cfg.Runtime.MaxConcurrency)
+	agent := runtime.NewDeterministicRuntimeWithTimeout(provider, store, cfg.Runtime.MaxConcurrency, cfg.Runtime.DefaultTimeout)
+	defer agent.Close()
 	server := &http.Server{
 		Addr:         cfg.Server.Addr,
 		Handler:      api.NewServer(cfg, agent),
