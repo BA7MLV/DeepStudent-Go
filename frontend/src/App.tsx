@@ -107,7 +107,7 @@ function MessageText() {
 function ChatEmptyState() {
   return (
     <div className="ds-chat-center">
-      <h2 id="chat-welcome-title">把今天学会的，变成真正掌握的</h2>
+      <h2 id="chat-welcome-title">从理解开始，让知识成为自己的能力</h2>
     </div>
   );
 }
