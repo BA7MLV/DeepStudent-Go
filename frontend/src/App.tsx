@@ -89,18 +89,20 @@ function ChatWorkspace() {
         <ThreadPrimitive.Root className="ds-chat-thread">
           <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll>
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-            <div className="ds-chat-center">
-              <div className="ds-chat-brand" aria-hidden="true">
-                <img src="./logo-black.svg" alt="" />
+            <ThreadPrimitive.Empty>
+              <div className="ds-chat-center">
+                <div className="ds-chat-brand" aria-hidden="true">
+                  <img src="./logo-black.svg" alt="" />
+                </div>
+                <h2 id="chat-welcome-title">欢迎使用 DeepStudent</h2>
+                <p>开始新对话，探索学习资料、整理笔记、随时提问</p>
+                <div className="ds-chat-actions">
+                  <button className="ds-primary-button" type="button">＋ 新对话</button>
+                  <button className="ds-secondary-button" type="button">▤ 浏览学习资源</button>
+                </div>
+                <span className="ds-chat-hint">提示：随时按 ⌘ N 新建对话</span>
               </div>
-              <h2 id="chat-welcome-title">欢迎使用 DeepStudent</h2>
-              <p>开始新对话，探索学习资料、整理笔记、随时提问</p>
-              <div className="ds-chat-actions">
-                <button className="ds-primary-button" type="button">＋ 新对话</button>
-                <button className="ds-secondary-button" type="button">▤ 浏览学习资源</button>
-              </div>
-              <span className="ds-chat-hint">提示：随时按 ⌘ N 新建对话</span>
-            </div>
+            </ThreadPrimitive.Empty>
             <ThreadPrimitive.ScrollToBottom className="ds-scroll-bottom">↓</ThreadPrimitive.ScrollToBottom>
           </ThreadPrimitive.Viewport>
           <ComposerPrimitive.Root className="ds-composer" compact>
