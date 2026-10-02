@@ -2,8 +2,9 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   root: ".",
-  // Desktop MyGo loads the bundle from its local webview root. GitHub Pages
-  // needs the repository path prefix, so opt into that only in the Pages job.
+  // MyGo serves the embedded bundle from mygo://localhost/ while Pages needs
+  // the repository prefix. Keep both targets explicit so desktop builds never
+  // inherit /DeepStudent-Go/ asset URLs and regress to a white screen.
   base: process.env.VITE_DEPLOY_TARGET === "pages" ? "/DeepStudent-Go/" : "/",
   build: {
     outDir: "dist",
