@@ -19,7 +19,7 @@ product all at once.
 | Go runtime | HTTP JSON + SSE routes, deterministic offline provider, request IDs, structured errors, exact-origin CORS |
 | Persistence | CGO-free SQLite with WAL, single-writer policy, append-only session events |
 | Desktop shell | MyGo window with a React 19 + TypeScript + Vite UI and typed health bridge |
-| Web preview | Responsive DeepStudent shell with chat, learning resources, tasks, flashcards, templates, settings, and light/dark themes |
+| Web preview | Responsive DeepStudent shell with chat, learning resources, tasks, flashcards, settings, and light/dark themes |
 | CI | Go format/test/vet/build checks, Pages preview workflow, unsigned macOS arm64 workflow |
 | Not implemented | Real provider adapters, authentication, tool execution, durable SSE replay/cancel, and a native iOS app |
 
@@ -134,7 +134,7 @@ The compose server binds to `127.0.0.1:8080` and stores SQLite in the
 
 These are explicit placeholders until a deployment/artifact URL is recorded:
 
-- Pages preview: `https://<owner>.github.io/<repository>/`
+- Pages preview: https://ba7mlv.github.io/DeepStudent-Go/
 - macOS preview artifact: `<MACOS_ARTIFACT_URL>`
 - CI workflow (real link): [`macOS shell workflow`](https://github.com/BA7MLV/DeepStudent-Go/actions/workflows/macos-shell.yml)
 - Pages workflow (real link): [`Pages preview workflow`](https://github.com/BA7MLV/DeepStudent-Go/actions/workflows/pages-preview.yml)
@@ -169,7 +169,7 @@ iOS product.
    64–72pt rows, unread/run status, pull-to-refresh, and search
 2. **Session detail** — dense message timeline, streaming assistant deltas,
    inline run status, and a bottom composer with attachment/tool affordances
-3. **Study** — resources, tasks, flashcards, and templates as secondary shelves
+3. **Study** — resources, tasks, and flashcards as secondary shelves
 4. **Settings** — runtime URL, diagnostics, theme, and experiment flags
 
 Use `NavigationStack` on iPhone and `NavigationSplitView` on iPad. Keep the
