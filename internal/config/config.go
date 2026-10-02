@@ -17,12 +17,12 @@ const DefaultVersion = "v1"
 // credentials are referenced by environment variable name and are never
 // loaded into this structure.
 type Config struct {
-	Version    string                   `json:"version"`
-	Server     ServerConfig             `json:"server"`
-	Storage    StorageConfig            `json:"storage"`
-	Runtime    RuntimeConfig            `json:"runtime"`
-	Auth       AuthConfig               `json:"auth"`
-	Providers  map[string]ProviderProfile `json:"providers"`
+	Version   string                     `json:"version"`
+	Server    ServerConfig               `json:"server"`
+	Storage   StorageConfig              `json:"storage"`
+	Runtime   RuntimeConfig              `json:"runtime"`
+	Auth      AuthConfig                 `json:"auth"`
+	Providers map[string]ProviderProfile `json:"providers"`
 }
 
 type ServerConfig struct {

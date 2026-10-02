@@ -10,11 +10,11 @@ import (
 type StreamEventType string
 
 const (
-	EventRunStarted  StreamEventType = "run.started"
-	EventTextDelta   StreamEventType = "message.delta"
-	EventToolCall    StreamEventType = "tool.call"
+	EventRunStarted   StreamEventType = "run.started"
+	EventTextDelta    StreamEventType = "message.delta"
+	EventToolCall     StreamEventType = "tool.call"
 	EventRunCompleted StreamEventType = "run.completed"
-	EventRunError    StreamEventType = "run.error"
+	EventRunError     StreamEventType = "run.error"
 )
 
 type StreamEvent struct {
@@ -78,11 +78,11 @@ type SessionStore interface {
 }
 
 type AgentRunRequest struct {
-	RunID     string       `json:"run_id,omitempty"`
-	SessionID string       `json:"session_id,omitempty"`
-	Prompt    string       `json:"prompt"`
-	Model     string       `json:"model,omitempty"`
-	MaxTokens int          `json:"max_tokens,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Prompt    string `json:"prompt"`
+	Model     string `json:"model,omitempty"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
 }
 
 type AgentRun struct {

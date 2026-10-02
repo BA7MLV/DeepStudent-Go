@@ -18,7 +18,7 @@ import (
 type DeterministicProvider struct{}
 
 func NewDeterministicProvider() DeterministicProvider { return DeterministicProvider{} }
-func (DeterministicProvider) Name() string             { return "deterministic" }
+func (DeterministicProvider) Name() string            { return "deterministic" }
 
 func (DeterministicProvider) Stream(ctx context.Context, request ModelRequest, emit func(StreamEvent) error) error {
 	text := strings.TrimSpace(request.Prompt)

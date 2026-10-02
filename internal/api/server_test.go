@@ -30,7 +30,9 @@ func TestRunSSE(t *testing.T) {
 	if res.Code != http.StatusAccepted {
 		t.Fatalf("start status %d: %s", res.Code, res.Body.String())
 	}
-	var body struct{ EventsURL string `json:"events_url"` }
+	var body struct {
+		EventsURL string `json:"events_url"`
+	}
 	if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}

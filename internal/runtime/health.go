@@ -12,9 +12,9 @@ func NewHealthService() *HealthService {
 }
 
 type HealthStatus struct {
-	Status    string    `json:"status"`
-	Runtime   string    `json:"runtime"`
-	StartedAt string    `json:"startedAt"`
+	Status    string `json:"status"`
+	Runtime   string `json:"runtime"`
+	StartedAt string `json:"startedAt"`
 }
 
 func (s *HealthService) Health() HealthStatus {

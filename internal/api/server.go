@@ -19,10 +19,10 @@ import (
 const apiVersion = "v1"
 
 type Server struct {
-	cfg    config.Config
-	runs   runtime.AgentRuntime
-	ready  atomic.Bool
-	now    func() time.Time
+	cfg   config.Config
+	runs  runtime.AgentRuntime
+	ready atomic.Bool
+	now   func() time.Time
 }
 
 func NewServer(cfg config.Config, runs runtime.AgentRuntime) *Server {
@@ -227,4 +227,3 @@ func requestID(candidate string) string {
 	}
 	return "req-" + hex.EncodeToString(bytes[:])
 }
-
