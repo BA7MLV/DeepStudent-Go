@@ -60,7 +60,7 @@ const viewMeta: Record<ViewId, { title: string; subtitle: string }> = {
   "chat-v2": { title: "", subtitle: "" },
   "learning-hub": { title: "学习资源", subtitle: "浏览和管理你的学习资料" },
   todo: { title: "待办事项", subtitle: "把下一步学习行动放在眼前" },
-  "skills-management": { title: "技能管理", subtitle: "配置 DeepStudent 的可用技能" },
+  "skills-management": { title: "", subtitle: "" },
   flashcards: { title: "闪卡", subtitle: "用主动回忆巩固真正理解的内容" },
   settings: { title: "设置", subtitle: "调整 DeepStudent 的工作方式" },
 };
@@ -147,21 +147,20 @@ function LearningHub() {
     <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button" aria-label="添加资源">＋</button></div><label className="ds-search-field">⌕ <input placeholder="搜索资源…" /></label><p className="ds-sidebar-empty">暂无资源</p></aside><div className="ds-resource-grid"><EmptyState title="还没有学习资源" description="添加 PDF、Markdown、网页或图片，开始整理你的学习资料" /></div></div>
   </WorkspacePage>;
 }
-function EmptyState({ title, description }: { title: string; description: string }) { return <div className="ds-empty-state"><b>{title}</b><p>{description}</p></div>; }
+function EmptyState({ title, description }: { title: string; description: string }) { return <div className="ds-empty-state"><p><b>{title}</b>，{description}</p></div>; }
 function Todo() { return <WorkspacePage eyebrow="今日行动" title="待办事项" description="把下一步学习行动放在眼前" action="＋ 新建待办"><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
-function Skills() { return <WorkspacePage eyebrow="可组合能力" title="技能管理" description="安装、启用和编辑 DeepStudent 的技能" action="＋ 添加技能"><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
+function Skills() { return <WorkspacePage title="技能管理" description="添加和管理 DeepStudent 的技能" action="＋ 添加技能"><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
 function Flashcards() { return <WorkspacePage eyebrow="主动回忆" title="闪卡" description="用短时练习巩固真正理解的内容" action="＋ 新建卡组"><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme }: { theme: Theme; onTheme: () => void }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section><section className="ds-panel ds-setting-section"><PanelHeading title="运行时连接" meta="当前 MyGo 桌面壳连接状态" /><div className="ds-runtime-row"><span className="ds-status"><i></i>Go runtime 已连接</span><code>HealthService.Health</code></div></section></div></div></WorkspacePage>; }
+function Settings({ theme, onTheme }: { theme: Theme; onTheme: () => void }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
-function WorkspacePage({ eyebrow, title, description, action, children }: { eyebrow: string; title: string; description: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><div><span className="ds-eyebrow">{eyebrow}</span><h2>{title}</h2><p>{description}</p></div>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
+function WorkspacePage({ eyebrow, title, description, action, children }: { eyebrow?: string; title: string; description: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><div>{eyebrow && <span className="ds-eyebrow">{eyebrow}</span>}<h2>{title}</h2><p>{description}</p></div>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
 
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [runtimeStatus, setRuntimeStatus] = useState("连接 Go runtime…");
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -169,13 +168,7 @@ export function App() {
     window.localStorage.setItem("dstu-theme-mode", theme);
   }, [theme]);
   useEffect(() => {
-    let active = true;
-    void HealthService.health().then((health) => {
-      if (active) setRuntimeStatus(`${health.runtime} runtime · ${health.status}`);
-    }).catch(() => {
-      if (active) setRuntimeStatus("Go runtime bridge unavailable");
-    });
-    return () => { active = false; };
+    void HealthService.health().catch(() => undefined);
   }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
@@ -201,6 +194,9 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
+          <button className="ds-sidebar-toggle ds-sidebar-toggle--desktop" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}>
+            <Icon name="sliders" size={16} />
+          </button>
           <span className="ds-sidebar__brand-name">DeepStudent</span>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
@@ -213,19 +209,19 @@ export function App() {
         </div>
         <div className="ds-sidebar__footer">
           <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
-          <div className="ds-runtime-status" id="runtime-status"><i></i><span>{runtimeStatus}</span></div>
-          <div className="ds-sidebar__version">DeepStudent Go · 0.1</div>
         </div>
       </aside>
       <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <header className="ds-main__header">
           <div className="ds-main__leading">
+            <button className="ds-sidebar-toggle ds-sidebar-toggle--mobile" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}>
+              <Icon name="sliders" size={16} />
+            </button>
             <span className="ds-main__brand">DeepStudent</span>
           </div>
           <div className={`ds-main__heading${meta.title ? "" : " is-empty"}`}>
             {meta.title && <div className="ds-main__heading-copy"><h1>{meta.title}</h1><p>{meta.subtitle}</p></div>}
-            <button className="ds-header-toggle" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}><Icon name="sliders" size={17} /></button>
           </div>
         </header>
         <div className="ds-main__content">{content}</div>
