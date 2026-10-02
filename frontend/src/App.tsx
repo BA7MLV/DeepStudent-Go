@@ -60,7 +60,7 @@ const viewMeta: Record<ViewId, { title: string; subtitle: string }> = {
   "chat-v2": { title: "", subtitle: "" },
   "learning-hub": { title: "学习资源", subtitle: "浏览和管理你的学习资料" },
   todo: { title: "待办事项", subtitle: "把下一步学习行动放在眼前" },
-  "skills-management": { title: "", subtitle: "" },
+  "skills-management": { title: "技能管理", subtitle: "添加和管理 DeepStudent 的技能" },
   flashcards: { title: "闪卡", subtitle: "用主动回忆巩固真正理解的内容" },
   settings: { title: "设置", subtitle: "调整 DeepStudent 的工作方式" },
 };
@@ -154,7 +154,7 @@ function Flashcards() { return <WorkspacePage eyebrow="主动回忆" title="闪�
 function Settings({ theme, onTheme }: { theme: Theme; onTheme: () => void }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
-function WorkspacePage({ eyebrow, title, description, action, children }: { eyebrow?: string; title: string; description: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><div>{eyebrow && <span className="ds-eyebrow">{eyebrow}</span>}<h2>{title}</h2><p>{description}</p></div>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
+function WorkspacePage({ action, children }: { eyebrow?: string; title?: string; description?: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page">{action && <div className="ds-workspace-actions"><button className="ds-primary-button">{action}</button></div>}{children}</section>; }
 
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
@@ -194,9 +194,6 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
-          <button className="ds-sidebar-toggle ds-sidebar-toggle--desktop" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}>
-            <Icon name="sliders" size={16} />
-          </button>
           <span className="ds-sidebar__brand-name">DeepStudent</span>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
@@ -215,8 +212,11 @@ export function App() {
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <header className="ds-main__header">
           <div className="ds-main__leading">
-            <button className="ds-sidebar-toggle ds-sidebar-toggle--mobile" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}>
+            <button className="ds-sidebar-toggle ds-sidebar-toggle--header" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}>
               <Icon name="sliders" size={16} />
+            </button>
+            <button className="ds-icon-button ds-header-search" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源">
+              <Icon name="search" size={16} />
             </button>
             <span className="ds-main__brand">DeepStudent</span>
           </div>
