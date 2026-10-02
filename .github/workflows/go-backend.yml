@@ -24,6 +24,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Resolve Go module checksums
+        run: go mod tidy
       - name: Format check
         run: test -z "$(gofmt -l cmd internal)"
       - name: Test
