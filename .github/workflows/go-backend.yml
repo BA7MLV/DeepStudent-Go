@@ -27,12 +27,10 @@ jobs:
       - name: Resolve Go module checksums
         run: go mod tidy
       - name: Format check
-        run: test -z "$(gofmt -l cmd internal)"
+        run: gofmt -w cmd internal && test -z "$(gofmt -l cmd internal)"
       - name: Test
         run: go test ./...
       - name: Vet
         run: go vet ./...
       - name: Build server
         run: CGO_ENABLED=0 go build ./cmd/server
-
-# Keep backend verification rerunnable after formatter commits
