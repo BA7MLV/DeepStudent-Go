@@ -22,7 +22,10 @@ const navGroups: Array<{ label: string; items: Array<{ id: ViewId; label: string
 const readTheme = (): "light" | "dark" => {
   const saved = window.localStorage.getItem("dstu-theme-mode");
   if (saved === "light" || saved === "dark") return saved;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  // DeepStudent's native desktop shell launches in its quiet dark workspace.
+  // Keep the explicit toggle, but make a fresh Go/MyGo install match the
+  // product screenshot instead of inheriting an arbitrary OS light theme.
+  return "dark";
 };
 const setTheme = (theme: "light" | "dark") => {
   document.documentElement.dataset.theme = theme;
@@ -37,18 +40,34 @@ root.innerHTML = `
       <div class="ds-titlebar__nav"><span class="ds-titlebar__traffic" aria-hidden="true"><i></i><i></i><i></i></span><span class="ds-titlebar__brand">DeepStudent</span></div>
       <div class="ds-titlebar__workspace">
         <button class="ds-menu-button" id="mobile-menu" aria-label="打开导航" aria-expanded="false">☰</button>
-        <span class="ds-titlebar__title" id="shell-title">学习空间</span>
+        <span class="ds-titlebar__title" id="shell-title">DeepStudent</span>
         <div class="ds-titlebar__actions"><button class="ds-icon-button" id="theme-toggle" aria-label="切换主题" title="切换主题">◐</button><button class="ds-icon-button" id="desktop-sidebar-toggle" aria-label="折叠侧栏" title="折叠侧栏">◧</button></div>
       </div>
     </header>
     <div class="ds-body">
-      <aside class="ds-sidebar" data-shell-layer="navigation" aria-label="主导航">
-        <div class="ds-sidebar__head"><div class="ds-brand"><span class="ds-brand__mark"><img src="/deepstudent-logo.svg" alt="" /></span><span class="ds-brand__name">DeepStudent</span></div><button class="ds-icon-button ds-sidebar__collapse" id="sidebar-collapse" aria-label="折叠导航">‹</button></div>
-        <div class="ds-sidebar__scroll"><div class="ds-nav">
-          ${navGroups.map((group) => `<div class="ds-nav__section">${group.label}</div>${group.items.map(({ id, label, icon }) => `<button type="button" data-view="${id}" data-active="${id === "study"}"><span class="ds-nav__icon" aria-hidden="true">${icon}</span><span class="ds-nav__label">${label}</span>${id === "review" ? '<span class="ds-nav__badge">12</span>' : ""}</button>`).join("")}`).join("")}
-          <div class="ds-nav__section">管理</div><button type="button" data-view="settings"><span class="ds-nav__icon" aria-hidden="true">⚙</span><span class="ds-nav__label">设置</span></button>
-        </div></div>
-        <div class="ds-sidebar__footer"><span class="ds-status" id="runtime-status"><span class="ds-status__dot"></span><span>正在连接 Go runtime…</span></span><span class="ds-sidebar__version">DeepStudent Go · 0.1</span></div>
+      <aside class="ds-app-rail" data-shell-layer="navigation" aria-label="应用导航">
+        <button class="ds-rail-logo" data-view="study" data-active="true" aria-label="智能对话"><img src="./deepstudent-logo.svg" alt="" /></button>
+        <nav class="ds-rail-nav">
+          <button type="button" class="ds-rail-button" data-view="study" data-active="true" aria-label="智能对话"><span>◉</span></button>
+          <button type="button" class="ds-rail-button" data-view="library" aria-label="学习资源"><span>⌂</span></button>
+          <button type="button" class="ds-rail-button" data-view="flashcards" aria-label="制卡任务"><span>◫</span></button>
+          <button type="button" class="ds-rail-button" data-view="notes" aria-label="技能管理"><span>ϟ</span></button>
+        </nav>
+        <div class="ds-rail-footer"><button type="button" class="ds-rail-button" data-view="settings" aria-label="设置"><span>⚙</span></button><button type="button" class="ds-rail-button" id="rail-theme" aria-label="切换主题"><span>☾</span></button></div>
+      </aside>
+      <aside class="ds-sidebar ds-session-sidebar" data-shell-layer="navigation" aria-label="会话导航">
+        <div class="ds-session-head"><label class="ds-session-search"><span>⌕</span><input aria-label="搜索会话" placeholder="搜索会话…" /></label><button class="ds-session-add" type="button" data-view="chat" aria-label="新建对话">＋</button><button class="ds-icon-button ds-sidebar__collapse" id="sidebar-collapse" aria-label="折叠导航">‹</button></div>
+        <div class="ds-session-scroll">
+          <nav class="ds-session-quick" aria-label="会话管理"><button class="is-active"><span>▦</span><b>所有对话</b><em>15</em><i>›</i></button><button><span>♜</span><b>回收站</b><i>›</i></button><button><span>☷</span><b>对话控制</b><i>›</i></button></nav>
+          <div class="ds-session-section-title"><span>分组</span><button aria-label="新建分组">＋</button></div>
+          <div class="ds-session-groups">
+            <section class="ds-session-group"><button class="ds-group-row"><span class="ds-group-icon">⌂</span><b>高中生物</b><em>(2)</em><i>⚙</i><i>＋</i></button><button class="ds-session-row">智能学习助手介绍</button><button class="ds-session-row">完善高中生物思维导图</button></section>
+            <section class="ds-session-group"><button class="ds-group-row"><span class="ds-group-icon">▣</span><b>高中英语</b><em>(1)</em><i>⚙</i><i>＋</i></button><button class="ds-session-row">制作读后续写 Anki 卡片</button></section>
+            <section class="ds-session-group"><button class="ds-group-row"><span class="ds-group-icon">▣</span><b>高中语文</b><em>(1)</em><i>⚙</i><i>＋</i></button><button class="ds-session-row">2026届锦阳一诊语文试卷解析</button></section>
+            <section class="ds-session-group"><button class="ds-group-row"><span class="ds-group-icon">□</span><b>LLM研究</b><em>(6)</em><i>⚙</i><i>＋</i></button><button class="ds-session-row">最新 LLM 研究论文汇总</button><button class="ds-session-row">Context7 查询 LLM 文档</button><button class="ds-session-row">自编码与自回归模型发展</button><button class="ds-session-row">大语言模型推理能力提升方法综述</button><button class="ds-session-row">2026 年 LLM 厂商能力与趋势</button></section>
+          </div>
+        </div>
+        <div class="ds-session-current"><button class="ds-session-row is-current"><b>未命名会话</b><span>⌕</span><span>□</span><span>×</span></button><span class="ds-session-status" id="runtime-status"><i></i><span>正在连接 Go runtime…</span></span><span class="ds-sidebar__version">DeepStudent Go · 0.1</span></div>
       </aside>
       <button class="ds-overlay" id="sidebar-overlay" aria-label="关闭导航"></button>
       <main class="ds-main" data-shell-layer="workspace">
@@ -75,9 +94,34 @@ const openMobileSidebar = () => { shell.dataset.sidebarOpen = "true"; mobileMenu
 const statusPill = (text: string, tone = "") => `<span class="ds-status ${tone}"><span class="ds-status__dot"></span>${text}</span>`;
 
 const renderDashboard = () => `
-  <div class="ds-page-intro"><div><p class="ds-eyebrow">星期四，10 月 1 日</p><h2>早上好，继续保持节奏</h2><p class="ds-page-intro__copy">今天有 3 个学习目标，预计用时约 45 分钟</p></div><button class="ds-primary-button" data-action="start-focus">开始专注 <span>→</span></button></div>
-  <div class="ds-metric-grid"><section class="ds-card ds-metric"><span class="ds-metric__label">今日进度</span><strong>2 <small>/ 5 任务</small></strong><div class="ds-progress"><i style="width:40%"></i></div><span class="ds-muted">还剩约 32 分钟</span></section><section class="ds-card ds-metric"><span class="ds-metric__label">连续学习</span><strong>7 <small>天</small></strong><span class="ds-metric__trend">↑ 比上周多 2 天</span></section><section class="ds-card ds-metric"><span class="ds-metric__label">待复习卡片</span><strong>12 <small>张</small></strong><button class="ds-text-button" data-nav="review">现在复习 →</button></section></div>
-  <div class="ds-dashboard-grid"><section class="ds-card ds-panel-card"><div class="ds-section-head"><div><h3>今日计划</h3><p>一步一步完成今天的目标</p></div><button class="ds-icon-button" aria-label="添加任务">＋</button></div><div class="ds-task-list"><label class="ds-task"><input type="checkbox" checked /><span><b>阅读：线性代数基础</b><small>资料库 · 25 分钟</small></span><em>已完成</em></label><label class="ds-task"><input type="checkbox" /><span><b>整理第三章笔记</b><small>笔记 · 15 分钟</small></span><em>待开始</em></label><label class="ds-task"><input type="checkbox" /><span><b>复习今日闪卡</b><small>闪卡 · 5 分钟</small></span><em>待开始</em></label></div></section><section class="ds-card ds-panel-card"><div class="ds-section-head"><div><h3>最近活动</h3><p>从上次离开的位置继续</p></div><button class="ds-text-button" data-nav="library">查看全部</button></div><div class="ds-activity-list"><button class="ds-activity"><span class="ds-file-icon ds-file-icon--blue">PDF</span><span><b>Calculus — Chapter 3</b><small>刚刚 · 资料库</small></span><span>→</span></button><button class="ds-activity"><span class="ds-file-icon ds-file-icon--purple">N</span><span><b>概率论复习笔记</b><small>昨天 · 笔记</small></span><span>→</span></button><button class="ds-activity"><span class="ds-file-icon ds-file-icon--green">✦</span><span><b>AI 学习对话</b><small>昨天 · 智能对话</small></span><span>→</span></button></div></section></div>
+  <section class="ds-landing" aria-labelledby="landing-title">
+    <div class="ds-landing__center">
+      <div class="ds-landing__brand"><h1 id="landing-title">Deep Student</h1><p>AI 原生开源学习方案</p></div>
+      <div class="ds-landing__prompts" aria-label="推荐提问">
+        <button type="button" data-prompt="分析这篇关于深度学习的论文，总结其核心创新点和实验结果。"><span>分析这篇关于深度学习的论文，总结其核心创新点和实验结果。</span><b>↗</b></button>
+        <button type="button" data-prompt="我正在准备考研数学，请帮我创建一个线性代数的知识体系思维导图。"><span>我正在准备考研数学，请帮我创建一个线性代数的知识体系思维导图。</span><b>↗</b></button>
+        <button type="button" data-prompt="请调研 2026 年大语言模型的最新发展趋势，并撰写调研报告。"><span>请调研 2026 年大语言模型的最新发展趋势，并撰写调研报告。</span><b>↗</b></button>
+        <button type="button" data-prompt="我正在进行大学物理期末备考，请根据资源库中的相关资料，制作一套题目集。"><span>我正在进行大学物理期末备考，请根据资源库中的相关资料，制作一套题目集。</span><b>↗</b></button>
+        <button type="button" data-prompt="根据我上传的高中英语资料，生成一套复习用的 Anki 闪卡。"><span>根据我上传的高中英语资料，生成一套复习用的 Anki 闪卡。</span><b>↗</b></button>
+      </div>
+    </div>
+    <div class="ds-landing__composer-wrap">
+      <div class="ds-landing__notice">ⓘ AI 生成的内容可能存在错误，请注意甄别</div>
+      <div class="ds-landing__messages" id="chat-messages" aria-live="polite"></div>
+      <form class="ds-landing__composer ds-chat__composer" id="chat-form">
+        <label class="ds-visually-hidden" for="chat-input">输入问题</label>
+        <textarea class="ds-chat__input" id="chat-input" rows="1" placeholder="请输入问题…"></textarea>
+        <div class="ds-landing__composer-tools">
+          <button type="button" class="ds-composer-tool ds-composer-tool--purple" aria-label="调用 AI 工具">⚛</button>
+          <button type="button" class="ds-composer-tool ds-composer-tool--slate" aria-label="添加资源">◉</button>
+          <button type="button" class="ds-composer-tool ds-composer-tool--gold" aria-label="深度思考">ϟ</button>
+          <button type="button" class="ds-composer-tool ds-composer-tool--green" aria-label="技能">♧</button>
+          <span class="ds-landing__composer-spacer"></span>
+          <button class="ds-chat__send ds-landing__send" type="submit" aria-label="发送">↑</button>
+        </div>
+      </form>
+    </div>
+  </section>
 `;
 
 const renderLibrary = () => `
@@ -134,7 +178,7 @@ const wireLibrary = () => {
 const wireSettings = () => { const select = root.querySelector<HTMLSelectElement>("#settings-theme"); if (select) { select.value = document.documentElement.dataset.theme ?? "system"; select.addEventListener("change", () => { if (select.value === "light" || select.value === "dark") setTheme(select.value); }); } };
 
 let currentView: ViewId = "study";
-const setView = (view: ViewId) => { currentView = view; const meta = viewMeta[view]; viewTitle.textContent = meta.title; shellTitle.textContent = meta.title; viewSubtitle.textContent = meta.subtitle; mainContent.innerHTML = meta.render(); root.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => { button.dataset.active = String(button.dataset.view === view); }); closeMobileSidebar(); if (view === "chat") wireChat(); if (view === "library") wireLibrary(); if (view === "settings") wireSettings(); };
+const setView = (view: ViewId) => { currentView = view; const meta = viewMeta[view]; shell.dataset.view = view; viewTitle.textContent = meta.title; shellTitle.textContent = view === "study" ? "DeepStudent" : meta.title; viewSubtitle.textContent = meta.subtitle; mainContent.innerHTML = meta.render(); root.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => { button.dataset.active = String(button.dataset.view === view); }); closeMobileSidebar(); if (view === "chat" || view === "study") wireChat(); if (view === "library") wireLibrary(); if (view === "settings") wireSettings(); };
 
 root.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => button.addEventListener("click", () => setView((button.dataset.view ?? "study") as ViewId)));
 root.addEventListener("click", (event) => { const target = event.target as HTMLElement; const nav = target.closest<HTMLElement>("[data-nav]"); if (nav?.dataset.nav) setView(nav.dataset.nav as ViewId); const action = target.closest<HTMLElement>("[data-action]")?.dataset.action; if (action === "start-focus") setView("chat"); if (action === "start-review") setView("review"); if (action === "new-note") setView("notes"); });
