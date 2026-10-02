@@ -67,10 +67,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .ds-chat-page h2 { max-width:340px; font-size:22px; }
   .ds-chat-page p { max-width:300px; font-size:13px; line-height:1.45; }
   .ds-chat-prompts { grid-template-columns:1fr; margin-top:20px; }
-  .ds-composer { position:sticky; bottom:0; z-index:5; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; column-gap:8px; width:100%; margin:0 auto calc(8px + env(safe-area-inset-bottom)); padding:6px 8px; border-radius:24px; box-shadow:0 -6px 24px rgba(0,0,0,.08); }
-  .ds-composer textarea { grid-column:1; min-height:44px; max-height:144px; overflow-y:auto; resize:none; padding:7px 2px; }
-  .ds-composer__toolbar { grid-column:2; align-self:end; padding-top:0; border-top:0; }
-  .ds-composer__tools { flex-wrap:nowrap; }
+  .ds-composer { position:sticky; bottom:0; z-index:5; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; column-gap:4px; width:100%; margin:0 auto calc(4px + env(safe-area-inset-bottom)); padding:2px 4px; border-radius:22px; box-shadow:0 2px 12px rgba(0,0,0,.06); }
+  .ds-composer textarea { grid-column:1; min-height:40px; max-height:132px; overflow-y:auto; resize:none; padding:6px 4px; line-height:1.35; }
+  .ds-composer__toolbar { grid-column:2; align-self:center; padding-top:0; border-top:0; }
+  .ds-composer__tools { flex-wrap:nowrap; gap:0; }
   .ds-workspace-page { padding:20px 14px 34px; }
   .ds-workspace-actions { justify-content:stretch; margin-bottom:14px; }
   .ds-workspace-actions .ds-primary-button { width:100%; }
@@ -86,6 +86,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .ds-icon-button,.ds-sidebar-toggle,.ds-header-toggle,.ds-section-action { width:44px; height:44px; }
   .ds-sidebar-toggle--header,.ds-header-search { flex-basis:44px; }
   .ds-composer-tool,.ds-send-button { width:44px; height:44px; border-radius:12px; }
+  .ds-send-button { background:radial-gradient(circle at center, var(--ds-fg) 0 16px, transparent 16.5px); }
   .ds-chat-message { margin-bottom:10px; padding:11px 13px; border-radius:13px; }
   .ds-primary-button,.ds-secondary-button { min-height:44px; }
   .ds-text-button { min-height:44px; padding:0 8px; }
