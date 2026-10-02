@@ -105,21 +105,14 @@ function MessageText() {
 }
 
 function ChatEmptyState() {
-  return (
-    <div className="ds-chat-center">
-      <div className="ds-chat-welcome-mark" aria-hidden="true"><Icon name="sparkle" size={20} /></div>
-      <span className="ds-chat-kicker">DeepStudent 学习助手</span>
-      <h2 id="chat-welcome-title">从理解开始，让知识成为自己的能力</h2>
-      <p>把问题带来，我们一起理解、整理，再用练习巩固</p>
-    </div>
-  );
+  return <div className="ds-chat-center" aria-hidden="true" />;
 }
 
 function ChatWorkspace() {
   const runtime = useLocalRuntime(StubAdapter);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <section className="ds-chat-page" aria-labelledby="chat-welcome-title">
+      <section className="ds-chat-page" aria-label="新会话">
         <ThreadPrimitive.Root className="ds-chat-thread">
           <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll>
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
@@ -215,16 +208,16 @@ export function App() {
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <header className="ds-main__header">
           <div className="ds-main__leading">
+            <span className="ds-main__brand">DeepStudent</span>
             <button className="ds-sidebar-toggle ds-sidebar-toggle--header" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}>
               <Icon name="sliders" size={16} />
             </button>
             <button className="ds-icon-button ds-header-search" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源">
               <Icon name="search" size={16} />
             </button>
-            <span className="ds-main__brand">DeepStudent</span>
           </div>
           <div className={`ds-main__heading${meta.title ? "" : " is-empty"}`}>
-            {meta.title && <div className="ds-main__heading-copy"><h1>{meta.title}</h1><p>{meta.subtitle}</p></div>}
+            {meta.title && <div className="ds-main__heading-copy"><h1>{meta.title}</h1></div>}
           </div>
         </header>
         <div className="ds-main__content">{content}</div>
