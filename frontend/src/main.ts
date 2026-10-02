@@ -96,11 +96,11 @@ const statusPill = (text: string, tone = "") => `<span class="ds-status ${tone}"
 const renderDashboard = () => `
   <section class="ds-landing" aria-labelledby="landing-title">
     <div class="ds-landing__center">
-      <div class="ds-landing__brand"><h1 id="landing-title">Deep Student</h1><p>AI 原生开源学习方案</p></div>
+      <div class="ds-landing__brand"><h1 id="landing-title">Deep Student</h1><p>AI原生开源学习方案</p></div>
       <div class="ds-landing__prompts" aria-label="推荐提问">
         <button type="button" data-prompt="分析这篇关于深度学习的论文，总结其核心创新点和实验结果。"><span>分析这篇关于深度学习的论文，总结其核心创新点和实验结果。</span><b>↗</b></button>
         <button type="button" data-prompt="我正在准备考研数学，请帮我创建一个线性代数的知识体系思维导图。"><span>我正在准备考研数学，请帮我创建一个线性代数的知识体系思维导图。</span><b>↗</b></button>
-        <button type="button" data-prompt="请调研 2026 年大语言模型的最新发展趋势，并撰写调研报告。"><span>请调研 2026 年大语言模型的最新发展趋势，并撰写调研报告。</span><b>↗</b></button>
+        <button type="button" data-prompt="请调研2026年大语言模型的最新发展趋势，并撰写调研报告。"><span>请调研2026年大语言模型的最新发展趋势，并撰写调研报告。</span><b>↗</b></button>
         <button type="button" data-prompt="我正在进行大学物理期末备考，请根据资源库中的相关资料，制作一套题目集。"><span>我正在进行大学物理期末备考，请根据资源库中的相关资料，制作一套题目集。</span><b>↗</b></button>
         <button type="button" data-prompt="根据我上传的高中英语资料，生成一套复习用的 Anki 闪卡。"><span>根据我上传的高中英语资料，生成一套复习用的 Anki 闪卡。</span><b>↗</b></button>
       </div>
