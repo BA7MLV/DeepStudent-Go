@@ -34,6 +34,7 @@ func (DeterministicProvider) Stream(ctx context.Context, request ModelRequest, e
 type deterministicRun struct {
 	id          string
 	sessionID   string
+	cancel      context.CancelFunc
 	mu          sync.Mutex
 	history     []StreamEvent
 	subscribers map[chan StreamEvent]struct{}
@@ -44,14 +45,24 @@ type deterministicRun struct {
 // A durable SessionStore can be supplied; every emitted event is appended
 // before it is broadcast to subscribers.
 type DeterministicRuntime struct {
-	provider ModelProvider
-	store    SessionStore
-	sem      chan struct{}
-	mu       sync.RWMutex
-	runs     map[string]*deterministicRun
+	provider  ModelProvider
+	store     SessionStore
+	sem       chan struct{}
+	timeout   time.Duration
+	retention time.Duration
+	mu        sync.RWMutex
+	runs      map[string]*deterministicRun
 }
 
 func NewDeterministicRuntime(provider ModelProvider, store SessionStore, maxConcurrency int) *DeterministicRuntime {
+	return NewDeterministicRuntimeWithTimeout(provider, store, maxConcurrency, 0)
+}
+
+// NewDeterministicRuntimeWithTimeout is the production constructor. A positive
+// timeout bounds provider and persistence work for each run; zero preserves the
+// unbounded behavior used by low-level tests and callers that manage context
+// cancellation themselves.
+func NewDeterministicRuntimeWithTimeout(provider ModelProvider, store SessionStore, maxConcurrency int, timeout time.Duration) *DeterministicRuntime {
 	if provider == nil {
 		provider = NewDeterministicProvider()
 	}
@@ -59,10 +70,14 @@ func NewDeterministicRuntime(provider ModelProvider, store SessionStore, maxConc
 		maxConcurrency = 1
 	}
 	return &DeterministicRuntime{
-		provider: provider,
-		store:    store,
-		sem:      make(chan struct{}, maxConcurrency),
-		runs:     make(map[string]*deterministicRun),
+		provider:  provider,
+		store:     store,
+		sem:       make(chan struct{}, maxConcurrency),
+		timeout:   timeout,
+		// Keep completed runs briefly so a client can attach after POST returns,
+		// then release the history and channels instead of retaining every run.
+		retention: 5 * time.Minute,
+		runs:      make(map[string]*deterministicRun),
 	}
 }
 
@@ -74,17 +89,28 @@ func (r *DeterministicRuntime) Start(ctx context.Context, request AgentRunReques
 	if runID == "" {
 		runID = newID("run")
 	}
-	state := &deterministicRun{id: runID, sessionID: request.SessionID, subscribers: make(map[chan StreamEvent]struct{})}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var runCtx context.Context
+	var cancel context.CancelFunc
+	if r.timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, r.timeout)
+	} else {
+		runCtx, cancel = context.WithCancel(ctx)
+	}
+	state := &deterministicRun{id: runID, sessionID: request.SessionID, cancel: cancel, subscribers: make(map[chan StreamEvent]struct{})}
 	first := make(chan StreamEvent, 16)
 	state.subscribers[first] = struct{}{}
 	r.mu.Lock()
 	if _, exists := r.runs[runID]; exists {
 		r.mu.Unlock()
+		cancel()
 		return AgentRun{}, fmt.Errorf("run %q already exists", runID)
 	}
 	r.runs[runID] = state
 	r.mu.Unlock()
-	go r.execute(ctx, state, request)
+	go r.execute(runCtx, state, request)
 	return AgentRun{ID: runID, SessionID: request.SessionID, Events: first}, nil
 }
 
@@ -106,13 +132,29 @@ func (r *DeterministicRuntime) Subscribe(ctx context.Context, runID string) (<-c
 		state.subscribers[channel] = struct{}{}
 	}
 	state.mu.Unlock()
+	if ctx != nil {
+		go func() {
+			<-ctx.Done()
+			state.mu.Lock()
+			if _, ok := state.subscribers[channel]; ok {
+				delete(state.subscribers, channel)
+				close(channel)
+			}
+			state.mu.Unlock()
+		}()
+	}
 	return channel, nil
 }
 
 func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministicRun, request AgentRunRequest) {
-	r.sem <- struct{}{}
-	defer func() { <-r.sem }()
+	defer state.cancel()
 	defer r.close(state)
+	select {
+	case r.sem <- struct{}{}:
+	case <-ctx.Done():
+		return
+	}
+	defer func() { <-r.sem }()
 	started := StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunStarted, CreatedAt: time.Now().UTC()}
 	if !r.emit(ctx, state, started) {
 		return
@@ -126,6 +168,9 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 		}
 		return nil
 	})
+	if err == nil && ctx.Err() != nil {
+		err = ctx.Err()
+	}
 	if err != nil && !errors.Is(err, context.Canceled) {
 		r.emit(ctx, state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunError, ErrorCode: "provider_error", ErrorMessage: "model provider failed", Done: true, CreatedAt: time.Now().UTC()})
 	} else if err == nil {
@@ -134,7 +179,9 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 }
 
 func (r *DeterministicRuntime) emit(ctx context.Context, state *deterministicRun, event StreamEvent) bool {
-	if ctx != nil {
+	// Terminal events still need to reach connected clients when a provider
+	// returns a deadline error; non-terminal events stop promptly on cancel.
+	if ctx != nil && !event.Done {
 		select {
 		case <-ctx.Done():
 			return false
@@ -143,7 +190,7 @@ func (r *DeterministicRuntime) emit(ctx context.Context, state *deterministicRun
 	}
 	if r.store != nil && state.sessionID != "" {
 		payload, _ := json.Marshal(event)
-		_, _ = r.store.AppendEvent(context.Background(), SessionEvent{SessionID: state.sessionID, RunID: state.id, Type: string(event.Type), Payload: payload, CreatedAt: event.CreatedAt})
+		_, _ = r.store.AppendEvent(ctx, SessionEvent{SessionID: state.sessionID, RunID: state.id, Type: string(event.Type), Payload: payload, CreatedAt: event.CreatedAt})
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
@@ -172,6 +219,30 @@ func (r *DeterministicRuntime) close(state *deterministicRun) {
 	}
 	state.subscribers = nil
 	state.mu.Unlock()
+	// Retain a completed run just long enough for a client to subscribe after
+	// the asynchronous POST response, then release its event history.
+	time.AfterFunc(r.retention, func() {
+		r.mu.Lock()
+		if current, ok := r.runs[state.id]; ok && current == state {
+			delete(r.runs, state.id)
+		}
+		r.mu.Unlock()
+	})
+}
+
+// Close cancels active runs and releases their subscribers. It is safe to call
+// during server shutdown before the backing store is closed.
+func (r *DeterministicRuntime) Close() {
+	r.mu.RLock()
+	states := make([]*deterministicRun, 0, len(r.runs))
+	for _, state := range r.runs {
+		states = append(states, state)
+	}
+	r.mu.RUnlock()
+	for _, state := range states {
+		state.cancel()
+		r.close(state)
+	}
 }
 
 func newID(prefix string) string {
