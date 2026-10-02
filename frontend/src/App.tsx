@@ -126,8 +126,8 @@ function ChatWorkspace() {
             <div className="ds-composer__toolbar">
               <div className="ds-composer__tools">
                 <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="paperclip" size={16} /></ComposerPrimitive.AddAttachment>
-                <button type="button" className="ds-composer-tool" aria-label="调用工具"><Icon name="wand" size={16} /></button>
-                <button type="button" className="ds-composer-tool" aria-label="深度思考"><Icon name="brain" size={16} /></button>
+                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="调用工具"><Icon name="wand" size={16} /></button>
+                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="深度思考"><Icon name="brain" size={16} /></button>
               </div>
               <ComposerPrimitive.Send className="ds-send-button" aria-label="发送"><Icon name="send" size={15} strokeWidth={2} /></ComposerPrimitive.Send>
             </div>
