@@ -4,6 +4,7 @@ import {
   MessagePartPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  unstable_useComposerInput,
   useLocalRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
@@ -31,6 +32,16 @@ const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "task-dashboard", label: "Anki制卡", icon: "cards" },
   { id: "flashcards", label: "闪卡", icon: "stack" },
   { id: "template-management", label: "模板管理", icon: "template" },
+];
+
+const quickPrompts: Array<{ label: string; icon: IconName }> = [
+  { label: "复习今天的课程", icon: "book" },
+  { label: "整理一份学习笔记", icon: "template" },
+  { label: "解释一个概念", icon: "brain" },
+  { label: "生成知识点卡片", icon: "cards" },
+  { label: "制定复习计划", icon: "check" },
+  { label: "总结这段资料", icon: "stack" },
+  { label: "创建学习线程", icon: "sparkle" },
 ];
 
 function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: number; strokeWidth?: number }) {
@@ -90,8 +101,8 @@ const StubAdapter: ChatModelAdapter = {
         {
           type: "text",
           text: text
-            ? `已收到「${text}」。DeepStudent Go 的本地对话壳已准备好，接下来会接入 Go runtime 的流式模型。`
-            : "DeepStudent Go 本地对话已就绪。",
+            ? `收到「${text}」，我们可以从理解、整理和复习开始。`
+            : "准备好开始学习。",
         },
       ],
     };
@@ -110,6 +121,30 @@ function MessageText() {
   return <MessagePartPrimitive.Text component="span" smooth />;
 }
 
+function ChatEmptyState() {
+  const composer = unstable_useComposerInput();
+
+  return (
+    <div className="ds-chat-center">
+      <h2 id="chat-welcome-title">把今天学会的，变成真正掌握的</h2>
+      <p>从一个学习目标开始，理解、整理，再用练习巩固</p>
+      <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
+        {quickPrompts.map((prompt) => (
+          <button
+            key={prompt.label}
+            className="ds-chat-prompt"
+            type="button"
+            onClick={() => composer.setText(prompt.label)}
+          >
+            <Icon name={prompt.icon} size={16} />
+            <span>{prompt.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ChatWorkspace() {
   const runtime = useLocalRuntime(StubAdapter);
   return (
@@ -119,30 +154,7 @@ function ChatWorkspace() {
           <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll>
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
             <ThreadPrimitive.Empty>
-              <div className="ds-chat-center">
-                <h2 id="chat-welcome-title">欢迎使用 DeepStudent</h2>
-                <p className="ds-learning-slogan">把资料变成理解，把理解变成会用的知识</p>
-                <div className="ds-learning-prompts" aria-label="学习快捷提示">
-                  {[
-                    "复习今天的课程",
-                    "整理一份学习笔记",
-                    "解释一个概念",
-                    "生成知识点卡片",
-                    "制定复习计划",
-                    "总结这段资料",
-                    "创建学习线程",
-                  ].map((prompt) => (
-                    <button key={prompt} type="button" className="ds-learning-prompt" onClick={() => {
-                      const input = document.querySelector<HTMLTextAreaElement>(".ds-composer textarea");
-                      if (!input) return;
-                      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
-                      setter?.call(input, prompt);
-                      input.dispatchEvent(new Event("input", { bubbles: true }));
-                      input.focus();
-                    }}>{prompt}</button>
-                  ))}
-                </div>
-              </div>
+              <ChatEmptyState />
             </ThreadPrimitive.Empty>
             <ThreadPrimitive.ScrollToBottom className="ds-scroll-bottom">↓</ThreadPrimitive.ScrollToBottom>
           </ThreadPrimitive.Viewport>
@@ -154,7 +166,6 @@ function ChatWorkspace() {
                 <button type="button" className="ds-composer-tool" aria-label="调用工具"><Icon name="wand" size={16} /></button>
                 <button type="button" className="ds-composer-tool" aria-label="深度思考"><Icon name="brain" size={16} /></button>
               </div>
-              <span className="ds-composer__notice">AI 生成的内容可能存在错误，请注意甄别</span>
               <ComposerPrimitive.Send className="ds-send-button" aria-label="发送"><Icon name="send" size={15} strokeWidth={2} /></ComposerPrimitive.Send>
             </div>
           </ComposerPrimitive.Root>
@@ -224,8 +235,52 @@ export function App() {
     return <Settings theme={theme} onTheme={toggleTheme} />;
   }, [theme, view]);
   const meta = viewMeta[view];
+  const toggleSidebar = () => {
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      setSidebarOpen((open) => !open);
+      return;
+    }
+    setSidebarCollapsed((collapsed) => !collapsed);
+  };
 
   return <div className="ds-shell" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed} data-view={view}>
-    <div className="ds-body"><aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口"><div className="ds-sidebar__brand"><button className="ds-sidebar-toggle ds-icon-button" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label="切换边栏"><Icon name="sliders" size={15} /></button><span>DeepStudent</span><div className="ds-sidebar__brand-actions"><button className="ds-icon-button" aria-label="搜索会话"><Icon name="search" size={15} /></button></div></div><nav className="ds-primary-nav" aria-label="主入口">{navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}</nav><div className="ds-sidebar__scroll"><section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><button className="ds-thread-row"><span className="ds-thread-dot ds-thread-dot--accent"><Icon name="sparkle" size={13} /></span><span>开始一个新对话</span></button></section><section className="ds-sidebar-section"><div className="ds-section-label"><span>主题</span><span className="ds-section-tools"><button className="ds-section-action" aria-label="收起主题"><Icon name="chevron-down" size={14} /></button><button className="ds-section-action" aria-label="新建主题"><Icon name="plus" size={14} /></button></span></div><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="home" size={14} /></span><span>高中生物</span><em>2</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>智能学习助手介绍</span></button><button className="ds-thread-row ds-thread-row--nested"><span>完善高中生物思维导图</span></button><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="book" size={14} /></span><span>高中英语</span><em>1</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>制作读后续写 Anki 卡片</span></button><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="folder" size={14} /></span><span>LLM研究</span><em>6</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>最新 LLM 研究论文汇总</span></button><button className="ds-thread-row ds-thread-row--nested"><span>Context7 查询 LLM 文档</span></button></section><section className="ds-sidebar-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={() => selectView("chat-v2")} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><button className="ds-thread-row ds-thread-row--active"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>未命名会话</span><small>刚刚</small></button><button className="ds-thread-row"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>复习概率论</span><small>昨天</small></button><button className="ds-thread-row"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>帮我读这篇论文</span><small>周一</small></button></section></div><div className="ds-sidebar__footer"><button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button><div className="ds-runtime-status" id="runtime-status"><i></i><span>{runtimeStatus}</span></div><div className="ds-sidebar__version">DeepStudent Go · 0.1</div></div></aside><button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button><main className="ds-main" data-shell-layer="workspace" data-view={view}><header className="ds-main__header"><div className="ds-main__heading"><h1>{meta.title}</h1><p>{meta.subtitle}</p></div><div className="ds-main__actions"><button className="ds-icon-button" onClick={() => selectView("learning-hub")} aria-label="搜索"><Icon name="search" size={16} /></button><button className="ds-icon-button" onClick={() => selectView("chat-v2")} aria-label="新建"><Icon name="plus" size={16} /></button><button className="ds-icon-button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button><button className="ds-icon-button" onClick={() => setSidebarCollapsed((collapsed) => !collapsed)} aria-label="收起侧边栏"><Icon name="chevron-left" size={16} /></button></div></header><div className="ds-main__content">{content}</div></main></div>
+    <div className="ds-body">
+      <aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口">
+        <div className="ds-sidebar__brand">
+          <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏">
+            <Icon name="chevron-left" size={16} />
+          </button>
+          <span className="ds-sidebar__brand-name">DeepStudent</span>
+          <div className="ds-sidebar__brand-actions">
+            <button className="ds-icon-button" aria-label="搜索会话"><Icon name="search" size={15} /></button>
+          </div>
+        </div>
+        <nav className="ds-primary-nav" aria-label="主入口">
+          {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
+        </nav>
+        <div className="ds-sidebar__scroll">
+          <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><button className="ds-thread-row"><span className="ds-thread-dot ds-thread-dot--accent"><Icon name="sparkle" size={13} /></span><span>开始一个新对话</span></button></section>
+          <section className="ds-sidebar-section"><div className="ds-section-label"><span>主题</span><span className="ds-section-tools"><button className="ds-section-action" aria-label="收起主题"><Icon name="chevron-down" size={14} /></button><button className="ds-section-action" aria-label="新建主题"><Icon name="plus" size={14} /></button></span></div><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="home" size={14} /></span><span>高中生物</span><em>2</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>智能学习助手介绍</span></button><button className="ds-thread-row ds-thread-row--nested"><span>完善高中生物思维导图</span></button><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="book" size={14} /></span><span>高中英语</span><em>1</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>制作读后续写 Anki 卡片</span></button><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="folder" size={14} /></span><span>LLM研究</span><em>6</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>最新 LLM 研究论文汇总</span></button><button className="ds-thread-row ds-thread-row--nested"><span>Context7 查询 LLM 文档</span></button></section>
+          <section className="ds-sidebar-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={() => selectView("chat-v2")} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><button className="ds-thread-row ds-thread-row--active"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>未命名会话</span><small>刚刚</small></button><button className="ds-thread-row"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>复习概率论</span><small>昨天</small></button><button className="ds-thread-row"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>帮我读这篇论文</span><small>周一</small></button></section>
+        </div>
+        <div className="ds-sidebar__footer">
+          <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
+          <div className="ds-runtime-status" id="runtime-status"><i></i><span>{runtimeStatus}</span></div>
+          <div className="ds-sidebar__version">DeepStudent Go · 0.1</div>
+        </div>
+      </aside>
+      <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
+      <main className="ds-main" data-shell-layer="workspace" data-view={view}>
+        <header className="ds-main__header">
+          <div className="ds-main__leading">
+            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}><Icon name="sliders" size={17} /></button>
+            <span className="ds-main__brand">DeepStudent</span>
+          </div>
+          <div className="ds-main__heading"><h1>{meta.title}</h1><p>{meta.subtitle}</p></div>
+          <div className="ds-main__actions"><button className="ds-icon-button" onClick={() => selectView("learning-hub")} aria-label="搜索"><Icon name="search" size={16} /></button><button className="ds-icon-button" onClick={() => selectView("chat-v2")} aria-label="新建"><Icon name="plus" size={16} /></button><button className="ds-icon-button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
+        </header>
+        <div className="ds-main__content">{content}</div>
+      </main>
+    </div>
   </div>;
 }
