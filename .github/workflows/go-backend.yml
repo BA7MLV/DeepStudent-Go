@@ -32,3 +32,5 @@ jobs:
         run: go vet ./...
       - name: Build server
         run: CGO_ENABLED=0 go build ./cmd/server
+
+# Keep backend verification rerunnable after formatter commits
