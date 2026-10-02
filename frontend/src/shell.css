@@ -47,3 +47,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ds-overlay { display:none; }
 @media (max-width: 1024px) { :root { --ds-sidebar-width:270px; }.ds-resource-layout,.ds-settings-layout { grid-template-columns:1fr; }.ds-resource-tree { display:none; }.ds-skill-grid,.ds-metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width: 767px) { html,body,#app { min-width:0; }.ds-titlebar { grid-template-columns:1fr; background:var(--ds-bg); }.ds-titlebar__nav { display:none; }.ds-titlebar__workspace { padding:0 10px; }.ds-menu-button { display:grid; }.ds-body { grid-template-columns:1fr; }.ds-sidebar { position:fixed; z-index:30; inset:var(--ds-titlebar-height) auto 0 0; width:min(320px,88vw); transform:translateX(-102%); box-shadow:14px 0 36px rgba(0,0,0,.16); }.ds-shell[data-sidebar-open="true"] .ds-sidebar { transform:translateX(0); }.ds-shell[data-sidebar-open="true"] .ds-overlay { display:block; position:fixed; z-index:20; inset:var(--ds-titlebar-height) 0 0; background:rgba(0,0,0,.35); }.ds-main__header { padding:0 14px; }.ds-main__content { overflow:auto; }.ds-chat-page { padding:14px; }.ds-chat-center { padding:20px 8px 30px; }.ds-chat-page h2 { font-size:22px; }.ds-composer { width:100%; }.ds-composer__notice { display:none; }.ds-workspace-page { padding:20px 14px 34px; }.ds-page-heading { flex-direction:column; }.ds-resource-grid,.ds-skill-grid,.ds-metric-grid { grid-template-columns:1fr; }.ds-empty-card { grid-column:auto; }.ds-settings-layout { grid-template-columns:1fr; }.ds-settings-nav { display:flex; overflow:auto; }.ds-settings-nav button { white-space:nowrap; }.ds-job-card { align-items:flex-start; flex-wrap:wrap; }.ds-job-card .ds-secondary-button { margin-left:60px; } }
+/* assistant-ui primitives stay unstyled by default; these hooks keep the native DeepStudent landing geometry */
+.ds-chat-thread { display:flex; flex:1; min-height:0; flex-direction:column; }
+.ds-thread-viewport { display:flex; flex:1; min-height:0; flex-direction:column; overflow:auto; }
+.ds-thread-viewport > [data-aui-thread-messages] { display:contents; }
+.ds-chat-thread .ds-chat-center { flex:1; }
+.ds-chat-thread .ds-chat-message { flex:0 0 auto; width:min(760px,100%); }
+.ds-scroll-bottom { display:none; }
+.ds-composer { flex:0 0 auto; }
