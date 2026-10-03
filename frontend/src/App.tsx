@@ -14,20 +14,26 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
+  ArrowCounterClockwise,
   BookOpen,
   Brain,
+  Bug,
   Cards,
   CaretDown,
   CheckSquare,
+  CheckCircle,
   Gear,
   List,
   MagnifyingGlass,
   Microphone,
+  Pause,
+  Play,
   Plus,
   SidebarSimple,
   Sparkle,
   StackSimple,
   Sun,
+  Wrench,
   X,
   type Icon as PhosphorIcon,
 } from "@phosphor-icons/react";
@@ -35,6 +41,7 @@ import { HealthService } from "./mygo";
 
 type ViewId =
   | "chat-v2"
+  | "stream-debug"
   | "learning-hub"
   | "todo"
   | "skills-management"
@@ -144,10 +151,11 @@ function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null;
   </div>;
 }
 
-type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "menu" | "chevron-down" | "sun" | "arrow-up" | "microphone" | "x" | "brain";
+type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "menu" | "chevron-down" | "sun" | "arrow-up" | "microphone" | "x" | "brain" | "bug" | "play" | "pause" | "reset" | "wrench" | "check-circle";
 
 const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "chat-v2", label: "新会话", icon: "sparkle" },
+  { id: "stream-debug", label: "调试流式输出", icon: "bug" },
   { id: "learning-hub", label: "学习资源", icon: "book" },
   { id: "todo", label: "待办事项", icon: "check" },
   { id: "skills-management", label: "技能管理", icon: "sparkle-two" },
@@ -156,6 +164,7 @@ const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
 
 const viewTitles: Record<ViewId, string> = {
   "chat-v2": "",
+  "stream-debug": "调试流式输出",
   "learning-hub": "学习资源",
   todo: "待办事项",
   "skills-management": "技能管理",
@@ -191,6 +200,12 @@ const phosphorIcons: Record<IconName, PhosphorIcon> = {
   microphone: Microphone,
   x: X,
   brain: Brain,
+  bug: Bug,
+  play: Play,
+  pause: Pause,
+  reset: ArrowCounterClockwise,
+  wrench: Wrench,
+  "check-circle": CheckCircle,
 };
 
 function Icon({ name, size = 16, strokeWidth: _strokeWidth = 1.8 }: { name: IconName; size?: number; strokeWidth?: number }) {
@@ -752,6 +767,159 @@ function ChatWorkspace() {
   );
 }
 
+type StreamStatus = "idle" | "running" | "paused" | "complete";
+type StreamCodeLanguage = "javascript" | "json" | "go" | "python";
+
+const streamTokens = [
+  "你好",
+  "，",
+  "这里是",
+  "一段",
+  "流式输出",
+  "仿真。",
+  "我会",
+  "先规划",
+  "步骤，",
+  "再调用",
+  "工具，",
+  "最后",
+  "逐 token",
+  "绘制结果。",
+];
+
+const streamCode: Record<StreamCodeLanguage, string> = {
+  javascript: `const stream = async function* () {\n  for (const token of tokens) {\n    yield token;\n    await wait(120);\n  }\n};`,
+  json: `{"event":"token","index":7,"value":"规划","done":false}`,
+  go: `for _, token := range tokens {\n    fmt.Fprint(writer, token)\n    writer.Flush()\n    time.Sleep(120 * time.Millisecond)\n}`,
+  python: `async for token in response.aiter_tokens():\n    print(token, end="", flush=True)\n    await asyncio.sleep(0.12)`,
+};
+
+const streamCodeLabels: Record<StreamCodeLanguage, string> = {
+  javascript: "JS",
+  json: "JSON",
+  go: "Go",
+  python: "Python",
+};
+
+const streamToolSteps = [
+  { label: "规划响应", detail: "拆分任务与输出结构", start: 0, end: 4 },
+  { label: "调用学习资源", detail: "读取本地示例上下文", start: 4, end: 9 },
+  { label: "渲染流式结果", detail: "逐 token 更新文本与 SVG", start: 9, end: streamTokens.length },
+];
+
+function StreamDebugPage() {
+  const [status, setStatus] = useState<StreamStatus>("idle");
+  const [tokenIndex, setTokenIndex] = useState(0);
+  const [codeLanguage, setCodeLanguage] = useState<StreamCodeLanguage>("javascript");
+  const visibleTokens = streamTokens.slice(0, tokenIndex);
+  const progress = streamTokens.length === 0 ? 0 : tokenIndex / streamTokens.length;
+
+  useEffect(() => {
+    if (status !== "running") return;
+    const timer = window.setTimeout(() => {
+      setTokenIndex((current) => Math.min(streamTokens.length, current + 1));
+    }, 145);
+    return () => window.clearTimeout(timer);
+  }, [status, tokenIndex]);
+
+  useEffect(() => {
+    if (status === "running" && tokenIndex >= streamTokens.length) setStatus("complete");
+  }, [status, tokenIndex]);
+
+  const startStream = () => {
+    if (status === "complete" || tokenIndex >= streamTokens.length) setTokenIndex(0);
+    setStatus("running");
+  };
+  const pauseStream = () => setStatus((current) => current === "running" ? "paused" : current);
+  const resetStream = () => {
+    setStatus("idle");
+    setTokenIndex(0);
+  };
+
+  const statusLabels: Record<StreamStatus, string> = {
+    idle: "未开始",
+    running: "流式输出中",
+    paused: "已暂停",
+    complete: "已完成",
+  };
+
+  return <section className="ds-workspace-page ds-stream-debug-page" aria-labelledby="stream-debug-title">
+    <div className="ds-stream-debug__heading">
+      <div>
+        <div className="ds-stream-debug__eyebrow"><Icon name="bug" size={14} />前端调试工具</div>
+        <h2 id="stream-debug-title">调试流式输出</h2>
+        <p>观察文本、工具调用和 SVG 绘制如何随着 token 到达而更新</p>
+      </div>
+      <span className="ds-stream-sim-badge"><span className="ds-stream-sim-badge__dot" />仿真模式 · 不连接真实后端</span>
+    </div>
+
+    <div className="ds-stream-debug__toolbar" role="toolbar" aria-label="流式输出控制">
+      <button type="button" className="ds-primary-button" onClick={startStream} disabled={status === "running"}>
+        <Icon name="play" size={14} />{status === "complete" ? "重新开始" : status === "paused" ? "继续输出" : "开始输出"}
+      </button>
+      <button type="button" className="ds-secondary-button" onClick={pauseStream} disabled={status !== "running"}>
+        <Icon name="pause" size={14} />暂停
+      </button>
+      <button type="button" className="ds-secondary-button" onClick={resetStream} disabled={status === "idle"}>
+        <Icon name="reset" size={14} />重置
+      </button>
+      <span className={`ds-stream-status ds-stream-status--${status}`}><span className="ds-stream-status__dot" />{statusLabels[status]}</span>
+      <span className="ds-stream-counter">{tokenIndex} / {streamTokens.length} tokens</span>
+    </div>
+
+    <div className="ds-stream-debug__grid">
+      <section className="ds-panel ds-stream-console" aria-label="仿真 Chat 输出">
+        <div className="ds-panel-heading"><div><b>仿真 Chat</b><p>每 145ms 推送一个 token，支持随时暂停</p></div><span className="ds-stream-mini-label">LOCAL UI</span></div>
+        <div className="ds-stream-console__body">
+          <div className="ds-stream-bubble ds-stream-bubble--user"><span className="ds-stream-bubble__role">你</span><span>请演示一次带工具调用的流式回复</span></div>
+          <div className="ds-stream-bubble ds-stream-bubble--assistant">
+            <span className="ds-stream-bubble__role">DeepStudent · 仿真</span>
+            <p className="ds-stream-token-text" aria-live="polite">{visibleTokens.length === 0 ? <span className="ds-stream-placeholder">点击“开始输出”查看逐 token 文本…</span> : visibleTokens.map((token, index) => <span key={`${index}-${token}`} className="ds-stream-token">{token}</span>)}{status === "running" && <span className="ds-stream-cursor" aria-hidden="true" />}</p>
+            <span className="ds-stream-bubble__meta">{status === "complete" ? "输出完成 · 仿真结果" : status === "idle" ? "等待开始" : "实时更新中"}</span>
+          </div>
+        </div>
+        <div className="ds-stream-timeline" aria-label="工具调用状态时间线">
+          <div className="ds-stream-timeline__heading"><b>工具调用时间线</b><span>仅前端状态仿真</span></div>
+          <ol>
+            {streamToolSteps.map((step, index) => {
+              const stepStatus = tokenIndex >= step.end ? "complete" : tokenIndex >= step.start && status !== "idle" ? "running" : "pending";
+              const stepIcon: IconName = stepStatus === "complete" ? "check-circle" : stepStatus === "running" ? "wrench" : "chevron-down";
+              return <li key={step.label} className={`ds-stream-timeline__item ds-stream-timeline__item--${stepStatus}`}>
+                <span className="ds-stream-timeline__marker"><Icon name={stepIcon} size={14} /></span>
+                <span className="ds-stream-timeline__line" aria-hidden="true" />
+                <span className="ds-stream-timeline__copy"><b>{step.label}</b><small>{step.detail}</small></span>
+                <em>{stepStatus === "complete" ? "完成" : stepStatus === "running" ? "进行中" : "等待"}</em>
+                {index === streamToolSteps.length - 1 && <span className="ds-stream-timeline__last" aria-hidden="true" />}
+              </li>;
+            })}
+          </ol>
+        </div>
+      </section>
+
+      <aside className="ds-stream-debug__aside">
+        <section className="ds-panel ds-stream-drawing-panel">
+          <div className="ds-panel-heading"><div><b>逐步绘制 SVG</b><p>stroke-dashoffset 随进度归零</p></div><span className="ds-stream-progress">{Math.round(progress * 100)}%</span></div>
+          <div className="ds-stream-svg-wrap">
+            <svg className="ds-stream-svg" viewBox="0 0 280 150" role="img" aria-label={`SVG 绘制进度 ${Math.round(progress * 100)}%`}>
+              <path className="ds-stream-svg__guide" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" />
+              <path className="ds-stream-svg__path" pathLength="1" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" style={{ strokeDasharray: 1, strokeDashoffset: 1 - progress }} />
+              <circle className="ds-stream-svg__endpoint" cx={24 + progress * 242} cy={111 - Math.sin(progress * Math.PI) * 62} r="4" />
+            </svg>
+            <div className="ds-stream-svg-wrap__caption"><Icon name="wrench" size={13} />绘制轨迹会随 token 一笔画出</div>
+          </div>
+        </section>
+        <section className="ds-panel ds-stream-code-panel">
+          <div className="ds-panel-heading"><div><b>事件载荷示例</b><p>同一模拟事件的多语言实现</p></div></div>
+          <div className="ds-stream-code-tabs" role="tablist" aria-label="代码语言">
+            {(Object.keys(streamCode) as StreamCodeLanguage[]).map((language) => <button key={language} type="button" role="tab" aria-selected={codeLanguage === language} className={codeLanguage === language ? "is-active" : ""} onClick={() => setCodeLanguage(language)}>{streamCodeLabels[language]}</button>)}
+          </div>
+          <pre className="ds-stream-code-block"><code>{streamCode[codeLanguage]}</code></pre>
+        </section>
+      </aside>
+    </div>
+  </section>;
+}
+
 function LearningHub() {
   return <WorkspacePage action={<><Icon name="plus" size={14} />添加资源</>}>
     <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button" aria-label="添加资源">＋</button></div><label className="ds-search-field"><Icon name="search" size={14} /><input placeholder="搜索资源…" /></label><p className="ds-sidebar-empty">暂无资源</p></aside><div className="ds-resource-grid"><EmptyState title="还没有学习资源" description="添加 PDF、Markdown、网页或图片，开始整理你的学习资料" /></div></div>
@@ -798,6 +966,7 @@ export function App() {
   const selectView = (next: ViewId) => { setView(next); setSidebarOpen(false); };
   const content = useMemo(() => {
     if (view === "chat-v2") return <ChatWorkspace />;
+    if (view === "stream-debug") return <StreamDebugPage />;
     if (view === "learning-hub") return <LearningHub />;
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
@@ -839,9 +1008,6 @@ export function App() {
         <header className="ds-main__header">
           <div className="ds-main__leading">
             <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarOpen || !sidebarCollapsed}><Icon name="menu" size={17} /></button>
-            <button className="ds-sidebar-toggle ds-main-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="展开侧边栏" aria-expanded={!sidebarCollapsed}>
-              <Icon name="sidebar" size={16} />
-            </button>
           </div>
           {viewTitles[view] && <h1 className="ds-main__title">{viewTitles[view]}</h1>}
           <div className="ds-main__actions"><button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
