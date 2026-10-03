@@ -31,12 +31,16 @@ type StreamEvent struct {
 }
 
 type ModelRequest struct {
-	Model       string         `json:"model,omitempty"`
-	Messages    []Message      `json:"messages,omitempty"`
-	Prompt      string         `json:"prompt,omitempty"`
-	MaxTokens   int            `json:"max_tokens,omitempty"`
-	Temperature float64        `json:"temperature,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
+	Provider          string         `json:"provider,omitempty"`
+	Model             string         `json:"model,omitempty"`
+	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
+	Messages          []Message      `json:"messages,omitempty"`
+	Prompt            string         `json:"prompt,omitempty"`
+	MaxTokens         int            `json:"max_tokens,omitempty"`
+	InputCapabilities []string       `json:"input_capabilities,omitempty"`
+	Input             []string       `json:"input,omitempty"`
+	Temperature       float64        `json:"temperature,omitempty"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
 }
 
 type Message struct {
@@ -78,11 +82,15 @@ type SessionStore interface {
 }
 
 type AgentRunRequest struct {
-	RunID     string `json:"run_id,omitempty"`
-	SessionID string `json:"session_id,omitempty"`
-	Prompt    string `json:"prompt"`
-	Model     string `json:"model,omitempty"`
-	MaxTokens int    `json:"max_tokens,omitempty"`
+	RunID             string   `json:"run_id,omitempty"`
+	SessionID         string   `json:"session_id,omitempty"`
+	Prompt            string   `json:"prompt"`
+	Provider          string   `json:"provider,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
+	MaxTokens         int      `json:"max_tokens,omitempty"`
+	InputCapabilities []string `json:"input_capabilities,omitempty"`
+	Input             []string `json:"input,omitempty"`
 }
 
 type AgentRun struct {
