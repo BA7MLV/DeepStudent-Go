@@ -6,8 +6,10 @@ import {
   ThreadPrimitive,
   unstable_useComposerInput,
   useLocalRuntime,
+  type AttachmentAdapter,
   type ThreadComposerRuntime,
   type ChatModelAdapter,
+  AttachmentPrimitive,
 } from "@assistant-ui/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -264,6 +266,42 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     reader.readAsDataURL(blob);
   });
 }
+
+function normalizeDataUrlMime(dataUrl: string, mimeType: string) {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return dataUrl;
+  return `data:${mimeType};base64,${dataUrl.slice(comma + 1)}`;
+}
+
+// The local runtime has no server upload endpoint yet. Keep dropped files in
+// the assistant-ui pending queue, including the original File object, and
+// only materialize a data URL when the message is sent.
+const LocalFileAttachmentAdapter: AttachmentAdapter = {
+  accept: "*",
+  async add({ file }) {
+    return {
+      id: `local-file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      type: "file",
+      name: file.name,
+      contentType: file.type || "application/octet-stream",
+      file,
+      status: { type: "requires-action", reason: "composer-send" },
+    };
+  },
+  async send(attachment) {
+    const contentType = attachment.contentType || attachment.file.type || "application/octet-stream";
+    const dataUrl = normalizeDataUrlMime(await blobToDataUrl(attachment.file), contentType);
+    return {
+      ...attachment,
+      contentType,
+      content: [{ type: "file", data: dataUrl, mimeType: contentType, filename: attachment.name }],
+      status: { type: "complete" },
+    };
+  },
+  async remove() {
+    // Local files are only held in the composer until they are sent or removed.
+  },
+};
 
 type ComposerInput = ReturnType<typeof unstable_useComposerInput>;
 
@@ -568,20 +606,117 @@ function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }
   </button>;
 }
 
+type ComposerDropState = "idle" | "dragging" | "adding" | "added" | "error";
+
 function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime> }) {
   const composer = unstable_useComposerInput();
   const [voiceState, setVoiceState] = useState<VoiceOverlayState>({ recording: false, cancelZone: false, level: 0, elapsed: 0 });
+  const [dropState, setDropState] = useState<ComposerDropState>("idle");
   const gestureRef = useRef<ComposerGestureHandlers | null>(null);
+  const dragDepthRef = useRef(0);
+  const dropFeedbackTimerRef = useRef<number | null>(null);
   const registerGesture = (handlers: ComposerGestureHandlers | null) => { gestureRef.current = handlers; };
   const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerDown(event);
   const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerMove(event);
   const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerUp(event);
   const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerCancel(event);
+  const hasFiles = (event: React.DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types).includes("Files");
+  const clearDropFeedback = () => {
+    if (dropFeedbackTimerRef.current !== null) {
+      window.clearTimeout(dropFeedbackTimerRef.current);
+      dropFeedbackTimerRef.current = null;
+    }
+  };
+  const showDropFeedback = (state: Exclude<ComposerDropState, "idle" | "dragging">) => {
+    clearDropFeedback();
+    setDropState(state);
+    dropFeedbackTimerRef.current = window.setTimeout(() => {
+      dropFeedbackTimerRef.current = null;
+      setDropState("idle");
+    }, 2200);
+  };
+  const isInsideComposer = (event: React.DragEvent<HTMLElement>) => {
+    const next = event.relatedTarget;
+    return next instanceof Node && event.currentTarget.contains(next);
+  };
+  const handleDragEnter = (event: React.DragEvent<HTMLElement>) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (!runtime.thread.getState().capabilities.attachments) {
+      event.dataTransfer.dropEffect = "none";
+      showDropFeedback("error");
+      return;
+    }
+    if (isInsideComposer(event)) return;
+    dragDepthRef.current += 1;
+    clearDropFeedback();
+    setDropState("dragging");
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const handleDragOver = (event: React.DragEvent<HTMLElement>) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (!runtime.thread.getState().capabilities.attachments) {
+      event.dataTransfer.dropEffect = "none";
+      return;
+    }
+    event.dataTransfer.dropEffect = "copy";
+    if (dropState === "idle") setDropState("dragging");
+  };
+  const handleDragLeave = (event: React.DragEvent<HTMLElement>) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (isInsideComposer(event)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0 && dropState === "dragging") setDropState("idle");
+  };
+  const handleDrop = (event: React.DragEvent<HTMLElement>) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    clearDropFeedback();
+    const files = Array.from(event.dataTransfer.files);
+    if (!runtime.thread.getState().capabilities.attachments || files.length === 0) {
+      setDropState("idle");
+      return;
+    }
+
+    setDropState("adding");
+    void (async () => {
+      let failed = 0;
+      for (const file of files) {
+        try {
+          await runtime.thread.composer.addAttachment(file);
+        } catch {
+          failed += 1;
+        }
+      }
+      showDropFeedback(failed === files.length ? "error" : "added");
+    })();
+  };
+  useEffect(() => () => clearDropFeedback(), []);
   const overlayStyle = {
     "--ds-voice-level": voiceState.level.toFixed(3),
     "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
   } as React.CSSProperties;
-  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
+  const dropStateLabel: Record<Exclude<ComposerDropState, "idle">, string> = {
+    dragging: "松开以添加附件",
+    adding: "正在加入附件…",
+    added: "附件已加入待发送",
+    error: "附件未能加入",
+  };
+  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} data-drop-state={dropState} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel} onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+    {dropState !== "idle" && <div className="ds-composer__drop-state" role="status" aria-live="polite">{dropStateLabel[dropState]}</div>}
+    <div className="ds-composer__attachments" aria-label="待发送附件">
+      <ComposerPrimitive.Attachments>
+        {({ attachment }) => <AttachmentPrimitive.Root className="ds-composer-attachment">
+          <AttachmentPrimitive.unstable_Thumb className="ds-composer-attachment__thumb" />
+          <span className="ds-composer-attachment__name"><AttachmentPrimitive.Name /></span>
+          <small>{attachment.status.type === "requires-action" ? "待发送" : attachment.status.type === "complete" ? "已准备" : "处理失败"}</small>
+          <AttachmentPrimitive.Remove className="ds-composer-attachment__remove" aria-label={`移除 ${attachment.name}`}><Icon name="x" size={13} /></AttachmentPrimitive.Remove>
+        </AttachmentPrimitive.Root>}
+      </ComposerPrimitive.Attachments>
+    </div>
     <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
     <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
     <div className="ds-composer__toolbar">
@@ -595,7 +730,7 @@ function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime>
 }
 
 function ChatWorkspace() {
-  const runtime = useLocalRuntime(StubAdapter);
+  const runtime = useLocalRuntime(StubAdapter, { adapters: { attachments: LocalFileAttachmentAdapter } });
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <section className="ds-chat-page" aria-labelledby="chat-welcome-title">
