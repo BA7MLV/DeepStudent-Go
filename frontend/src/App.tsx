@@ -123,7 +123,7 @@ function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null;
   </div>;
 }
 
-type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "chevron-down" | "sun" | "home" | "folder" | "send" | "arrow-up" | "microphone" | "x" | "paperclip" | "wand" | "brain";
+type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "menu" | "chevron-down" | "sun" | "home" | "folder" | "send" | "arrow-up" | "microphone" | "x" | "paperclip" | "wand" | "brain";
 
 const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "chat-v2", label: "新会话", icon: "sparkle" },
@@ -165,6 +165,7 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: n
     plus: <><path d="M12 5v14M5 12h14"/></>,
     search: <><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></>,
     sidebar: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></>,
+    menu: <><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></>,
     "chevron-down": <path d="m6 9 6 6 6-6"/>,
     sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></>,
     home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
@@ -251,7 +252,14 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 type ComposerInput = ReturnType<typeof unstable_useComposerInput>;
 
-function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRuntime; input: ComposerInput }) {
+type ComposerGestureHandlers = {
+  onPointerDown: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerMove: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
+};
+
+function VoiceComposerButton({ composer, input, onRegister }: { composer: ThreadComposerRuntime; input: ComposerInput; onRegister?: (handlers: ComposerGestureHandlers | null) => void }) {
   const [recording, setRecording] = useState(false);
   const [cancelZone, setCancelZone] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -262,7 +270,15 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
   const cancelZoneRef = useRef(false);
   const startYRef = useRef(0);
   const suppressClickRef = useRef(false);
+  const longPressTimerRef = useRef<number | null>(null);
   const hasText = input.value.trim().length > 0;
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
 
   const resetRecording = () => {
     recorderRef.current = null;
@@ -271,6 +287,7 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
     chunksRef.current = [];
     pressingRef.current = false;
     cancelZoneRef.current = false;
+    clearLongPressTimer();
     setRecording(false);
     setCancelZone(false);
   };
@@ -297,7 +314,13 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
 
   const stopRecording = (cancel: boolean) => {
     const recorder = recorderRef.current;
-    if (!recorder) return;
+    if (!recorder) {
+      pressingRef.current = false;
+      cancelZoneRef.current = false;
+      clearLongPressTimer();
+      setCancelZone(false);
+      return;
+    }
     if (recorder.state !== "inactive") {
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
@@ -310,14 +333,9 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
     }
   };
 
-  const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    const isMobile = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
-    if (hasText || !isMobile || recording || pressingRef.current) return;
-    pressingRef.current = true;
-    startYRef.current = event.clientY;
+  const startRecording = async () => {
+    if (!pressingRef.current || recorderRef.current) return;
     setError(null);
-    event.currentTarget.setPointerCapture?.(event.pointerId);
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
       pressingRef.current = false;
       setError("当前设备不支持录音");
@@ -325,7 +343,7 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (!pressingRef.current) {
+      if (!pressingRef.current || cancelZoneRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
@@ -345,6 +363,17 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
     }
   };
 
+  const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const isMobile = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+    if (hasText || !isMobile || recording || pressingRef.current) return;
+    pressingRef.current = true;
+    startYRef.current = event.clientY;
+    setError(null);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    await startRecording();
+  };
+
   const handlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (!pressingRef.current) return;
     const inCancelZone = startYRef.current - event.clientY > 64;
@@ -354,15 +383,80 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
 
   const handlePointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
+    clearLongPressTimer();
     pressingRef.current = false;
     stopRecording(cancelZoneRef.current);
     event.currentTarget.releasePointerCapture?.(event.pointerId);
   };
 
   const handlePointerCancel = () => {
+    clearLongPressTimer();
     pressingRef.current = false;
     stopRecording(true);
   };
+
+  const isGestureArea = (event: React.PointerEvent<HTMLElement>) => {
+    if (!(event.target instanceof Element)) return true;
+    // Keep regular controls clickable. The textarea and the empty composer
+    // surface are the intentional long-press recording targets.
+    return !event.target.closest("button, input, select, a");
+  };
+
+  const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    const isMobile = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+    if (!isMobile || hasText || recording || pressingRef.current || !isGestureArea(event)) return;
+    pressingRef.current = true;
+    startYRef.current = event.clientY;
+    cancelZoneRef.current = false;
+    setCancelZone(false);
+    setError(null);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
+      void startRecording();
+    }, 320);
+  };
+
+  const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    if (!pressingRef.current || !isGestureArea(event)) return;
+    const inCancelZone = startYRef.current - event.clientY > 64;
+    cancelZoneRef.current = inCancelZone;
+    setCancelZone(inCancelZone);
+    if (inCancelZone && !recording) clearLongPressTimer();
+    if (recording) event.preventDefault();
+  };
+
+  const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    if (!isGestureArea(event)) return;
+    const wasRecording = recording || recorderRef.current !== null;
+    clearLongPressTimer();
+    if (wasRecording) event.preventDefault();
+    pressingRef.current = false;
+    stopRecording(wasRecording && cancelZoneRef.current);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => {
+    if (!isGestureArea(event)) return;
+    clearLongPressTimer();
+    pressingRef.current = false;
+    stopRecording(true);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  useEffect(() => {
+    const handlers: ComposerGestureHandlers = {
+      onPointerDown: handleAreaPointerDown,
+      onPointerMove: handleAreaPointerMove,
+      onPointerUp: handleAreaPointerUp,
+      onPointerCancel: handleAreaPointerCancel,
+    };
+    onRegister?.(handlers);
+    return () => onRegister?.(null);
+  });
+
+  useEffect(() => () => clearLongPressTimer(), []);
 
   const handleClick = () => {
     if (suppressClickRef.current) {
@@ -390,13 +484,17 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
 
 function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime> }) {
   const composer = unstable_useComposerInput();
-  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()}>
+  const gestureRef = useRef<ComposerGestureHandlers | null>(null);
+  const registerGesture = (handlers: ComposerGestureHandlers | null) => { gestureRef.current = handlers; };
+  const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerDown(event);
+  const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerMove(event);
+  const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerUp(event);
+  const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerCancel(event);
+  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
+    <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
     <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
     <div className="ds-composer__toolbar">
-      <div className="ds-composer__tools">
-        <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="paperclip" size={16} /></ComposerPrimitive.AddAttachment>
-      </div>
-      <VoiceComposerButton composer={runtime.thread.composer} input={composer} />
+      <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} />
     </div>
   </ComposerPrimitive.Root>;
 }
@@ -410,14 +508,14 @@ function ChatWorkspace() {
           <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll>
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
             <ThreadPrimitive.Empty>
-              <ChatEmptyState />
+              <div className="ds-chat-empty-state">
+                <ChatEmptyState />
+                <ChatQuickPrompts />
+              </div>
             </ThreadPrimitive.Empty>
             <ThreadPrimitive.ScrollToBottom className="ds-scroll-bottom">↓</ThreadPrimitive.ScrollToBottom>
           </ThreadPrimitive.Viewport>
-          <ChatComposer runtime={runtime} />
-          <ThreadPrimitive.Empty>
-            <ChatQuickPrompts />
-          </ThreadPrimitive.Empty>
+          <div className="ds-composer-dock"><ChatComposer runtime={runtime} /></div>
         </ThreadPrimitive.Root>
       </section>
     </AssistantRuntimeProvider>
@@ -510,7 +608,7 @@ export function App() {
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <header className="ds-main__header">
           <div className="ds-main__leading">
-            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarOpen || !sidebarCollapsed}><Icon name="sidebar" size={17} /></button>
+            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarOpen || !sidebarCollapsed}><Icon name="menu" size={17} /></button>
             <button className="ds-main-logo-button" type="button" onClick={toggleSidebar} aria-label="展开侧边栏" aria-expanded={!sidebarCollapsed}>
               <img src="/logo-black.svg" alt="" />
               <span className="ds-main-logo-button__affordance" aria-hidden="true"><Icon name="sidebar" size={15} /></span>
