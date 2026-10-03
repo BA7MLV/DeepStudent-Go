@@ -26,6 +26,30 @@ product all at once.
 The existing DeepStudent implementation remains the source of truth until the
 migration passes compatibility and benchmark gates.
 
+## Verification status
+
+The branch includes [`go-backend.yml`](.github/workflows/go-backend.yml), which
+runs `gofmt`, `go test ./...`, `go vet ./...`, and a CGO-free server build on
+pushes to `feature/go-backend-runtime` and pull requests targeting `main` or
+this branch. This checkout documents the workflow but does not contain a
+recorded successful Actions run; treat Go CI as **unverified until a run is
+observed in GitHub Actions**. Do not describe the backend as CI-green based on
+this README alone.
+
+For a local verification pass, run:
+
+```sh
+gofmt -w cmd internal
+test -z "$(gofmt -l cmd internal)"
+go test ./...
+go vet ./...
+CGO_ENABLED=0 go build ./cmd/server
+```
+
+The frontend can be checked independently with `bun run typecheck` and
+`bun run build` from `frontend/`. These checks do not prove that the browser
+chat is wired to the Go SSE API.
+
 ## Architecture
 
 ```text
@@ -89,6 +113,29 @@ model. `DEEPSTUDENT_BASE_URL` and
 loading API keys into config. `config.Manager` reloads validated snapshots
 atomically and leaves the last known-good config on invalid edits.
 
+### Configuration reference
+
+Configuration is loaded in this order: built-in defaults, the optional JSON
+file named by `DEEPSTUDENT_CONFIG`, then environment overrides. Invalid reloads
+leave the last known-good snapshot in place. Common local overrides are:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DEEPSTUDENT_HTTP_ADDR` | `127.0.0.1:8080` | bind address for the API |
+| `DEEPSTUDENT_DB_PATH` | `data/deepstudent.db` | SQLite database path |
+| `DEEPSTUDENT_CORS_ALLOWLIST` | localhost/127.0.0.1:5173 | comma-separated exact origins |
+| `DEEPSTUDENT_DEFAULT_PROVIDER` | `deterministic` | provider route for new runs |
+| `DEEPSTUDENT_DEFAULT_TIMEOUT` | `45s` | runtime run timeout |
+| `DEEPSTUDENT_MAX_TOKENS` | `2048` | runtime token ceiling |
+| `DEEPSTUDENT_MAX_CONCURRENCY` | `2` | bounded active runs |
+| `DEEPSTUDENT_AUTH_ENABLED` | `false` | reserved session boundary; login is not implemented |
+
+Provider endpoint and credential settings use metadata only. Set
+`DEEPSTUDENT_PROVIDER_<NAME>_BASE_URL` or a `baseURL`/`baseURLEnv` reference;
+set `apiKeyEnv` to the name of an environment variable, never to the secret
+value. The deterministic provider remains the only provider instantiated by
+`cmd/server` today.
+
 Try the current stream:
 
 ```sh
@@ -147,8 +194,8 @@ switching volume drivers or a pre-existing host bind mount.
 
 These are explicit placeholders until a deployment/artifact URL is recorded:
 
-- Pages preview: https://ba7mlv.github.io/DeepStudent-Go/
-- macOS preview artifact: `<MACOS_ARTIFACT_URL>`
+- Expected Pages URL after a successful deployment (verify before sharing): https://ba7mlv.github.io/DeepStudent-Go/
+- macOS preview artifact: `<MACOS_ARTIFACT_URL>` (the workflow artifact URL is run-specific)
 - CI workflow (real link): [`macOS shell workflow`](https://github.com/BA7MLV/DeepStudent-Go/actions/workflows/macos-shell.yml)
 - Pages workflow (real link): [`Pages preview workflow`](https://github.com/BA7MLV/DeepStudent-Go/actions/workflows/pages-preview.yml)
 
@@ -233,6 +280,35 @@ frontend/                   React shell and MyGo-compatible health client
 protocol/runtime-v1.md      versioned request/event envelope
 docs/backend-architecture.md
 ```
+
+## Branch relationship
+
+- `feature/go-backend-runtime` is the backend migration slice documented here.
+  It adds the local HTTP/SSE service, SQLite event store, deterministic provider,
+  Docker profile, and backend-specific CI workflow.
+- `migration/mygo-shell-poc` is the UI-first shell experiment. Its chat remains
+  a local stub and it has no Go backend verification workflow.
+- The existing DeepStudent implementation remains the source of truth until
+  compatibility, performance, and security gates are agreed and met. Keep the
+  runtime contract versioned when integrating the two branches.
+
+## Known limitations and roadmap
+
+The current server is local/test-only: authentication is disabled, only the
+deterministic provider is instantiated, and the browser shell is not connected
+to `/api/v1/runs`. SSE history is in-memory and retained briefly for late
+subscriptions; durable replay, reconnect/resume, cancellation, and remote
+client discovery are not implemented. Tool execution, telemetry, migrations,
+provider adapters, signed packaging, and production deployment are also out of
+scope.
+
+Next gates are:
+
+1. Connect the shell through a typed HTTP/SSE adapter and add contract tests.
+2. Add explicit replay/cancel/auth semantics before shared or remote use.
+3. Integrate a real provider through an environment-backed secret boundary.
+4. Benchmark persistence/runtime behavior and document migration/recovery.
+5. Add accessibility, release-signing, deployment, and incident/runbook gates.
 
 ## Safety and scope
 
