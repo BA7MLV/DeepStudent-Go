@@ -65,7 +65,7 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, provider TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, created_at TEXT NOT NULL, finished_at TEXT, FOREIGN KEY(session_id) REFERENCES sessions(id))`,
 		`CREATE TABLE IF NOT EXISTS session_events (session_id TEXT NOT NULL, sequence INTEGER NOT NULL, run_id TEXT NOT NULL DEFAULT '', type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(session_id, sequence), FOREIGN KEY(session_id) REFERENCES sessions(id))`,
-		`CREATE TABLE IF NOT EXISTS provider_profiles (name TEXT PRIMARY KEY, base_url TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', api_key_env TEXT NOT NULL DEFAULT '', timeout_ms INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE IF NOT EXISTS provider_profiles (name TEXT PRIMARY KEY, base_url TEXT NOT NULL DEFAULT '', base_url_env TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', reasoning_effort TEXT NOT NULL DEFAULT '', max_tokens INTEGER NOT NULL DEFAULT 0, input_capabilities_json TEXT NOT NULL DEFAULT '[]', api_key_env TEXT NOT NULL DEFAULT '', timeout_ms INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	}
