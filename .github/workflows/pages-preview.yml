@@ -3,7 +3,7 @@ name: Preview frontend on GitHub Pages
 on:
   push:
     branches:
-      - goal/mobile-chat-shell
+      - migration/mygo-shell-poc
   workflow_dispatch:
 
 permissions:
