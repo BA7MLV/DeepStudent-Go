@@ -6,9 +6,10 @@ import {
   ThreadPrimitive,
   unstable_useComposerInput,
   useLocalRuntime,
+  type ThreadComposerRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { HealthService } from "./mygo";
 
 type ViewId =
@@ -42,40 +43,87 @@ function readOnboardingConfig(): OnboardingConfig | null {
 }
 
 const onboardingGoals: Array<{ value: LearningGoal; label: string; description: string }> = [
-  { value: "exam", label: "备考与考试", description: "拆解重点，安排复习节奏" },
-  { value: "course", label: "跟上课程", description: "理解概念，完成作业和练习" },
-  { value: "skill", label: "长期掌握技能", description: "循序学习，建立可迁移的知识" },
+  { value: "exam", label: "备考与考试", description: "按考试节奏复习" },
+  { value: "course", label: "跟上课程", description: "理解课程并完成练习" },
+  { value: "skill", label: "长期掌握技能", description: "持续积累可迁移能力" },
 ];
 const onboardingModes: Array<{ value: LearningMode; label: string; description: string }> = [
-  { value: "practice", label: "练习优先", description: "先尝试，再通过反馈巩固理解" },
-  { value: "notes", label: "整理优先", description: "把资料变成清晰的笔记和结构" },
-  { value: "plan", label: "计划优先", description: "按目标安排每天的学习行动" },
+  { value: "practice", label: "练习优先", description: "先练习，再看反馈" },
+  { value: "notes", label: "整理优先", description: "整理资料和笔记" },
+  { value: "plan", label: "计划优先", description: "按目标安排行动" },
 ];
 const onboardingModels: Array<{ value: ModelChoice; label: string; description: string }> = [
-  { value: "local", label: "DeepStudent Local", description: "使用本机默认模型，数据留在当前环境" },
-  { value: "openai", label: "OpenAI", description: "使用已配置的 OpenAI 模型" },
-  { value: "compatible", label: "兼容 OpenAI 的服务", description: "连接自定义的兼容接口" },
+  { value: "local", label: "DeepStudent Local", description: "本机模型，数据留在当前环境" },
+  { value: "openai", label: "OpenAI", description: "使用已配置的模型" },
+  { value: "compatible", label: "兼容 OpenAI 的服务", description: "连接兼容接口" },
+];
+
+const onboardingRuntimeOptions: Array<{ value: RuntimeChoice; label: string; description: string }> = [
+  { value: "go", label: "Go runtime", description: "推荐，适合完整功能" },
+  { value: "browser", label: "浏览器运行时", description: "无需本地服务" },
 ];
 
 function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null; onComplete: (config: Omit<OnboardingConfig, "completedAt">) => void }) {
   const [draft, setDraft] = useState<Omit<OnboardingConfig, "completedAt">>(() => initial ? { goal: initial.goal, mode: initial.mode, model: initial.model, runtime: initial.runtime } : defaultOnboardingConfig);
+  const [step, setStep] = useState(0);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
   const select = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const onChange = () => setIsMobile(query.matches);
+    onChange();
+    query.addEventListener?.("change", onChange);
+    return () => query.removeEventListener?.("change", onChange);
+  }, []);
+
+  const renderOptions = <K extends keyof typeof draft>(key: K, title: string, options: Array<{ value: (typeof draft)[K]; label: string; description: string }>) => (
+    <div key={String(key)} className="ds-onboarding__group">
+      <h2>{title}</h2>
+      <div className="ds-onboarding__options">
+        {options.map((option) => <button key={String(option.value)} type="button" className={`ds-onboarding-option${draft[key] === option.value ? " is-selected" : ""}`} aria-pressed={draft[key] === option.value} onClick={() => select(key, option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}
+      </div>
+    </div>
+  );
+
+  const renderRuntime = () => (
+    <div key="runtime" className="ds-onboarding__group ds-onboarding__runtime-group">
+      <h2>运行时</h2>
+      <div className="ds-onboarding__options">
+        {onboardingRuntimeOptions.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.runtime === option.value ? " is-selected" : ""}`} aria-pressed={draft.runtime === option.value} onClick={() => select("runtime", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}
+      </div>
+    </div>
+  );
+
+  const steps = [
+    renderOptions("goal", "学习目标", onboardingGoals),
+    renderOptions("mode", "学习方式", onboardingModes),
+    renderOptions("model", "模型", onboardingModels),
+    renderRuntime(),
+  ];
+  const finishOrAdvance = () => {
+    if (!isMobile || step === steps.length - 1) onComplete(draft);
+    else setStep((current) => current + 1);
+  };
+
   return <div className="ds-onboarding" role="dialog" aria-modal="true" aria-labelledby="ds-onboarding-title">
     <section className="ds-onboarding__card">
-      <header className="ds-onboarding__header"><div><span className="ds-onboarding__brand">DeepStudent</span><span className="ds-onboarding__kicker">首次设置</span></div></header>
+      <header className="ds-onboarding__header"><div><span className="ds-onboarding__brand">DeepStudent</span><span className="ds-onboarding__kicker">首次设置</span></div>{isMobile && <span className="ds-onboarding__progress">{step + 1} / {steps.length}</span>}</header>
       <main className="ds-onboarding__body">
         <h1 id="ds-onboarding-title">设置你的学习方式</h1>
-        <div className="ds-onboarding__group"><h2>学习目标</h2><div className="ds-onboarding__options">{onboardingGoals.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.goal === option.value ? " is-selected" : ""}`} aria-pressed={draft.goal === option.value} onClick={() => select("goal", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></div>
-        <div className="ds-onboarding__group"><h2>学习方式</h2><div className="ds-onboarding__options">{onboardingModes.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.mode === option.value ? " is-selected" : ""}`} aria-pressed={draft.mode === option.value} onClick={() => select("mode", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></div>
-        <div className="ds-onboarding__group"><h2>模型</h2><div className="ds-onboarding__options">{onboardingModels.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.model === option.value ? " is-selected" : ""}`} aria-pressed={draft.model === option.value} onClick={() => select("model", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></div>
-        <fieldset className="ds-onboarding__runtime"><legend>运行时</legend><label className={draft.runtime === "go" ? "is-selected" : ""}><input type="radio" name="onboarding-runtime" checked={draft.runtime === "go"} onChange={() => select("runtime", "go")} /> Go runtime（推荐）</label><label className={draft.runtime === "browser" ? "is-selected" : ""}><input type="radio" name="onboarding-runtime" checked={draft.runtime === "browser"} onChange={() => select("runtime", "browser")} /> 浏览器运行时</label></fieldset>
+        {isMobile ? <div className="ds-onboarding__mobile-step">{steps[step]}</div> : <>{steps}</>}
       </main>
-      <footer className="ds-onboarding__footer"><button type="button" className="ds-text-button" onClick={() => onComplete(defaultOnboardingConfig)}>使用默认设置</button><button type="button" className="ds-primary-button" onClick={() => onComplete(draft)}>完成设置</button></footer>
+      <footer className="ds-onboarding__footer">
+        <button type="button" className="ds-text-button" onClick={() => onComplete(defaultOnboardingConfig)}>使用默认设置</button>
+        <div className="ds-onboarding__footer-main">
+          {isMobile && step > 0 && <button type="button" className="ds-secondary-button" onClick={() => setStep((current) => current - 1)}>上一步</button>}
+          <button type="button" className="ds-primary-button" onClick={finishOrAdvance}>{isMobile && step < steps.length - 1 ? "下一步" : "完成设置"}</button>
+        </div>
+      </footer>
     </section>
   </div>;
 }
 
-type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "chevron-down" | "sun" | "home" | "folder" | "send" | "paperclip" | "wand" | "brain";
+type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "chevron-down" | "sun" | "home" | "folder" | "send" | "arrow-up" | "microphone" | "x" | "paperclip" | "wand" | "brain";
 
 const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "chat-v2", label: "新会话", icon: "sparkle" },
@@ -84,6 +132,15 @@ const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "skills-management", label: "技能管理", icon: "sparkle-two" },
   { id: "flashcards", label: "闪卡", icon: "stack" },
 ];
+
+const viewTitles: Record<ViewId, string> = {
+  "chat-v2": "新会话",
+  "learning-hub": "学习资源",
+  todo: "待办事项",
+  "skills-management": "技能管理",
+  flashcards: "闪卡",
+  settings: "设置",
+};
 
 const quickPrompts: Array<{ label: string; icon: IconName }> = [
   { label: "复习今天的课程", icon: "book" },
@@ -113,6 +170,9 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: n
     home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
     folder: <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5Z"/>,
     send: <path d="m4 4 17 8-17 8 3-8Z"/>,
+    "arrow-up": <><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></>,
+    microphone: <><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"/></>,
+    x: <><path d="m6 6 12 12M18 6 6 18"/></>,
     paperclip: <path d="m20.5 11.5-8.7 8.7a5 5 0 0 1-7.1-7.1l8.8-8.8a3.5 3.5 0 0 1 5 5l-8.8 8.8a2 2 0 1 1-2.8-2.8l8.1-8.1"/>,
     wand: <><path d="m15 4 5 5M13 6l5 5M4 20l8-8M5 5l.5 1.5L7 7l-1.5.5L5 9l-.5-1.5L3 7l1.5-.5Z"/><path d="m18 15 .5 1.5L20 17l-1.5.5L18 19l-.5-1.5L16 17l1.5-.5Z"/></>,
     brain: <><path d="M9.5 4.5a3 3 0 0 0-5.5 1.7A3.5 3.5 0 0 0 5 12a3.5 3.5 0 0 0 1.3 6.7A3 3 0 0 0 12 17V7a3 3 0 0 0-2.5-2.5Z"/><path d="M14.5 4.5a3 3 0 0 1 5.5 1.7A3.5 3.5 0 0 1 19 12a3.5 3.5 0 0 1-1.3 6.7A3 3 0 0 1 12 17V7a3 3 0 0 1 2.5-2.5Z"/></>,
@@ -129,6 +189,7 @@ const readTheme = (): Theme => {
 const StubAdapter: ChatModelAdapter = {
   async *run({ messages }) {
     const last = messages.at(-1);
+    const hasVoiceAttachment = last?.content.some((part) => part.type === "file" && part.mimeType.startsWith("audio/"));
     const text = last?.content
       .filter((part): part is { type: "text"; text: string } => part.type === "text")
       .map((part) => part.text)
@@ -138,7 +199,9 @@ const StubAdapter: ChatModelAdapter = {
       content: [
         {
           type: "text",
-          text: text
+          text: hasVoiceAttachment
+            ? "已收到语音消息，可以继续学习。"
+            : text
             ? `收到「${text}」，我们可以从理解、整理和复习开始。`
             : "准备好开始学习。",
         },
@@ -160,27 +223,178 @@ function MessageText() {
 }
 
 function ChatEmptyState() {
-  const composer = unstable_useComposerInput();
-
   return (
     <div className="ds-chat-center">
       <h2 id="chat-welcome-title">把今天学会的，变成真正掌握的</h2>
-      <p>从一个学习目标开始，理解、整理，再用练习巩固</p>
-      <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
-        {quickPrompts.map((prompt) => (
-          <button
-            key={prompt.label}
-            className="ds-chat-prompt"
-            type="button"
-            onClick={() => composer.setText(prompt.label)}
-          >
-            <Icon name={prompt.icon} size={16} />
-            <span>{prompt.label}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
+}
+
+function ChatQuickPrompts() {
+  const composer = unstable_useComposerInput();
+  return <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
+    {quickPrompts.map((prompt) => <button key={prompt.label} className="ds-chat-prompt" type="button" onClick={() => composer.setText(prompt.label)}><Icon name={prompt.icon} size={16} /><span>{prompt.label}</span></button>)}
+  </div>;
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error ?? new Error("无法读取录音"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+type ComposerInput = ReturnType<typeof unstable_useComposerInput>;
+
+function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRuntime; input: ComposerInput }) {
+  const [recording, setRecording] = useState(false);
+  const [cancelZone, setCancelZone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const pressingRef = useRef(false);
+  const cancelZoneRef = useRef(false);
+  const startYRef = useRef(0);
+  const suppressClickRef = useRef(false);
+  const hasText = input.value.trim().length > 0;
+
+  const resetRecording = () => {
+    recorderRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    chunksRef.current = [];
+    pressingRef.current = false;
+    cancelZoneRef.current = false;
+    setRecording(false);
+    setCancelZone(false);
+  };
+
+  const sendRecording = async (blob: Blob) => {
+    try {
+      const dataUrl = await blobToDataUrl(blob);
+      const contentType = blob.type || "audio/webm";
+      const filename = `voice-${Date.now()}.webm`;
+      await composer.addAttachment({
+        type: "file",
+        name: filename,
+        contentType,
+        content: [{ type: "file", data: dataUrl, mimeType: contentType, filename }],
+      });
+      composer.send();
+    } catch {
+      // Local runtime has no attachment adapter by default. Keep the gesture
+      // useful in that configuration while leaving text chat unaffected.
+      input.setText("语音消息");
+      input.send();
+    }
+  };
+
+  const stopRecording = (cancel: boolean) => {
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    if (recorder.state !== "inactive") {
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        resetRecording();
+        if (!cancel && blob.size > 0) void sendRecording(blob);
+      };
+      recorder.stop();
+    } else {
+      resetRecording();
+    }
+  };
+
+  const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    if (hasText || !window.matchMedia("(max-width: 767px)").matches || recording || pressingRef.current) return;
+    pressingRef.current = true;
+    startYRef.current = event.clientY;
+    setError(null);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      pressingRef.current = false;
+      setError("当前设备不支持录音");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!pressingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (chunk) => {
+        if (chunk.data.size > 0) chunksRef.current.push(chunk.data);
+      };
+      recorderRef.current = recorder;
+      streamRef.current = stream;
+      recorder.start();
+      setRecording(true);
+      suppressClickRef.current = true;
+    } catch {
+      pressingRef.current = false;
+      setError("无法访问麦克风");
+    }
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!pressingRef.current) return;
+    const inCancelZone = startYRef.current - event.clientY > 64;
+    cancelZoneRef.current = inCancelZone;
+    setCancelZone(inCancelZone);
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    pressingRef.current = false;
+    stopRecording(cancelZoneRef.current);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const handlePointerCancel = () => {
+    pressingRef.current = false;
+    stopRecording(true);
+  };
+
+  const handleClick = () => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    if (hasText) input.send();
+  };
+
+  return <button
+    type="button"
+    className={`ds-send-button ds-composer-send${hasText ? " is-text-ready" : " is-empty"}${recording ? " is-recording" : ""}${cancelZone ? " is-cancel-zone" : ""}`}
+    aria-label={error ?? (hasText ? "发送" : cancelZone ? "松开取消录音" : recording ? "松开结束录音" : "按住说话")}
+    title={error ?? (hasText ? "发送" : cancelZone ? "松开取消" : recording ? "松开结束" : "按住说话")}
+    onClick={handleClick}
+    onPointerDown={handlePointerDown}
+    onPointerMove={handlePointerMove}
+    onPointerUp={handlePointerUp}
+    onPointerCancel={handlePointerCancel}
+  >
+    <Icon name={hasText ? "arrow-up" : cancelZone ? "x" : "microphone"} size={17} strokeWidth={1.9} />
+    {recording && <span className="ds-voice-status" aria-hidden="true">{cancelZone ? "松开取消" : "松开结束"}</span>}
+  </button>;
+}
+
+function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime> }) {
+  const composer = unstable_useComposerInput();
+  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()}>
+    <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
+    <div className="ds-composer__toolbar">
+      <div className="ds-composer__tools">
+        <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="paperclip" size={16} /></ComposerPrimitive.AddAttachment>
+      </div>
+      <VoiceComposerButton composer={runtime.thread.composer} input={composer} />
+    </div>
+  </ComposerPrimitive.Root>;
 }
 
 function ChatWorkspace() {
@@ -196,17 +410,10 @@ function ChatWorkspace() {
             </ThreadPrimitive.Empty>
             <ThreadPrimitive.ScrollToBottom className="ds-scroll-bottom">↓</ThreadPrimitive.ScrollToBottom>
           </ThreadPrimitive.Viewport>
-          <ComposerPrimitive.Root className="ds-composer" compact>
-            <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
-            <div className="ds-composer__toolbar">
-              <div className="ds-composer__tools">
-                <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="paperclip" size={16} /></ComposerPrimitive.AddAttachment>
-                <button type="button" className="ds-composer-tool" aria-label="调用工具"><Icon name="wand" size={16} /></button>
-                <button type="button" className="ds-composer-tool" aria-label="深度思考"><Icon name="brain" size={16} /></button>
-              </div>
-              <ComposerPrimitive.Send className="ds-send-button" aria-label="发送"><Icon name="send" size={15} strokeWidth={2} /></ComposerPrimitive.Send>
-            </div>
-          </ComposerPrimitive.Root>
+          <ChatComposer runtime={runtime} />
+          <ThreadPrimitive.Empty>
+            <ChatQuickPrompts />
+          </ThreadPrimitive.Empty>
         </ThreadPrimitive.Root>
       </section>
     </AssistantRuntimeProvider>
@@ -214,7 +421,7 @@ function ChatWorkspace() {
 }
 
 function LearningHub() {
-  return <WorkspacePage title="学习资源" action="＋ 添加资源">
+  return <WorkspacePage action={<><Icon name="plus" size={14} />添加资源</>}>
     <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button" aria-label="添加资源">＋</button></div><label className="ds-search-field"><Icon name="search" size={14} /><input placeholder="搜索资源…" /></label><p className="ds-sidebar-empty">暂无资源</p></aside><div className="ds-resource-grid"><EmptyState title="还没有学习资源" description="添加 PDF、Markdown、网页或图片，开始整理你的学习资料" /></div></div>
   </WorkspacePage>;
 }
@@ -223,13 +430,13 @@ function EmptyState({ title, description }: { title: string; description: string
   return <div className="ds-empty-state"><p><b>{title}</b>，{description}</p></div>;
 }
 
-function Todo() { return <WorkspacePage title="待办事项" action="＋ 新建待办"><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
-function Skills() { return <WorkspacePage title="技能管理" action="＋ 添加技能"><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
-function Flashcards() { return <WorkspacePage title="闪卡" action="＋ 新建卡组"><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) { return <WorkspacePage title="设置"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
+function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
+function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
+function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
+function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) { return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
-function WorkspacePage({ title, action, children }: { title: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><h2>{title}</h2>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
+function WorkspacePage({ action, children }: { action?: React.ReactNode; children: React.ReactNode }) { return <section className="ds-workspace-page">{action && <div className="ds-page-actions"><button className="ds-primary-button">{action}</button></div>}{children}</section>; }
 
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
@@ -299,9 +506,14 @@ export function App() {
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <header className="ds-main__header">
           <div className="ds-main__leading">
-            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={!sidebarCollapsed || sidebarOpen}><Icon name="sidebar" size={17} /></button>
+            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarOpen || !sidebarCollapsed}><Icon name="sidebar" size={17} /></button>
+            <button className="ds-main-logo-button" type="button" onClick={toggleSidebar} aria-label="展开侧边栏" aria-expanded={!sidebarCollapsed}>
+              <img src="/logo-black.svg" alt="" />
+              <span className="ds-main-logo-button__affordance" aria-hidden="true"><Icon name="sidebar" size={15} /></span>
+            </button>
             <span className="ds-main__brand">DeepStudent</span>
           </div>
+          <h1 className="ds-main__title">{viewTitles[view]}</h1>
           <div className="ds-main__actions"><button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
         </header>
         <div className="ds-main__content">{content}</div>
