@@ -3,6 +3,7 @@ services:
     build: .
     environment:
       DEEPSTUDENT_DB_PATH: /data/deepstudent.db
+      DEEPSTUDENT_BLOB_ROOT: /data/blobs
       DEEPSTUDENT_HTTP_ADDR: 0.0.0.0:8080
     ports:
       - "127.0.0.1:8080:8080"
