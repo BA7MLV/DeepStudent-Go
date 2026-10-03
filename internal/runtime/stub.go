@@ -39,6 +39,7 @@ type deterministicRun struct {
 	history     []StreamEvent
 	subscribers map[chan StreamEvent]struct{}
 	closed      bool
+	record      RunRecord
 }
 
 // DeterministicRuntime wires a provider to a small in-memory event broker.
@@ -100,6 +101,7 @@ func (r *DeterministicRuntime) Start(ctx context.Context, request AgentRunReques
 		runCtx, cancel = context.WithCancel(ctx)
 	}
 	state := &deterministicRun{id: runID, sessionID: request.SessionID, cancel: cancel, subscribers: make(map[chan StreamEvent]struct{})}
+	state.record = RunRecord{ID: runID, SessionID: request.SessionID, Provider: request.Provider, Model: request.Model, Status: RunQueued, CreatedAt: time.Now().UTC()}
 	first := make(chan StreamEvent, 16)
 	state.subscribers[first] = struct{}{}
 	r.mu.Lock()
@@ -110,11 +112,61 @@ func (r *DeterministicRuntime) Start(ctx context.Context, request AgentRunReques
 	}
 	r.runs[runID] = state
 	r.mu.Unlock()
+	if r.store != nil && request.SessionID != "" {
+		if err := r.store.CreateSession(context.Background(), request.SessionID); err != nil {
+			cancel()
+			r.mu.Lock()
+			delete(r.runs, runID)
+			r.mu.Unlock()
+			return AgentRun{}, fmt.Errorf("create session: %w", err)
+		}
+	}
+	if catalog, ok := r.store.(RunStore); ok {
+		if err := catalog.CreateRun(context.Background(), state.record); err != nil {
+			cancel()
+			r.mu.Lock()
+			delete(r.runs, runID)
+			r.mu.Unlock()
+			return AgentRun{}, fmt.Errorf("create run: %w", err)
+		}
+	}
 	go r.execute(runCtx, state, request)
 	return AgentRun{ID: runID, SessionID: request.SessionID, Events: first}, nil
 }
 
+// Run returns the latest in-memory status for a run.
+func (r *DeterministicRuntime) Run(_ context.Context, runID string) (RunRecord, error) {
+	r.mu.RLock()
+	state, ok := r.runs[runID]
+	r.mu.RUnlock()
+	if !ok {
+		return RunRecord{}, fmt.Errorf("run %q not found", runID)
+	}
+	state.mu.Lock()
+	record := state.record
+	state.mu.Unlock()
+	return record, nil
+}
+
+// Cancel requests cancellation. A terminal run is idempotently left alone.
+func (r *DeterministicRuntime) Cancel(_ context.Context, runID string) error {
+	r.mu.RLock()
+	state, ok := r.runs[runID]
+	r.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("run %q not found", runID)
+	}
+	state.cancel()
+	return nil
+}
+
 func (r *DeterministicRuntime) Subscribe(ctx context.Context, runID string) (<-chan StreamEvent, error) {
+	return r.SubscribeFrom(ctx, runID, "")
+}
+
+// SubscribeFrom replays events after lastEventID before following live events.
+// The replay window is intentionally bounded by the in-memory retention policy.
+func (r *DeterministicRuntime) SubscribeFrom(ctx context.Context, runID, lastEventID string) (<-chan StreamEvent, error) {
 	r.mu.RLock()
 	state, ok := r.runs[runID]
 	r.mu.RUnlock()
@@ -123,8 +175,13 @@ func (r *DeterministicRuntime) Subscribe(ctx context.Context, runID string) (<-c
 	}
 	state.mu.Lock()
 	channel := make(chan StreamEvent, len(state.history)+16)
+	replay := lastEventID == ""
 	for _, event := range state.history {
-		channel <- event
+		if replay {
+			channel <- event
+		} else if event.ID == lastEventID {
+			replay = true
+	}
 	}
 	if state.closed {
 		close(channel)
@@ -149,9 +206,15 @@ func (r *DeterministicRuntime) Subscribe(ctx context.Context, runID string) (<-c
 func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministicRun, request AgentRunRequest) {
 	defer state.cancel()
 	defer r.close(state)
+	if ctx.Err() != nil {
+		r.setStatus(state, RunCanceled)
+		return
+	}
 	select {
 	case r.sem <- struct{}{}:
+		r.setStatus(state, RunRunning)
 	case <-ctx.Done():
+		r.setStatus(state, RunCanceled)
 		return
 	}
 	defer func() { <-r.sem }()
@@ -183,10 +246,35 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 	if err == nil && ctx.Err() != nil {
 		err = ctx.Err()
 	}
-	if err != nil && !errors.Is(err, context.Canceled) {
-		r.emit(ctx, state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunError, ErrorCode: "provider_error", ErrorMessage: "model provider failed", Done: true, CreatedAt: time.Now().UTC()})
+	if err != nil && errors.Is(err, context.Canceled) {
+		r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()})
+		r.setStatus(state, RunCanceled)
+	} else if err != nil {
+		errorCode := "provider_error"
+		errorMessage := "model provider failed"
+		if errors.Is(err, context.DeadlineExceeded) {
+			errorCode = "timeout"
+			errorMessage = "run timed out"
+		}
+		r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunError, ErrorCode: errorCode, ErrorMessage: errorMessage, Done: true, CreatedAt: time.Now().UTC()})
+		r.setStatus(state, RunFailed)
 	} else if err == nil {
 		r.emit(ctx, state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCompleted, Done: true, CreatedAt: time.Now().UTC()})
+		r.setStatus(state, RunCompleted)
+	}
+}
+
+func (r *DeterministicRuntime) setStatus(state *deterministicRun, status RunStatus) {
+	state.mu.Lock()
+	state.record.Status = status
+	if status == RunCompleted || status == RunFailed || status == RunCanceled {
+		now := time.Now().UTC()
+		state.record.FinishedAt = &now
+	}
+	record := state.record
+	state.mu.Unlock()
+	if store, ok := r.store.(RunStore); ok && record.FinishedAt != nil {
+		_ = store.FinishRun(context.Background(), record.ID, status, *record.FinishedAt)
 	}
 }
 
@@ -203,6 +291,15 @@ func (r *DeterministicRuntime) emit(ctx context.Context, state *deterministicRun
 	if r.store != nil && state.sessionID != "" {
 		payload, _ := json.Marshal(event)
 		_, _ = r.store.AppendEvent(ctx, SessionEvent{SessionID: state.sessionID, RunID: state.id, Type: string(event.Type), Payload: payload, CreatedAt: event.CreatedAt})
+		if event.Type == EventTextDelta {
+			content := event.Text
+			if content == "" {
+				content = event.Delta
+			}
+			if catalog, ok := r.store.(SessionCatalog); ok && content != "" {
+				_, _ = catalog.AppendMessage(ctx, Message{SessionID: state.sessionID, RunID: state.id, Role: "assistant", Content: content, CreatedAt: event.CreatedAt})
+			}
+		}
 	}
 	state.mu.Lock()
 	defer state.mu.Unlock()
