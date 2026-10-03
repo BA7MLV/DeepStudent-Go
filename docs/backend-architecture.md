@@ -45,6 +45,13 @@ the configured default timeout and bounds queued work with context cancellation.
 Login is disabled in the first profile; `internal/auth` defines the future
 server-side session boundary and requires Argon2id for any password flow.
 
+Model selection is composable: a run can name `provider`, `model`, optional
+`reasoning_effort`, positive `max_tokens`, and input capabilities (`text`,
+`image`, `audio`, `video`, or `file`). Model profiles override provider
+defaults. Endpoint values can come from `baseURL` or a `baseURLEnv` reference;
+credentials remain environment variable names only. `config.Manager` validates
+and atomically swaps reload snapshots without probing providers.
+
 ## Persistence
 
 `internal/storage` opens SQLite with WAL and a single writer (`SetMaxOpenConns(1)`).
