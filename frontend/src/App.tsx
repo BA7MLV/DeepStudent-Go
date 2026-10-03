@@ -134,7 +134,7 @@ const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
 ];
 
 const viewTitles: Record<ViewId, string> = {
-  "chat-v2": "新会话",
+  "chat-v2": "",
   "learning-hub": "学习资源",
   todo: "待办事项",
   "skills-management": "技能管理",
@@ -232,8 +232,11 @@ function ChatEmptyState() {
 
 function ChatQuickPrompts() {
   const composer = unstable_useComposerInput();
+  const rows = [quickPrompts.slice(0, 3), quickPrompts.slice(3, 5), quickPrompts.slice(5, 6), quickPrompts.slice(6)];
   return <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
-    {quickPrompts.map((prompt) => <button key={prompt.label} className="ds-chat-prompt" type="button" onClick={() => composer.setText(prompt.label)}><Icon name={prompt.icon} size={16} /><span>{prompt.label}</span></button>)}
+    {rows.map((row, index) => <div className={`ds-chat-prompts__row ds-chat-prompts__row--${index + 1}`} key={`prompt-row-${index}`}>
+      {row.map((prompt) => <button key={prompt.label} className="ds-chat-prompt" type="button" onClick={() => composer.setText(prompt.label)}><Icon name={prompt.icon} size={15} /><span>{prompt.label}</span></button>)}
+    </div>)}
   </div>;
 }
 
@@ -309,7 +312,8 @@ function VoiceComposerButton({ composer, input }: { composer: ThreadComposerRunt
 
   const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
-    if (hasText || !window.matchMedia("(max-width: 767px)").matches || recording || pressingRef.current) return;
+    const isMobile = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+    if (hasText || !isMobile || recording || pressingRef.current) return;
     pressingRef.current = true;
     startYRef.current = event.clientY;
     setError(null);
@@ -513,7 +517,7 @@ export function App() {
             </button>
             <span className="ds-main__brand">DeepStudent</span>
           </div>
-          <h1 className="ds-main__title">{viewTitles[view]}</h1>
+          {viewTitles[view] && <h1 className="ds-main__title">{viewTitles[view]}</h1>}
           <div className="ds-main__actions"><button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
         </header>
         <div className="ds-main__content">{content}</div>
