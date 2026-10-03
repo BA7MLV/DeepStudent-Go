@@ -16,6 +16,7 @@ COPY --from=build /out/deepstudent-server /app/deepstudent-server
 COPY --from=build --chown=65532:65532 /data /data
 VOLUME ["/data"]
 ENV DEEPSTUDENT_DB_PATH=/data/deepstudent.db \
+    DEEPSTUDENT_BLOB_ROOT=/data/blobs \
     DEEPSTUDENT_HTTP_ADDR=127.0.0.1:8080
 EXPOSE 8080
 ENTRYPOINT ["/app/deepstudent-server"]
