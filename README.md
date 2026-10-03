@@ -81,6 +81,14 @@ DEEPSTUDENT_CORS_ALLOWLIST=http://localhost:5173 \
 go run ./cmd/server
 ```
 
+Model routes are independent from transport. A provider may declare
+`baseURL`/`base_url`, an `apiKeyEnv` reference, and defaults; its `models` map
+can override `reasoning_effort`, `max_tokens`, and `input` capabilities for a
+model. `DEEPSTUDENT_BASE_URL` and
+`DEEPSTUDENT_PROVIDER_<NAME>_BASE_URL` provide deployment overrides without
+loading API keys into config. `config.Manager` reloads validated snapshots
+atomically and leaves the last known-good config on invalid edits.
+
 Try the current stream:
 
 ```sh
