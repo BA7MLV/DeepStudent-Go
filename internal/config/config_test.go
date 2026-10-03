@@ -55,3 +55,35 @@ func TestManagerKeepsLastGoodSnapshotOnReloadFailure(t *testing.T) {
 	if err := manager.Reload(); err == nil { t.Fatal("expected reload validation error") }
 	if got := manager.Config().Runtime.MaxTokens; got != 1234 { t.Fatalf("snapshot replaced: %d", got) }
 }
+
+func TestDefaultsExposeCredentialFreeProviderPresets(t *testing.T) {
+	cfg := Defaults()
+	for _, name := range []string{"siliconflow", "deepseek", "custom-openai"} {
+		if _, ok := cfg.Providers[name]; !ok {
+			t.Fatalf("missing provider preset %q", name)
+		}
+	}
+	selection, err := cfg.ResolveModel("siliconflow", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.APIKeyEnv != "SILICONFLOW_API_KEY" || selection.BaseURL == "" || selection.MaxRetries == 0 || !selection.Streaming {
+		t.Fatalf("unexpected SiliconFlow selection: %+v", selection)
+	}
+}
+
+func TestLoadAttachmentStorageOverrides(t *testing.T) {
+	t.Setenv("DEEPSTUDENT_BLOB_ROOT", "/var/lib/deepstudent/blobs")
+	t.Setenv("DEEPSTUDENT_ATTACHMENT_MAX_BYTES", "4096")
+	t.Setenv("DEEPSTUDENT_ATTACHMENT_ALLOWED_MIME", "text/plain,image/*")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.BlobRoot != "/var/lib/deepstudent/blobs" || cfg.Storage.AttachmentMaxBytes != 4096 {
+		t.Fatalf("unexpected attachment storage: %+v", cfg.Storage)
+	}
+	if len(cfg.Storage.AttachmentAllowedMIMEs) != 2 || cfg.Storage.AttachmentAllowedMIMEs[1] != "image/*" {
+		t.Fatalf("unexpected MIME policy: %+v", cfg.Storage.AttachmentAllowedMIMEs)
+	}
+}
