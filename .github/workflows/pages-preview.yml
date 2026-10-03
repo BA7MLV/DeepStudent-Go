@@ -3,7 +3,7 @@ name: Preview frontend on GitHub Pages
 on:
   push:
     branches:
-      - migration/mygo-shell-poc
+      - goal/mobile-chat-shell
   workflow_dispatch:
 
 permissions:
@@ -20,11 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.2.21
-      - run: bun install --frozen-lockfile
-      - run: cd frontend && VITE_DEPLOY_TARGET=pages bun run build
+      - run: npm ci
+      - run: VITE_DEPLOY_TARGET=pages npm run build --workspace frontend
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist
