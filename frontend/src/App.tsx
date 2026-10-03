@@ -233,7 +233,7 @@ function ChatEmptyState() {
 
 function ChatQuickPrompts() {
   const composer = unstable_useComposerInput();
-  const rows = [quickPrompts.slice(0, 3), quickPrompts.slice(3, 5), quickPrompts.slice(5, 6), quickPrompts.slice(6)];
+  const rows = [quickPrompts.slice(0, 3), quickPrompts.slice(3, 5), quickPrompts.slice(5, 7)];
   return <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
     {rows.map((row, index) => <div className={`ds-chat-prompts__row ds-chat-prompts__row--${index + 1}`} key={`prompt-row-${index}`}>
       {row.map((prompt) => <button key={prompt.label} className="ds-chat-prompt" type="button" onClick={() => composer.setText(prompt.label)}><Icon name={prompt.icon} size={15} /><span>{prompt.label}</span></button>)}
@@ -259,12 +259,21 @@ type ComposerGestureHandlers = {
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
 };
 
-function VoiceComposerButton({ composer, input, onRegister }: { composer: ThreadComposerRuntime; input: ComposerInput; onRegister?: (handlers: ComposerGestureHandlers | null) => void }) {
+type VoiceOverlayState = { recording: boolean; cancelZone: boolean; level: number; elapsed: number };
+
+function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }: { composer: ThreadComposerRuntime; input: ComposerInput; onRegister?: (handlers: ComposerGestureHandlers | null) => void; onVoiceStateChange?: (state: VoiceOverlayState) => void }) {
   const [recording, setRecording] = useState(false);
   const [cancelZone, setCancelZone] = useState(false);
+  const [voiceLevel, setVoiceLevel] = useState(0);
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const meterFrameRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef(0);
   const chunksRef = useRef<Blob[]>([]);
   const pressingRef = useRef(false);
   const cancelZoneRef = useRef(false);
@@ -273,6 +282,10 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
   const longPressTimerRef = useRef<number | null>(null);
   const hasText = input.value.trim().length > 0;
 
+  useEffect(() => {
+    onVoiceStateChange?.({ recording, cancelZone, level: voiceLevel, elapsed: recordingElapsed });
+  }, [cancelZone, onVoiceStateChange, recording, recordingElapsed, voiceLevel]);
+
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current !== null) {
       window.clearTimeout(longPressTimerRef.current);
@@ -280,7 +293,22 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
     }
   };
 
+  const stopMeter = () => {
+    if (meterFrameRef.current !== null) {
+      window.cancelAnimationFrame(meterFrameRef.current);
+      meterFrameRef.current = null;
+    }
+    audioSourceRef.current?.disconnect();
+    audioSourceRef.current = null;
+    analyserRef.current = null;
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    if (audioContext) void audioContext.close().catch(() => undefined);
+    recordingStartedAtRef.current = 0;
+  };
+
   const resetRecording = () => {
+    stopMeter();
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -290,6 +318,8 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
     clearLongPressTimer();
     setRecording(false);
     setCancelZone(false);
+    setVoiceLevel(0);
+    setRecordingElapsed(0);
   };
 
   const sendRecording = async (blob: Blob) => {
@@ -355,8 +385,47 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
       recorderRef.current = recorder;
       streamRef.current = stream;
       recorder.start();
+      recordingStartedAtRef.current = performance.now();
       setRecording(true);
       suppressClickRef.current = true;
+
+      // Use the microphone signal when available. CSS still animates the
+      // overlay by time, so a browser without Web Audio remains expressive.
+      try {
+        const audioContext = new AudioContext();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 64;
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+        audioSourceRef.current = source;
+      } catch {
+        audioContextRef.current = null;
+        analyserRef.current = null;
+        audioSourceRef.current = null;
+      }
+
+      const meterData = analyserRef.current ? new Uint8Array(analyserRef.current.fftSize) : null;
+      const updateMeter = () => {
+        if (!recorderRef.current) return;
+        const elapsed = performance.now() - recordingStartedAtRef.current;
+        setRecordingElapsed(elapsed);
+        const analyser = analyserRef.current;
+        if (analyser && meterData) {
+          analyser.getByteTimeDomainData(meterData);
+          let sum = 0;
+          for (const sample of meterData) {
+            const normalized = (sample - 128) / 128;
+            sum += normalized * normalized;
+          }
+          setVoiceLevel(Math.min(1, Math.sqrt(sum / meterData.length) * 3.5));
+        } else {
+          setVoiceLevel(0.2 + (Math.sin(elapsed / 130) + 1) * 0.08);
+        }
+        meterFrameRef.current = window.requestAnimationFrame(updateMeter);
+      };
+      meterFrameRef.current = window.requestAnimationFrame(updateMeter);
     } catch {
       pressingRef.current = false;
       setError("无法访问麦克风");
@@ -458,6 +527,8 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
 
   useEffect(() => () => clearLongPressTimer(), []);
 
+  useEffect(() => () => stopMeter(), []);
+
   const handleClick = () => {
     if (suppressClickRef.current) {
       suppressClickRef.current = false;
@@ -484,17 +555,26 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
 
 function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime> }) {
   const composer = unstable_useComposerInput();
+  const [voiceState, setVoiceState] = useState<VoiceOverlayState>({ recording: false, cancelZone: false, level: 0, elapsed: 0 });
   const gestureRef = useRef<ComposerGestureHandlers | null>(null);
   const registerGesture = (handlers: ComposerGestureHandlers | null) => { gestureRef.current = handlers; };
   const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerDown(event);
   const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerMove(event);
   const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerUp(event);
   const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerCancel(event);
-  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
+  const overlayStyle = {
+    "--ds-voice-level": voiceState.level.toFixed(3),
+    "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
+  } as React.CSSProperties;
+  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
     <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
     <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
     <div className="ds-composer__toolbar">
-      <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} />
+      <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} onVoiceStateChange={setVoiceState} />
+    </div>
+    <div className="ds-voice-overlay" aria-hidden="true" style={overlayStyle}>
+      <div className="ds-voice-overlay__wash" />
+      <div className="ds-voice-overlay__wave">{Array.from({ length: 18 }, (_, index) => <i key={index} style={{ "--ds-voice-bar": index } as React.CSSProperties} />)}</div>
     </div>
   </ComposerPrimitive.Root>;
 }
@@ -610,10 +690,9 @@ export function App() {
           <div className="ds-main__leading">
             <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarOpen || !sidebarCollapsed}><Icon name="menu" size={17} /></button>
             <button className="ds-main-logo-button" type="button" onClick={toggleSidebar} aria-label="展开侧边栏" aria-expanded={!sidebarCollapsed}>
-              <img src="/logo-black.svg" alt="" />
+              <img src="./logo-black.svg" alt="DeepStudent" />
               <span className="ds-main-logo-button__affordance" aria-hidden="true"><Icon name="sidebar" size={15} /></span>
             </button>
-            <span className="ds-main__brand">DeepStudent</span>
           </div>
           {viewTitles[view] && <h1 className="ds-main__title">{viewTitles[view]}</h1>}
           <div className="ds-main__actions"><button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
