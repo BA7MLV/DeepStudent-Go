@@ -159,7 +159,19 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 	if !r.emit(ctx, state, started) {
 		return
 	}
-	err := r.provider.Stream(ctx, ModelRequest{Model: request.Model, Prompt: request.Prompt, MaxTokens: request.MaxTokens}, func(event StreamEvent) error {
+	capabilities := request.InputCapabilities
+	if capabilities == nil {
+		capabilities = request.Input
+	}
+	err := r.provider.Stream(ctx, ModelRequest{
+		Provider:          request.Provider,
+		Model:             request.Model,
+		ReasoningEffort:   request.ReasoningEffort,
+		Prompt:            request.Prompt,
+		MaxTokens:         request.MaxTokens,
+		InputCapabilities: append([]string(nil), capabilities...),
+		Input:             append([]string(nil), capabilities...),
+	}, func(event StreamEvent) error {
 		event.ID = newID("evt")
 		event.RunID = state.id
 		event.CreatedAt = time.Now().UTC()
