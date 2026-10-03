@@ -5,10 +5,12 @@ on:
   push:
     branches:
       - feature/go-backend-runtime
+      - goal/go-runtime-foundation
   pull_request:
     branches:
       - main
       - feature/go-backend-runtime
+      - goal/go-runtime-foundation
 
 permissions:
   contents: read
