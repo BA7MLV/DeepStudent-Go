@@ -16,25 +16,27 @@ product all at once.
 
 | Area | Current state |
 | --- | --- |
-| Go runtime | HTTP JSON + SSE routes, deterministic offline provider, request IDs, structured errors, exact-origin CORS |
-| Persistence | CGO-free SQLite with WAL, single-writer policy, append-only session events |
+| Go runtime | HTTP JSON + SSE routes, SiliconFlow/DeepSeek-compatible provider adapters, request IDs, structured errors, exact-origin CORS |
+| Persistence | CGO-free SQLite with WAL, single-writer policy, append-only session events, and attachment metadata |
+| Attachments | SHA-256 content-addressed blobs under `data/blobs`; SQLite stores metadata and `workspace://` references |
 | Desktop shell | MyGo window with a React 19 + TypeScript + Vite UI and typed health bridge |
 | Web preview | Responsive DeepStudent shell with chat, learning resources, tasks, flashcards, settings, and light/dark themes |
 | CI | Go format/test/vet/build checks, Pages preview workflow, unsigned macOS arm64 workflow |
-| Not implemented | Real provider adapters, authentication, tool execution, durable SSE replay/cancel, and a native iOS app |
+| Not implemented | Authentication, durable SSE replay/cancel, production tool sandbox, and a native iOS app |
 
 The existing DeepStudent implementation remains the source of truth until the
 migration passes compatibility and benchmark gates.
 
 ## Verification status
 
-The branch includes [`go-backend.yml`](.github/workflows/go-backend.yml), which
-runs `gofmt`, `go test ./...`, `go vet ./...`, and a CGO-free server build on
-pushes to `feature/go-backend-runtime` and pull requests targeting `main` or
-this branch. This checkout documents the workflow but does not contain a
-recorded successful Actions run; treat Go CI as **unverified until a run is
-observed in GitHub Actions**. Do not describe the backend as CI-green based on
-this README alone.
+The checkout includes [`go-backend.yml`](.github/workflows/go-backend.yml),
+which runs `gofmt`, `go test ./...`, `go vet ./...`, and a CGO-free server
+build on pushes to `feature/go-backend-runtime` and pull requests targeting
+`main` or that backend branch. The goal branch is not a push trigger in this
+workflow; use `workflow_dispatch` on this branch or add an explicit trigger
+before relying on CI for it. This checkout has no recorded successful Actions
+run, so treat Go CI as **unverified until a run is observed in GitHub Actions**.
+Do not describe the backend as CI-green based on this README alone.
 
 For a local verification pass, run:
 
@@ -50,31 +52,54 @@ The frontend can be checked independently with `bun run typecheck` and
 `bun run build` from `frontend/`. These checks do not prove that the browser
 chat is wired to the Go SSE API.
 
+Use this matrix to keep local claims honest. A check marked **not verified**
+needs a fresh run in an environment with the required toolchain; this checkout
+does not include an Actions result to cite.
+
+| Surface | Command or evidence | Current status |
+| --- | --- | --- |
+| Go formatting | `gofmt -w cmd internal && test -z "$(gofmt -l cmd internal)"` | Unverified in this checkout |
+| Go unit tests | `go test ./...` | Unverified in this checkout |
+| Go static checks | `go vet ./...` | Unverified in this checkout |
+| CGO-free server build | `CGO_ENABLED=0 go build ./cmd/server` | Unverified in this checkout |
+| Frontend type/build | `cd frontend && bun run typecheck && bun run build` | Independent; unverified here |
+| HTTP smoke | `GET /healthz`, `GET /readyz`, `POST /api/v1/runs` | Manual smoke required |
+| SSE smoke | `GET /api/v1/runs/:id/events` and inspect terminal event | Manual; in-memory stream only |
+| Attachment storage | `go test ./internal/attachments ./internal/storage` | Tests present; unverified here |
+| Docker profile | `docker compose up --build`; repeat health/SSE smoke | Manual; local profile only |
+
+The Go server is loaded once at process startup. `config.Manager` provides
+validated atomic reloads for embedding callers, but this command does not
+watch files or expose a reload endpoint.
+
 ## Architecture
 
-```text
-React shell (assistant-ui) ──┐
-                             ├─ presentation only
-MyGo desktop window ─────────┘
-          │ typed bridge today; HTTP/SSE adapter next
-          ▼
-Go API (`/healthz`, `/readyz`, `/api/v1/*`)
-          ▼
-provider-neutral runtime ── deterministic provider (current default)
-          │
-          ├─ SQLite WAL + append-only session events
-          └─ future provider/tool/execution adapters
+```mermaid
+flowchart LR
+  UI[React / assistant-ui] --> API[Go API\nHTTP JSON + SSE]
+  API --> RT[provider-neutral runtime\nProviderRouter]
+  RT --> DB[(SQLite WAL\nappend-only events)]
+  RT --> B[AttachmentStore\nmetadata + SHA-256 blobs]
+  RT --> X[SiliconFlow / DeepSeek / custom OpenAI\nHTTP + SSE adapters]
+  B --> FS[(data/blobs)]
 ```
+
+The MyGo window hosts the same React shell and currently exposes a typed health
+bridge. The browser chat still uses a local stub; wiring it to the Go SSE API is
+the next integration step.
 
 The contracts live in [`protocol/runtime-v1.md`](protocol/runtime-v1.md) and
 the backend boundary is documented in
 [`docs/backend-architecture.md`](docs/backend-architecture.md). The current
 SSE route streams live in-memory run events; persisted events are the basis for
-a future replay API, not a claim that reconnect/resume already works.
+a future replay API, not a claim that reconnect/resume already works. A late
+subscriber can receive the run history while it remains in memory (currently
+about five minutes after completion); there is no durable replay or
+`Last-Event-ID` contract yet.
 
 ## Technology
 
-- Go 1.27.1, `net/http`, and provider-neutral runtime interfaces
+- Go 1.27.1, `net/http`, provider-neutral runtime interfaces, and OpenAI-compatible HTTP/SSE adapters
 - SQLite via `modernc.org/sqlite` (CGO-free, WAL, single writer)
 - React 19, TypeScript, Vite, and `@assistant-ui/react`
 - MyGo 0.1.22 for the desktop shell and generated-compatible bindings
@@ -94,8 +119,9 @@ go run ./cmd/server
 ```
 
 The default listener is `127.0.0.1:8080`; SQLite is stored at
-`data/deepstudent.db`. The default provider is deterministic and never reads a
-secret or accesses the network. The `DEEPSTUDENT_CONFIG` JSON path is optional;
+`data/deepstudent.db`. The default profile remains deterministic for offline
+development; real SiliconFlow and DeepSeek adapters read credentials only from
+environment variables when that provider is explicitly selected. The `DEEPSTUDENT_CONFIG` JSON path is optional;
 environment values override file values. Useful overrides are:
 
 ```sh
@@ -113,6 +139,12 @@ model. `DEEPSTUDENT_BASE_URL` and
 loading API keys into config. `config.Manager` reloads validated snapshots
 atomically and leaves the last known-good config on invalid edits.
 
+`cmd/server` registers the deterministic, SiliconFlow, DeepSeek, and custom
+OpenAI-compatible profiles. Select a provider explicitly with
+`DEEPSTUDENT_DEFAULT_PROVIDER` or the run request. Keep API-key values out of
+JSON, Dockerfiles, compose files, logs, and run requests; configure only the
+environment-variable name (`apiKeyEnv`) and inject the value at process startup.
+
 ### Configuration reference
 
 Configuration is loaded in this order: built-in defaults, the optional JSON
@@ -122,9 +154,15 @@ leave the last known-good snapshot in place. Common local overrides are:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DEEPSTUDENT_HTTP_ADDR` | `127.0.0.1:8080` | bind address for the API |
-| `DEEPSTUDENT_DB_PATH` | `data/deepstudent.db` | SQLite database path |
+| `server.readTimeout` (JSON only) | `15s` | maximum request-header/read time |
+| `server.writeTimeout` (JSON only) | `30s` | maximum response lifetime, including SSE |
+| `server.idleTimeout` (JSON only) | `60s` | keep-alive idle timeout |
+| `DEEPSTUDENT_DB_PATH` | `data/deepstudent.db` | SQLite metadata/event database path |
+| `DEEPSTUDENT_BLOB_ROOT` | `data/blobs` | content-addressed attachment blob root |
+| `DEEPSTUDENT_ATTACHMENT_MAX_BYTES` | `33554432` | maximum accepted attachment bytes; `0` disables the limit |
+| `DEEPSTUDENT_ATTACHMENT_ALLOWED_MIME` | common text/document/image/audio/video types | comma-separated MIME allowlist; supports `type/*` |
 | `DEEPSTUDENT_CORS_ALLOWLIST` | localhost/127.0.0.1:5173 | comma-separated exact origins |
-| `DEEPSTUDENT_DEFAULT_PROVIDER` | `deterministic` | provider route for new runs |
+| `DEEPSTUDENT_DEFAULT_PROVIDER` | `deterministic` | provider route for new runs (`siliconflow`, `deepseek`, or `custom-openai` are available) |
 | `DEEPSTUDENT_DEFAULT_TIMEOUT` | `45s` | runtime run timeout |
 | `DEEPSTUDENT_MAX_TOKENS` | `2048` | runtime token ceiling |
 | `DEEPSTUDENT_MAX_CONCURRENCY` | `2` | bounded active runs |
@@ -133,8 +171,26 @@ leave the last known-good snapshot in place. Common local overrides are:
 Provider endpoint and credential settings use metadata only. Set
 `DEEPSTUDENT_PROVIDER_<NAME>_BASE_URL` or a `baseURL`/`baseURLEnv` reference;
 set `apiKeyEnv` to the name of an environment variable, never to the secret
-value. The deterministic provider remains the only provider instantiated by
-`cmd/server` today.
+value. Provider adapters are instantiated by `cmd/server`, but no credential is
+required until a remote provider is selected.
+
+### HTTP and SSE contract
+
+The local profile exposes only the following routes:
+
+- `GET /healthz` for process liveness
+- `GET /readyz` for runtime readiness
+- `GET /api/v1/` for the API version
+- `POST /api/v1/runs` with `{ "prompt", "session_id"?, "provider"?, "model"?, "max_tokens"? }`
+- `GET /api/v1/runs/:id/events` as `text/event-stream`
+
+The run request returns `202 Accepted`, a `run_id`, and an `events_url`.
+Responses carry `X-Request-ID`; JSON failures use an `error` envelope with a
+machine-readable code, message, and request ID. SSE event IDs are stable only
+for the in-memory retention window. Current event types are `run.started`,
+`message.delta`, `run.completed`, and `run.error`. The server does not expose
+session history, run status, cancellation, attachment upload/download, or
+durable cross-process replay routes in this slice.
 
 Try the current stream:
 
@@ -148,11 +204,11 @@ RUN_ID="paste-run-id"
 curl -N "http://127.0.0.1:8080/api/v1/runs/${RUN_ID}/events"
 ```
 
-The run endpoint returns `202 Accepted` and an `events_url`. SSE event types
-currently include `run.started`, `message.delta`, `run.completed`, and
-`run.error`. Runtime runs are bounded by the configured default timeout (45s by
-default); completed in-memory history is retained briefly (5 minutes) to allow
-an immediate late subscription, then released.
+Runtime runs are bounded by the configured default timeout (45s by default);
+completed in-memory history is retained briefly (about five minutes) to allow
+an immediate late subscription, then released. Persisted session events are
+written synchronously when a session ID is supplied, but no HTTP replay route
+reads them yet.
 
 ### Web shell
 
@@ -178,17 +234,65 @@ The build is unsigned and currently configured for macOS 12+ arm64. Linux
 configuration is present; release packaging and signing are not part of this
 prototype.
 
+### Attachments
+
+Attachments are accepted by the storage layer as immutable, content-addressed
+blobs. `internal/attachments` streams each upload to a temporary file while
+computing SHA-256, enforces the configured byte and MIME policy, and atomically
+places the blob at `data/blobs/<first-two-hex>/<sha256>`. SQLite stores only
+metadata (`sha256`, byte size, MIME, filename, creation time) and the canonical
+`workspace://attachments/<sha256>` reference. Re-uploading the same bytes is
+idempotent and reuses the existing blob.
+
+The current slice deliberately keeps the attachment API behind the storage
+boundary; callers must resolve references through `storage.AttachmentStore` so
+untracked files cannot be opened. Future HTTP upload/download routes should
+preserve this boundary and apply authentication, quotas, and request limits
+before exposing it remotely.
+
+The SQLite schema migration creates an `attachments` metadata table and indexes
+creation time. Bytes never enter SQLite. A duplicate upload reuses the same
+digest/reference, while an interrupted upload can leave an unreferenced blob;
+garbage collection is intentionally deferred. Back up the database and blob
+root together because either one alone is insufficient to resolve a reference.
+
 ### Docker profile
 
 ```sh
 docker compose up --build
+# stop the server; keep the named volume for SQLite/blob persistence
+docker compose down
 ```
 
-The compose server binds to `127.0.0.1:8080` and stores SQLite in the
-`deepstudent-data` volume. Provider credentials are intentionally not included.
-The image pre-creates `/data` with the distroless non-root UID's ownership so a
-new named volume can be opened by the server. Verify this permission when
-switching volume drivers or a pre-existing host bind mount.
+The process listens on `0.0.0.0:8080` inside the container; Compose publishes
+it only on host `127.0.0.1:8080` and stores SQLite metadata/events plus
+content-addressed attachment blobs under `/data` in the `deepstudent-data`
+volume. Provider credentials are intentionally not included. The image
+pre-creates `/data` with the distroless non-root UID's ownership so a new named
+volume can be opened by the server. Verify this permission when switching
+volume drivers or a pre-existing host bind mount. Back up SQLite and `/data/blobs`
+together: a `workspace://attachments/<sha256>` reference is useful only while
+both its metadata row and blob are retained.
+
+### Development loop
+
+Run the Go server first, then start the Vite shell in a second terminal:
+
+```sh
+# terminal 1
+go run ./cmd/server
+
+# terminal 2
+bun install
+bun run dev:web
+```
+
+The default deterministic provider makes this loop offline and reproducible;
+remote provider runs use bounded retries, request timeouts, and redacted errors.
+Use `curl` against `/healthz` and `/api/v1/runs` before debugging the shell;
+the shell's current chat stub does not exercise the Go stream. Keep SQLite and
+`data/blobs` out of commits (both are ignored by `.gitignore`) and never put
+provider credentials in source or frontend code.
 
 ## Preview links
 
@@ -275,7 +379,9 @@ cmd/server/                 local Go HTTP/SSE server
 cmd/deepstudent/            MyGo desktop entry point
 internal/api/               HTTP, CORS, errors, and SSE transport
 internal/runtime/           provider-neutral contracts and deterministic stub
+internal/attachments/       MIME/size policy and content-addressed blob store
 internal/storage/           SQLite schema and append-only event store
+internal/auth/              future server-side session boundary (disabled)
 frontend/                   React shell and MyGo-compatible health client
 protocol/runtime-v1.md      versioned request/event envelope
 docs/backend-architecture.md
@@ -283,9 +389,12 @@ docs/backend-architecture.md
 
 ## Branch relationship
 
-- `feature/go-backend-runtime` is the backend migration slice documented here.
-  It adds the local HTTP/SSE service, SQLite event store, deterministic provider,
-  Docker profile, and backend-specific CI workflow.
+- `goal/data-attachment-foundation` is the attachment slice documented here. It
+  adds the SQLite metadata table, content-addressed blob store, MIME/size
+  policy, and Docker persistence boundary on top of the backend runtime base.
+- `feature/go-backend-runtime` is the backend migration base. It adds the local
+  HTTP/SSE service, SQLite event store, deterministic provider, Docker profile,
+  and backend-specific CI workflow.
 - `migration/mygo-shell-poc` is the UI-first shell experiment. Its chat remains
   a local stub and it has no Go backend verification workflow.
 - The existing DeepStudent implementation remains the source of truth until
@@ -297,10 +406,10 @@ docs/backend-architecture.md
 The current server is local/test-only: authentication is disabled, only the
 deterministic provider is instantiated, and the browser shell is not connected
 to `/api/v1/runs`. SSE history is in-memory and retained briefly for late
-subscriptions; durable replay, reconnect/resume, cancellation, and remote
-client discovery are not implemented. Tool execution, telemetry, migrations,
-provider adapters, signed packaging, and production deployment are also out of
-scope.
+subscriptions; durable replay, reconnect/resume, HTTP cancellation, and remote
+client discovery are not implemented. Tool execution, telemetry, real provider
+adapters, blob garbage collection, signed packaging, and production deployment
+are also out of scope.
 
 Next gates are:
 
