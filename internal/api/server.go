@@ -87,10 +87,14 @@ func (s *Server) readyz(w http.ResponseWriter, requestID string) {
 }
 
 type runRequest struct {
-	SessionID string `json:"session_id,omitempty"`
-	Prompt    string `json:"prompt"`
-	Model     string `json:"model,omitempty"`
-	MaxTokens int    `json:"max_tokens,omitempty"`
+	SessionID         string   `json:"session_id,omitempty"`
+	Prompt            string   `json:"prompt"`
+	Provider          string   `json:"provider,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
+	MaxTokens         int      `json:"max_tokens,omitempty"`
+	InputCapabilities []string `json:"input_capabilities,omitempty"`
+	Input             []string `json:"input,omitempty"`
 }
 
 func (s *Server) startRun(w http.ResponseWriter, r *http.Request, requestID string) {
@@ -114,23 +118,56 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, requestID stri
 		writeError(w, requestID, http.StatusBadRequest, "invalid_request", "max_tokens must not be negative", nil)
 		return
 	}
+	selection, err := s.cfg.ResolveModel(input.Provider, input.Model)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
+		return
+	}
+	if strings.TrimSpace(input.Provider) == "" {
+		input.Provider = selection.Provider
+	}
+	if strings.TrimSpace(input.Model) == "" {
+		input.Model = selection.Model
+	}
+	if strings.TrimSpace(input.ReasoningEffort) == "" {
+		input.ReasoningEffort = selection.ReasoningEffort
+	}
 	if input.MaxTokens == 0 {
-		input.MaxTokens = s.cfg.Runtime.MaxTokens
+		input.MaxTokens = selection.MaxTokens
+	}
+	if input.InputCapabilities == nil {
+		input.InputCapabilities = input.Input
+	}
+	if input.InputCapabilities == nil {
+		input.InputCapabilities = selection.InputCapabilities
 	}
 	if s.cfg.Runtime.MaxTokens > 0 && input.MaxTokens > s.cfg.Runtime.MaxTokens {
 		writeError(w, requestID, http.StatusBadRequest, "token_limit_exceeded", "max_tokens exceeds the configured limit", map[string]any{"max_tokens": s.cfg.Runtime.MaxTokens})
 		return
 	}
-	run, err := s.runs.Start(context.Background(), runtime.AgentRunRequest{SessionID: input.SessionID, Prompt: input.Prompt, Model: input.Model, MaxTokens: input.MaxTokens})
+	run, err := s.runs.Start(context.Background(), runtime.AgentRunRequest{
+		SessionID:         input.SessionID,
+		Prompt:            input.Prompt,
+		Provider:          input.Provider,
+		Model:             input.Model,
+		ReasoningEffort:   input.ReasoningEffort,
+		MaxTokens:         input.MaxTokens,
+		InputCapabilities: input.InputCapabilities,
+		Input:             input.InputCapabilities,
+	})
 	if err != nil {
 		writeError(w, requestID, http.StatusBadRequest, "run_start_failed", err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"run_id":     run.ID,
-		"session_id": run.SessionID,
-		"events_url": "/api/v1/runs/" + run.ID + "/events",
-		"request_id": requestID,
+		"run_id":           run.ID,
+		"session_id":       run.SessionID,
+		"provider":         input.Provider,
+		"model":            input.Model,
+		"reasoning_effort": input.ReasoningEffort,
+		"max_tokens":       input.MaxTokens,
+		"events_url":       "/api/v1/runs/" + run.ID + "/events",
+		"request_id":       requestID,
 	})
 }
 
