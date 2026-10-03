@@ -4,6 +4,7 @@ import {
   MessagePartPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  unstable_useComposerInput,
   useLocalRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
@@ -19,7 +20,63 @@ type ViewId =
   | "settings";
 type Theme = "light" | "dark";
 
-type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "template" | "settings" | "plus" | "search" | "sliders" | "chevron-down" | "chevron-left" | "sun" | "home" | "folder" | "send" | "paperclip" | "wand" | "brain";
+type LearningGoal = "exam" | "course" | "skill";
+type LearningMode = "practice" | "notes" | "plan";
+type ModelChoice = "local" | "openai" | "compatible";
+type RuntimeChoice = "go" | "browser";
+type OnboardingConfig = { goal: LearningGoal; mode: LearningMode; model: ModelChoice; runtime: RuntimeChoice; completedAt: string };
+
+const onboardingStorageKey = "dstu-onboarding-config-v1";
+const defaultOnboardingConfig: Omit<OnboardingConfig, "completedAt"> = { goal: "course", mode: "practice", model: "local", runtime: "go" };
+
+function readOnboardingConfig(): OnboardingConfig | null {
+  const raw = window.localStorage.getItem(onboardingStorageKey);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<OnboardingConfig>;
+    if ((parsed.goal === "exam" || parsed.goal === "course" || parsed.goal === "skill") && (parsed.mode === "practice" || parsed.mode === "notes" || parsed.mode === "plan") && (parsed.model === "local" || parsed.model === "openai" || parsed.model === "compatible") && (parsed.runtime === "go" || parsed.runtime === "browser")) {
+      return { goal: parsed.goal, mode: parsed.mode, model: parsed.model, runtime: parsed.runtime, completedAt: typeof parsed.completedAt === "string" ? parsed.completedAt : new Date().toISOString() };
+    }
+  } catch { /* invalid local state behaves like a first visit */ }
+  return null;
+}
+
+const onboardingGoals: Array<{ value: LearningGoal; label: string; description: string }> = [
+  { value: "exam", label: "备考与考试", description: "拆解重点，安排复习节奏" },
+  { value: "course", label: "跟上课程", description: "理解概念，完成作业和练习" },
+  { value: "skill", label: "长期掌握技能", description: "循序学习，建立可迁移的知识" },
+];
+const onboardingModes: Array<{ value: LearningMode; label: string; description: string }> = [
+  { value: "practice", label: "练习优先", description: "先尝试，再通过反馈巩固理解" },
+  { value: "notes", label: "整理优先", description: "把资料变成清晰的笔记和结构" },
+  { value: "plan", label: "计划优先", description: "按目标安排每天的学习行动" },
+];
+const onboardingModels: Array<{ value: ModelChoice; label: string; description: string }> = [
+  { value: "local", label: "DeepStudent Local", description: "使用本机默认模型，数据留在当前环境" },
+  { value: "openai", label: "OpenAI", description: "使用已配置的 OpenAI 模型" },
+  { value: "compatible", label: "兼容 OpenAI 的服务", description: "连接自定义的兼容接口" },
+];
+
+function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null; onComplete: (config: Omit<OnboardingConfig, "completedAt">) => void }) {
+  const steps = ["学习目标", "学习方式", "模型与运行时"];
+  const [step, setStep] = useState(0);
+  const [draft, setDraft] = useState<Omit<OnboardingConfig, "completedAt">>(() => initial ? { goal: initial.goal, mode: initial.mode, model: initial.model, runtime: initial.runtime } : defaultOnboardingConfig);
+  const select = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  return <div className="ds-onboarding" role="dialog" aria-modal="true" aria-labelledby="ds-onboarding-title">
+    <section className="ds-onboarding__card">
+      <header className="ds-onboarding__header"><div><span className="ds-onboarding__brand">DeepStudent</span><span className="ds-onboarding__kicker">首次设置</span></div><span className="ds-onboarding__progress">{step + 1} / {steps.length}</span></header>
+      <div className="ds-onboarding__steps" aria-label="设置进度">{steps.map((label, index) => <span key={label} className={index === step ? "is-active" : index < step ? "is-done" : ""}><i>{index + 1}</i>{label}</span>)}</div>
+      <main className="ds-onboarding__body">
+        {step === 0 && <><h1 id="ds-onboarding-title">你想怎样使用 DeepStudent？</h1><p>先选一个方向，之后可以随时在设置中调整</p><div className="ds-onboarding__options">{onboardingGoals.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.goal === option.value ? " is-selected" : ""}`} aria-pressed={draft.goal === option.value} onClick={() => select("goal", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></>}
+        {step === 1 && <><h1 id="ds-onboarding-title">你更喜欢怎样学习？</h1><p>DeepStudent 会据此调整建议和快捷入口</p><div className="ds-onboarding__options">{onboardingModes.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.mode === option.value ? " is-selected" : ""}`} aria-pressed={draft.mode === option.value} onClick={() => select("mode", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></>}
+        {step === 2 && <><h1 id="ds-onboarding-title">配置模型与运行时</h1><p>这些选项只保存在本机，稍后可从设置重新打开</p><div className="ds-onboarding__options">{onboardingModels.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.model === option.value ? " is-selected" : ""}`} aria-pressed={draft.model === option.value} onClick={() => select("model", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div><fieldset className="ds-onboarding__runtime"><legend>运行时</legend><label className={draft.runtime === "go" ? "is-selected" : ""}><input type="radio" name="onboarding-runtime" checked={draft.runtime === "go"} onChange={() => select("runtime", "go")} /> Go runtime（推荐）</label><label className={draft.runtime === "browser" ? "is-selected" : ""}><input type="radio" name="onboarding-runtime" checked={draft.runtime === "browser"} onChange={() => select("runtime", "browser")} /> 浏览器运行时</label></fieldset></>}
+      </main>
+      <footer className="ds-onboarding__footer"><button type="button" className="ds-text-button" onClick={() => onComplete(defaultOnboardingConfig)}>跳过，使用默认配置</button><div><button type="button" className="ds-secondary-button" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0}>上一步</button><button type="button" className="ds-primary-button" onClick={() => step === steps.length - 1 ? onComplete(draft) : setStep((current) => current + 1)}>{step === steps.length - 1 ? "开始学习" : "继续"}</button></div></footer>
+    </section>
+  </div>;
+}
+
+type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sliders" | "chevron-down" | "chevron-left" | "sun" | "home" | "folder" | "send" | "paperclip" | "wand" | "brain";
 
 const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "chat-v2", label: "新会话", icon: "sparkle" },
@@ -27,6 +84,16 @@ const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "todo", label: "待办事项", icon: "check" },
   { id: "skills-management", label: "技能管理", icon: "sparkle-two" },
   { id: "flashcards", label: "闪卡", icon: "stack" },
+];
+
+const quickPrompts: Array<{ label: string; icon: IconName }> = [
+  { label: "复习今天的课程", icon: "book" },
+  { label: "整理一份学习笔记", icon: "book" },
+  { label: "解释一个概念", icon: "brain" },
+  { label: "生成知识点卡片", icon: "cards" },
+  { label: "制定复习计划", icon: "check" },
+  { label: "总结这段资料", icon: "stack" },
+  { label: "创建学习线程", icon: "sparkle" },
 ];
 
 function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: number; strokeWidth?: number }) {
@@ -38,7 +105,6 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: n
     "sparkle-two": <><path d="m8 3-.8 3.2a4 4 0 0 1-3 3L1 10l3.2.8a4 4 0 0 1 3 3L8 17l.8-3.2a4 4 0 0 1 3-3L15 10l-3.2-.8a4 4 0 0 1-3-3Z"/><path d="m18 14-.55 2.45A2 2 0 0 1 16 18l-2.45.55L16 19.1a2 2 0 0 1 1.45 1.45L18 23l.55-2.45A2 2 0 0 1 20 19.1l2.45-.55L20 18a2 2 0 0 1-1.45-1.45Z"/></>,
     cards: <><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 8h8M8 12h5M8 16h3"/></>,
     stack: <><path d="m12 3 8 4-8 4-8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></>,
-    template: <><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></>,
     settings: <><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.8 1.8 0 0 0-3.1 1.3v.2a2 2 0 1 1-4 0v-.2a1.8 1.8 0 0 0-3.1-1.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.8 1.8 0 0 0 2.3 12a1.8 1.8 0 0 0 1.3-3.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.8 1.8 0 0 0 9.5 4.8v-.2a2 2 0 1 1 4 0v.2a1.8 1.8 0 0 0 3.1 1.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.8 1.8 0 0 0 20.7 12a1.8 1.8 0 0 0-1.3 3Z"/></>,
     plus: <><path d="M12 5v14M5 12h14"/></>,
     search: <><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></>,
@@ -60,7 +126,7 @@ const viewMeta: Record<ViewId, { title: string; subtitle: string }> = {
   "chat-v2": { title: "", subtitle: "" },
   "learning-hub": { title: "学习资源", subtitle: "浏览和管理你的学习资料" },
   todo: { title: "待办事项", subtitle: "把下一步学习行动放在眼前" },
-  "skills-management": { title: "技能管理", subtitle: "添加和管理 DeepStudent 的技能" },
+  "skills-management": { title: "技能管理", subtitle: "配置 DeepStudent 的可用技能" },
   flashcards: { title: "闪卡", subtitle: "用主动回忆巩固真正理解的内容" },
   settings: { title: "设置", subtitle: "调整 DeepStudent 的工作方式" },
 };
@@ -105,14 +171,34 @@ function MessageText() {
 }
 
 function ChatEmptyState() {
-  return <div className="ds-chat-center" aria-hidden="true" />;
+  const composer = unstable_useComposerInput();
+
+  return (
+    <div className="ds-chat-center">
+      <h2 id="chat-welcome-title">把今天学会的，变成真正掌握的</h2>
+      <p>从一个学习目标开始，理解、整理，再用练习巩固</p>
+      <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
+        {quickPrompts.map((prompt) => (
+          <button
+            key={prompt.label}
+            className="ds-chat-prompt"
+            type="button"
+            onClick={() => composer.setText(prompt.label)}
+          >
+            <Icon name={prompt.icon} size={16} />
+            <span>{prompt.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ChatWorkspace() {
   const runtime = useLocalRuntime(StubAdapter);
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <section className="ds-chat-page" aria-label="新会话">
+      <section className="ds-chat-page" aria-labelledby="chat-welcome-title">
         <ThreadPrimitive.Root className="ds-chat-thread">
           <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll>
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
@@ -126,8 +212,8 @@ function ChatWorkspace() {
             <div className="ds-composer__toolbar">
               <div className="ds-composer__tools">
                 <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="paperclip" size={16} /></ComposerPrimitive.AddAttachment>
-                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="调用工具"><Icon name="wand" size={16} /></button>
-                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="深度思考"><Icon name="brain" size={16} /></button>
+                <button type="button" className="ds-composer-tool" aria-label="调用工具"><Icon name="wand" size={16} /></button>
+                <button type="button" className="ds-composer-tool" aria-label="深度思考"><Icon name="brain" size={16} /></button>
               </div>
               <ComposerPrimitive.Send className="ds-send-button" aria-label="发送"><Icon name="send" size={15} strokeWidth={2} /></ComposerPrimitive.Send>
             </div>
@@ -140,23 +226,29 @@ function ChatWorkspace() {
 
 function LearningHub() {
   return <WorkspacePage eyebrow="学习中心" title="学习资源" description="浏览、搜索并打开你的笔记、教材、试卷和文件" action="＋ 添加资源">
-    <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button" aria-label="添加资源">＋</button></div><label className="ds-search-field">⌕ <input placeholder="搜索资源…" /></label><p className="ds-sidebar-empty">暂无资源</p></aside><div className="ds-resource-grid"><EmptyState title="还没有学习资源" description="添加 PDF、Markdown、网页或图片，开始整理你的学习资料" /></div></div>
+    <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button" aria-label="添加资源">＋</button></div><label className="ds-search-field"><Icon name="search" size={14} /><input placeholder="搜索资源…" /></label><p className="ds-sidebar-empty">暂无资源</p></aside><div className="ds-resource-grid"><EmptyState title="还没有学习资源" description="添加 PDF、Markdown、网页或图片，开始整理你的学习资料" /></div></div>
   </WorkspacePage>;
 }
-function EmptyState({ title, description }: { title: string; description: string }) { return <div className="ds-empty-state"><p><b>{title}</b>，{description}</p></div>; }
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return <div className="ds-empty-state"><p><b>{title}</b>，{description}</p></div>;
+}
+
 function Todo() { return <WorkspacePage eyebrow="今日行动" title="待办事项" description="把下一步学习行动放在眼前" action="＋ 新建待办"><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
-function Skills() { return <WorkspacePage title="技能管理" description="添加和管理 DeepStudent 的技能" action="＋ 添加技能"><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
+function Skills() { return <WorkspacePage eyebrow="可组合能力" title="技能管理" description="安装、启用和编辑 DeepStudent 的技能" action="＋ 添加技能"><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
 function Flashcards() { return <WorkspacePage eyebrow="主动回忆" title="闪卡" description="用短时练习巩固真正理解的内容" action="＋ 新建卡组"><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme }: { theme: Theme; onTheme: () => void }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
+function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
-function WorkspacePage({ action, children }: { eyebrow?: string; title?: string; description?: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page">{action && <div className="ds-workspace-actions"><button className="ds-primary-button">{action}</button></div>}{children}</section>; }
+function WorkspacePage({ eyebrow, title, description, action, children }: { eyebrow: string; title: string; description: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><div><span className="ds-eyebrow">{eyebrow}</span><h2>{title}</h2><p>{description}</p></div>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
 
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
+  const [onboardingOpen, setOnboardingOpen] = useState(() => onboardingConfig === null);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -168,6 +260,13 @@ export function App() {
   }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
+  const completeOnboarding = (config: Omit<OnboardingConfig, "completedAt">) => {
+    const saved = { ...config, completedAt: new Date().toISOString() };
+    window.localStorage.setItem(onboardingStorageKey, JSON.stringify(saved));
+    setOnboardingConfig(saved);
+    setOnboardingOpen(false);
+  };
+  const openOnboarding = () => setOnboardingOpen(true);
   const selectView = (next: ViewId) => { setView(next); setSidebarOpen(false); };
   const content = useMemo(() => {
     if (view === "chat-v2") return <ChatWorkspace />;
@@ -175,7 +274,7 @@ export function App() {
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "flashcards") return <Flashcards />;
-    return <Settings theme={theme} onTheme={toggleTheme} />;
+    return <Settings theme={theme} onTheme={toggleTheme} onOpenOnboarding={openOnboarding} />;
   }, [theme, view]);
   const meta = viewMeta[view];
   const toggleSidebar = () => {
@@ -190,7 +289,13 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
+          <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏">
+            <Icon name="chevron-left" size={16} />
+          </button>
           <span className="ds-sidebar__brand-name">DeepStudent</span>
+          <div className="ds-sidebar__brand-actions">
+            <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
+          </div>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
           {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
@@ -208,20 +313,15 @@ export function App() {
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <header className="ds-main__header">
           <div className="ds-main__leading">
+            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}><Icon name="sliders" size={17} /></button>
             <span className="ds-main__brand">DeepStudent</span>
-            <button className="ds-sidebar-toggle ds-sidebar-toggle--header" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}>
-              <Icon name="sliders" size={16} />
-            </button>
-            <button className="ds-icon-button ds-header-search" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源">
-              <Icon name="search" size={16} />
-            </button>
           </div>
-          <div className={`ds-main__heading${meta.title ? "" : " is-empty"}`}>
-            {meta.title && <div className="ds-main__heading-copy"><h1>{meta.title}</h1></div>}
-          </div>
+          <div className="ds-main__heading"><h1>{meta.title}</h1><p>{meta.subtitle}</p></div>
+          <div className="ds-main__actions"><button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
         </header>
         <div className="ds-main__content">{content}</div>
       </main>
     </div>
+    {onboardingOpen && <Onboarding initial={onboardingConfig} onComplete={completeOnboarding} />}
   </div>;
 }
