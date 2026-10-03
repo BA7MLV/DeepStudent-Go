@@ -58,25 +58,24 @@ const onboardingModels: Array<{ value: ModelChoice; label: string; description: 
 ];
 
 function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null; onComplete: (config: Omit<OnboardingConfig, "completedAt">) => void }) {
-  const steps = ["学习目标", "学习方式", "模型与运行时"];
-  const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<Omit<OnboardingConfig, "completedAt">>(() => initial ? { goal: initial.goal, mode: initial.mode, model: initial.model, runtime: initial.runtime } : defaultOnboardingConfig);
   const select = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((current) => ({ ...current, [key]: value }));
   return <div className="ds-onboarding" role="dialog" aria-modal="true" aria-labelledby="ds-onboarding-title">
     <section className="ds-onboarding__card">
-      <header className="ds-onboarding__header"><div><span className="ds-onboarding__brand">DeepStudent</span><span className="ds-onboarding__kicker">首次设置</span></div><span className="ds-onboarding__progress">{step + 1} / {steps.length}</span></header>
-      <div className="ds-onboarding__steps" aria-label="设置进度">{steps.map((label, index) => <span key={label} className={index === step ? "is-active" : index < step ? "is-done" : ""}><i>{index + 1}</i>{label}</span>)}</div>
+      <header className="ds-onboarding__header"><div><span className="ds-onboarding__brand">DeepStudent</span><span className="ds-onboarding__kicker">首次设置</span></div></header>
       <main className="ds-onboarding__body">
-        {step === 0 && <><h1 id="ds-onboarding-title">你想怎样使用 DeepStudent？</h1><p>先选一个方向，之后可以随时在设置中调整</p><div className="ds-onboarding__options">{onboardingGoals.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.goal === option.value ? " is-selected" : ""}`} aria-pressed={draft.goal === option.value} onClick={() => select("goal", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></>}
-        {step === 1 && <><h1 id="ds-onboarding-title">你更喜欢怎样学习？</h1><p>DeepStudent 会据此调整建议和快捷入口</p><div className="ds-onboarding__options">{onboardingModes.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.mode === option.value ? " is-selected" : ""}`} aria-pressed={draft.mode === option.value} onClick={() => select("mode", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></>}
-        {step === 2 && <><h1 id="ds-onboarding-title">配置模型与运行时</h1><p>这些选项只保存在本机，稍后可从设置重新打开</p><div className="ds-onboarding__options">{onboardingModels.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.model === option.value ? " is-selected" : ""}`} aria-pressed={draft.model === option.value} onClick={() => select("model", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div><fieldset className="ds-onboarding__runtime"><legend>运行时</legend><label className={draft.runtime === "go" ? "is-selected" : ""}><input type="radio" name="onboarding-runtime" checked={draft.runtime === "go"} onChange={() => select("runtime", "go")} /> Go runtime（推荐）</label><label className={draft.runtime === "browser" ? "is-selected" : ""}><input type="radio" name="onboarding-runtime" checked={draft.runtime === "browser"} onChange={() => select("runtime", "browser")} /> 浏览器运行时</label></fieldset></>}
+        <h1 id="ds-onboarding-title">设置你的学习方式</h1>
+        <div className="ds-onboarding__group"><h2>学习目标</h2><div className="ds-onboarding__options">{onboardingGoals.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.goal === option.value ? " is-selected" : ""}`} aria-pressed={draft.goal === option.value} onClick={() => select("goal", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></div>
+        <div className="ds-onboarding__group"><h2>学习方式</h2><div className="ds-onboarding__options">{onboardingModes.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.mode === option.value ? " is-selected" : ""}`} aria-pressed={draft.mode === option.value} onClick={() => select("mode", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></div>
+        <div className="ds-onboarding__group"><h2>模型</h2><div className="ds-onboarding__options">{onboardingModels.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.model === option.value ? " is-selected" : ""}`} aria-pressed={draft.model === option.value} onClick={() => select("model", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}</div></div>
+        <fieldset className="ds-onboarding__runtime"><legend>运行时</legend><label className={draft.runtime === "go" ? "is-selected" : ""}><input type="radio" name="onboarding-runtime" checked={draft.runtime === "go"} onChange={() => select("runtime", "go")} /> Go runtime（推荐）</label><label className={draft.runtime === "browser" ? "is-selected" : ""}><input type="radio" name="onboarding-runtime" checked={draft.runtime === "browser"} onChange={() => select("runtime", "browser")} /> 浏览器运行时</label></fieldset>
       </main>
-      <footer className="ds-onboarding__footer"><button type="button" className="ds-text-button" onClick={() => onComplete(defaultOnboardingConfig)}>跳过，使用默认配置</button><div><button type="button" className="ds-secondary-button" onClick={() => setStep((current) => Math.max(0, current - 1))} disabled={step === 0}>上一步</button><button type="button" className="ds-primary-button" onClick={() => step === steps.length - 1 ? onComplete(draft) : setStep((current) => current + 1)}>{step === steps.length - 1 ? "开始学习" : "继续"}</button></div></footer>
+      <footer className="ds-onboarding__footer"><button type="button" className="ds-text-button" onClick={() => onComplete(defaultOnboardingConfig)}>使用默认设置</button><button type="button" className="ds-primary-button" onClick={() => onComplete(draft)}>完成设置</button></footer>
     </section>
   </div>;
 }
 
-type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sliders" | "chevron-down" | "chevron-left" | "sun" | "home" | "folder" | "send" | "paperclip" | "wand" | "brain";
+type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "chevron-down" | "sun" | "home" | "folder" | "send" | "paperclip" | "wand" | "brain";
 
 const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "chat-v2", label: "新会话", icon: "sparkle" },
@@ -108,9 +107,8 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: n
     settings: <><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.8 1.8 0 0 0-3.1 1.3v.2a2 2 0 1 1-4 0v-.2a1.8 1.8 0 0 0-3.1-1.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.8 1.8 0 0 0 2.3 12a1.8 1.8 0 0 0 1.3-3.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.8 1.8 0 0 0 9.5 4.8v-.2a2 2 0 1 1 4 0v.2a1.8 1.8 0 0 0 3.1 1.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.8 1.8 0 0 0 20.7 12a1.8 1.8 0 0 0-1.3 3Z"/></>,
     plus: <><path d="M12 5v14M5 12h14"/></>,
     search: <><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></>,
-    sliders: <><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="11" cy="18" r="2" fill="currentColor" stroke="none"/></>,
+    sidebar: <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></>,
     "chevron-down": <path d="m6 9 6 6 6-6"/>,
-    "chevron-left": <path d="m15 6-6 6 6 6"/>,
     sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></>,
     home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
     folder: <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5Z"/>,
@@ -121,15 +119,6 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: n
   };
   return <svg {...common} aria-hidden="true">{paths[name]}</svg>;
 }
-
-const viewMeta: Record<ViewId, { title: string; subtitle: string }> = {
-  "chat-v2": { title: "", subtitle: "" },
-  "learning-hub": { title: "学习资源", subtitle: "浏览和管理你的学习资料" },
-  todo: { title: "待办事项", subtitle: "把下一步学习行动放在眼前" },
-  "skills-management": { title: "技能管理", subtitle: "配置 DeepStudent 的可用技能" },
-  flashcards: { title: "闪卡", subtitle: "用主动回忆巩固真正理解的内容" },
-  settings: { title: "设置", subtitle: "调整 DeepStudent 的工作方式" },
-};
 
 const readTheme = (): Theme => {
   const saved = window.localStorage.getItem("dstu-theme-mode");
@@ -225,7 +214,7 @@ function ChatWorkspace() {
 }
 
 function LearningHub() {
-  return <WorkspacePage eyebrow="学习中心" title="学习资源" description="浏览、搜索并打开你的笔记、教材、试卷和文件" action="＋ 添加资源">
+  return <WorkspacePage title="学习资源" action="＋ 添加资源">
     <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button" aria-label="添加资源">＋</button></div><label className="ds-search-field"><Icon name="search" size={14} /><input placeholder="搜索资源…" /></label><p className="ds-sidebar-empty">暂无资源</p></aside><div className="ds-resource-grid"><EmptyState title="还没有学习资源" description="添加 PDF、Markdown、网页或图片，开始整理你的学习资料" /></div></div>
   </WorkspacePage>;
 }
@@ -234,13 +223,13 @@ function EmptyState({ title, description }: { title: string; description: string
   return <div className="ds-empty-state"><p><b>{title}</b>，{description}</p></div>;
 }
 
-function Todo() { return <WorkspacePage eyebrow="今日行动" title="待办事项" description="把下一步学习行动放在眼前" action="＋ 新建待办"><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
-function Skills() { return <WorkspacePage eyebrow="可组合能力" title="技能管理" description="安装、启用和编辑 DeepStudent 的技能" action="＋ 添加技能"><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
-function Flashcards() { return <WorkspacePage eyebrow="主动回忆" title="闪卡" description="用短时练习巩固真正理解的内容" action="＋ 新建卡组"><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
+function Todo() { return <WorkspacePage title="待办事项" action="＋ 新建待办"><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
+function Skills() { return <WorkspacePage title="技能管理" action="＋ 添加技能"><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
+function Flashcards() { return <WorkspacePage title="闪卡" action="＋ 新建卡组"><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
+function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) { return <WorkspacePage title="设置"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
-function WorkspacePage({ eyebrow, title, description, action, children }: { eyebrow: string; title: string; description: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><div><span className="ds-eyebrow">{eyebrow}</span><h2>{title}</h2><p>{description}</p></div>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
+function WorkspacePage({ title, action, children }: { title: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><h2>{title}</h2>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
 
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
@@ -276,7 +265,6 @@ export function App() {
     if (view === "flashcards") return <Flashcards />;
     return <Settings theme={theme} onTheme={toggleTheme} onOpenOnboarding={openOnboarding} />;
   }, [theme, view]);
-  const meta = viewMeta[view];
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
@@ -289,12 +277,10 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
-          <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏">
-            <Icon name="chevron-left" size={16} />
-          </button>
           <span className="ds-sidebar__brand-name">DeepStudent</span>
           <div className="ds-sidebar__brand-actions">
             <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
+            <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏"><Icon name="sidebar" size={16} /></button>
           </div>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
@@ -313,10 +299,9 @@ export function App() {
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <header className="ds-main__header">
           <div className="ds-main__leading">
-            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}><Icon name="sliders" size={17} /></button>
+            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={!sidebarCollapsed || sidebarOpen}><Icon name="sidebar" size={17} /></button>
             <span className="ds-main__brand">DeepStudent</span>
           </div>
-          <div className="ds-main__heading"><h1>{meta.title}</h1><p>{meta.subtitle}</p></div>
           <div className="ds-main__actions"><button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
         </header>
         <div className="ds-main__content">{content}</div>
