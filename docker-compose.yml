@@ -1,0 +1,14 @@
+services:
+  server:
+    build: .
+    environment:
+      DEEPSTUDENT_DB_PATH: /data/deepstudent.db
+      DEEPSTUDENT_HTTP_ADDR: 0.0.0.0:8080
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - deepstudent-data:/data
+    restart: unless-stopped
+
+volumes:
+  deepstudent-data:

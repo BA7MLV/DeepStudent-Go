@@ -1,0 +1,53 @@
+name: Build MyGo macOS shell
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - migration/mygo-shell-poc
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install JavaScript dependencies
+        run: bun install
+
+      - name: Resolve Go module checksums
+        run: go mod tidy
+
+      - name: Install MyGo CLI
+        run: go install github.com/egoist/mygo/cmd/mygo@v0.1.22
+
+      - name: Generate typed bindings
+        run: mygo generate
+
+      - name: Build unsigned macOS app
+        run: bun run build -- -platform darwin/arm64
+
+      - name: Upload app artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepstudent-go-macos-arm64
+          path: |
+            build/**/*.app
+            build/**/*.dmg
+          if-no-files-found: error
