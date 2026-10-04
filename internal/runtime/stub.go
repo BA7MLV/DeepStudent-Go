@@ -308,6 +308,7 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 	defer state.cancel()
 	defer r.close(state)
 	if ctx.Err() != nil {
+		r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()})
 		r.setStatus(state, RunCanceled)
 		return
 	}
