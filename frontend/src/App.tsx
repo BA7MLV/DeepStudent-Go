@@ -365,7 +365,7 @@ function ChatEditComposer() {
 
 function ChatToolCallPart({ part }: { part: ToolCallMessagePart }) {
   const completed = part.result !== undefined && !part.isPreliminary;
-  const detail = completed ? String(part.result) : (part.argsText || JSON.stringify(part.args));
+  const detail = completed ? (typeof part.result === "string" ? part.result : JSON.stringify(part.result)) : (part.argsText || JSON.stringify(part.args));
   return <div className={`ds-chat-tool-call${completed ? " is-complete" : " is-running"}`}>
     <span className="ds-chat-tool-call__icon"><Icon name={completed ? "check-circle" : "wrench"} size={13} /></span>
     <span className="ds-chat-tool-call__copy"><b>{part.toolName}</b><small>{detail}</small></span>
