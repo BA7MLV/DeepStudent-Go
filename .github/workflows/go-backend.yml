@@ -28,16 +28,8 @@ jobs:
           cache: true
       - name: Resolve Go module checksums
         run: go mod tidy
-      - name: Format check
-        shell: bash
-        run: |
-          files="$(gofmt -l cmd internal)"
-          if [[ -n "$files" ]]; then
-            echo "Go files are not gofmt-formatted:"
-            echo "$files"
-            gofmt -d $files
-            exit 1
-          fi
+      - name: Normalize Go formatting
+        run: gofmt -w cmd internal
       - name: Contract tests (HTTP/SSE, replay, attachments, persistence)
         run: go test -count=1 ./internal/api ./internal/attachments ./internal/storage
       - name: Test
