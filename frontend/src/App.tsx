@@ -669,9 +669,10 @@ function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }
 
   const isGestureArea = (event: React.PointerEvent<HTMLElement>) => {
     if (!(event.target instanceof Element)) return true;
-    // Keep actionable controls clickable. The textarea and the rest of the
-    // composer are intentional long-press recording targets when empty.
-    return !event.target.closest("button, input, select, a");
+    // The whole empty composer is a press-and-hold recording surface. Keep
+    // explicit controls (attachment/remove/send) clickable and let the
+    // textarea itself participate in the long-press gesture.
+    return !event.target.closest("button, select, a, [data-drop-ignore]");
   };
 
   const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => {
@@ -892,6 +893,7 @@ function WorkspaceDropZone({ children }: { children: React.ReactNode }) {
 
 function ChatComposer({ runtime, outboxStatus = "idle" }: { runtime: ReturnType<typeof useLocalRuntime>; outboxStatus?: OutboxStatus }) {
   const composer = unstable_useComposerInput();
+  const hasComposerText = composer.value.trim().length > 0;
   const [voiceState, setVoiceState] = useState<VoiceOverlayState>({ recording: false, cancelZone: false, level: 0, elapsed: 0 });
   const gestureRef = useRef<ComposerGestureHandlers | null>(null);
   const workspaceDrop = useContext(WorkspaceDropContext);
@@ -935,7 +937,7 @@ function ChatComposer({ runtime, outboxStatus = "idle" }: { runtime: ReturnType<
           </AttachmentPrimitive.Root>}
         </ComposerPrimitive.Attachments>
       </div>
-      <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
+      <ComposerPrimitive.AddAttachment className={`ds-composer-tool${hasComposerText ? " is-disabled" : ""}`} disabled={hasComposerText} aria-label={hasComposerText ? "有文本时不可添加附件" : "添加附件"}><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
       <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
       <div className="ds-composer__toolbar">
         <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} onVoiceStateChange={setVoiceState} />
@@ -944,6 +946,7 @@ function ChatComposer({ runtime, outboxStatus = "idle" }: { runtime: ReturnType<
     </ComposerPrimitive.Root>
     <div className="ds-voice-recording-status" role="status" aria-live="polite" aria-hidden={!voiceState.recording}>
       <time>{formatRecordingElapsed(voiceState.elapsed)}</time>
+      <span>{voiceState.cancelZone ? "松开取消" : "上滑取消"}</span>
     </div>
   </div>;
 }
@@ -1163,7 +1166,7 @@ function Settings({ theme, onTheme, onOpenOnboarding, onClose }: { theme: Theme;
   return <div className="ds-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <button type="button" className="ds-settings-modal__backdrop" aria-label="关闭设置" onClick={onClose} />
     <section className="ds-settings-modal__card">
-      <header className="ds-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />工作区</span><h2 id="settings-title">设置</h2></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={onClose}><Icon name="x" size={16} /></button></header>
+      <header className="ds-settings-modal__header"><div><h2 id="settings-title">设置</h2></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={onClose}><Icon name="x" size={16} /></button></header>
       <div className="ds-settings-modal__body">
         <nav className="ds-settings-nav" aria-label="设置分类">
           <button type="button" className={section === "general" ? "is-active" : ""} onClick={() => setSection("general")}>常规</button>
@@ -1271,7 +1274,7 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" data-drop-ignore="true" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
-          {((isMobile && sidebarOpen) || (!isMobile && !sidebarCollapsed)) && <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={isMobile ? "关闭导航" : "收起导航"} aria-expanded={isMobile ? sidebarOpen : !sidebarCollapsed}><Icon name="sidebar" size={16} /></button>}
+          {((isMobile && sidebarOpen) || (!isMobile && !sidebarCollapsed)) && <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={isMobile ? "关闭导航" : "收起导航"} aria-expanded={isMobile ? sidebarOpen : !sidebarCollapsed}><Icon name="menu" size={16} /></button>}
           <span className="ds-sidebar__brand-name">DeepStudent</span>
           <div className="ds-sidebar__brand-actions">
             <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
@@ -1294,7 +1297,7 @@ export function App() {
         <div className="ds-main__drag-region" aria-hidden="true" />
         {((isMobile && !sidebarOpen) || (!isMobile && sidebarCollapsed)) && <div className="ds-main__floating-actions" aria-label="工作区导航">
           <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={isMobile ? sidebarOpen : !sidebarCollapsed}>
-            <Icon name="sidebar" size={17} />
+            <Icon name="menu" size={17} />
           </button>
         </div>}
         <div className="ds-main__actions" aria-label="窗口操作">
