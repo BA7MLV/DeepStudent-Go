@@ -109,7 +109,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ds-chat-message__user { align-items:flex-end; }
 .ds-chat-message__assistant { align-items:flex-start; }
 .ds-chat-message__attachments { display:flex; max-width:70%; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
-.ds-chat-message__bubble { max-width:70%; padding:10px 14px; border-radius:22px; background:var(--ds-fg); color:var(--ds-bg); line-height:1.55; }
+.ds-chat-message__bubble { display:inline-flex; align-self:flex-end; width:auto; inline-size:fit-content; max-width:min(70%,42rem); max-inline-size:min(70%,42rem); padding:10px 14px; border-radius:22px; background:var(--ds-fg); color:var(--ds-bg); line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; }
 .ds-chat-message__content { width:100%; color:var(--ds-fg); line-height:1.65; }
 .ds-chat-message__content > div { margin:0; }
 .ds-chat-message__content p { margin:0 0 10px; }
@@ -144,7 +144,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .ds-chatgpt-empty { padding-bottom:10vh; }
   .ds-chatgpt-empty h1 { font-size:22px; }
   .ds-chatgpt-viewport { padding-top:20px; }
-  .ds-chat-message__bubble,.ds-chat-message__attachments { max-width:88%; }
+  .ds-chat-message__bubble,.ds-chat-message__attachments { max-width:min(88%,42rem); }
   .ds-chatgpt-footer { width:calc(100% + 28px); margin-inline:-14px; padding:8px 14px calc(8px + env(safe-area-inset-bottom)); backdrop-filter:blur(12px); }
 }
 
@@ -927,6 +927,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   box-shadow:none;
   color:#dc2626;
 }
+.ds-composer-tool:disabled,
+.ds-composer-tool.is-disabled {
+  cursor:not-allowed;
+  opacity:.34;
+  pointer-events:none;
+}
 @media (max-width: 767px) {
   .ds-composer-dock {
     position:sticky;
@@ -971,3 +977,79 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     box-shadow:0 -1px 0 color-mix(in srgb,#dc2626 38%,transparent);
   }
 }
+
+/* The mobile chat composer is a viewport-level dock. The thread owns the
+   only scroll container, while this dock stays above the home-indicator area
+   and the dynamic keyboard viewport. */
+@media (max-width: 767px) {
+  .ds-main[data-view="chat-v2"] .ds-composer-dock,
+  .ds-main[data-view="chat-v2"] .ds-chatgpt-footer {
+    position:fixed;
+    right:0;
+    bottom:0;
+    left:0;
+    z-index:20;
+    width:100%;
+    margin:0;
+    padding:8px 14px calc(8px + env(safe-area-inset-bottom));
+    border-top:1px solid color-mix(in srgb,var(--ds-border) 72%,transparent);
+    background:color-mix(in srgb,var(--ds-bg) 94%,transparent);
+    backdrop-filter:blur(14px);
+  }
+  .ds-main[data-view="chat-v2"] .ds-thread-viewport {
+    padding-bottom:calc(112px + env(safe-area-inset-bottom));
+    scroll-padding-bottom:calc(112px + env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes ds-voice-waterline {
+  0%,100% { transform:translate3d(-4%,0,0) scaleY(.84); }
+  50% { transform:translate3d(4%, -3px,0) scaleY(1.08); }
+}
+
+@media (max-width: 767px) {
+  .ds-composer-shell > .ds-voice-wave::after {
+    position:absolute;
+    top:-18px;
+    left:-12%;
+    width:124%;
+    height:46px;
+    border-top:1px solid color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) 30%,transparent);
+    border-radius:50%;
+    box-shadow:0 -6px 14px color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) 18%,transparent);
+    content:"";
+    opacity:.7;
+    transform-origin:center bottom;
+    animation:ds-voice-waterline 1500ms var(--ds-ease) infinite;
+  }
+  .ds-composer-shell[data-voice-recording="true"] > .ds-voice-wave::before {
+    animation:ds-voice-waterline 2200ms var(--ds-ease) infinite reverse;
+  }
+  .ds-composer-shell[data-voice-cancel="true"] > .ds-voice-wave::after {
+    border-color:color-mix(in srgb,#dc2626 58%,transparent);
+    box-shadow:0 -6px 14px color-mix(in srgb,#dc2626 28%,transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-composer-shell > .ds-voice-wave::before,
+  .ds-composer-shell > .ds-voice-wave::after { animation:none; }
+}
+
+/* Keep both workspace and model settings as genuine overlays. The backdrop is
+   the only dimming layer, so the current page remains subtly visible beneath
+   the focused card instead of being replaced by an opaque settings screen. */
+.ds-settings-modal,
+.ds-stream-settings-modal {
+  isolation:isolate;
+  background:transparent;
+  backdrop-filter:none;
+}
+.ds-settings-modal__backdrop,
+.ds-stream-settings-modal__backdrop {
+  z-index:0;
+  background:color-mix(in srgb,var(--ds-bg) 46%,transparent);
+  backdrop-filter:blur(6px);
+}
+.ds-settings-modal__card,
+.ds-stream-settings-modal__card { z-index:1; }
