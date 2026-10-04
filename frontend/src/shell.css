@@ -162,7 +162,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 /* Conversation controls stay compact and out of the message flow. */
-.ds-chatgpt-footer { position:relative; }
+.ds-chatgpt-footer { position:sticky; bottom:0; z-index:5; }
 .ds-scroll-bottom {
   position:absolute;
   right:8px;
@@ -1053,3 +1053,57 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .ds-settings-modal__card,
 .ds-stream-settings-modal__card { z-index:1; }
+
+/* Real chat keeps its composer docked without introducing a divider line. On
+   mobile the viewport reserves the fixed dock's space so the last message can
+   still scroll clear of it. */
+.ds-main[data-view="chat-v2"] .ds-chatgpt-footer,
+.ds-main[data-view="chat-v2"] .ds-composer-dock {
+  position:sticky;
+  bottom:0;
+  z-index:8;
+  border-top:0;
+  background:color-mix(in srgb,var(--ds-bg) 94%,transparent);
+}
+@media (max-width: 767px) {
+  .ds-main[data-view="chat-v2"] .ds-chatgpt-footer,
+  .ds-main[data-view="chat-v2"] .ds-composer-dock {
+    position:fixed;
+    right:0;
+    bottom:0;
+    left:0;
+    width:100%;
+    margin:0;
+    padding:8px 14px calc(8px + env(safe-area-inset-bottom));
+    border-top:0;
+    background:color-mix(in srgb,var(--ds-bg) 94%,transparent);
+    backdrop-filter:blur(14px);
+  }
+  .ds-main[data-view="chat-v2"] .ds-thread-viewport {
+    padding-bottom:calc(112px + env(safe-area-inset-bottom));
+    scroll-padding-bottom:calc(112px + env(safe-area-inset-bottom));
+  }
+}
+
+/* A small fixed palette keeps card surfaces and text independent from accent
+   choices while making buttons, links, focus and selected states coherent. */
+.ds-theme-color-setting {
+  display:grid;
+  gap:10px;
+  padding:14px 18px 16px;
+  border-top:1px solid var(--ds-border);
+}
+.ds-theme-color-setting > div:first-child b { display:block; font-size:13px; }
+.ds-theme-color-setting > div:first-child small { display:block; margin-top:3px; color:var(--ds-muted); font-size:12px; }
+.ds-theme-color-presets { display:flex; align-items:center; flex-wrap:wrap; gap:9px; }
+.ds-theme-color-swatch {
+  width:25px;
+  height:25px;
+  padding:0;
+  border:2px solid transparent;
+  border-radius:50%;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,#fff 42%,transparent);
+  transition:transform 140ms var(--ds-ease),box-shadow 140ms var(--ds-ease);
+}
+.ds-theme-color-swatch:hover { transform:translateY(-1px) scale(1.06); }
+.ds-theme-color-swatch.is-selected { box-shadow:0 0 0 2px var(--ds-panel),0 0 0 4px var(--ds-accent); }
