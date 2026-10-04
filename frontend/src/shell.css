@@ -277,7 +277,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ds-stream-debug__toolbar {
   position:absolute;
   z-index:8;
-  top:calc(var(--mygo-titlebar-height, 0px) + 8px);
+  top:calc(var(--mygo-titlebar-height, 0px) + 46px);
   right:18px;
   justify-content:flex-end;
   margin:0;
@@ -406,7 +406,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   }
 }
 @media (max-width: 767px) {
-  .ds-stream-debug__toolbar { top:calc(var(--mygo-titlebar-height, 0px) + 5px); right:10px; gap:4px; }
+  .ds-stream-debug__toolbar { top:calc(var(--mygo-titlebar-height, 0px) + 42px); right:10px; gap:4px; }
   .ds-stream-debug__toolbar .ds-secondary-button { min-height:31px; padding:0 10px; font-size:12px; }
   .ds-stream-thread__viewport { padding:calc(var(--mygo-titlebar-height, 0px) + 48px) 14px 12px; }
   .ds-stream-composer-dock { padding:9px 14px calc(10px + env(safe-area-inset-bottom)); }
@@ -483,7 +483,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ds-stream-debug__toolbar {
   position:absolute;
   z-index:8;
-  top:calc(var(--mygo-titlebar-height, 0px) + 8px);
+  top:calc(var(--mygo-titlebar-height, 0px) + 46px);
   right:18px;
   justify-content:flex-end;
   margin:0;
@@ -608,7 +608,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   }
 }
 @media (max-width: 767px) {
-  .ds-stream-debug__toolbar { top:calc(var(--mygo-titlebar-height, 0px) + 5px); right:10px; gap:4px; }
+  .ds-stream-debug__toolbar { top:calc(var(--mygo-titlebar-height, 0px) + 42px); right:10px; gap:4px; }
   .ds-stream-debug__toolbar .ds-secondary-button { min-height:31px; padding:0 10px; font-size:12px; }
   .ds-stream-thread__viewport { padding:calc(var(--mygo-titlebar-height, 0px) + 48px) 14px 12px; }
   .ds-stream-composer-dock { padding:9px 14px calc(10px + env(safe-area-inset-bottom)); }
