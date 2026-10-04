@@ -486,6 +486,7 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
         const eventsUrl = start.events_url ? new URL(start.events_url, startResponse.url || runtimeUrl(baseUrl, "/runs")).toString() : runtimeUrl(baseUrl, `/runs/${encodeURIComponent(runId)}/events`);
         let text = "";
         const toolCalls = new Map<string, ToolCallMessagePart<any>>();
+        let lastToolCallId: string | undefined;
         const content = (): Array<{ type: "text"; text: string } | ToolCallMessagePart<any>> => [
           ...(text ? [{ type: "text" as const, text }] : []),
           ...toolCalls.values(),
@@ -501,15 +502,16 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
             }
           }
           if (type === "tool.call") {
-            const toolCallId = String(eventValue(event, "tool_call_id", "toolCallId", "id") || `tool-${toolCalls.size + 1}`);
+            const toolCallId = String(eventValue(event, "tool_call_id", "toolCallId") || event.id || `tool-${toolCalls.size + 1}`);
             const toolName = String(eventValue(event, "tool_name", "toolName", "name") || "tool");
             const rawArgs = eventValue(event, "args", "arguments", "input");
             const { args, argsText } = jsonArgs(rawArgs);
             toolCalls.set(toolCallId, { type: "tool-call", toolCallId, toolName, args, argsText, isPreliminary: true });
+            lastToolCallId = toolCallId;
             if (options.streamingMode !== "buffered") yield emitContent({ type: "running" });
           }
           if (type === "tool.result") {
-            const toolCallId = String(eventValue(event, "tool_call_id", "toolCallId", "id") || "");
+            const toolCallId = String(eventValue(event, "tool_call_id", "toolCallId") || lastToolCallId || "");
             const previous = toolCalls.get(toolCallId);
             if (previous) {
               const result = eventValue(event, "result", "output", "text");
