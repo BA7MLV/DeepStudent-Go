@@ -19,6 +19,8 @@ runtime migration is complete.
 - First-run onboarding for learning goal, mode, model label, and runtime label
 - Chat, learning resources, tasks, skills, flashcards, settings, and theme views
 - MyGo desktop entry point and typed health bridge
+- Native MyGo app/window menus, persisted window bounds, hidden-titlebar drag
+  chrome, and a native file-drop hook (React still owns Chat and drop zones)
 - Versioned runtime envelope notes in [`protocol/runtime-v1.md`](protocol/runtime-v1.md)
 - GitHub Pages and unsigned macOS arm64 workflow definitions
 
@@ -36,7 +38,8 @@ React shell (Vite)
   └─ typed MyGo health bridge when running in the desktop shell
           │
           ▼
-      Go `HealthService` (health only in this branch)
+      Go desktop shell (native menu, window chrome, file-drop event)
+        └─ `HealthService` bridge (health only in this branch)
 
 Future seam: versioned runtime.v1 request/event contract
 ```
@@ -48,7 +51,7 @@ adds HTTP/SSE, persistence, and provider-neutral runtime packages.
 
 ## Technology
 
-- Go 1.27.1 module and MyGo 0.1.22 desktop runtime
+- Go 1.27.1 module and MyGo 0.2.4 desktop runtime
 - React 19, TypeScript, Vite, and `@assistant-ui/react`
 - Bun for workspace install and scripts (Node/npm lockfile is retained for
   repository tooling; Bun is what CI invokes)
@@ -97,14 +100,18 @@ The shell can also be run through MyGo after generating the typed bindings:
 
 ```sh
 bun install
-go install github.com/egoist/mygo/cmd/mygo@v0.1.22
+go install github.com/egoist/mygo/cmd/mygo@v0.2.4
 mygo generate
 bun run build -- -platform darwin/arm64
 ```
 
 `mygo.config.ts` sets the development URL to Vite, embeds `frontend/dist` for
-packaged builds, and configures macOS 12+ plus a Linux metadata profile. Builds
-are unsigned (`signingIdentity: "-"`) and are intended for local evaluation.
+packaged builds, and configures macOS 12+ plus a Linux metadata profile. The Go
+entry point uses MyGo 0.2.4's native app/window menu roles, remembers the main
+window with `StateKey`, keeps the title bar hidden while React draws a drag
+region, and logs file drops that land outside React's explicit drop zones.
+Builds are unsigned (`signingIdentity: "-"`) and are intended for local
+evaluation.
 
 ## Build and test
 
@@ -184,7 +191,7 @@ To build locally on an Apple Silicon Mac:
 
 ```sh
 bun install
-go install github.com/egoist/mygo/cmd/mygo@v0.1.22
+go install github.com/egoist/mygo/cmd/mygo@v0.2.4
 mygo generate
 bun run build -- -platform darwin/arm64
 ```
