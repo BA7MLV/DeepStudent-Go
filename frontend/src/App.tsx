@@ -1,10 +1,15 @@
 import {
+  ActionBarPrimitive,
+  AuiIf,
   AssistantRuntimeProvider,
+  BranchPickerPrimitive,
   ComposerPrimitive,
   MessagePartPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   unstable_useComposerInput,
+  useAui,
+  useAuiState,
   useLocalRuntime,
   type AttachmentAdapter,
   type ThreadComposerRuntime,
@@ -22,12 +27,17 @@ import {
   Bug,
   Cards,
   CaretDown,
+  CaretLeft,
+  CaretRight,
   CheckSquare,
   CheckCircle,
+  Check,
+  Copy,
   Gear,
   List,
   MagnifyingGlass,
   Microphone,
+  PencilSimple,
   Pause,
   Play,
   Plus,
@@ -38,6 +48,7 @@ import {
   Wrench,
   X,
   type Icon as PhosphorIcon,
+  DownloadSimple,
 } from "@phosphor-icons/react";
 import { HealthService } from "./mygo";
 import { createGoRuntimeAdapter } from "./go-runtime";
@@ -212,16 +223,6 @@ const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "flashcards", label: "闪卡", icon: "stack" },
 ];
 
-const quickPrompts: Array<{ label: string; icon: IconName }> = [
-  { label: "复习今天的课程", icon: "book" },
-  { label: "整理一份学习笔记", icon: "book" },
-  { label: "解释一个概念", icon: "brain" },
-  { label: "生成知识点卡片", icon: "cards" },
-  { label: "制定复习计划", icon: "check" },
-  { label: "总结这段资料", icon: "stack" },
-  { label: "创建学习线程", icon: "sparkle" },
-];
-
 const phosphorIcons: Record<IconName, PhosphorIcon> = {
   sparkle: Sparkle,
   book: BookOpen,
@@ -336,34 +337,95 @@ const StubAdapter: ChatModelAdapter = {
   },
 };
 
-function ChatMessage() {
+/**
+ * ChatGPT's example keeps text rendering as a named component so the message
+ * primitive can swap in markdown/tool renderers without changing the thread.
+ * DeepStudent intentionally keeps the renderer dependency-free and lets the
+ * primitive stream text smoothly into a block-level surface.
+ */
+function MarkdownText() {
+  return <MessagePartPrimitive.Text component="div" smooth />;
+}
+
+function ChatGPTAttachmentUI() {
+  const aui = useAui();
+  const isComposer = aui.attachment.source !== "message";
   return (
-    <MessagePrimitive.Root className="ds-chat-message">
-      <MessagePrimitive.Parts components={{ Text: MessageText }} />
-    </MessagePrimitive.Root>
+    <AttachmentPrimitive.Root className="ds-chat-attachment">
+      <AuiIf condition={(state) => state.attachment.type === "image"}>
+        <AttachmentPrimitive.unstable_Thumb className="ds-chat-attachment__thumb ds-chat-attachment__thumb--image" />
+      </AuiIf>
+      <AuiIf condition={(state) => state.attachment.type !== "image"}>
+        <AttachmentPrimitive.unstable_Thumb className="ds-chat-attachment__thumb" />
+      </AuiIf>
+      <span className="ds-chat-attachment__name"><AttachmentPrimitive.Name /></span>
+      {isComposer && <AttachmentPrimitive.Remove className="ds-chat-attachment__remove" aria-label="移除附件"><Icon name="x" size={13} /></AttachmentPrimitive.Remove>}
+    </AttachmentPrimitive.Root>
   );
 }
 
-function MessageText() {
-  return <MessagePartPrimitive.Text component="span" smooth />;
+function ChatBranchPicker() {
+  return (
+    <BranchPickerPrimitive.Root hideWhenSingleBranch className="ds-chat-branch-picker">
+      <BranchPickerPrimitive.Previous className="ds-chat-action" aria-label="上一分支"><CaretLeft size={14} /></BranchPickerPrimitive.Previous>
+      <span><BranchPickerPrimitive.Number />/<BranchPickerPrimitive.Count /></span>
+      <BranchPickerPrimitive.Next className="ds-chat-action" aria-label="下一分支"><CaretRight size={14} /></BranchPickerPrimitive.Next>
+    </BranchPickerPrimitive.Root>
+  );
 }
 
-function ChatEmptyState() {
+function ChatActionBar({ assistant = false }: { assistant?: boolean }) {
   return (
-    <div className="ds-chat-center">
-      <h2 id="chat-welcome-title">把今天学会的，变成真正掌握的</h2>
+    <div className="ds-chat-message-actions">
+      <ActionBarPrimitive.Root hideWhenRunning autohide="always" autohideFloat="single-branch" className="ds-chat-action-bar">
+        <ActionBarPrimitive.Copy className="ds-chat-action" aria-label="复制"><AuiIf condition={(state) => state.message.isCopied}><Check size={14} /></AuiIf><AuiIf condition={(state) => !state.message.isCopied}><Copy size={14} /></AuiIf></ActionBarPrimitive.Copy>
+        {!assistant && <ActionBarPrimitive.Edit className="ds-chat-action" aria-label="编辑"><PencilSimple size={14} /></ActionBarPrimitive.Edit>}
+        {assistant && <ActionBarPrimitive.Reload className="ds-chat-action" aria-label="重新生成"><ArrowCounterClockwise size={14} /></ActionBarPrimitive.Reload>}
+        {assistant && <ActionBarPrimitive.ExportMarkdown className="ds-chat-action" aria-label="导出 Markdown"><DownloadSimple size={14} /></ActionBarPrimitive.ExportMarkdown>}
+      </ActionBarPrimitive.Root>
+      <ChatBranchPicker />
     </div>
   );
 }
 
-function ChatQuickPrompts() {
-  const composer = unstable_useComposerInput();
-  const rows = [quickPrompts.slice(0, 3), quickPrompts.slice(3, 5), quickPrompts.slice(5, 7)];
-  return <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
-    {rows.map((row, index) => <div className={`ds-chat-prompts__row ds-chat-prompts__row--${index + 1}`} key={`prompt-row-${index}`}>
-      {row.map((prompt) => <button key={prompt.label} className="ds-chat-prompt" type="button" onClick={() => composer.setText(prompt.label)}><Icon name={prompt.icon} size={15} /><span>{prompt.label}</span></button>)}
-    </div>)}
-  </div>;
+function ChatEditComposer() {
+  return (
+    <ComposerPrimitive.Root className="ds-chat-edit-composer">
+      <ComposerPrimitive.Input aria-label="编辑消息" />
+      <div className="ds-chat-edit-composer__actions">
+        <ComposerPrimitive.Cancel className="ds-secondary-button">取消</ComposerPrimitive.Cancel>
+        <ComposerPrimitive.Send className="ds-primary-button">发送</ComposerPrimitive.Send>
+      </div>
+    </ComposerPrimitive.Root>
+  );
+}
+
+function ChatMessage() {
+  const isEditing = useAuiState((state) => state.message.composer.isEditing);
+  if (isEditing) return <ChatEditComposer />;
+  return (
+    <MessagePrimitive.Root className="ds-chat-message">
+      <MessagePrimitive.If user>
+        <div className="ds-chat-message__user">
+          <div className="ds-chat-message__attachments"><MessagePrimitive.Attachments components={{ Attachment: ChatGPTAttachmentUI }} /></div>
+          <div className="ds-chat-message__bubble"><MessagePrimitive.Parts /></div>
+          <ChatActionBar />
+        </div>
+      </MessagePrimitive.If>
+      <MessagePrimitive.If assistant>
+        <div className="ds-chat-message__assistant">
+          <div className="ds-chat-message__content">
+            <MessagePrimitive.Parts>{({ part }) => {
+              if (part.type === "text") return <MarkdownText />;
+              if (part.type === "tool-call") return part.toolUI ?? <div className="ds-chat-tool-call">{part.toolName}</div>;
+              return null;
+            }}</MessagePrimitive.Parts>
+          </div>
+          <ChatActionBar assistant />
+        </div>
+      </MessagePrimitive.If>
+    </MessagePrimitive.Root>
+  );
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -979,20 +1041,29 @@ function ChatWorkspace({ session, onSessionChange }: { session: ChatSession; onS
   };
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <section className="ds-chat-page" aria-labelledby="chat-welcome-title">
+      <section className="ds-chat-page ds-chatgpt-page" aria-labelledby="chat-welcome-title">
         <ThreadPrimitive.Root className="ds-chat-thread">
-          <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
-            <div className="ds-timeline-status" aria-live="polite"><span>{messageCount ? `${messageCount} 条消息` : "新会话"}</span>{!isOnline && <span className="ds-outbox-pill is-queued">离线 · 稍后发送</span>}</div>
-            <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-            <ThreadPrimitive.Empty>
-              <div className="ds-chat-empty-state">
-                <ChatEmptyState />
-                <ChatQuickPrompts />
+          <AuiIf condition={(state) => state.thread.isEmpty}>
+            <div className="ds-chatgpt-empty">
+              <div className="ds-chatgpt-empty__inner">
+                <h1>从哪里开始？</h1>
+                <div className="ds-composer-dock"><ChatComposer runtime={runtime} outboxStatus={outboxStatus} /></div>
               </div>
-            </ThreadPrimitive.Empty>
-            {!isAtBottom && <button type="button" className="ds-scroll-bottom" onClick={jumpToBottom} aria-label="跳到底部">{unread ? `${unread} 条新消息 ↓` : "跳到底部 ↓"}</button>}
-          </ThreadPrimitive.Viewport>
-          <div className="ds-composer-dock"><ChatComposer runtime={runtime} outboxStatus={outboxStatus} /></div>
+            </div>
+          </AuiIf>
+          <AuiIf condition={(state) => !state.thread.isEmpty}>
+            <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport ds-chatgpt-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
+              <div className="ds-timeline-status" aria-live="polite"><span>{messageCount ? `${messageCount} 条消息` : "新会话"}</span>{!isOnline && <span className="ds-outbox-pill is-queued">离线 · 稍后发送</span>}</div>
+              <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+              <ThreadPrimitive.ViewportFooter className="ds-composer-dock ds-chatgpt-footer">
+                <ThreadPrimitive.ScrollToBottom asChild>
+                  <button type="button" className="ds-scroll-bottom" aria-label="跳到底部">{unread ? `${unread} 条新消息 ↓` : "跳到底部 ↓"}</button>
+                </ThreadPrimitive.ScrollToBottom>
+                <ChatComposer runtime={runtime} outboxStatus={outboxStatus} />
+                <p className="ds-chatgpt-disclaimer">DeepStudent 可能会出错，请核对重要信息</p>
+              </ThreadPrimitive.ViewportFooter>
+            </ThreadPrimitive.Viewport>
+          </AuiIf>
         </ThreadPrimitive.Root>
       </section>
     </AssistantRuntimeProvider>
