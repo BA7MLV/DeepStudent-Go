@@ -119,7 +119,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ds-chat-action { display:inline-grid; place-items:center; width:27px; height:27px; border-radius:7px; background:transparent; color:var(--ds-muted); }
 .ds-chat-action:hover { background:var(--ds-hover); color:var(--ds-fg); }
 .ds-chat-branch-picker { display:inline-flex; align-items:center; gap:2px; color:var(--ds-muted); font-size:11px; }
-.ds-chat-tool-call { padding:7px 10px; border:1px solid var(--ds-border); border-radius:9px; background:var(--ds-panel-muted); color:var(--ds-muted); font-size:11px; }
+.ds-chat-tool-call { display:grid; grid-template-columns:22px minmax(0,1fr) auto; gap:7px; align-items:center; width:min(100%,520px); padding:8px 10px; border:1px solid var(--ds-border); border-radius:9px; background:var(--ds-panel-muted); color:var(--ds-muted); font-size:11px; }
+.ds-chat-tool-call.is-running { border-color:color-mix(in srgb,var(--ds-title-accent) 28%,var(--ds-border)); }
+.ds-chat-tool-call.is-complete { border-color:color-mix(in srgb,#52a675 40%,var(--ds-border)); }
+.ds-chat-tool-call__icon { display:grid; place-items:center; width:22px; height:22px; border-radius:6px; color:var(--ds-title-accent); background:color-mix(in srgb,var(--ds-title-accent) 12%,var(--ds-panel)); }
+.ds-chat-tool-call.is-complete .ds-chat-tool-call__icon,.ds-chat-tool-call.is-complete em { color:#2f9a67; }
+.ds-chat-tool-call__copy { display:grid; min-width:0; gap:1px; }
+.ds-chat-tool-call__copy b,.ds-chat-tool-call__copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ds-chat-tool-call__copy b { color:var(--ds-fg); font-size:11px; font-weight:600; }
+.ds-chat-tool-call__copy small { font-size:10px; }
+.ds-chat-tool-call em { color:var(--ds-title-accent); font-size:10px; font-style:normal; }
 .ds-chat-edit-composer { display:flex; width:min(760px,100%); flex-direction:column; gap:7px; margin:0 auto; padding:10px 12px; border-radius:18px; background:var(--ds-panel-muted); }
 .ds-chat-edit-composer textarea { min-height:34px; width:100%; resize:none; border:0; outline:0; background:transparent; color:var(--ds-fg); }
 .ds-chat-edit-composer__actions { display:flex; justify-content:flex-end; gap:7px; }
