@@ -1,6 +1,7 @@
 import type {
   ChatModelAdapter,
   ChatModelRunResult,
+  ToolCallMessagePart,
   ThreadMessage,
 } from "@assistant-ui/react";
 
@@ -73,6 +74,8 @@ export type GoRuntimeAdapterOptions = {
   provider?: string;
   /** Optional model route sent to the Go model catalog. */
   model?: string;
+  /** Controls whether intermediate deltas are committed as they arrive. */
+  streamingMode?: "events" | "buffered";
   /** Optional local adapter used when the Go service is unavailable. */
   fallback?: ChatModelAdapter;
   /** Dependency injection keeps the adapter straightforward to test. */
@@ -197,6 +200,31 @@ const appendEventText = (current: string, event: GoRuntimeEvent): string => {
   // of a delta. Avoid duplicating it when it already contains our prefix.
   if (next === current || next.startsWith(current)) return next;
   return current + next;
+};
+
+const eventValue = (event: GoRuntimeEvent, ...keys: string[]): unknown => {
+  const record = event as unknown as Record<string, unknown>;
+  for (const key of keys) {
+    if (record[key] !== undefined) return record[key];
+    if (event.metadata && event.metadata[key] !== undefined) return event.metadata[key];
+  }
+  return undefined;
+};
+
+const jsonArgs = (value: unknown): { args: Readonly<Record<string, unknown>>; argsText: string } => {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return { args: parsed as Readonly<Record<string, unknown>>, argsText: value };
+    } catch {
+      // Keep partial argument text while a provider is still streaming JSON.
+    }
+    return { args: {}, argsText: value };
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { args: value as Readonly<Record<string, unknown>>, argsText: JSON.stringify(value) };
+  }
+  return { args: {}, argsText: value === undefined ? "{}" : JSON.stringify(value) };
 };
 
 const normalizeEventType = (event: GoRuntimeEvent, frameType?: string): string => {
@@ -442,6 +470,7 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
         if (sessionId) body.session_id = sessionId;
         if (provider) body.provider = provider;
         if (model) body.model = model;
+        if (options.streamingMode) body.streaming_mode = options.streamingMode;
         if (reasoningEffort) body.reasoning_effort = reasoningEffort;
         if (maxTokens) body.max_tokens = maxTokens;
 
@@ -456,29 +485,52 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
         runId = start.run_id;
         const eventsUrl = start.events_url ? new URL(start.events_url, startResponse.url || runtimeUrl(baseUrl, "/runs")).toString() : runtimeUrl(baseUrl, `/runs/${encodeURIComponent(runId)}/events`);
         let text = "";
+        const toolCalls = new Map<string, ToolCallMessagePart<any>>();
+        const content = (): Array<{ type: "text"; text: string } | ToolCallMessagePart<any>> => [
+          ...(text ? [{ type: "text" as const, text }] : []),
+          ...toolCalls.values(),
+        ];
+        const emitContent = (status: NonNullable<ChatModelRunResult["status"]>) => ({ content: content(), status });
         for await (const event of streamRun({ eventsUrl, signal: controller.signal, fetchImpl, eventSourceImpl, reconnectAttempts, reconnectDelayMs })) {
           const type = normalizeEventType(event);
-          if (type === "message.delta" || type === "run" || type === "run.completed" || type === "completed") {
+          if (type === "message.delta" || type === "run") {
             const next = appendEventText(text, event);
             if (next !== text) {
               text = next;
-              yield assistantTextWithStatus(text, { type: "running" });
+              if (options.streamingMode !== "buffered") yield emitContent({ type: "running" });
             }
+          }
+          if (type === "tool.call") {
+            const toolCallId = String(eventValue(event, "tool_call_id", "toolCallId", "id") || `tool-${toolCalls.size + 1}`);
+            const toolName = String(eventValue(event, "tool_name", "toolName", "name") || "tool");
+            const rawArgs = eventValue(event, "args", "arguments", "input");
+            const { args, argsText } = jsonArgs(rawArgs);
+            toolCalls.set(toolCallId, { type: "tool-call", toolCallId, toolName, args, argsText, isPreliminary: true });
+            if (options.streamingMode !== "buffered") yield emitContent({ type: "running" });
+          }
+          if (type === "tool.result") {
+            const toolCallId = String(eventValue(event, "tool_call_id", "toolCallId", "id") || "");
+            const previous = toolCalls.get(toolCallId);
+            if (previous) {
+              const result = eventValue(event, "result", "output", "text");
+              toolCalls.set(toolCallId, { ...previous, result, isPreliminary: false });
+            }
+            if (options.streamingMode !== "buffered") yield emitContent({ type: "running" });
           }
           if (type === "run.error" || type === "error") {
             const message = event.error_message || "Go runtime failed to generate a response";
             completed = true;
-            yield assistantTextWithStatus(text, { type: "incomplete", reason: "error", error: { code: event.error_code || "runtime_error", message } });
+            yield emitContent({ type: "incomplete", reason: "error", error: { code: event.error_code || "runtime_error", message } });
             return;
           }
           if (type === "run.canceled" || type === "canceled") {
             completed = true;
-            yield assistantTextWithStatus(text, { type: "incomplete", reason: "cancelled" });
+            yield emitContent({ type: "incomplete", reason: "cancelled" });
             return;
           }
           if (type === "run.completed" || type === "completed") {
             completed = true;
-            yield assistantTextWithStatus(text, { type: "complete", reason: "stop" });
+            yield emitContent({ type: "complete", reason: "stop" });
             return;
           }
         }

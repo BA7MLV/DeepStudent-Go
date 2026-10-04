@@ -139,6 +139,129 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .ds-chatgpt-footer { width:calc(100% + 28px); margin-inline:-14px; padding:8px 14px calc(8px + env(safe-area-inset-bottom)); backdrop-filter:blur(12px); }
 }
 
+/* Playground uses the same full-height conversation surface as a new chat.
+   Only the compact settings affordance floats above the thread. */
+.ds-playground-page { position:relative; }
+.ds-playground-toolbar { position:absolute; z-index:7; top:9px; right:24px; display:flex; align-items:center; gap:7px; }
+.ds-playground-model { max-width:min(48vw,360px); overflow:hidden; color:var(--ds-muted); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.ds-playground-toolbar .ds-icon-button { border:1px solid var(--ds-border); background:color-mix(in srgb,var(--ds-bg) 88%,transparent); }
+.ds-playground-page .ds-chat-thread { min-height:100%; }
+.ds-playground-page .ds-chat-message { margin-inline:auto; }
+@media (max-width:767px) {
+  .ds-playground-toolbar { top:5px; right:14px; }
+  .ds-playground-model { max-width:45vw; }
+}
+
+/* Conversation controls stay compact and out of the message flow. */
+.ds-chatgpt-footer { position:relative; }
+.ds-scroll-bottom {
+  position:absolute;
+  right:8px;
+  bottom:calc(100% + 8px);
+  display:grid;
+  place-items:center;
+  width:28px;
+  height:28px;
+  min-height:28px;
+  margin:0;
+  padding:0;
+  border:1px solid var(--ds-border);
+  border-radius:50%;
+  background:color-mix(in srgb,var(--ds-panel) 94%,transparent);
+  color:var(--ds-muted);
+  box-shadow:0 3px 12px rgba(0,0,0,.12);
+}
+.ds-scroll-bottom:hover { background:var(--ds-hover); color:var(--ds-fg); }
+
+/* Session rows expose a quiet delete affordance without nesting buttons. */
+.ds-thread-row { gap:0; padding:0; }
+.ds-thread-row__main {
+  display:flex;
+  align-items:center;
+  min-width:0;
+  flex:1;
+  min-height:32px;
+  gap:8px;
+  padding:0 7px 0 10px;
+  border-radius:var(--ds-radius-row);
+  background:transparent;
+  color:inherit;
+  text-align:left;
+  font-size:13px;
+}
+.ds-thread-row__main > span:nth-child(2) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ds-thread-row__main small { margin-left:auto; }
+.ds-thread-row__delete {
+  display:grid;
+  place-items:center;
+  width:24px;
+  height:24px;
+  flex:0 0 24px;
+  margin-right:4px;
+  border-radius:6px;
+  background:transparent;
+  color:var(--ds-muted);
+  opacity:0;
+  transition:opacity 140ms var(--ds-ease),background-color 140ms var(--ds-ease),color 140ms var(--ds-ease);
+}
+.ds-thread-row:hover .ds-thread-row__delete,
+.ds-thread-row:focus-within .ds-thread-row__delete { opacity:1; }
+.ds-thread-row__delete:hover { background:var(--ds-hover); color:var(--ds-fg); }
+.ds-thread-row[data-active="true"] { background:var(--ds-selection); color:var(--ds-fg); font-weight:500; }
+.ds-thread-row[data-active="true"] .ds-thread-row__main { color:inherit; }
+
+/* Settings are a focused modal so opening them does not replace the workspace. */
+.ds-settings-modal {
+  position:fixed;
+  z-index:80;
+  inset:0;
+  display:grid;
+  place-items:center;
+  padding:24px;
+  background:color-mix(in srgb,var(--ds-bg) 72%,transparent);
+  backdrop-filter:blur(8px);
+}
+.ds-settings-modal__backdrop {
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  background:color-mix(in srgb,var(--ds-bg) 62%,transparent);
+}
+.ds-settings-modal__card {
+  position:relative;
+  display:flex;
+  width:min(720px,100%);
+  max-height:min(720px,calc(100dvh - 48px));
+  flex-direction:column;
+  overflow:hidden;
+  border:1px solid var(--ds-border);
+  border-radius:18px;
+  background:var(--ds-panel);
+  box-shadow:0 28px 90px rgba(0,0,0,.22);
+  animation:ds-fade-up 220ms var(--ds-ease) both;
+}
+.ds-settings-modal__header {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:18px;
+  padding:20px 22px 16px;
+  border-bottom:1px solid var(--ds-border);
+}
+.ds-settings-modal__header h2 { margin:7px 0 0; font-size:21px; font-weight:600; letter-spacing:-.025em; }
+.ds-settings-modal__body { display:grid; grid-template-columns:170px minmax(0,1fr); gap:16px; min-height:0; padding:16px; overflow:auto; }
+.ds-settings-modal__body .ds-settings-nav { align-content:start; height:max-content; padding:7px; }
+.ds-settings-modal__body .ds-settings-nav button:disabled { cursor:default; opacity:.45; }
+.ds-settings-modal__body .ds-settings-content { min-width:0; }
+@media (max-width: 767px) {
+  .ds-settings-modal { align-items:end; padding:0; }
+  .ds-settings-modal__card { width:100%; max-height:calc(100dvh - 12px); border-radius:16px 16px 0 0; }
+  .ds-settings-modal__body { grid-template-columns:1fr; gap:10px; padding:12px 14px calc(14px + env(safe-area-inset-bottom)); }
+  .ds-settings-modal__body .ds-settings-nav { display:flex; overflow:auto; }
+  .ds-settings-modal__body .ds-settings-nav button { white-space:nowrap; }
+}
+
 /* Stream debug playground: all output is intentionally local and simulated. */
 .ds-stream-debug-page { max-width:1280px; padding-top:26px; }
 .ds-stream-debug__heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; margin-bottom:20px; }
@@ -771,4 +894,71 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   }
   .ds-composer-shell::after { transform:none; }
   .ds-composer-shell[data-voice-recording="true"] .ds-voice-overlay__ripple { filter:none; }
+}
+
+/* Mobile voice feedback stays in the bottom dock as one quiet, theme-colored
+   waterline. Keep the composer capsule readable and avoid a competing overlay,
+   aurora, or expanding ring animation. */
+.ds-composer-shell::before,
+.ds-composer-shell::after { display:none !important; }
+.ds-voice-wave { display:none; }
+.ds-composer-shell > .ds-voice-recording-status {
+  border:0;
+  background:transparent;
+  box-shadow:none;
+  padding:0;
+  color:var(--ds-voice-color,var(--ds-title-accent));
+  font-size:11px;
+  font-variant-numeric:tabular-nums;
+}
+.ds-composer-shell > .ds-voice-recording-status time { min-width:0; color:inherit; }
+.ds-composer-shell[data-voice-cancel="true"] > .ds-voice-recording-status {
+  border:0;
+  background:transparent;
+  box-shadow:none;
+  color:#dc2626;
+}
+@media (max-width: 767px) {
+  .ds-composer-dock {
+    position:sticky;
+    bottom:0;
+    z-index:8;
+    isolation:isolate;
+    background:transparent;
+  }
+  .ds-composer-shell > .ds-voice-wave {
+    position:absolute;
+    z-index:0;
+    inset:-10px -14px calc(-10px - env(safe-area-inset-bottom));
+    display:block;
+    overflow:hidden;
+    border-radius:28px 28px 0 0;
+    pointer-events:none;
+    opacity:0;
+    background:linear-gradient(180deg, color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) 7%,transparent), color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) 15%,transparent));
+    transition:opacity 160ms var(--ds-ease),background-color 160ms var(--ds-ease);
+  }
+  .ds-composer-shell > .ds-voice-wave::before {
+    position:absolute;
+    top:-33px;
+    left:-8%;
+    width:116%;
+    height:74px;
+    border-radius:50% 50% 0 0 / 100% 100% 0 0;
+    background:color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) 17%,transparent);
+    box-shadow:0 -1px 0 color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) 28%,transparent);
+    content:"";
+    transform:rotate(-1deg);
+  }
+  .ds-composer-shell[data-voice-recording="true"] > .ds-voice-wave {
+    opacity:calc(.56 + var(--ds-voice-level) * .18);
+  }
+  .ds-composer-shell[data-voice-cancel="true"] > .ds-voice-wave {
+    opacity:.78;
+    background:linear-gradient(180deg, color-mix(in srgb,#dc2626 10%,transparent), color-mix(in srgb,#dc2626 22%,transparent));
+  }
+  .ds-composer-shell[data-voice-cancel="true"] > .ds-voice-wave::before {
+    background:color-mix(in srgb,#dc2626 24%,transparent);
+    box-shadow:0 -1px 0 color-mix(in srgb,#dc2626 38%,transparent);
+  }
 }

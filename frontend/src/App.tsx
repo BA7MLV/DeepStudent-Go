@@ -363,6 +363,16 @@ function ChatEditComposer() {
   );
 }
 
+function ChatToolCallPart({ part }: { part: ToolCallMessagePart }) {
+  const completed = part.result !== undefined && !part.isPreliminary;
+  const detail = completed ? String(part.result) : (part.argsText || JSON.stringify(part.args));
+  return <div className={`ds-chat-tool-call${completed ? " is-complete" : " is-running"}`}>
+    <span className="ds-chat-tool-call__icon"><Icon name={completed ? "check-circle" : "wrench"} size={13} /></span>
+    <span className="ds-chat-tool-call__copy"><b>{part.toolName}</b><small>{detail}</small></span>
+    <em>{completed ? "完成" : "运行中"}</em>
+  </div>;
+}
+
 function ChatMessage() {
   const isEditing = useAuiState((state) => state.message.composer.isEditing);
   if (isEditing) return <ChatEditComposer />;
@@ -380,7 +390,7 @@ function ChatMessage() {
           <div className="ds-chat-message__content">
             <MessagePrimitive.Parts>{({ part }) => {
               if (part.type === "text") return <MarkdownText />;
-              if (part.type === "tool-call") return part.toolUI ?? <div className="ds-chat-tool-call">{part.toolName}</div>;
+              if (part.type === "tool-call") return part.toolUI ?? <ChatToolCallPart part={part} />;
               return null;
             }}</MessagePrimitive.Parts>
           </div>
@@ -913,13 +923,7 @@ function ChatComposer({ runtime, outboxStatus = "idle" }: { runtime: ReturnType<
     "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
   } as React.CSSProperties;
   return <div className="ds-composer-shell" data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} style={overlayStyle}>
-    <div className="ds-voice-overlay" aria-hidden="true">
-      <div className="ds-voice-overlay__wash" />
-      <div className="ds-voice-overlay__aurora" />
-      <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--one" />
-      <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--two" />
-      <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--three" />
-    </div>
+    <div className="ds-voice-wave" aria-hidden="true" />
     <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
       <div className="ds-composer__attachments" aria-label="待发送附件">
         <ComposerPrimitive.Attachments>
@@ -939,8 +943,7 @@ function ChatComposer({ runtime, outboxStatus = "idle" }: { runtime: ReturnType<
       </div>
     </ComposerPrimitive.Root>
     <div className="ds-voice-recording-status" role="status" aria-live="polite" aria-hidden={!voiceState.recording}>
-      <time aria-hidden="true">{formatRecordingElapsed(voiceState.elapsed)}</time>
-      <span>上滑取消</span>
+      <time>{formatRecordingElapsed(voiceState.elapsed)}</time>
     </div>
   </div>;
 }
@@ -1022,9 +1025,9 @@ function ChatWorkspace({ session, onSessionChange }: { session: ChatSession; onS
               <div className="ds-timeline-status" aria-live="polite"><span>{messageCount ? `${messageCount} 条消息` : "新会话"}</span>{!isOnline && <span className="ds-outbox-pill is-queued">离线 · 稍后发送</span>}</div>
               <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
               <ThreadPrimitive.ViewportFooter className="ds-composer-dock ds-chatgpt-footer">
-                <ThreadPrimitive.ScrollToBottom asChild>
-                  <button type="button" className="ds-scroll-bottom" aria-label="跳到底部">{unread ? `${unread} 条新消息 ↓` : "跳到底部 ↓"}</button>
-                </ThreadPrimitive.ScrollToBottom>
+                {(!isAtBottom || unread > 0) && <ThreadPrimitive.ScrollToBottom asChild>
+                  <button type="button" className="ds-scroll-bottom" aria-label={unread ? `${unread} 条新消息，跳到底部` : "跳到底部"} title={unread ? `${unread} 条新消息` : "跳到底部"}><Icon name="chevron-down" size={15} /></button>
+                </ThreadPrimitive.ScrollToBottom>}
                 <ChatComposer runtime={runtime} outboxStatus={outboxStatus} />
                 <p className="ds-chatgpt-disclaimer">DeepStudent 可能会出错，请核对重要信息</p>
               </ThreadPrimitive.ViewportFooter>
@@ -1036,9 +1039,6 @@ function ChatWorkspace({ session, onSessionChange }: { session: ChatSession; onS
   );
 }
 
-type StreamStatus = "idle" | "running" | "paused" | "complete" | "error";
-type StreamEventKind = "run" | "token" | "tool" | "render" | "status" | "error";
-type StreamEvent = { id: number; kind: StreamEventKind; label: string; detail: string; tone?: "running" | "complete" | "paused" | "error"; payload?: unknown };
 type StreamDebugSettings = {
   provider: "siliconflow" | "deepseek" | "openai" | "custom";
   model: string;
@@ -1052,10 +1052,10 @@ const streamSettingsStorageKey = "dstu-stream-settings-v1";
 const defaultStreamDebugSettings: StreamDebugSettings = {
   provider: "siliconflow",
   model: "DeepSeek-R1-Distill-Qwen-7B",
-  baseUrl: "https://api.siliconflow.cn/v1",
+  baseUrl: "/api/v1",
   streamingMode: "events",
   timeout: 30,
-  retry: 1,
+  retry: 2,
 };
 
 function readStreamDebugSettings(): StreamDebugSettings {
@@ -1075,275 +1075,73 @@ function readStreamDebugSettings(): StreamDebugSettings {
   }
 }
 
-type RuntimeStreamRequest = {
-  version: "deepstudent.runtime.v1";
-  id: string;
-  method: "llm.stream";
-  params: {
-    provider: StreamDebugSettings["provider"];
-    model: string;
-    baseUrl: string;
-    streamingMode: StreamDebugSettings["streamingMode"];
-    messages: Array<{ role: string; content: string }>;
-  };
-};
-type RuntimeStreamEvent = {
-  version: "deepstudent.runtime.v1";
-  id: string;
-  type: "llm.run.start" | "llm.delta" | "llm.tool.call" | "llm.tool.result" | "llm.render" | "llm.run.complete" | "llm.error";
-  data: Record<string, unknown>;
-};
-type RuntimeStreamAdapter = (request: RuntimeStreamRequest, signal: AbortSignal) => AsyncIterable<RuntimeStreamEvent>;
-
-declare global {
-  interface Window {
-    deepstudent?: { runtime?: { stream?: RuntimeStreamAdapter } };
-  }
-}
-
-const streamResponseTokens = [
-  "我先把你的问题拆成几个小步骤。",
-  "接着读取本地上下文，",
-  "再把结果整理成可以继续追问的回复。",
-  "你可以看到每个增量逐步到达。",
-  "如果需要，随时暂停、继续或清空这次运行。",
-];
-
-const streamDelay = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
-  if (signal.aborted) { reject(new DOMException("Stream cancelled", "AbortError")); return; }
-  const timer = window.setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
-  const onAbort = () => { window.clearTimeout(timer); signal.removeEventListener("abort", onAbort); reject(new DOMException("Stream cancelled", "AbortError")); };
-  signal.addEventListener("abort", onAbort, { once: true });
-});
-
-const streamWaitForResume = (control: StreamControl, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
-  if (!control.paused) { resolve(); return; }
-  const onAbort = () => { control.waiters = control.waiters.filter((waiter) => waiter !== resume); reject(new DOMException("Stream cancelled", "AbortError")); };
-  const resume = () => { signal.removeEventListener("abort", onAbort); resolve(); };
-  control.waiters.push(resume);
-  signal.addEventListener("abort", onAbort, { once: true });
-});
-
-type StreamControl = { paused: boolean; generation: number; waiters: Array<() => void> };
-
-function makeRuntimeRequest(settings: StreamDebugSettings, messages: readonly { role: string; content: unknown }[]): RuntimeStreamRequest {
-  return {
-    version: "deepstudent.runtime.v1",
-    id: `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    method: "llm.stream",
-    params: {
-      provider: settings.provider,
-      model: settings.model,
-      baseUrl: settings.baseUrl,
-      streamingMode: settings.streamingMode,
-      messages: messages.map((message) => ({ role: message.role, content: Array.isArray(message.content) ? message.content.map((part) => typeof part === "object" && part !== null && "text" in part ? String((part as { text?: unknown }).text ?? "") : "").join("") : String(message.content ?? "") })),
-    },
-  };
-}
-
-async function* localRuntimeStream(request: RuntimeStreamRequest, signal: AbortSignal): AsyncIterable<RuntimeStreamEvent> {
-  const prompt = request.params.messages.at(-1)?.content.trim() || "继续学习";
-  const id = request.id;
-  yield { version: "deepstudent.runtime.v1", id, type: "llm.run.start", data: { provider: request.params.provider, model: request.params.model } };
-  for (const [index, text] of [`收到你的问题「${prompt}」。`, ...streamResponseTokens].entries()) {
-    await streamDelay(index === 0 ? 180 : 145, signal);
-    yield { version: "deepstudent.runtime.v1", id, type: "llm.delta", data: { index, text } };
-    if (index === 1) {
-      await streamDelay(120, signal);
-      const toolCallId = `${id}-context`;
-      yield { version: "deepstudent.runtime.v1", id, type: "llm.tool.call", data: { toolCallId, toolName: "local_context", args: { query: prompt.slice(0, 72) } } };
-      await streamDelay(360, signal);
-      yield { version: "deepstudent.runtime.v1", id, type: "llm.tool.result", data: { toolCallId, toolName: "local_context", result: "2 个本地示例" } };
-    }
-    yield { version: "deepstudent.runtime.v1", id, type: "llm.render", data: { progress: (index + 1) / 6, target: "message" } };
-  }
-  yield { version: "deepstudent.runtime.v1", id, type: "llm.run.complete", data: { finishReason: "stop" } };
-}
-
-function StreamToolPart({ toolName, args, result, isPreliminary }: ToolCallMessagePartProps) {
-  const isDone = result !== undefined && !isPreliminary;
-  return <div className={`ds-stream-tool-event${isDone ? " is-complete" : " is-running"}`}>
-    <span className="ds-stream-tool-event__icon"><Icon name={isDone ? "check-circle" : "wrench"} size={14} /></span>
-    <span className="ds-stream-tool-event__copy"><b>{toolName === "local_context" ? "读取本地上下文" : toolName}</b><small>{isDone ? `完成 · ${String(result)}` : `进行中 · ${JSON.stringify(args)}`}</small></span>
-    <em>{isDone ? "完成" : "运行中"}</em>
+function StreamDebugSettingsModal({ draft, onChange, onClose, onSave }: {
+  draft: StreamDebugSettings;
+  onChange: (patch: Partial<StreamDebugSettings>) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return <div className="ds-stream-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="stream-settings-title">
+    <button type="button" className="ds-stream-settings-modal__backdrop" aria-label="关闭设置" onClick={onClose} />
+    <form className="ds-stream-settings-modal__card" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
+      <div className="ds-stream-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />运行时设置</span><h3 id="stream-settings-title">LLM 连接配置</h3><p>这些选项只影响当前 playground 对话</p></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={onClose}><Icon name="x" size={16} /></button></div>
+      <div className="ds-stream-settings-modal__body">
+        <label className="ds-stream-setting-field"><span>Provider</span><select value={draft.provider} onChange={(event) => onChange({ provider: event.target.value as StreamDebugSettings["provider"] })}><option value="siliconflow">SiliconFlow</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">Custom</option></select></label>
+        <label className="ds-stream-setting-field"><span>Model</span><input value={draft.model} onChange={(event) => onChange({ model: event.target.value })} /></label>
+        <label className="ds-stream-setting-field"><span>Runtime API</span><input value={draft.baseUrl} onChange={(event) => onChange({ baseUrl: event.target.value })} placeholder="/api/v1" /></label>
+        <div className="ds-stream-settings-grid"><label className="ds-stream-setting-field"><span>Timeout (s)</span><input type="number" min={1} max={300} value={draft.timeout} onChange={(event) => onChange({ timeout: Math.max(1, Number(event.target.value) || 1) })} /></label><label className="ds-stream-setting-field"><span>Reconnect attempts</span><input type="number" min={0} max={5} value={draft.retry} onChange={(event) => onChange({ retry: Math.max(0, Number(event.target.value) || 0) })} /></label></div>
+        <fieldset className="ds-stream-setting-mode"><legend>Streaming mode</legend><label className={draft.streamingMode === "events" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="events" checked={draft.streamingMode === "events"} onChange={() => onChange({ streamingMode: "events" })} /><span><b>事件流</b><small>每个 delta 到达时立即更新回复</small></span></label><label className={draft.streamingMode === "buffered" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="buffered" checked={draft.streamingMode === "buffered"} onChange={() => onChange({ streamingMode: "buffered" })} /><span><b>缓冲</b><small>运行完成后一次性显示回复</small></span></label></fieldset>
+      </div>
+      <div className="ds-stream-settings-modal__footer"><button type="button" className="ds-secondary-button" onClick={onClose}>取消</button><button type="submit" className="ds-primary-button">保存设置</button></div>
+    </form>
   </div>;
 }
 
-function StreamMessageText() {
-  return <MessagePartPrimitive.Text component="span" smooth />;
-}
-
-function StreamDebugMessage() {
-  const parts = { Text: StreamMessageText, tools: { Fallback: StreamToolPart } };
-  return <MessagePrimitive.Root className="ds-stream-message">
-    <MessagePrimitive.If user><div className="ds-stream-message__bubble ds-stream-message__bubble--user"><span className="ds-stream-message__role">你</span><MessagePrimitive.Parts components={parts} /></div></MessagePrimitive.If>
-    <MessagePrimitive.If assistant><div className="ds-stream-message__bubble ds-stream-message__bubble--assistant"><span className="ds-stream-message__role">DeepStudent</span><MessagePrimitive.Parts components={parts} /></div></MessagePrimitive.If>
-  </MessagePrimitive.Root>;
-}
-
-function StreamDebugComposer() {
-  return <ComposerPrimitive.Root className="ds-stream-composer">
-    <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
-    <ComposerPrimitive.Send className="ds-stream-composer__send" aria-label="发送消息"><Icon name="arrow-up" size={16} /></ComposerPrimitive.Send>
-  </ComposerPrimitive.Root>;
-}
-
 function StreamDebugPage() {
-  const controlRef = useRef<StreamControl>({ paused: false, generation: 0, waiters: [] });
-  const eventSequenceRef = useRef(0);
-  const eventSinkRef = useRef<(event: Omit<StreamEvent, "id">) => void>(() => undefined);
-  const [status, setStatus] = useState<StreamStatus>("idle");
-  const [events, setEvents] = useState<StreamEvent[]>([]);
-  const [progress, setProgress] = useState(0);
   const [settings, setSettings] = useState<StreamDebugSettings>(() => readStreamDebugSettings());
   const [settingsDraft, setSettingsDraft] = useState<StreamDebugSettings>(() => readStreamDebugSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const adapter = useMemo<ChatModelAdapter>(() => ({
-    async *run({ messages, abortSignal }) {
-      const currentGeneration = controlRef.current.generation;
-      const request = makeRuntimeRequest(settings, messages);
-      const transport = window.deepstudent?.runtime?.stream ?? localRuntimeStream;
-      let response = "";
-      let settledToolCall: ToolCallMessagePart | undefined;
-      let toolCallId = `${request.id}-context`;
-      const emit = (event: Omit<StreamEvent, "id">) => eventSinkRef.current(event);
-      const append = (content: ToolCallMessagePart | undefined = settledToolCall) => {
-        const contentParts: Array<{ type: "text"; text: string } | ToolCallMessagePart> = [{ type: "text", text: response }];
-        if (content) contentParts.push(content);
-        return contentParts;
-      };
-      try {
-        for await (const event of transport(request, abortSignal)) {
-          if (currentGeneration !== controlRef.current.generation) return;
-          await streamWaitForResume(controlRef.current, abortSignal);
-          const data = event.data ?? {};
-          if (event.type === "llm.run.start") {
-            setStatus("running");
-            emit({ kind: "run", label: "run.start", detail: `${String(data.provider ?? request.params.provider)} · ${String(data.model ?? request.params.model)}`, tone: "running", payload: event });
-            continue;
-          }
-          if (event.type === "llm.delta") {
-            const text = String(data.text ?? "");
-            response += text;
-            emit({ kind: "token", label: `delta.${String(data.index ?? "")}`, detail: text, tone: "running", payload: event });
-            setProgress(Math.min(0.96, Number(data.progress ?? 0) || (response.length / 240)));
-            if (settings.streamingMode === "events") yield { content: append() };
-            continue;
-          }
-          if (event.type === "llm.tool.call") {
-            toolCallId = String(data.toolCallId ?? toolCallId);
-            const args = (data.args && typeof data.args === "object" ? data.args : {}) as ToolCallMessagePart["args"];
-            emit({ kind: "tool", label: `tool.call · ${String(data.toolName ?? "tool")}`, detail: JSON.stringify(args), tone: "running", payload: event });
-            const preliminary: ToolCallMessagePart = { type: "tool-call", toolCallId, toolName: String(data.toolName ?? "tool"), args, argsText: JSON.stringify(args), isPreliminary: true };
-            if (settings.streamingMode === "events") yield { content: append(preliminary) };
-            continue;
-          }
-          if (event.type === "llm.tool.result") {
-            const result = String(data.result ?? "");
-            emit({ kind: "tool", label: `tool.result · ${String(data.toolName ?? "tool")}`, detail: result, tone: "complete", payload: event });
-            settledToolCall = { type: "tool-call", toolCallId: String(data.toolCallId ?? toolCallId), toolName: String(data.toolName ?? "tool"), args: {}, argsText: "{}", result, isPreliminary: false };
-            if (settings.streamingMode === "events") yield { content: append(settledToolCall) };
-            continue;
-          }
-          if (event.type === "llm.render") {
-            const nextProgress = Number(data.progress);
-            if (Number.isFinite(nextProgress)) setProgress(Math.max(0, Math.min(1, nextProgress)));
-            emit({ kind: "render", label: "render.sync", detail: `${String(data.target ?? "message")} · ${Math.round(Math.max(0, Math.min(1, nextProgress || 0)) * 100)}%`, tone: "running", payload: event });
-            continue;
-          }
-          if (event.type === "llm.error") {
-            const message = String(data.message ?? "runtime stream error");
-            emit({ kind: "error", label: "run.error", detail: message, tone: "error", payload: event });
-            setStatus("error");
-            if (settings.streamingMode === "events") yield { content: [{ type: "text", text: `${response}\n\n错误：${message}` }] };
-            return;
-          }
-          if (event.type === "llm.run.complete") {
-            if (settings.streamingMode === "buffered") yield { content: append() };
-            setProgress(1);
-            emit({ kind: "status", label: "run.complete", detail: String(data.finishReason ?? "stop"), tone: "complete", payload: event });
-            setStatus("complete");
-            yield { content: append(), status: { type: "complete", reason: "stop" } };
-          }
-        }
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        const message = error instanceof Error ? error.message : String(error);
-        emit({ kind: "error", label: "run.error", detail: message, tone: "error", payload: { message } });
-        setStatus("error");
-        if (response) yield { content: [{ type: "text", text: `${response}\n\n错误：${message}` }] };
-      }
-    },
+  const sessionIdRef = useRef(`playground-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const adapter = useMemo(() => createGoRuntimeAdapter({
+    sessionId: sessionIdRef.current,
+    baseUrl: settings.baseUrl,
+    provider: settings.provider,
+    model: settings.model,
+    streamingMode: settings.streamingMode,
+    timeoutMs: settings.timeout * 1000,
+    reconnectAttempts: settings.retry,
+    fallback: StubAdapter,
   }), [settings]);
   const runtime = useLocalRuntime(adapter);
-
-  const pushEvent = (event: Omit<StreamEvent, "id">) => {
-    eventSequenceRef.current += 1;
-    setEvents((current) => [...current.slice(-79), { ...event, id: eventSequenceRef.current }]);
-  };
-  eventSinkRef.current = pushEvent;
   const openSettings = () => { setSettingsDraft(settings); setSettingsOpen(true); };
   const saveSettings = () => {
     setSettings(settingsDraft);
     window.localStorage.setItem(streamSettingsStorageKey, JSON.stringify(settingsDraft));
     setSettingsOpen(false);
   };
-  const resetStream = () => {
-    controlRef.current.generation += 1;
-    controlRef.current.paused = false;
-    controlRef.current.waiters.splice(0).forEach((resume) => resume());
-    runtime.thread.cancelRun();
-    runtime.thread.reset();
-    setStatus("idle"); setEvents([]); setProgress(0);
-  };
-  const pauseStream = () => {
-    if (status !== "running") return;
-    controlRef.current.paused = true; setStatus("paused");
-    pushEvent({ kind: "status", label: "run.pause", detail: "等待继续输出", tone: "paused" });
-  };
-  const resumeStream = () => {
-    if (status !== "paused") return;
-    controlRef.current.paused = false; controlRef.current.waiters.splice(0).forEach((resume) => resume());
-    setStatus("running"); pushEvent({ kind: "status", label: "run.resume", detail: "继续事件流", tone: "running" });
-  };
-  const statusLabel: Record<StreamStatus, string> = { idle: "等待输入", running: "模型生成中", paused: "已暂停", complete: "已完成", error: "运行错误" };
 
-  return <section className="ds-workspace-page ds-stream-debug-page" aria-label="流式对话">
-    <div className="ds-stream-debug__toolbar" role="toolbar" aria-label="流式输出控制">
-      <span className={`ds-stream-status ds-stream-status--${status}`}><span className="ds-stream-status__dot" />{statusLabel[status]}</span>
-      <span className="ds-stream-model-status">{settings.provider} · {settings.model} · {settings.streamingMode === "events" ? "事件流" : "缓冲"}</span>
-      <button type="button" className="ds-secondary-button" onClick={status === "paused" ? resumeStream : pauseStream} disabled={status !== "running" && status !== "paused"}><Icon name={status === "paused" ? "play" : "pause"} size={14} />{status === "paused" ? "继续" : "暂停"}</button>
-      <button type="button" className="ds-secondary-button" onClick={resetStream} disabled={status === "idle" && events.length === 0}><Icon name="reset" size={14} />清空 / 重置</button>
-      <button type="button" className="ds-icon-button ds-stream-settings-trigger" onClick={openSettings} aria-label="打开流式调试设置" title="流式调试设置"><Icon name="settings" size={16} /></button>
+  return <section className="ds-chat-page ds-chatgpt-page ds-playground-page" aria-label="DeepStudent playground">
+    <div className="ds-playground-toolbar" role="toolbar" aria-label="对话设置">
+      <span className="ds-playground-model">{settings.provider} · {settings.model}</span>
+      <button type="button" className="ds-icon-button" onClick={openSettings} aria-label="打开模型设置" title="模型设置"><Icon name="settings" size={16} /></button>
     </div>
-
-    <section className="ds-stream-chat-panel" aria-label="流式对话">
-      <AssistantRuntimeProvider runtime={runtime}>
-        <ThreadPrimitive.Root className="ds-stream-thread">
-          <ThreadPrimitive.Viewport className="ds-stream-thread__viewport" autoScroll>
-            <ThreadPrimitive.Messages components={{ Message: StreamDebugMessage }} />
-            <ThreadPrimitive.Empty><div className="ds-stream-thread__empty"><Icon name="sparkle" size={22} /><b>DeepStudent</b></div></ThreadPrimitive.Empty>
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ThreadPrimitive.Root className="ds-chat-thread">
+        <AuiIf condition={(state) => state.thread.isEmpty}>
+          <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll turnAnchor="bottom">
+            <ThreadPrimitive.Empty><div className="ds-chat-empty-state"><ChatEmptyState /><ChatQuickPrompts /></div></ThreadPrimitive.Empty>
           </ThreadPrimitive.Viewport>
-          <div className="ds-stream-composer-dock"><StreamDebugComposer /></div>
-        </ThreadPrimitive.Root>
-      </AssistantRuntimeProvider>
-    </section>
-
-    {settingsOpen && <div className="ds-stream-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="stream-settings-title">
-      <button type="button" className="ds-stream-settings-modal__backdrop" aria-label="关闭设置" onClick={() => setSettingsOpen(false)} />
-      <form className="ds-stream-settings-modal__card" onSubmit={(event) => { event.preventDefault(); saveSettings(); }}>
-        <div className="ds-stream-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />运行时设置</span><h3 id="stream-settings-title">LLM 连接配置</h3></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={() => setSettingsOpen(false)}><Icon name="x" size={16} /></button></div>
-        <div className="ds-stream-settings-modal__body">
-          <label className="ds-stream-setting-field"><span>Provider</span><select value={settingsDraft.provider} onChange={(event) => setSettingsDraft((current) => ({ ...current, provider: event.target.value as StreamDebugSettings["provider"] }))}><option value="siliconflow">SiliconFlow</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">Custom</option></select></label>
-          <label className="ds-stream-setting-field"><span>Model</span><input value={settingsDraft.model} onChange={(event) => setSettingsDraft((current) => ({ ...current, model: event.target.value }))} /></label>
-          <label className="ds-stream-setting-field"><span>Base URL</span><input type="url" value={settingsDraft.baseUrl} onChange={(event) => setSettingsDraft((current) => ({ ...current, baseUrl: event.target.value }))} /></label>
-          <div className="ds-stream-settings-grid"><label className="ds-stream-setting-field"><span>Timeout (s)</span><input type="number" min={1} max={300} value={settingsDraft.timeout} onChange={(event) => setSettingsDraft((current) => ({ ...current, timeout: Number(event.target.value) || 1 }))} /></label><label className="ds-stream-setting-field"><span>Retry</span><input type="number" min={0} max={5} value={settingsDraft.retry} onChange={(event) => setSettingsDraft((current) => ({ ...current, retry: Number(event.target.value) || 0 }))} /></label></div>
-          <fieldset className="ds-stream-setting-mode"><legend>Streaming mode</legend><label className={settingsDraft.streamingMode === "events" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="events" checked={settingsDraft.streamingMode === "events"} onChange={() => setSettingsDraft((current) => ({ ...current, streamingMode: "events" }))} /><span><b>事件流</b><small>每个 delta 立即更新 assistant message</small></span></label><label className={settingsDraft.streamingMode === "buffered" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="buffered" checked={settingsDraft.streamingMode === "buffered"} onChange={() => setSettingsDraft((current) => ({ ...current, streamingMode: "buffered" }))} /><span><b>缓冲</b><small>收齐事件后一次性提交 assistant message</small></span></label></fieldset>
-        </div>
-        <div className="ds-stream-settings-modal__footer"><button type="button" className="ds-secondary-button" onClick={() => setSettingsOpen(false)}>取消</button><button type="submit" className="ds-primary-button">保存设置</button></div>
-      </form>
-    </div>}
+          <div className="ds-composer-dock"><ChatComposer runtime={runtime} /></div>
+        </AuiIf>
+        <AuiIf condition={(state) => !state.thread.isEmpty}>
+          <ThreadPrimitive.Viewport className="ds-thread-viewport ds-chatgpt-viewport" autoScroll turnAnchor="bottom">
+            <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+            <ThreadPrimitive.ViewportFooter className="ds-composer-dock ds-chatgpt-footer"><ChatComposer runtime={runtime} /><p className="ds-chatgpt-disclaimer">DeepStudent 可能会出错，请核对重要信息</p></ThreadPrimitive.ViewportFooter>
+          </ThreadPrimitive.Viewport>
+        </AuiIf>
+      </ThreadPrimitive.Root>
+    </AssistantRuntimeProvider>
+    {settingsOpen && <StreamDebugSettingsModal draft={settingsDraft} onChange={(patch) => setSettingsDraft((current) => ({ ...current, ...patch }))} onClose={() => setSettingsOpen(false)} onSave={saveSettings} />}
   </section>;
 }
 
@@ -1360,8 +1158,25 @@ function EmptyState({ title, description }: { title: string; description: string
 function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
 function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
 function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) {
-  return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>;
+function Settings({ theme, onTheme, onOpenOnboarding, onClose }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void; onClose: () => void }) {
+  const [section, setSection] = useState<"general" | "appearance">("general");
+  return <div className="ds-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <button type="button" className="ds-settings-modal__backdrop" aria-label="关闭设置" onClick={onClose} />
+    <section className="ds-settings-modal__card">
+      <header className="ds-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />工作区</span><h2 id="settings-title">设置</h2></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={onClose}><Icon name="x" size={16} /></button></header>
+      <div className="ds-settings-modal__body">
+        <nav className="ds-settings-nav" aria-label="设置分类">
+          <button type="button" className={section === "general" ? "is-active" : ""} onClick={() => setSection("general")}>常规</button>
+          <button type="button" className={section === "appearance" ? "is-active" : ""} onClick={() => setSection("appearance")}>外观</button>
+          <button type="button" disabled>AI 助手</button><button type="button" disabled>快捷键</button><button type="button" disabled>关于</button>
+        </nav>
+        <div className="ds-settings-content">
+          {section === "general" && <section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section>}
+          {section === "appearance" && <section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section>}
+        </div>
+      </div>
+    </section>
+  </div>;
 }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
@@ -1370,8 +1185,10 @@ function WorkspacePage({ action, children }: { action?: React.ReactNode; childre
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
   const [onboardingOpen, setOnboardingOpen] = useState(() => onboardingConfig === null);
   const [sessions, setSessions] = useState<ChatSession[]>(() => readSessions());
@@ -1383,6 +1200,13 @@ export function App() {
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem("dstu-theme-mode", theme);
   }, [theme]);
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const onChange = () => setIsMobile(query.matches);
+    onChange();
+    query.addEventListener?.("change", onChange);
+    return () => query.removeEventListener?.("change", onChange);
+  }, []);
   useEffect(() => { window.localStorage.setItem(sessionStorageKey, JSON.stringify(sessions)); }, [sessions]);
   useEffect(() => { if (!sessions.some((session) => session.id === activeSessionId) && sessions[0]) setActiveSessionId(sessions[0].id); }, [activeSessionId, sessions]);
   useEffect(() => {
@@ -1397,10 +1221,34 @@ export function App() {
     setOnboardingOpen(false);
   };
   const openOnboarding = () => setOnboardingOpen(true);
-  const selectView = (next: ViewId) => { setView(next); setSidebarOpen(false); };
+  const selectView = (next: ViewId) => {
+    if (next === "settings") {
+      setSettingsOpen(true);
+      setSidebarOpen(false);
+      return;
+    }
+    setView(next);
+    setSettingsOpen(false);
+    setSidebarOpen(false);
+  };
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? createSession();
   const updateSession = useCallback((patch: Partial<ChatSession>) => setSessions((current) => current.map((session) => session.id === activeSession.id ? { ...session, ...patch } : session)), [activeSession.id]);
-  const newSession = () => { const session = createSession(); setSessions((current) => [session, ...current]); setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); };
+  const newSession = () => { const session = createSession(); setSessions((current) => [session, ...current]); setActiveSessionId(session.id); setView("chat-v2"); setSettingsOpen(false); setSidebarOpen(false); };
+  const deleteSession = (sessionId: string) => {
+    const remaining = sessions.filter((session) => session.id !== sessionId);
+    if (remaining.length === 0) {
+      const replacement = createSession();
+      setSessions([replacement]);
+      setActiveSessionId(replacement.id);
+      setView("chat-v2");
+      return;
+    }
+    setSessions(remaining);
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(remaining[0].id);
+      setView("chat-v2");
+    }
+  };
   const visibleSessions = sessions.filter((session) => !sessionSearch.trim() || session.title.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase())).sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
   const content = useMemo(() => {
     if (view === "chat-v2") return <ChatWorkspace key={activeSession.id} session={activeSession} onSessionChange={updateSession} />;
@@ -1409,10 +1257,10 @@ export function App() {
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "flashcards") return <Flashcards />;
-    return <Settings theme={theme} onTheme={toggleTheme} onOpenOnboarding={openOnboarding} />;
+    return <ChatWorkspace key={activeSession.id} session={activeSession} onSessionChange={updateSession} />;
   }, [activeSession, theme, updateSession, view]);
   const toggleSidebar = () => {
-    if (window.matchMedia("(max-width: 767px)").matches) {
+    if (isMobile) {
       setSidebarOpen((open) => !open);
       return;
     }
@@ -1423,7 +1271,7 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" data-drop-ignore="true" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
-          <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起导航" aria-expanded={sidebarOpen || !sidebarCollapsed}><Icon name="sidebar" size={16} /></button>
+          {((isMobile && sidebarOpen) || (!isMobile && !sidebarCollapsed)) && <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={isMobile ? "关闭导航" : "收起导航"} aria-expanded={isMobile ? sidebarOpen : !sidebarCollapsed}><Icon name="sidebar" size={16} /></button>}
           <span className="ds-sidebar__brand-name">DeepStudent</span>
           <div className="ds-sidebar__brand-actions">
             <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
@@ -1435,26 +1283,27 @@ export function App() {
         <div className="ds-sidebar__scroll">
           <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><p className="ds-sidebar-empty">暂无置顶会话</p></section>
           <section className="ds-sidebar-section"><div className="ds-section-label"><span>主题</span><span className="ds-section-tools"><button className="ds-section-action" aria-label="收起主题"><Icon name="chevron-down" size={14} /></button><button className="ds-section-action" aria-label="新建主题"><Icon name="plus" size={14} /></button></span></div><p className="ds-sidebar-empty">暂无主题</p></section>
-          <section className="ds-sidebar-section ds-conversation-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={newSession} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><label className="ds-conversation-search"><MagnifyingGlass size={13} /><input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话…" aria-label="搜索会话" /></label>{visibleSessions.length === 0 ? <p className="ds-sidebar-empty">没有匹配的会话</p> : visibleSessions.map((session) => <button type="button" key={session.id} className="ds-thread-row" data-active={session.id === activeSession.id} onClick={() => { setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); setSessions((current) => current.map((item) => item.id === session.id ? { ...item, unread: 0 } : item)); }}><span className={`ds-thread-dot ${session.unread ? "ds-thread-dot--accent" : ""}`}>{session.unread ? "●" : "○"}</span><span>{session.title}</span>{session.unread > 0 && <small>{session.unread}</small>}</button>)}</section>
+          <section className="ds-sidebar-section ds-conversation-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={newSession} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><label className="ds-conversation-search"><MagnifyingGlass size={13} /><input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话…" aria-label="搜索会话" /></label>{visibleSessions.length === 0 ? <p className="ds-sidebar-empty">没有匹配的会话</p> : visibleSessions.map((session) => <div key={session.id} className="ds-thread-row" data-active={session.id === activeSession.id}><button type="button" className="ds-thread-row__main" onClick={() => { setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); setSessions((current) => current.map((item) => item.id === session.id ? { ...item, unread: 0 } : item)); }}><span className={`ds-thread-dot ${session.unread ? "ds-thread-dot--accent" : ""}`}>{session.unread ? "●" : "○"}</span><span>{session.title}</span>{session.unread > 0 && <small>{session.unread}</small>}</button><button type="button" className="ds-thread-row__delete" onClick={() => deleteSession(session.id)} aria-label={`删除会话 ${session.title}`} title="删除会话"><Icon name="x" size={13} /></button></div>)}</section>
         </div>
         <div className="ds-sidebar__footer">
-          <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
+          <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings" || settingsOpen}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
         </div>
       </aside>
       <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <div className="ds-main__drag-region" aria-hidden="true" />
-        <div className="ds-main__floating-actions" aria-label="工作区导航">
-          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="切换导航" aria-expanded={sidebarOpen || !sidebarCollapsed}>
+        {((isMobile && !sidebarOpen) || (!isMobile && sidebarCollapsed)) && <div className="ds-main__floating-actions" aria-label="工作区导航">
+          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={isMobile ? sidebarOpen : !sidebarCollapsed}>
             <Icon name="sidebar" size={17} />
           </button>
-        </div>
+        </div>}
         <div className="ds-main__actions" aria-label="窗口操作">
           <button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button>
         </div>
         <WorkspaceDropZone>{content}</WorkspaceDropZone>
       </main>
     </div>
+    {settingsOpen && <Settings theme={theme} onTheme={toggleTheme} onOpenOnboarding={openOnboarding} onClose={() => setSettingsOpen(false)} />}
     {onboardingOpen && <Onboarding initial={onboardingConfig} onComplete={completeOnboarding} />}
   </div>;
 }
