@@ -7,8 +7,16 @@ import {
   useLocalRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HealthService } from "./mygo";
+import { createGoRuntimeAdapter } from "./go-runtime";
+import {
+  createRuntimeSession,
+  getRuntimeSessionMessages,
+  listRuntimeSessions,
+  type RuntimeMessage,
+  type RuntimeSession,
+} from "./runtime-api";
 
 type ViewId =
   | "chat-v2"
@@ -18,6 +26,122 @@ type ViewId =
   | "flashcards"
   | "settings";
 type Theme = "light" | "dark";
+type OutboxStatus = "idle" | "sending" | "queued" | "sent" | "failed";
+
+type PersistedMessage = {
+  id: string;
+  role: string;
+  content: unknown;
+  createdAt?: string;
+  status?: unknown;
+  parentId?: string | null;
+  sourceId?: string | null;
+  metadata?: unknown;
+  attachments?: unknown;
+};
+
+type ChatSession = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  draft: string;
+  unread: number;
+  pinned?: boolean;
+  messages: PersistedMessage[];
+};
+
+const SESSION_STORAGE_KEY = "dstu-chat-sessions-v1";
+
+function createSession(): ChatSession {
+  return {
+    id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    title: "新会话",
+    updatedAt: Date.now(),
+    draft: "",
+    unread: 0,
+    messages: [],
+  };
+}
+
+function readSessions(): ChatSession[] {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(SESSION_STORAGE_KEY) ?? "null");
+    if (Array.isArray(stored) && stored.length > 0) return stored as ChatSession[];
+  } catch {
+    // A malformed local cache should never prevent the chat shell from opening.
+  }
+  return [createSession()];
+}
+
+function messageText(message: PersistedMessage | undefined): string {
+  if (!message) return "";
+  if (!Array.isArray(message.content)) return "";
+  return message.content
+    .filter((part): part is { type: "text"; text: string } => Boolean(part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"))
+    .map((part) => part.text)
+    .join(" ")
+    .trim();
+}
+
+function serializeMessages(messages: readonly unknown[]): PersistedMessage[] {
+  return messages.map((message) => {
+    const item = message as PersistedMessage;
+    const createdAt: unknown = (message as { createdAt?: unknown }).createdAt;
+    return { ...item, createdAt: createdAt instanceof Date ? createdAt.toISOString() : typeof createdAt === "string" ? createdAt : undefined };
+  });
+}
+
+function restoreMessages(messages: PersistedMessage[]): unknown[] {
+  return messages.map((message) => ({ ...message, createdAt: message.createdAt ? new Date(message.createdAt) : undefined }));
+}
+
+function serverTimestamp(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** Convert append-only Go messages into the assistant-ui transcript shape. */
+function serverMessagesToPersisted(messages: RuntimeMessage[]): PersistedMessage[] {
+  const result: PersistedMessage[] = [];
+  for (const message of messages) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const text = typeof message.content === "string" ? message.content : String(message.content ?? "");
+    if (!text) continue;
+    const previous = result.at(-1);
+    const previousRunId = previous?.metadata && typeof previous.metadata === "object" ? (previous.metadata as { runId?: unknown }).runId : undefined;
+    // The Go runtime appends each streamed delta as a message. Coalesce one
+    // run back into a single assistant bubble during hydration.
+    if (message.role === "assistant" && previous?.role === "assistant" && (message.run_id ? previousRunId === message.run_id : true)) {
+      previous.content = [{ type: "text", text: `${messageText(previous)}${text}` }];
+      if (message.created_at) previous.createdAt = message.created_at;
+      continue;
+    }
+    result.push({
+      id: message.id || `server-message-${result.length}`,
+      role: message.role,
+      content: [{ type: "text", text }],
+      createdAt: message.created_at,
+      metadata: { sessionId: message.session_id, runId: message.run_id },
+    });
+  }
+  return result;
+}
+
+function serverSessionToLocal(session: RuntimeSession, messages: PersistedMessage[] | undefined, local: ChatSession | undefined): ChatSession {
+  return {
+    id: session.id,
+    title: session.title?.trim() || local?.title || "新会话",
+    updatedAt: serverTimestamp(session.updated_at, local?.updatedAt ?? Date.now()),
+    draft: local?.draft ?? "",
+    unread: local?.unread ?? 0,
+    pinned: local?.pinned,
+    // An empty server transcript is authoritative too. `undefined` means the
+    // transcript request failed and is the only case where the local cache is
+    // useful as a temporary fallback.
+    messages: messages !== undefined ? messages : (local?.messages ?? []),
+  };
+}
 
 type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "template" | "settings" | "plus" | "search" | "sliders" | "chevron-down" | "chevron-left" | "sun" | "home" | "folder" | "send" | "paperclip" | "wand" | "brain";
 
@@ -56,41 +180,40 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: n
   return <svg {...common} aria-hidden="true">{paths[name]}</svg>;
 }
 
-const viewMeta: Record<ViewId, { title: string; subtitle: string }> = {
-  "chat-v2": { title: "", subtitle: "" },
-  "learning-hub": { title: "学习资源", subtitle: "浏览和管理你的学习资料" },
-  todo: { title: "待办事项", subtitle: "把下一步学习行动放在眼前" },
-  "skills-management": { title: "技能管理", subtitle: "配置 DeepStudent 的可用技能" },
-  flashcards: { title: "闪卡", subtitle: "用主动回忆巩固真正理解的内容" },
-  settings: { title: "设置", subtitle: "调整 DeepStudent 的工作方式" },
-};
-
 const readTheme = (): Theme => {
   const saved = window.localStorage.getItem("dstu-theme-mode");
   if (saved === "dark" || saved === "light") return saved;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 };
 
-const StubAdapter: ChatModelAdapter = {
-  async *run({ messages }) {
-    const last = messages.at(-1);
-    const text = last?.content
-      .filter((part): part is { type: "text"; text: string } => part.type === "text")
-      .map((part) => part.text)
-      .join(" ")
-      .trim();
-    yield {
-      content: [
-        {
-          type: "text",
-          text: text
-            ? `收到「${text}」，我们可以从理解、整理和复习开始。`
-            : "准备好开始学习。",
-        },
-      ],
-    };
-  },
-};
+function makeChatAdapter(statusRef: { current: (status: OutboxStatus) => void }): ChatModelAdapter {
+  return {
+    async *run({ messages }) {
+      const last = messages.at(-1);
+      const text = last?.content
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join(" ")
+        .trim();
+      const offline = typeof navigator !== "undefined" && !navigator.onLine;
+      statusRef.current(offline ? "queued" : "sending");
+      // Keep the local prototype useful offline while surfacing the outbox state.
+      await new Promise((resolve) => window.setTimeout(resolve, 220));
+      yield {
+        content: [
+          {
+            type: "text",
+            text: text
+              ? `收到「${text}」，我们可以从理解、整理和复习开始。`
+              : "准备好开始学习。",
+          },
+        ],
+      };
+      statusRef.current(offline ? "queued" : "sent");
+      if (!offline) window.setTimeout(() => statusRef.current("idle"), 1200);
+    },
+  };
+}
 
 function ChatMessage() {
   return (
@@ -107,32 +230,121 @@ function MessageText() {
 function ChatEmptyState() {
   return (
     <div className="ds-chat-center">
-      <h2 id="chat-welcome-title">从理解开始，让知识成为自己的能力</h2>
+      <h2 id="chat-welcome-title">把今天学会的，变成真正掌握的</h2>
     </div>
   );
 }
 
-function ChatWorkspace() {
-  const runtime = useLocalRuntime(StubAdapter);
+function ChatWorkspace({ session, onSessionChange }: { session: ChatSession; onSessionChange: (patch: Partial<ChatSession>) => void }) {
+  const statusRef = useRef<(status: OutboxStatus) => void>(() => undefined);
+  const [outboxStatus, setOutboxStatus] = useState<OutboxStatus>("idle");
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
+  const [unread, setUnread] = useState(session.unread);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [messageCount, setMessageCount] = useState(session.messages.length);
+  const isAtBottomRef = useRef(true);
+  const persistedCountRef = useRef(session.messages.length);
+  const unreadRef = useRef(session.unread);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  statusRef.current = setOutboxStatus;
+  const adapter = useMemo(() => createGoRuntimeAdapter({
+    sessionId: session.id,
+    // Keep the prototype usable on static previews and while the local Go
+    // service is starting. The adapter only selects this fallback for an
+    // unavailable runtime; API/application errors remain visible.
+    fallback: makeChatAdapter(statusRef),
+  }), [session.id]);
+  const runtime = useLocalRuntime(adapter, { initialMessages: restoreMessages(session.messages) as never });
+
+  useEffect(() => {
+    const onOnline = () => { setIsOnline(true); setOutboxStatus("idle"); };
+    const onOffline = () => { setIsOnline(false); };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
+  }, []);
+
+  useEffect(() => {
+    runtime.thread.composer.setText(session.draft);
+    const saveDraft = () => onSessionChange({ draft: runtime.thread.composer.getState().text, updatedAt: Date.now() });
+    saveDraft();
+    return runtime.thread.composer.subscribe(saveDraft);
+  }, [onSessionChange, runtime]);
+
+  useEffect(() => {
+    const persist = () => {
+      const state = runtime.thread.getState();
+      const messages = serializeMessages(state.messages);
+      const previousCount = persistedCountRef.current;
+      setMessageCount(messages.length);
+      persistedCountRef.current = messages.length;
+      if (state.isRunning) setOutboxStatus(isOnline ? "sending" : "queued");
+      else if (messages.length > previousCount && isOnline) {
+        setOutboxStatus("sent");
+        window.setTimeout(() => setOutboxStatus("idle"), 1000);
+      }
+      if (messages.length > previousCount && !isAtBottomRef.current) {
+        const nextUnread = unreadRef.current + messages.length - previousCount;
+        unreadRef.current = nextUnread;
+        setUnread(nextUnread);
+        onSessionChange({ unread: nextUnread });
+      }
+      onSessionChange({
+        messages,
+        updatedAt: Date.now(),
+        title: session.title === "新会话" ? (messageText(messages.find((item) => item.role === "user")!) || session.title).slice(0, 36) : session.title,
+      });
+    };
+    persist();
+    return runtime.thread.subscribe(persist);
+    }, [isOnline, onSessionChange, runtime, session.title]);
+
+  const handleScroll = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 28;
+    isAtBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+    if (atBottom) {
+      unreadRef.current = 0;
+      setUnread(0);
+      onSessionChange({ unread: 0 });
+    }
+  }, [onSessionChange]);
+
+  const jumpToBottom = () => {
+    viewportRef.current?.scrollTo({ top: viewportRef.current.scrollHeight, behavior: "smooth" });
+    unreadRef.current = 0;
+    setUnread(0);
+    onSessionChange({ unread: 0 });
+  };
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <section className="ds-chat-page" aria-labelledby="chat-welcome-title">
         <ThreadPrimitive.Root className="ds-chat-thread">
-          <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll>
+          <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
+            <div className="ds-timeline-status" aria-live="polite">
+              <span>{messageCount ? `${messageCount} 条消息` : "新会话"}</span>
+              {!isOnline && <span className="ds-outbox-pill is-queued">离线 · 稍后发送</span>}
+              {outboxStatus === "sending" && <span className="ds-outbox-pill">发送中…</span>}
+              {outboxStatus === "sent" && <span className="ds-outbox-pill is-sent">已保存</span>}
+            </div>
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
             <ThreadPrimitive.Empty>
               <ChatEmptyState />
             </ThreadPrimitive.Empty>
-            <ThreadPrimitive.ScrollToBottom className="ds-scroll-bottom">↓</ThreadPrimitive.ScrollToBottom>
+            {!isAtBottom && <button type="button" className="ds-scroll-bottom" onClick={jumpToBottom} aria-label="跳到底部">{unread ? `${unread} 条新消息 ↓` : "跳到底部 ↓"}</button>}
           </ThreadPrimitive.Viewport>
           <ComposerPrimitive.Root className="ds-composer" compact>
             <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
             <div className="ds-composer__toolbar">
               <div className="ds-composer__tools">
                 <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="paperclip" size={16} /></ComposerPrimitive.AddAttachment>
-                <button type="button" className="ds-composer-tool" aria-label="调用工具"><Icon name="wand" size={16} /></button>
-                <button type="button" className="ds-composer-tool" aria-label="深度思考"><Icon name="brain" size={16} /></button>
+                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="调用工具"><Icon name="wand" size={16} /></button>
+                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="深度思考"><Icon name="brain" size={16} /></button>
               </div>
+              <span className={`ds-outbox-state is-${outboxStatus}`} aria-live="polite">{outboxStatus === "queued" ? "待发送" : outboxStatus === "failed" ? "发送失败" : ""}</span>
               <ComposerPrimitive.Send className="ds-send-button" aria-label="发送"><Icon name="send" size={15} strokeWidth={2} /></ComposerPrimitive.Send>
             </div>
           </ComposerPrimitive.Root>
@@ -162,12 +374,24 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState("连接 Go runtime…");
+  const [sessions, setSessions] = useState<ChatSession[]>(() => readSessions());
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [sessionSearch, setSessionSearch] = useState("");
+  // Bump this after a server transcript arrives so assistant-ui receives the
+  // hydrated initial messages without changing the existing shell layout.
+  const [sessionHydrationVersion, setSessionHydrationVersion] = useState(0);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem("dstu-theme-mode", theme);
   }, [theme]);
+  useEffect(() => {
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
+  }, [sessions]);
+  useEffect(() => {
+    if (!sessions.some((session) => session.id === activeSessionId) && sessions[0]) setActiveSessionId(sessions[0].id);
+  }, [activeSessionId, sessions]);
   useEffect(() => {
     let active = true;
     void HealthService.health().then((health) => {
@@ -177,18 +401,74 @@ export function App() {
     });
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const hydrate = async () => {
+      try {
+        const remoteSessions = await listRuntimeSessions();
+        if (cancelled) return;
+        // Keep the transcript result separate from the local cache until the
+        // final state update. A user can create a new chat or send a message
+        // while this startup request is in flight; reading `sessions` from
+        // the effect closure would otherwise overwrite that newer state.
+        const hydrated = await Promise.all(remoteSessions.map(async (remote) => {
+          try {
+            const messages = await getRuntimeSessionMessages(remote.id);
+            return { remote, messages: serverMessagesToPersisted(messages) };
+          } catch {
+            // A session transcript can be temporarily unavailable; keep its
+            // local cache while still showing the server session entry.
+            return { remote, messages: undefined };
+          }
+        }));
+        if (cancelled) return;
+        setSessions((current) => {
+          const localById = new Map(current.map((session) => [session.id, session]));
+          const remote = hydrated.map(({ remote: serverSession, messages }) => serverSessionToLocal(serverSession, messages, localById.get(serverSession.id)));
+          const remoteIds = new Set(remote.map((session) => session.id));
+          // Preserve local-only conversations for static/offline previews until
+          // their first successful send creates them on the server.
+          return [...remote, ...current.filter((session) => !remoteIds.has(session.id))];
+        });
+        if (hydrated.length > 0) {
+          setSessionHydrationVersion((version) => version + 1);
+        }
+      } catch {
+        // No Go HTTP service is expected in a static preview. LocalStorage is
+        // deliberately left untouched in this case.
+      }
+    };
+    void hydrate();
+    return () => { cancelled = true; };
+    // Hydrate once on startup. ChatWorkspace persists subsequent changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
   const selectView = (next: ViewId) => { setView(next); setSidebarOpen(false); };
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? createSession();
+  const updateSession = useCallback((patch: Partial<ChatSession>) => {
+    setSessions((current) => current.map((session) => session.id === activeSession.id ? { ...session, ...patch } : session));
+  }, [activeSession.id]);
+  const newSession = () => {
+    const session = createSession();
+    setSessions((current) => [session, ...current]);
+    setActiveSessionId(session.id);
+    setView("chat-v2");
+    setSidebarOpen(false);
+    void createRuntimeSession(session).catch(() => undefined);
+  };
+  const visibleSessions = sessions
+    .filter((session) => !sessionSearch.trim() || session.title.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase()))
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
   const content = useMemo(() => {
-    if (view === "chat-v2") return <ChatWorkspace />;
+    if (view === "chat-v2") return <ChatWorkspace key={`${activeSession.id}:${sessionHydrationVersion}`} session={activeSession} onSessionChange={updateSession} />;
     if (view === "learning-hub") return <LearningHub />;
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "flashcards") return <Flashcards />;
     return <Settings theme={theme} onTheme={toggleTheme} />;
-  }, [theme, view]);
-  const meta = viewMeta[view];
+  }, [activeSession, sessionHydrationVersion, theme, updateSession, view]);
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
@@ -204,12 +484,16 @@ export function App() {
           <span className="ds-sidebar__brand-name">DeepStudent</span>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
-          {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
+          {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => item.id === "chat-v2" ? newSession() : selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
         </nav>
         <div className="ds-sidebar__scroll">
-          <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><p className="ds-sidebar-empty">暂无置顶会话</p></section>
+          <section className="ds-sidebar-section ds-conversation-section">
+            <div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={newSession} aria-label="新建对话"><Icon name="plus" size={14} /></button></div>
+            <label className="ds-conversation-search"><Icon name="search" size={13} /><input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话…" aria-label="搜索会话" /></label>
+            {visibleSessions.length === 0 ? <p className="ds-sidebar-empty">没有匹配的会话</p> : visibleSessions.map((session) => <button type="button" key={session.id} className="ds-thread-row" data-active={session.id === activeSession.id} onClick={() => { setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); setSessions((current) => current.map((item) => item.id === session.id ? { ...item, unread: 0 } : item)); }}><span className={`ds-thread-dot ${session.unread ? "ds-thread-dot--accent" : ""}`}>{session.unread ? "●" : "○"}</span><span>{session.title}</span>{session.unread > 0 && <small>{session.unread}</small>}</button>)}
+          </section>
+          <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><p className="ds-sidebar-empty">将重要会话置顶，方便快速返回</p></section>
           <section className="ds-sidebar-section"><div className="ds-section-label"><span>主题</span><span className="ds-section-tools"><button className="ds-section-action" aria-label="收起主题"><Icon name="chevron-down" size={14} /></button><button className="ds-section-action" aria-label="新建主题"><Icon name="plus" size={14} /></button></span></div><p className="ds-sidebar-empty">暂无主题</p></section>
-          <section className="ds-sidebar-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={() => selectView("chat-v2")} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><p className="ds-sidebar-empty">暂无对话</p></section>
         </div>
         <div className="ds-sidebar__footer">
           <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
@@ -219,15 +503,12 @@ export function App() {
       </aside>
       <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
-        <header className="ds-main__header">
-          <div className="ds-main__leading">
-            <span className="ds-main__brand">DeepStudent</span>
-          </div>
-          <div className={`ds-main__heading${meta.title ? "" : " is-empty"}`}>
-            {meta.title && <div className="ds-main__heading-copy"><h1>{meta.title}</h1><p>{meta.subtitle}</p></div>}
-            <button className="ds-header-toggle" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}><Icon name="sliders" size={17} /></button>
-          </div>
-        </header>
+        <div className="ds-main__drag-region" aria-hidden="true" />
+        <div className="ds-main__floating-actions">
+          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={sidebarCollapsed || sidebarOpen}>
+            <Icon name="sliders" size={17} />
+          </button>
+        </div>
         <div className="ds-main__content">{content}</div>
       </main>
     </div>

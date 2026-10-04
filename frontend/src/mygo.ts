@@ -5,6 +5,27 @@
  */
 import { call } from "mygo-runtime";
 
+export {
+  createRuntimeSession,
+  createSession,
+  getRuntimeSessionMessages,
+  getSessionMessages,
+  getSessions,
+  listRuntimeSessions,
+  normalizeRuntimeBaseUrl,
+  postRuntimeSessionMessage,
+  postSessionMessage,
+  runtimeApiBaseUrl,
+  runtimeApiUrl,
+  RuntimeApiError,
+  type RuntimeApiOptions,
+  type RuntimeFetch,
+  type RuntimeMessage,
+  type RuntimeRunStart,
+  type RuntimeSession,
+  type RuntimeSessionMessageInput,
+} from "./runtime-api";
+
 export interface HealthStatus {
   status: string;
   runtime: string;

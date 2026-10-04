@@ -4,7 +4,7 @@ export default defineConfig({
   name: "DeepStudent Go",
   identifier: "cn.deepstudent.go",
   version: "0.1.0",
-  icon: "./frontend/public/app-icon.png",
+  icon: "./assets/deepstudent-app-icon.png",
   devUrl: "http://localhost:5173",
   devCommand: "bun run dev:web",
   buildCommand: "bun run build:web",
