@@ -62,7 +62,6 @@ type ViewId =
   | "flashcards"
   | "settings";
 type Theme = "light" | "dark";
-type ThemeColor = string;
 type OutboxStatus = "idle" | "sending" | "queued" | "sent" | "failed";
 
 type PersistedMessage = {
@@ -98,17 +97,6 @@ function serializeMessages(messages: readonly unknown[]): PersistedMessage[] {
   });
 }
 function restoreMessages(messages: PersistedMessage[]): unknown[] { return messages.map((message) => ({ ...message, createdAt: message.createdAt ? new Date(message.createdAt) : undefined })); }
-
-const themeColorStorageKey = "dstu-theme-color";
-const defaultThemeColor: ThemeColor = "#2563eb";
-const themeColorPresets: Array<{ value: ThemeColor; label: string }> = [
-  { value: "#2563eb", label: "靛蓝" },
-  { value: "#0f766e", label: "青绿" },
-  { value: "#7c3aed", label: "紫罗兰" },
-  { value: "#ea580c", label: "橙色" },
-  { value: "#db2777", label: "玫红" },
-  { value: "#16a34a", label: "翠绿" },
-];
 
 type LearningGoal = "exam" | "course" | "skill";
 type LearningMode = "practice" | "notes" | "plan";
@@ -223,6 +211,16 @@ const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "flashcards", label: "闪卡", icon: "stack" },
 ];
 
+const quickPrompts: Array<{ label: string; icon: IconName }> = [
+  { label: "复习今天的课程", icon: "book" },
+  { label: "整理一份学习笔记", icon: "book" },
+  { label: "解释一个概念", icon: "brain" },
+  { label: "生成知识点卡片", icon: "cards" },
+  { label: "制定复习计划", icon: "check" },
+  { label: "总结这段资料", icon: "stack" },
+  { label: "创建学习线程", icon: "sparkle" },
+];
+
 const phosphorIcons: Record<IconName, PhosphorIcon> = {
   sparkle: Sparkle,
   book: BookOpen,
@@ -259,59 +257,6 @@ const readTheme = (): Theme => {
   if (saved === "dark" || saved === "light") return saved;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 };
-
-const isThemeColor = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value);
-
-const readThemeColor = (): ThemeColor => {
-  const saved = window.localStorage.getItem(themeColorStorageKey);
-  return saved && isThemeColor(saved) ? saved : defaultThemeColor;
-};
-
-type ThemeColorTokens = {
-  accent: string;
-  accentStrong: string;
-  accentSoft: string;
-  focus: string;
-  titleAccent: string;
-  voice: string;
-  selection: string;
-  onAccent: string;
-};
-
-const hexToRgb = (hex: ThemeColor): [number, number, number] => [
-  Number.parseInt(hex.slice(1, 3), 16),
-  Number.parseInt(hex.slice(3, 5), 16),
-  Number.parseInt(hex.slice(5, 7), 16),
-];
-
-const rgbToHex = ([red, green, blue]: [number, number, number]) => `#${[red, green, blue].map((channel) => Math.round(Math.max(0, Math.min(255, channel))).toString(16).padStart(2, "0")).join("")}`;
-const mixRgb = (color: [number, number, number], target: [number, number, number], amount: number): [number, number, number] => color.map((channel, index) => channel + (target[index] - channel) * amount) as [number, number, number];
-const rgba = ([red, green, blue]: [number, number, number], alpha: number) => `rgba(${Math.round(red)}, ${Math.round(green)}, ${Math.round(blue)}, ${alpha})`;
-const relativeLuminance = ([red, green, blue]: [number, number, number]) => [red, green, blue].map((channel) => channel / 255).map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
-
-function getThemeColorTokens(themeColor: ThemeColor, theme: Theme): ThemeColorTokens {
-  const rgb = hexToRgb(themeColor);
-  const isLightColor = relativeLuminance(rgb) > 0.48;
-  const accentStrong = theme === "dark" ? mixRgb(rgb, [255, 255, 255], isLightColor ? 0.1 : 0.24) : mixRgb(rgb, [0, 0, 0], isLightColor ? 0.2 : 0.12);
-  const onAccent = relativeLuminance(rgb) > 0.48 ? "#111827" : "#ffffff";
-
-  // Keep decorative surfaces, helper text, focus rings, and voice feedback tied to
-  // the stable light/dark palette. The selected accent is limited to controls and
-  // selected states so changing the theme color never recolors the shell itself.
-  const stableAccent = theme === "dark" ? "#60a5fa" : "#2563eb";
-  const stableAccentSoft = theme === "dark" ? "rgba(96, 165, 250, 0.2)" : "rgba(37, 99, 235, 0.12)";
-  const stableTitleAccent = theme === "dark" ? "#93c5fd" : "#2563eb";
-  return {
-    accent: rgbToHex(rgb),
-    accentStrong: rgbToHex(accentStrong),
-    accentSoft: stableAccentSoft,
-    focus: stableTitleAccent,
-    titleAccent: stableTitleAccent,
-    voice: stableAccent,
-    selection: rgba(rgb, theme === "dark" ? 0.26 : 0.16),
-    onAccent,
-  };
-}
 
 const StubAdapter: ChatModelAdapter = {
   async *run({ messages }) {
@@ -362,6 +307,24 @@ function ChatGPTAttachmentUI() {
       {isComposer && <AttachmentPrimitive.Remove className="ds-chat-attachment__remove" aria-label="移除附件"><Icon name="x" size={13} /></AttachmentPrimitive.Remove>}
     </AttachmentPrimitive.Root>
   );
+}
+
+function ChatEmptyState() {
+  return (
+    <div className="ds-chat-center">
+      <h2 id="chat-welcome-title">把今天学会的，变成真正掌握的</h2>
+    </div>
+  );
+}
+
+function ChatQuickPrompts() {
+  const composer = unstable_useComposerInput();
+  const rows = [quickPrompts.slice(0, 3), quickPrompts.slice(3, 5), quickPrompts.slice(5, 7)];
+  return <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
+    {rows.map((row, index) => <div className={`ds-chat-prompts__row ds-chat-prompts__row--${index + 1}`} key={`prompt-row-${index}`}>
+      {row.map((prompt) => <button key={prompt.label} className="ds-chat-prompt" type="button" onClick={() => composer.setText(prompt.label)}><Icon name={prompt.icon} size={15} /><span>{prompt.label}</span></button>)}
+    </div>)}
+  </div>;
 }
 
 function ChatBranchPicker() {
@@ -1044,12 +1007,15 @@ function ChatWorkspace({ session, onSessionChange }: { session: ChatSession; onS
       <section className="ds-chat-page ds-chatgpt-page" aria-labelledby="chat-welcome-title">
         <ThreadPrimitive.Root className="ds-chat-thread">
           <AuiIf condition={(state) => state.thread.isEmpty}>
-            <div className="ds-chatgpt-empty">
-              <div className="ds-chatgpt-empty__inner">
-                <h1>从哪里开始？</h1>
-                <div className="ds-composer-dock"><ChatComposer runtime={runtime} outboxStatus={outboxStatus} /></div>
-              </div>
-            </div>
+            <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
+              <ThreadPrimitive.Empty>
+                <div className="ds-chat-empty-state">
+                  <ChatEmptyState />
+                  <ChatQuickPrompts />
+                </div>
+              </ThreadPrimitive.Empty>
+            </ThreadPrimitive.Viewport>
+            <div className="ds-composer-dock"><ChatComposer runtime={runtime} outboxStatus={outboxStatus} /></div>
           </AuiIf>
           <AuiIf condition={(state) => !state.thread.isEmpty}>
             <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport ds-chatgpt-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
@@ -1394,8 +1360,8 @@ function EmptyState({ title, description }: { title: string; description: string
 function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
 function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
 function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, themeColor, onThemeColor, onOpenOnboarding }: { theme: Theme; onTheme: () => void; themeColor: ThemeColor; onThemeColor: (color: ThemeColor) => void; onOpenOnboarding: () => void }) {
-  return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label><div className="ds-theme-color-setting"><div className="ds-theme-color-setting__heading"><span><b>主题色</b><small>用于按钮、焦点、标题和录音波形</small></span><span className="ds-theme-color-preview"><i style={{ backgroundColor: themeColor }} aria-hidden="true" /><code>{themeColor.toUpperCase()}</code></span></div><div className="ds-theme-color-presets" role="group" aria-label="主题色预设"><span className="ds-theme-color-presets__label">预设</span>{themeColorPresets.map((preset) => <button key={preset.value} type="button" className={`ds-theme-color-swatch${themeColor.toLowerCase() === preset.value ? " is-selected" : ""}`} style={{ backgroundColor: preset.value }} aria-label={`选择${preset.label}主题色`} aria-pressed={themeColor.toLowerCase() === preset.value} onClick={() => onThemeColor(preset.value)} />)}</div><label className="ds-theme-color-custom"><span>自定义颜色</span><input type="color" value={themeColor} onChange={(event) => onThemeColor(event.target.value)} aria-label="自定义主题色" /></label></div></section></div></div></WorkspacePage>;
+function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) {
+  return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>;
 }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
@@ -1404,7 +1370,6 @@ function WorkspacePage({ action, children }: { action?: React.ReactNode; childre
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
-  const [themeColor, setThemeColor] = useState<ThemeColor>(() => readThemeColor());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
@@ -1418,18 +1383,6 @@ export function App() {
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem("dstu-theme-mode", theme);
   }, [theme]);
-  useEffect(() => {
-    const root = document.documentElement;
-    const tokens = getThemeColorTokens(themeColor, theme);
-    root.style.setProperty("--ds-accent", tokens.accent);
-    root.style.setProperty("--ds-accent-strong", tokens.accentStrong);
-    root.style.setProperty("--ds-accent-soft", tokens.accentSoft);
-    root.style.setProperty("--ds-focus", tokens.focus);
-    root.style.setProperty("--ds-title-accent", tokens.titleAccent);
-    root.style.setProperty("--ds-voice-color", tokens.voice);
-    root.style.setProperty("--ds-selection", tokens.selection);
-    root.style.setProperty("--ds-on-accent", tokens.onAccent);
-  }, [theme, themeColor]);
   useEffect(() => { window.localStorage.setItem(sessionStorageKey, JSON.stringify(sessions)); }, [sessions]);
   useEffect(() => { if (!sessions.some((session) => session.id === activeSessionId) && sessions[0]) setActiveSessionId(sessions[0].id); }, [activeSessionId, sessions]);
   useEffect(() => {
@@ -1437,11 +1390,6 @@ export function App() {
   }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
-  const updateThemeColor = (color: ThemeColor) => {
-    const nextColor = isThemeColor(color) ? color : defaultThemeColor;
-    setThemeColor(nextColor);
-    window.localStorage.setItem(themeColorStorageKey, nextColor);
-  };
   const completeOnboarding = (config: Omit<OnboardingConfig, "completedAt">) => {
     const saved = { ...config, completedAt: new Date().toISOString() };
     window.localStorage.setItem(onboardingStorageKey, JSON.stringify(saved));
@@ -1461,8 +1409,8 @@ export function App() {
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "flashcards") return <Flashcards />;
-    return <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} onThemeColor={updateThemeColor} onOpenOnboarding={openOnboarding} />;
-  }, [activeSession, theme, themeColor, updateSession, view]);
+    return <Settings theme={theme} onTheme={toggleTheme} onOpenOnboarding={openOnboarding} />;
+  }, [activeSession, theme, updateSession, view]);
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
@@ -1475,6 +1423,7 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" data-drop-ignore="true" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
+          <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起导航" aria-expanded={sidebarOpen || !sidebarCollapsed}><Icon name="sidebar" size={16} /></button>
           <span className="ds-sidebar__brand-name">DeepStudent</span>
           <div className="ds-sidebar__brand-actions">
             <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
