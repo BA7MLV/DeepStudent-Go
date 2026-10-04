@@ -62,7 +62,28 @@ type ViewId =
   | "flashcards"
   | "settings";
 type Theme = "light" | "dark";
+type ThemeColor = string;
 type OutboxStatus = "idle" | "sending" | "queued" | "sent" | "failed";
+
+const themeColorStorageKey = "dstu-theme-color";
+const defaultThemeColor = "#2563eb";
+const themeColorPresets: Array<{ value: ThemeColor; label: string }> = [
+  { value: "#2563eb", label: "靛蓝" },
+  { value: "#0f766e", label: "青绿" },
+  { value: "#7c3aed", label: "紫罗兰" },
+  { value: "#ea580c", label: "橙色" },
+  { value: "#db2777", label: "玫红" },
+];
+
+const isThemeColor = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value);
+const readThemeColor = (): ThemeColor => {
+  const saved = window.localStorage.getItem(themeColorStorageKey);
+  return saved && isThemeColor(saved) ? saved : defaultThemeColor;
+};
+const themeColorLuminance = (hex: ThemeColor) => {
+  const channels = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset + 1, offset + 3), 16) / 255);
+  return channels.map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+};
 
 type PersistedMessage = {
   id: string;
@@ -1161,7 +1182,7 @@ function EmptyState({ title, description }: { title: string; description: string
 function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
 function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
 function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, onOpenOnboarding, onClose }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void; onClose: () => void }) {
+function Settings({ theme, onTheme, themeColor, onThemeColor, onOpenOnboarding, onClose }: { theme: Theme; onTheme: () => void; themeColor: ThemeColor; onThemeColor: (color: ThemeColor) => void; onOpenOnboarding: () => void; onClose: () => void }) {
   const [section, setSection] = useState<"general" | "appearance">("general");
   return <div className="ds-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="settings-title">
     <button type="button" className="ds-settings-modal__backdrop" aria-label="关闭设置" onClick={onClose} />
@@ -1175,7 +1196,7 @@ function Settings({ theme, onTheme, onOpenOnboarding, onClose }: { theme: Theme;
         </nav>
         <div className="ds-settings-content">
           {section === "general" && <section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section>}
-          {section === "appearance" && <section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section>}
+          {section === "appearance" && <section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label><div className="ds-theme-color-setting"><div><b>主题色</b><small>用于按钮、链接和选中状态</small></div><div className="ds-theme-color-presets" role="group" aria-label="主题色预设">{themeColorPresets.map((preset) => <button key={preset.value} type="button" className={`ds-theme-color-swatch${themeColor.toLowerCase() === preset.value ? " is-selected" : ""}`} style={{ backgroundColor: preset.value }} aria-label={`选择${preset.label}主题色`} aria-pressed={themeColor.toLowerCase() === preset.value} onClick={() => onThemeColor(preset.value)} />)}</div></div></section>}
         </div>
       </div>
     </section>
@@ -1188,6 +1209,7 @@ function WorkspacePage({ action, children }: { action?: React.ReactNode; childre
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
+  const [themeColor, setThemeColor] = useState<ThemeColor>(() => readThemeColor());
   const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -1204,6 +1226,17 @@ export function App() {
     window.localStorage.setItem("dstu-theme-mode", theme);
   }, [theme]);
   useEffect(() => {
+    const root = document.documentElement;
+    const luminance = themeColorLuminance(themeColor);
+    root.style.setProperty("--ds-accent", themeColor);
+    root.style.setProperty("--ds-accent-strong", `color-mix(in srgb, ${themeColor} 82%, ${theme === "dark" ? "white" : "black"})`);
+    root.style.setProperty("--ds-focus", themeColor);
+    root.style.setProperty("--ds-title-accent", themeColor);
+    root.style.setProperty("--ds-selection", `color-mix(in srgb, ${themeColor} ${theme === "dark" ? "26%" : "16%"}, transparent)`);
+    root.style.setProperty("--ds-on-accent", luminance > 0.48 ? "#111827" : "#ffffff");
+    window.localStorage.setItem(themeColorStorageKey, themeColor);
+  }, [theme, themeColor]);
+  useEffect(() => {
     const query = window.matchMedia("(max-width: 767px)");
     const onChange = () => setIsMobile(query.matches);
     onChange();
@@ -1217,6 +1250,9 @@ export function App() {
   }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
+  const updateThemeColor = (color: ThemeColor) => {
+    if (isThemeColor(color)) setThemeColor(color.toLowerCase());
+  };
   const completeOnboarding = (config: Omit<OnboardingConfig, "completedAt">) => {
     const saved = { ...config, completedAt: new Date().toISOString() };
     window.localStorage.setItem(onboardingStorageKey, JSON.stringify(saved));
@@ -1274,10 +1310,11 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" data-drop-ignore="true" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
-          {((isMobile && sidebarOpen) || (!isMobile && !sidebarCollapsed)) && <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label={isMobile ? "关闭导航" : "收起导航"} aria-expanded={isMobile ? sidebarOpen : !sidebarCollapsed}><Icon name="menu" size={16} /></button>}
+          {isMobile && sidebarOpen && <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="关闭导航" aria-expanded={sidebarOpen}><Icon name="menu" size={16} /></button>}
           <span className="ds-sidebar__brand-name">DeepStudent</span>
           <div className="ds-sidebar__brand-actions">
             <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
+            {!isMobile && !sidebarCollapsed && <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起导航" aria-expanded={!sidebarCollapsed}><Icon name="sidebar" size={16} /></button>}
           </div>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
@@ -1297,7 +1334,7 @@ export function App() {
         <div className="ds-main__drag-region" aria-hidden="true" />
         {((isMobile && !sidebarOpen) || (!isMobile && sidebarCollapsed)) && <div className="ds-main__floating-actions" aria-label="工作区导航">
           <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={isMobile ? sidebarOpen : !sidebarCollapsed}>
-            <Icon name="menu" size={17} />
+            <Icon name={isMobile ? "menu" : "sidebar"} size={17} />
           </button>
         </div>}
         <div className="ds-main__actions" aria-label="窗口操作">
@@ -1306,7 +1343,7 @@ export function App() {
         <WorkspaceDropZone>{content}</WorkspaceDropZone>
       </main>
     </div>
-    {settingsOpen && <Settings theme={theme} onTheme={toggleTheme} onOpenOnboarding={openOnboarding} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} onThemeColor={updateThemeColor} onOpenOnboarding={openOnboarding} onClose={() => setSettingsOpen(false)} />}
     {onboardingOpen && <Onboarding initial={onboardingConfig} onComplete={completeOnboarding} />}
   </div>;
 }
