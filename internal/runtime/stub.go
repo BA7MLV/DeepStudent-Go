@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,10 @@ type deterministicRun struct {
 	cancel      context.CancelFunc
 	mu          sync.Mutex
 	history     []StreamEvent
+	// sequences mirrors history for stores that assign a durable session
+	// sequence to each event. It lets a reconnect use either the public event
+	// id or the session sequence as Last-Event-ID.
+	sequences   []int64
 	subscribers map[chan StreamEvent]struct{}
 	closed      bool
 	record      RunRecord
@@ -165,23 +170,43 @@ func (r *DeterministicRuntime) Subscribe(ctx context.Context, runID string) (<-c
 }
 
 // SubscribeFrom replays events after lastEventID before following live events.
-// The replay window is intentionally bounded by the in-memory retention policy.
+// The replay window is intentionally bounded by the in-memory retention policy
+// for active runs. If the process was restarted and the run is no longer in
+// memory, persisted session_events provide a restart-safe replay window.
 func (r *DeterministicRuntime) SubscribeFrom(ctx context.Context, runID, lastEventID string) (<-chan StreamEvent, error) {
 	r.mu.RLock()
 	state, ok := r.runs[runID]
 	r.mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("run %q not found", runID)
+		events, err := r.replayPersisted(ctx, runID, strings.TrimSpace(lastEventID))
+		if err != nil {
+			return nil, err
+		}
+		channel := make(chan StreamEvent, len(events))
+		for _, event := range events {
+			channel <- event
+		}
+		close(channel)
+		return channel, nil
 	}
+	lastEventID = strings.TrimSpace(lastEventID)
+	lastSequence, hasSequence := parseEventSequence(lastEventID)
 	state.mu.Lock()
 	channel := make(chan StreamEvent, len(state.history)+16)
 	replay := lastEventID == ""
-	for _, event := range state.history {
+	for index, event := range state.history {
 		if replay {
 			channel <- event
-		} else if event.ID == lastEventID {
+			continue
+		}
+		if event.ID == lastEventID || (hasSequence && index < len(state.sequences) && state.sequences[index] > lastSequence) {
+			if hasSequence {
+				// A numeric Last-Event-ID is a session sequence, so the first
+				// event after the sequence is part of the replay.
+				channel <- event
+			}
 			replay = true
-	}
+		}
 	}
 	if state.closed {
 		close(channel)
@@ -201,6 +226,82 @@ func (r *DeterministicRuntime) SubscribeFrom(ctx context.Context, runID, lastEve
 		}()
 	}
 	return channel, nil
+}
+
+// replayPersisted reads the durable event log for a run that is no longer
+// present in this process (for example, after a restart). Last-Event-ID may be
+// the opaque SSE event id emitted by the runtime or a decimal session event
+// sequence. Unknown opaque ids intentionally produce an empty replay rather
+// than duplicating the entire run.
+func (r *DeterministicRuntime) replayPersisted(ctx context.Context, runID, lastEventID string) ([]StreamEvent, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	reader, ok := r.store.(RunReader)
+	if !ok {
+		return nil, fmt.Errorf("run %q not found", runID)
+	}
+	run, err := reader.Run(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(run.SessionID) == "" {
+		return nil, fmt.Errorf("run %q has no session", runID)
+	}
+	events, err := r.store.Events(ctx, run.SessionID, 0)
+	if err != nil {
+		return nil, err
+	}
+	lastSequence, hasSequence := parseEventSequence(lastEventID)
+	if lastEventID != "" && !hasSequence {
+		var found bool
+		for _, persisted := range events {
+			if persisted.RunID != runID || persisted.Sequence <= 0 {
+				continue
+			}
+			var event StreamEvent
+			if err := json.Unmarshal(persisted.Payload, &event); err != nil {
+				continue
+			}
+			if event.ID == lastEventID {
+				lastSequence = persisted.Sequence
+				found = true
+				break
+			}
+		}
+		if !found {
+			return []StreamEvent{}, nil
+		}
+	}
+	result := make([]StreamEvent, 0, len(events))
+	for _, persisted := range events {
+		if persisted.RunID != runID || (lastEventID != "" && persisted.Sequence <= lastSequence) {
+			continue
+		}
+		var event StreamEvent
+		if err := json.Unmarshal(persisted.Payload, &event); err != nil {
+			continue
+		}
+		// The database columns are authoritative for routing and timestamps;
+		// this also makes replay tolerant of payloads written by older builds.
+		event.RunID = runID
+		if event.Type == "" {
+			event.Type = StreamEventType(persisted.Type)
+		}
+		if event.CreatedAt.IsZero() {
+			event.CreatedAt = persisted.CreatedAt
+		}
+		result = append(result, event)
+	}
+	return result, nil
+}
+
+func parseEventSequence(lastEventID string) (int64, bool) {
+	if lastEventID == "" {
+		return 0, false
+	}
+	sequence, err := strconv.ParseInt(lastEventID, 10, 64)
+	return sequence, err == nil && sequence > 0
 }
 
 func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministicRun, request AgentRunRequest) {
@@ -288,9 +389,13 @@ func (r *DeterministicRuntime) emit(ctx context.Context, state *deterministicRun
 		default:
 		}
 	}
+	var sequence int64
 	if r.store != nil && state.sessionID != "" {
 		payload, _ := json.Marshal(event)
-		_, _ = r.store.AppendEvent(ctx, SessionEvent{SessionID: state.sessionID, RunID: state.id, Type: string(event.Type), Payload: payload, CreatedAt: event.CreatedAt})
+		persisted, err := r.store.AppendEvent(ctx, SessionEvent{SessionID: state.sessionID, RunID: state.id, Type: string(event.Type), Payload: payload, CreatedAt: event.CreatedAt})
+		if err == nil {
+			sequence = persisted.Sequence
+		}
 		if event.Type == EventTextDelta {
 			content := event.Text
 			if content == "" {
@@ -307,6 +412,7 @@ func (r *DeterministicRuntime) emit(ctx context.Context, state *deterministicRun
 		return false
 	}
 	state.history = append(state.history, event)
+	state.sequences = append(state.sequences, sequence)
 	for subscriber := range state.subscribers {
 		select {
 		case subscriber <- event:

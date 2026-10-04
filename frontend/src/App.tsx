@@ -71,17 +71,6 @@ function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: n
   return <svg {...common} aria-hidden="true">{paths[name]}</svg>;
 }
 
-const viewMeta: Record<ViewId, { title: string; subtitle: string }> = {
-  "chat-v2": { title: "", subtitle: "" },
-  "learning-hub": { title: "学习资源", subtitle: "浏览和管理你的学习资料" },
-  todo: { title: "待办事项", subtitle: "把下一步学习行动放在眼前" },
-  "skills-management": { title: "技能管理", subtitle: "配置 DeepStudent 的可用技能" },
-  "task-dashboard": { title: "Anki 制卡", subtitle: "从资料生成可复习的卡片" },
-  flashcards: { title: "闪卡", subtitle: "用主动回忆巩固真正理解的内容" },
-  "template-management": { title: "模板管理", subtitle: "管理笔记、卡片和输出模板" },
-  settings: { title: "设置", subtitle: "调整 DeepStudent 的工作方式" },
-};
-
 const readTheme = (): Theme => {
   const saved = window.localStorage.getItem("dstu-theme-mode");
   if (saved === "dark" || saved === "light") return saved;
@@ -234,7 +223,6 @@ export function App() {
     if (view === "template-management") return <Templates />;
     return <Settings theme={theme} onTheme={toggleTheme} />;
   }, [theme, view]);
-  const meta = viewMeta[view];
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
@@ -271,14 +259,17 @@ export function App() {
       </aside>
       <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
-        <header className="ds-main__header">
-          <div className="ds-main__leading">
-            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarCollapsed || sidebarOpen}><Icon name="sliders" size={17} /></button>
-            <span className="ds-main__brand">DeepStudent</span>
+        <div className="ds-main__drag-region" aria-hidden="true" />
+        <div className="ds-main__floating-actions" aria-label="窗口与工作区操作">
+          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={sidebarCollapsed || sidebarOpen}>
+            <Icon name="sliders" size={17} />
+          </button>
+          <div className="ds-main__actions">
+            <button className="ds-icon-button" onClick={() => selectView("learning-hub")} aria-label="搜索"><Icon name="search" size={16} /></button>
+            <button className="ds-icon-button" onClick={() => selectView("chat-v2")} aria-label="新建"><Icon name="plus" size={16} /></button>
+            <button className="ds-icon-button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button>
           </div>
-          <div className="ds-main__heading"><h1>{meta.title}</h1><p>{meta.subtitle}</p></div>
-          <div className="ds-main__actions"><button className="ds-icon-button" onClick={() => selectView("learning-hub")} aria-label="搜索"><Icon name="search" size={16} /></button><button className="ds-icon-button" onClick={() => selectView("chat-v2")} aria-label="新建"><Icon name="plus" size={16} /></button><button className="ds-icon-button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
-        </header>
+        </div>
         <div className="ds-main__content">{content}</div>
       </main>
     </div>

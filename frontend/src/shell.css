@@ -45,3 +45,57 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ds-chat-thread .ds-chat-message { flex:0 0 auto; width:min(760px,100%); }
 .ds-scroll-bottom { display:none; }
 .ds-composer { flex:0 0 auto; }
+
+/* MyGo hidden-titlebar window chrome: reserve only the native traffic-light
+   room as a drag handle; the rest of the app remains normal web content. */
+.ds-shell { position:relative; }
+.ds-sidebar__brand { --app-region:drag; -webkit-app-region:drag; }
+.ds-main { position:relative; }
+.ds-main__drag-region {
+  position:absolute;
+  z-index:2;
+  top:0;
+  right:0;
+  left:0;
+  height:var(--mygo-titlebar-height, 0px);
+  min-height:0;
+  --app-region:drag;
+  -webkit-app-region:drag;
+  user-select:none;
+}
+.ds-main__floating-actions {
+  position:absolute;
+  z-index:4;
+  top:calc(var(--mygo-titlebar-height, 0px) + 8px);
+  right:14px;
+  display:flex;
+  align-items:center;
+  gap:2px;
+  padding:2px;
+  border:1px solid transparent;
+  border-radius:10px;
+}
+.ds-main__floating-actions:hover,
+.ds-main__floating-actions:focus-within {
+  border-color:var(--ds-border);
+  background:color-mix(in srgb, var(--ds-bg) 92%, transparent);
+}
+.ds-main__actions { display:flex; gap:2px; }
+.ds-sidebar-affordance {
+  display:none;
+  place-items:center;
+  width:28px;
+  height:28px;
+  border-radius:var(--ds-radius-row);
+  background:transparent;
+  color:var(--ds-muted);
+}
+.ds-sidebar-affordance:hover { background:var(--ds-hover); color:var(--ds-fg); }
+.ds-shell[data-sidebar-collapsed="true"] .ds-sidebar-affordance { display:inline-grid; }
+@media (max-width: 767px) {
+  .ds-main__floating-actions { top:calc(var(--mygo-titlebar-height, 0px) + 6px); right:10px; }
+  .ds-sidebar-affordance { display:inline-grid; }
+  .ds-shell[data-sidebar-open="true"] .ds-sidebar-affordance { display:none; }
+}
+/* Keep the sidebar's brand row below the macOS traffic-light room. */
+.ds-sidebar { padding-top:calc(14px + var(--mygo-titlebar-height, 0px)); }

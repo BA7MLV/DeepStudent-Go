@@ -268,12 +268,24 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, message runtime.Message
 	if err := s.CreateSession(ctx, message.SessionID); err != nil {
 		return runtime.Message{}, err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO messages(id, session_id, run_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)`, message.ID, message.SessionID, message.RunID, message.Role, message.Content, message.CreatedAt.UTC().Format(time.RFC3339Nano))
+	// Client-provided message IDs make offline outbox retries idempotent. If a
+	// retry arrives after the first write, return the original row instead of
+	// turning a successful delivery into a duplicate-message error.
+	_, err := s.db.ExecContext(ctx, `INSERT INTO messages(id, session_id, run_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET run_id = CASE WHEN messages.run_id = '' THEN excluded.run_id ELSE messages.run_id END`, message.ID, message.SessionID, message.RunID, message.Role, message.Content, message.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return runtime.Message{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, message.CreatedAt.UTC().Format(time.RFC3339Nano), message.SessionID)
-	return message, err
+	stored, err := s.GetMessage(ctx, message.ID)
+	if err != nil {
+		return runtime.Message{}, err
+	}
+	if stored.SessionID != message.SessionID {
+		return runtime.Message{}, fmt.Errorf("message %q already belongs to another session", message.ID)
+	}
+	if stored.ID == message.ID && stored.RunID == message.RunID && stored.Content == message.Content {
+		_, err = s.db.ExecContext(ctx, `UPDATE sessions SET updated_at = CASE WHEN updated_at < ? THEN ? ELSE updated_at END WHERE id = ?`, message.CreatedAt.UTC().Format(time.RFC3339Nano), message.CreatedAt.UTC().Format(time.RFC3339Nano), message.SessionID)
+	}
+	return stored, err
 }
 
 func (s *SQLiteStore) Messages(ctx context.Context, sessionID string, after time.Time) ([]runtime.Message, error) {
@@ -302,6 +314,149 @@ func (s *SQLiteStore) Messages(ctx context.Context, sessionID string, after time
 		result = append(result, message)
 	}
 	return result, rows.Err()
+}
+
+// MessagesPage returns a bounded, stable timeline window. Cursors are message
+// IDs rather than timestamps so messages written in the same clock tick are
+// neither skipped nor repeated while a client scrolls upward or reconnects.
+// The returned messages are always in ascending timeline order.
+func (s *SQLiteStore) MessagesPage(ctx context.Context, sessionID, beforeID, afterID string, limit int) (runtime.MessagePage, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return runtime.MessagePage{}, errors.New("session id is required")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if strings.TrimSpace(beforeID) != "" && strings.TrimSpace(afterID) != "" {
+		return runtime.MessagePage{}, errors.New("before and after cursors are mutually exclusive")
+	}
+
+	args := []any{sessionID}
+	query := `SELECT id, session_id, run_id, role, content, created_at FROM messages WHERE session_id = ?`
+	order := ` ORDER BY created_at, id`
+	descending := false
+	if beforeID = strings.TrimSpace(beforeID); beforeID != "" {
+		var cursorCreated string
+		if err := s.db.QueryRowContext(ctx, `SELECT created_at FROM messages WHERE id = ? AND session_id = ?`, beforeID, sessionID).Scan(&cursorCreated); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return runtime.MessagePage{}, fmt.Errorf("message cursor %q not found", beforeID)
+			}
+			return runtime.MessagePage{}, err
+		}
+		query += ` AND (created_at < ? OR (created_at = ? AND id < ?))`
+		args = append(args, cursorCreated, cursorCreated, beforeID)
+		order = ` ORDER BY created_at DESC, id DESC`
+		descending = true
+	} else if afterID = strings.TrimSpace(afterID); afterID != "" {
+		var cursorCreated string
+		if err := s.db.QueryRowContext(ctx, `SELECT created_at FROM messages WHERE id = ? AND session_id = ?`, afterID, sessionID).Scan(&cursorCreated); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return runtime.MessagePage{}, fmt.Errorf("message cursor %q not found", afterID)
+			}
+			return runtime.MessagePage{}, err
+		}
+		query += ` AND (created_at > ? OR (created_at = ? AND id > ?))`
+		args = append(args, cursorCreated, cursorCreated, afterID)
+	}
+	query += order + ` LIMIT ?`
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return runtime.MessagePage{}, err
+	}
+	defer rows.Close()
+	result := make([]runtime.Message, 0, limit+1)
+	for rows.Next() {
+		var message runtime.Message
+		var created string
+		if err := rows.Scan(&message.ID, &message.SessionID, &message.RunID, &message.Role, &message.Content, &created); err != nil {
+			return runtime.MessagePage{}, err
+		}
+		if message.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
+			return runtime.MessagePage{}, err
+		}
+		result = append(result, message)
+	}
+	if err := rows.Err(); err != nil {
+		return runtime.MessagePage{}, err
+	}
+	hasMore := len(result) > limit
+	if hasMore {
+		result = result[:limit]
+	}
+	if descending {
+		for left, right := 0, len(result)-1; left < right; left, right = left+1, right-1 {
+			result[left], result[right] = result[right], result[left]
+		}
+	}
+	page := runtime.MessagePage{Messages: result, HasMore: hasMore}
+	if len(result) > 0 {
+		page.NextBefore = result[0].ID
+		page.NextAfter = result[len(result)-1].ID
+	}
+	return page, nil
+}
+
+// SearchSessions provides a small, indexed-enough search surface for sidebar
+// lookup. The query matches session IDs and titles, and also message content so
+// a user can find a thread by something they remember writing.
+func (s *SQLiteStore) SearchSessions(ctx context.Context, query string, limit, offset int) ([]runtime.Session, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return s.ListSessions(ctx, limit, offset)
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	pattern := "%" + query + "%"
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT s.id, s.title, s.created_at, s.updated_at
+		FROM sessions s
+		WHERE s.id LIKE ? OR s.title LIKE ? OR EXISTS (
+			SELECT 1 FROM messages m WHERE m.session_id = s.id AND m.content LIKE ?
+		)
+		ORDER BY s.updated_at DESC LIMIT ? OFFSET ?`, pattern, pattern, pattern, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]runtime.Session, 0)
+	for rows.Next() {
+		var session runtime.Session
+		var created, updated string
+		if err := rows.Scan(&session.ID, &session.Title, &created, &updated); err != nil {
+			return nil, err
+		}
+		if session.CreatedAt, err = time.Parse(time.RFC3339Nano, created); err != nil {
+			return nil, err
+		}
+		if session.UpdatedAt, err = time.Parse(time.RFC3339Nano, updated); err != nil {
+			return nil, err
+		}
+		result = append(result, session)
+	}
+	return result, rows.Err()
+}
+
+func (s *SQLiteStore) GetMessage(ctx context.Context, messageID string) (runtime.Message, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return runtime.Message{}, errors.New("message id is required")
+	}
+	var message runtime.Message
+	var created string
+	err := s.db.QueryRowContext(ctx, `SELECT id, session_id, run_id, role, content, created_at FROM messages WHERE id = ?`, messageID).Scan(&message.ID, &message.SessionID, &message.RunID, &message.Role, &message.Content, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtime.Message{}, fmt.Errorf("message %q not found", messageID)
+	}
+	if err != nil {
+		return runtime.Message{}, err
+	}
+	message.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+	return message, err
 }
 
 func (s *SQLiteStore) CreateRun(ctx context.Context, run runtime.RunRecord) error {

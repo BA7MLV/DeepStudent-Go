@@ -108,6 +108,8 @@ type runRequest struct {
 	SessionID         string   `json:"session_id,omitempty"`
 	Prompt            string   `json:"prompt"`
 	Content           string   `json:"content,omitempty"`
+	MessageID         string   `json:"message_id,omitempty"`
+	ClientMessageID   string   `json:"client_message_id,omitempty"`
 	Provider          string   `json:"provider,omitempty"`
 	Model             string   `json:"model,omitempty"`
 	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
@@ -175,8 +177,33 @@ func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID
 	}
 	var requestedRunID string
 	if catalog, ok := s.store.(runtime.SessionCatalog); ok && input.SessionID != "" {
+		messageID := strings.TrimSpace(input.MessageID)
+		if messageID == "" {
+			messageID = strings.TrimSpace(input.ClientMessageID)
+		}
+		// Retries from an offline outbox may arrive after the original request
+		// already created a run. Reuse that run instead of emitting a duplicate
+		// assistant response. Stores without MessageLookup retain old behavior.
+		if messageID != "" {
+			if lookup, lookupOK := s.store.(runtime.MessageLookup); lookupOK {
+				if existing, lookupErr := lookup.GetMessage(r.Context(), messageID); lookupErr == nil {
+					if existing.SessionID != input.SessionID || existing.Role != "user" || existing.Content != input.Prompt {
+						writeError(w, requestID, http.StatusConflict, "message_id_conflict", "message id is already used for another message", nil)
+						return
+					}
+					if existing.RunID != "" {
+						s.writeAcceptedRun(w, requestID, existing.RunID, input.SessionID, selection, input)
+						return
+					}
+				}
+			}
+		}
 		requestedRunID = newID("run")
-		if _, err := catalog.AppendMessage(r.Context(), runtime.Message{SessionID: input.SessionID, RunID: requestedRunID, Role: "user", Content: input.Prompt}); err != nil {
+		message := runtime.Message{SessionID: input.SessionID, RunID: requestedRunID, Role: "user", Content: input.Prompt}
+		if messageID != "" {
+			message.ID = messageID
+		}
+		if _, err := catalog.AppendMessage(r.Context(), message); err != nil {
 			writeError(w, requestID, http.StatusInternalServerError, "message_persist_failed", "could not persist user message", nil)
 			return
 		}
@@ -196,15 +223,19 @@ func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID
 		writeError(w, requestID, http.StatusBadRequest, "run_start_failed", err.Error(), nil)
 		return
 	}
+	s.writeAcceptedRun(w, requestID, run.ID, run.SessionID, selection, input)
+}
+
+func (s *Server) writeAcceptedRun(w http.ResponseWriter, requestID, runID, sessionID string, selection config.ModelSelection, input runRequest) {
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"run_id":           run.ID,
-		"session_id":       run.SessionID,
+		"run_id":           runID,
+		"session_id":       sessionID,
 		"profile_id":       selection.ProfileID,
 		"provider":         input.Provider,
 		"model":            input.Model,
 		"reasoning_effort": input.ReasoningEffort,
 		"max_tokens":       input.MaxTokens,
-		"events_url":       "/api/v1/runs/" + run.ID + "/events",
+		"events_url":       "/api/v1/runs/" + runID + "/events",
 		"request_id":       requestID,
 	})
 }
@@ -243,6 +274,11 @@ func (s *Server) streamRun(w http.ResponseWriter, r *http.Request, requestID str
 		writeError(w, requestID, http.StatusInternalServerError, "stream_unsupported", "streaming is unavailable", nil)
 		return
 	}
+	// Tell EventSource clients how quickly to retry after a dropped connection.
+	// This is advisory and does not change the durable Last-Event-ID replay
+	// behavior used to recover any events produced during the disconnect.
+	fmt.Fprint(w, "retry: 3000\n\n")
+	flusher.Flush()
 	for {
 		select {
 		case <-r.Context().Done():
@@ -268,7 +304,33 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request, requestID 
 		return
 	}
 	limit, offset := parsePage(r)
-	sessions, err := catalog.ListSessions(r.Context(), limit, offset)
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		query = strings.TrimSpace(r.URL.Query().Get("search"))
+	}
+	var sessions []runtime.Session
+	var err error
+	if query != "" {
+		if searcher, searchOK := s.store.(runtime.SessionSearcher); searchOK {
+			sessions, err = searcher.SearchSessions(r.Context(), query, limit, offset)
+		} else {
+			// Keep compatibility with small stores that only implement the
+			// original catalog. Their limited result set is filtered locally.
+			sessions, err = catalog.ListSessions(r.Context(), limit, offset)
+			if err == nil {
+				filtered := sessions[:0]
+				needle := strings.ToLower(query)
+				for _, session := range sessions {
+					if strings.Contains(strings.ToLower(session.ID), needle) || strings.Contains(strings.ToLower(session.Title), needle) {
+						filtered = append(filtered, session)
+					}
+				}
+				sessions = filtered
+			}
+		}
+	} else {
+		sessions, err = catalog.ListSessions(r.Context(), limit, offset)
+	}
 	if err != nil {
 		writeError(w, requestID, http.StatusInternalServerError, "session_list_failed", "could not list sessions", nil)
 		return
@@ -347,12 +409,77 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, requestID 
 		writeError(w, requestID, http.StatusNotFound, "session_not_found", "session not found", nil)
 		return
 	}
-	messages, err := catalog.Messages(r.Context(), sessionID, time.Time{})
+	var page runtime.MessagePage
+	var err error
+	beforeID := strings.TrimSpace(r.URL.Query().Get("before"))
+	afterID := strings.TrimSpace(r.URL.Query().Get("after"))
+	limit, limitProvided := parseMessagePage(r)
+	if pager, ok := s.store.(runtime.MessagePageReader); ok && (limitProvided || beforeID != "" || afterID != "") {
+		page, err = pager.MessagesPage(r.Context(), sessionID, beforeID, afterID, limit)
+	} else {
+		var messages []runtime.Message
+		messages, err = catalog.Messages(r.Context(), sessionID, time.Time{})
+		if err == nil {
+			// Legacy stores return one complete ascending timeline. Apply the
+			// same ID cursors in memory so upgraded clients can talk to them.
+			start, end := 0, len(messages)
+			if beforeID != "" {
+				for i, message := range messages {
+					if message.ID == beforeID {
+						end = i
+						break
+					}
+				}
+			} else if afterID != "" {
+				for i, message := range messages {
+					if message.ID == afterID {
+						start = i + 1
+						break
+					}
+				}
+			}
+			if start > end {
+				start = end
+			}
+			window := messages[start:end]
+			if limitProvided && len(window) > limit {
+				if beforeID != "" {
+					window = window[len(window)-limit:]
+				} else {
+					window = window[:limit]
+				}
+				page.HasMore = true
+			}
+			page.Messages = window
+			if len(window) > 0 {
+				page.NextBefore = window[0].ID
+				page.NextAfter = window[len(window)-1].ID
+			}
+		}
+	}
 	if err != nil {
 		writeError(w, requestID, http.StatusInternalServerError, "message_list_failed", "could not list messages", nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "request_id": requestID})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"messages":    page.Messages,
+		"has_more":    page.HasMore,
+		"next_before": page.NextBefore,
+		"next_after":  page.NextAfter,
+		"request_id":  requestID,
+	})
+}
+
+func parseMessagePage(r *http.Request) (int, bool) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return 50, false
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || limit <= 0 || limit > 200 {
+		return 50, true
+	}
+	return limit, true
 }
 
 func (s *Server) postMessage(w http.ResponseWriter, r *http.Request, requestID, sessionID string) {

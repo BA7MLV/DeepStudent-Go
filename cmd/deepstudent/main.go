@@ -12,8 +12,9 @@ func main() {
 
 	mygo.App.WhenReady(func() {
 		mygo.NewWindow(mygo.WindowOptions{
-			Title: "DeepStudent Go",
-			URL:   "/",
+			Title:         "DeepStudent Go",
+			URL:           "/",
+			TitleBarStyle: mygo.TitleBarHidden,
 		})
 	})
 

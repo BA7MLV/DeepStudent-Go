@@ -105,6 +105,38 @@ type SessionCatalog interface {
 	Messages(ctx context.Context, sessionID string, after time.Time) ([]Message, error)
 }
 
+// MessagePage is an optional cursor-based message timeline response. Cursor
+// values are opaque message IDs, which keeps pagination stable when multiple
+// messages share the same timestamp. The oldest/newest cursors can be sent
+// back as the before/after query parameters on the next request.
+type MessagePage struct {
+	Messages   []Message `json:"messages"`
+	HasMore    bool      `json:"has_more"`
+	NextBefore string    `json:"next_before,omitempty"`
+	NextAfter  string    `json:"next_after,omitempty"`
+}
+
+// MessagePageReader is an optional extension implemented by durable stores.
+// SessionCatalog remains intentionally small so existing in-memory stores keep
+// working; API handlers fall back to the legacy full timeline method when this
+// extension is unavailable.
+type MessagePageReader interface {
+	MessagesPage(ctx context.Context, sessionID, beforeID, afterID string, limit int) (MessagePage, error)
+}
+
+// SessionSearcher is an optional search extension for sidebar/session lookup.
+// Implementations should match query text against stable session metadata and
+// return results in the same recency order as ListSessions.
+type SessionSearcher interface {
+	SearchSessions(ctx context.Context, query string, limit, offset int) ([]Session, error)
+}
+
+// MessageLookup allows API retries to detect a previously persisted client
+// message and return its existing run instead of starting a duplicate run.
+type MessageLookup interface {
+	GetMessage(ctx context.Context, messageID string) (Message, error)
+}
+
 type RunStatus string
 
 const (

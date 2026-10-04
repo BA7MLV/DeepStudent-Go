@@ -1,114 +1,175 @@
 # DeepStudent-Go
 
-DeepStudent-Go is an incremental Go runtime migration for DeepStudent. It
-combines a local-first Go HTTP/SSE service with a small React/MyGo desktop
-shell, so the runtime boundary can evolve without replacing the existing
-product all at once.
+DeepStudent-Go 是 DeepStudent 的渐进式 Go 运行时迁移工作区。它把本地优先的 Go HTTP/SSE 服务、SQLite 持久化、附件存储，以及一个 React + MyGo 桌面壳放在同一个仓库中，让运行时边界可以逐步替换，而不用一次性重写现有产品。
 
-> **Status: prototype / migration workspace**
+> **状态：原型 / 迁移实验（prototype / migration workspace）**
 >
-> The Go transport, deterministic stream, SQLite event store, and desktop shell
-> are working foundations. The web chat still uses a local `StubAdapter`; it is
-> not yet wired to the Go SSE endpoint. An iOS client is planned as an
-> experiment and has not been built in this repository.
+> Go 传输层、确定性事件流、SQLite 事件存储、附件基础设施和桌面壳已经具备可运行的基础。浏览器聊天目前仍使用前端 `StubAdapter`，尚未接入 Go SSE；认证、跨进程 SSE 恢复、生产级工具沙箱和原生 iOS 客户端也尚未完成。现有 DeepStudent 实现仍是兼容性和性能对照的事实来源。
 
-## What exists today
+## 先看结论
 
-| Area | Current state |
+- **后端是持久化的唯一权威。** 会话、消息、运行记录和会话事件由 Go 服务写入 SQLite；前端应通过 HTTP 读取，而不是把浏览器状态当作数据源。
+- **前端和后端目前还没有接通聊天。** React 壳使用 `assistant-ui` 的本地 `StubAdapter` 生成演示回复；它只调用 MyGo 的类型化健康检查桥接，不会调用 `/api/v1/runs`。
+- **实时输出走 SSE。** `POST /api/v1/runs` 返回 `202` 和 `events_url`，客户端随后订阅 `GET /api/v1/runs/:id/events`。
+- **SSE 的短期重放在内存中。** 运行期间以及结束后的约 5 分钟会保留事件历史，可用 `Last-Event-ID` 补发；SQLite 中的 `session_events` 是持久化基础，但本版本还没有从 SQLite 做 HTTP 事件重放的端点。
+- **默认配置不访问网络。** `deterministic` provider 用于离线开发和可重复测试。SiliconFlow、DeepSeek 与自定义 OpenAI-compatible provider 只有在显式选择后才会读取环境变量中的凭据。
+- **部署范围是本机或本地 Docker。** 认证默认关闭，远程设备发现、生产工具执行、签名发布和 iOS 客户端均属于后续实验。
+
+## 现状一览
+
+| 区域 | 当前状态 |
 | --- | --- |
-| Go runtime | HTTP JSON + SSE routes, SiliconFlow/DeepSeek-compatible provider adapters, request IDs, structured errors, exact-origin CORS |
-| Persistence | CGO-free SQLite with WAL, single-writer policy, append-only session events, and attachment metadata |
-| Attachments | SHA-256 content-addressed blobs under `data/blobs`; SQLite stores metadata and `workspace://` references |
-| Desktop shell | MyGo window with a React 19 + TypeScript + Vite UI and typed health bridge |
-| Web preview | Responsive DeepStudent shell with chat, learning resources, tasks, flashcards, settings, and light/dark themes |
-| CI | Go format/test/vet/build checks, Pages preview workflow, unsigned macOS arm64 workflow |
-| Not implemented | Authentication, durable SSE replay/cancel, production tool sandbox, and a native iOS app |
+| Go runtime | HTTP JSON + SSE；provider-neutral runtime；请求 ID；结构化错误；精确 Origin CORS |
+| 权威持久化 | CGO-free SQLite、WAL、单写入者；会话/消息/运行/追加式事件；运行结束状态同步写入 |
+| 附件 | `data/blobs` 下的 SHA-256 内容寻址文件；SQLite 只保存元数据和 `workspace://` 引用 |
+| Web 预览 | React 19 + TypeScript + Vite；聊天、学习资源、待办、闪卡、设置及明暗主题的响应式壳 |
+| MyGo 桌面壳 | 与 Web 共用 React UI；生成兼容的 `HealthService.Health` 类型化桥接 |
+| CI | Go 格式化/测试/vet/build 检查；Pages 预览；未签名 macOS arm64 工作流 |
+| 尚未完成 | 认证、从 SQLite 的持久 SSE 重放/恢复、生产工具沙箱、附件 HTTP API、原生 iOS 客户端 |
 
-The existing DeepStudent implementation remains the source of truth until the
-migration passes compatibility and benchmark gates.
-
-## Verification status
-
-The checkout includes [`go-backend.yml`](.github/workflows/go-backend.yml),
-which runs `gofmt`, `go test ./...`, `go vet ./...`, and a CGO-free server
-build on pushes to `feature/go-backend-runtime` and pull requests targeting
-`main` or that backend branch. The goal branch is not a push trigger in this
-workflow; use `workflow_dispatch` on this branch or add an explicit trigger
-before relying on CI for it. This checkout has no recorded successful Actions
-run, so treat Go CI as **unverified until a run is observed in GitHub Actions**.
-Do not describe the backend as CI-green based on this README alone.
-
-For a local verification pass, run:
-
-```sh
-gofmt -w cmd internal
-test -z "$(gofmt -l cmd internal)"
-go test ./...
-go vet ./...
-CGO_ENABLED=0 go build ./cmd/server
-```
-
-The frontend can be checked independently with `bun run typecheck` and
-`bun run build` from `frontend/`. These checks do not prove that the browser
-chat is wired to the Go SSE API.
-
-Use this matrix to keep local claims honest. A check marked **not verified**
-needs a fresh run in an environment with the required toolchain; this checkout
-does not include an Actions result to cite.
-
-| Surface | Command or evidence | Current status |
-| --- | --- | --- |
-| Go formatting | `gofmt -w cmd internal && test -z "$(gofmt -l cmd internal)"` | Unverified in this checkout |
-| Go unit tests | `go test ./...` | Unverified in this checkout |
-| Go static checks | `go vet ./...` | Unverified in this checkout |
-| CGO-free server build | `CGO_ENABLED=0 go build ./cmd/server` | Unverified in this checkout |
-| Frontend type/build | `cd frontend && bun run typecheck && bun run build` | Independent; unverified here |
-| HTTP smoke | `GET /healthz`, `GET /readyz`, `POST /api/v1/runs` | Manual smoke required |
-| SSE smoke | `GET /api/v1/runs/:id/events` and inspect terminal event | Manual; in-memory stream only |
-| Attachment storage | `go test ./internal/attachments ./internal/storage` | Tests present; unverified here |
-| Docker profile | `docker compose up --build`; repeat health/SSE smoke | Manual; local profile only |
-
-The Go server is loaded once at process startup. `config.Manager` provides
-validated atomic reloads for embedding callers, but this command does not
-watch files or expose a reload endpoint.
-
-## Architecture
+## 架构与数据流
 
 ```mermaid
 flowchart LR
-  UI[React / assistant-ui] --> API[Go API\nHTTP JSON + SSE]
-  API --> RT[provider-neutral runtime\nProviderRouter]
-  RT --> DB[(SQLite WAL\nappend-only events)]
-  RT --> B[AttachmentStore\nmetadata + SHA-256 blobs]
-  RT --> X[SiliconFlow / DeepSeek / custom OpenAI\nHTTP + SSE adapters]
-  B --> FS[(data/blobs)]
+  WEB[浏览器 React / assistant-ui] -->|HTTP JSON + SSE（聊天接入待完成）| API[Go API\nHTTP + SSE]
+  DESKTOP[MyGo 桌面窗口] --> WEB
+  WEB -->|当前仅健康桥接| HEALTH[HealthService.Health]
+  API --> RT[Provider-neutral runtime\nAgentRun + ProviderRouter]
+  RT --> DB[(SQLite WAL\nserver-authoritative data)]
+  RT --> BLOB[AttachmentStore\nmetadata + SHA-256 blobs]
+  RT --> P[deterministic / SiliconFlow / DeepSeek / custom OpenAI\nHTTP + SSE]
+  BLOB --> FS[(data/blobs)]
 ```
 
-The MyGo window hosts the same React shell and currently exposes a typed health
-bridge. The browser chat still uses a local stub; wiring it to the Go SSE API is
-the next integration step.
+一次运行的权威流程如下：
 
-The contracts live in [`protocol/runtime-v1.md`](protocol/runtime-v1.md) and
-the backend boundary is documented in
-[`docs/backend-architecture.md`](docs/backend-architecture.md). The current
-SSE route streams live in-memory run events; persisted events are the basis for
-a future replay API, not a claim that reconnect/resume already works. A late
-subscriber can receive the run history while it remains in memory (currently
-about five minutes after completion); there is no durable replay or
-`Last-Event-ID` contract yet.
+1. 客户端向 `POST /api/v1/runs`（或 `POST /api/v1/sessions/:id/messages`）提交 prompt。API 校验模型选择、token 上限和会话信息；有持久化存储且未指定 `session_id` 时会创建会话。
+2. API 先在服务端保存用户消息（若请求带会话），再启动 runtime；runtime 创建 `runs` 记录。
+3. runtime 产生 `run.started`、`message.delta` 和终止事件。每个事件先追加到 `session_events`，再广播给 SSE 订阅者；文本增量同时写入 `messages`。运行状态最终更新为 `completed`、`failed` 或 `canceled`。
+4. API 立即返回 `202 Accepted`、`run_id`、`session_id` 和 `events_url`。客户端再打开 SSE 连接并按事件顺序渲染。
+5. 前端刷新或重新打开会话时，应调用会话/消息查询接口；仅在内存保留窗口内，才可通过 SSE 订阅得到短期事件重放。
 
-## Technology
+因此，浏览器 UI 是展示层，Go 服务是会话和运行数据的权威源。当前 `StubAdapter` 尚未走这条路径，是迁移期间刻意保留的实验缺口。
 
-- Go 1.27.1, `net/http`, provider-neutral runtime interfaces, and OpenAI-compatible HTTP/SSE adapters
-- SQLite via `modernc.org/sqlite` (CGO-free, WAL, single writer)
-- React 19, TypeScript, Vite, and `@assistant-ui/react`
-- MyGo 0.1.22 for the desktop shell and generated-compatible bindings
-- Bun for frontend install/build scripts
-- Docker Compose for a local server profile
+## SQLite 数据布局与持久化边界
 
-## Run locally
+`internal/storage` 打开 SQLite 时启用 `PRAGMA journal_mode = WAL` 和外键约束，并把最大连接数设为 1，避免低资源本地安装产生写锁风暴。每次追加事件使用短事务计算会话序号并插入，读取可以在同一连接池中并发进行。
 
-Prerequisites: Go 1.27+, Bun, and (optionally) Docker.
+迁移按版本执行（当前 schema version 为 3）：
+
+| 表 | 用途 |
+| --- | --- |
+| `schema_migrations` | 已应用迁移版本 |
+| `sessions` | 会话 ID、标题、创建/更新时间 |
+| `runs` | run ID、所属会话、provider/model、状态、完成时间 |
+| `session_events` | 按 `(session_id, sequence)` 排序的追加式事件和 JSON payload |
+| `messages` | 会话时间线中的 user/assistant 消息 |
+| `provider_profiles` | provider 元数据（不保存 API key 值） |
+| `settings` | 预留的键值设置 |
+| `jobs` | 预留的任务状态和 payload |
+| `attachments` | SHA-256、大小、MIME、文件名、时间和唯一 workspace 引用 |
+
+附件字节不会进入 SQLite。`internal/attachments` 在临时文件中流式计算 SHA-256，通过大小/MIME 策略后原子移动到：
+
+```text
+data/blobs/<sha256 前两位>/<完整 sha256>
+```
+
+SQLite 只保存 `workspace://attachments/<sha256>`。相同内容重复上传是幂等的；中断上传可能留下未引用 blob，垃圾回收尚未实现。备份时必须同时保存 SQLite 文件和 `data/blobs`，缺一不可解析引用。当前附件存储仍在内部边界后面，尚未暴露上传/下载 HTTP 路由。
+
+持久化是服务器权威，但本版本对极端故障的语义仍有限：事件写入错误在 runtime 的事件广播路径中不会变成客户端错误；批量写入、独立读池、blob GC 和崩溃恢复需要基准测试与回放语义后再启用。
+
+## SSE 事件、连接与重放
+
+SSE 响应使用 `text/event-stream`，每条消息包含：
+
+```text
+id: evt-...
+event: message.delta
+data: {"id":"evt-...","run_id":"run-...","type":"message.delta",...}
+```
+
+目前定义的事件类型包括：
+
+- `run.started`
+- `message.delta`
+- `tool.call`（协议保留，当前默认 provider 不产生）
+- `run.completed`
+- `run.error`
+- `run.canceled`
+
+客户端可在重连时发送 `Last-Event-ID`。确定性 runtime 会在内存历史中找到该 ID 后补发其后的事件，再继续发送实时事件。每个已结束 run 的历史最多保留约 5 分钟，随后 run 和事件频道从进程内存释放；因此：
+
+- 这不是跨进程或跨重启的 durable replay；
+- `session_events` 虽然已经落盘，但目前没有从该表按序列恢复 SSE 的 HTTP 路由；
+- 客户端不能把“成功重连”误认为“服务端已经恢复了任意旧 run”；
+- 生产部署前必须补充明确的 replay、resume、cancel、鉴权和断线 UI 契约。
+
+## HTTP API（v1）
+
+所有响应带 `X-Request-ID`；JSON 错误使用 `error.code`、`error.message`、`error.request_id`，CORS 只允许精确 Origin，不支持通配符。
+
+- `GET /healthz`：进程存活检查
+- `GET /readyz`：runtime 就绪检查
+- `GET /api/v1/`：API 版本
+- `GET /api/v1/sessions?limit=50&offset=0`：列出会话
+- `POST /api/v1/sessions`：创建或更新会话（`id`、`title`）
+- `GET /api/v1/sessions/:id`：读取会话
+- `GET /api/v1/sessions/:id/messages`：读取消息时间线
+- `POST /api/v1/sessions/:id/messages`：追加用户 prompt 并启动 run
+- `POST /api/v1/runs`：启动 run，返回 `202`、run 元数据和 `events_url`
+- `GET /api/v1/runs/:id`：读取运行状态（当前优先读取内存；内存 run 被清理后，HTTP 查询仍可能返回 404）
+- `POST /api/v1/runs/:id/cancel`：请求取消
+- `GET /api/v1/runs/:id/events`：订阅 SSE
+
+本版本没有会话删除、附件上传/下载、工具调用、登录、跨进程事件恢复或远程客户端发现接口。
+
+快速验证当前 SSE 流：
+
+```sh
+# terminal 1
+go run ./cmd/server
+
+# terminal 2
+curl -s http://127.0.0.1:8080/healthz
+curl -s -X POST http://127.0.0.1:8080/api/v1/runs \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"hello"}'
+
+# 将上一步返回的 run_id 填入
+RUN_ID="paste-run-id"
+curl -N "http://127.0.0.1:8080/api/v1/runs/${RUN_ID}/events"
+```
+
+运行受默认超时（默认 45 秒）和最大并发数（默认 2）约束。`cmd/server` 当前把默认 HTTP `readTimeout` 设为 15 秒、`writeTimeout` 设为 0（不限制 SSE 响应生命周期）、`idleTimeout` 设为 60 秒；如在 JSON 配置中设置写超时，应确认它不会提前截断长流。
+
+## 配置、provider 与密钥
+
+加载顺序是：内置默认值 → `DEEPSTUDENT_CONFIG` 指定的可选 JSON → 环境变量覆盖。`config.Manager.Reload` 会校验完整快照后原子替换；无效配置保留上一个有效快照，不会探测 provider 可用性或凭据。
+
+Provider profile 只保存 endpoint、模型、能力、重试和**环境变量名**。API key 的值只在进程启动/请求时从环境读取，绝不能写入 JSON、Dockerfile、Compose、日志、事件或浏览器请求。可使用 `DEEPSTUDENT_BASE_URL`、`DEEPSTUDENT_PROVIDER_<NAME>_BASE_URL` 等覆盖部署地址。
+
+常用配置：
+
+| 变量 | 默认值 | 作用 |
+| --- | --- | --- |
+| `DEEPSTUDENT_HTTP_ADDR` | `127.0.0.1:8080` | API 监听地址 |
+| `DEEPSTUDENT_DB_PATH` | `data/deepstudent.db` | SQLite 路径 |
+| `DEEPSTUDENT_BLOB_ROOT` | `data/blobs` | 内容寻址 blob 根目录 |
+| `DEEPSTUDENT_ATTACHMENT_MAX_BYTES` | `33554432` | 单个附件最大字节数；`0` 取消上限 |
+| `DEEPSTUDENT_ATTACHMENT_ALLOWED_MIME` | 常见文本/文档/图片/音视频 | 逗号分隔的 MIME allowlist，支持 `type/*` |
+| `DEEPSTUDENT_CORS_ALLOWLIST` | localhost/127.0.0.1:5173 | 逗号分隔的精确 Origin |
+| `DEEPSTUDENT_DEFAULT_PROVIDER` | `deterministic` | 新 run 的默认 provider |
+| `DEEPSTUDENT_DEFAULT_TIMEOUT` | `45s` | 单次 runtime 超时 |
+| `DEEPSTUDENT_MAX_TOKENS` | `2048` | runtime token 上限 |
+| `DEEPSTUDENT_MAX_CONCURRENCY` | `2` | 同时运行上限 |
+| `DEEPSTUDENT_AUTH_ENABLED` | `false` | 预留的会话边界；登录尚未实现 |
+
+JSON 中的 `server.readTimeout`、`server.writeTimeout`、`server.idleTimeout` 和 provider/model 细节没有对应的全部环境变量；需要更细配置时使用 `DEEPSTUDENT_CONFIG`。默认 provider 是 `deterministic`，可显式选择 `siliconflow`、`deepseek` 或 `custom-openai`。若选择远程 provider，先配置相应 endpoint 和 API key 环境变量。
+
+## 本地运行
+
+前置条件：Go 1.27+、Bun；Docker 可选。
 
 ### Go API + SSE runtime
 
@@ -118,110 +179,19 @@ go vet ./...
 go run ./cmd/server
 ```
 
-The default listener is `127.0.0.1:8080`; SQLite is stored at
-`data/deepstudent.db`. The default profile remains deterministic for offline
-development; real SiliconFlow and DeepSeek adapters read credentials only from
-environment variables when that provider is explicitly selected. The `DEEPSTUDENT_CONFIG` JSON path is optional;
-environment values override file values. Useful overrides are:
+默认监听 `127.0.0.1:8080`，数据写入 `data/deepstudent.db` 和 `data/blobs`。开发时建议保留确定性 provider，以获得离线、可重复的结果。
+
+### Web 壳
 
 ```sh
-DEEPSTUDENT_HTTP_ADDR=127.0.0.1:8080 \
-DEEPSTUDENT_DB_PATH=data/deepstudent.db \
-DEEPSTUDENT_CORS_ALLOWLIST=http://localhost:5173 \
-go run ./cmd/server
-```
-
-Model routes are independent from transport. A provider may declare
-`baseURL`/`base_url`, an `apiKeyEnv` reference, and defaults; its `models` map
-can override `reasoning_effort`, `max_tokens`, and `input` capabilities for a
-model. `DEEPSTUDENT_BASE_URL` and
-`DEEPSTUDENT_PROVIDER_<NAME>_BASE_URL` provide deployment overrides without
-loading API keys into config. `config.Manager` reloads validated snapshots
-atomically and leaves the last known-good config on invalid edits.
-
-`cmd/server` registers the deterministic, SiliconFlow, DeepSeek, and custom
-OpenAI-compatible profiles. Select a provider explicitly with
-`DEEPSTUDENT_DEFAULT_PROVIDER` or the run request. Keep API-key values out of
-JSON, Dockerfiles, compose files, logs, and run requests; configure only the
-environment-variable name (`apiKeyEnv`) and inject the value at process startup.
-
-### Configuration reference
-
-Configuration is loaded in this order: built-in defaults, the optional JSON
-file named by `DEEPSTUDENT_CONFIG`, then environment overrides. Invalid reloads
-leave the last known-good snapshot in place. Common local overrides are:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `DEEPSTUDENT_HTTP_ADDR` | `127.0.0.1:8080` | bind address for the API |
-| `server.readTimeout` (JSON only) | `15s` | maximum request-header/read time |
-| `server.writeTimeout` (JSON only) | `30s` | maximum response lifetime, including SSE |
-| `server.idleTimeout` (JSON only) | `60s` | keep-alive idle timeout |
-| `DEEPSTUDENT_DB_PATH` | `data/deepstudent.db` | SQLite metadata/event database path |
-| `DEEPSTUDENT_BLOB_ROOT` | `data/blobs` | content-addressed attachment blob root |
-| `DEEPSTUDENT_ATTACHMENT_MAX_BYTES` | `33554432` | maximum accepted attachment bytes; `0` disables the limit |
-| `DEEPSTUDENT_ATTACHMENT_ALLOWED_MIME` | common text/document/image/audio/video types | comma-separated MIME allowlist; supports `type/*` |
-| `DEEPSTUDENT_CORS_ALLOWLIST` | localhost/127.0.0.1:5173 | comma-separated exact origins |
-| `DEEPSTUDENT_DEFAULT_PROVIDER` | `deterministic` | provider route for new runs (`siliconflow`, `deepseek`, or `custom-openai` are available) |
-| `DEEPSTUDENT_DEFAULT_TIMEOUT` | `45s` | runtime run timeout |
-| `DEEPSTUDENT_MAX_TOKENS` | `2048` | runtime token ceiling |
-| `DEEPSTUDENT_MAX_CONCURRENCY` | `2` | bounded active runs |
-| `DEEPSTUDENT_AUTH_ENABLED` | `false` | reserved session boundary; login is not implemented |
-
-Provider endpoint and credential settings use metadata only. Set
-`DEEPSTUDENT_PROVIDER_<NAME>_BASE_URL` or a `baseURL`/`baseURLEnv` reference;
-set `apiKeyEnv` to the name of an environment variable, never to the secret
-value. Provider adapters are instantiated by `cmd/server`, but no credential is
-required until a remote provider is selected.
-
-### HTTP and SSE contract
-
-The local profile exposes only the following routes:
-
-- `GET /healthz` for process liveness
-- `GET /readyz` for runtime readiness
-- `GET /api/v1/` for the API version
-- `POST /api/v1/runs` with `{ "prompt", "session_id"?, "provider"?, "model"?, "max_tokens"? }`
-- `GET /api/v1/runs/:id/events` as `text/event-stream`
-
-The run request returns `202 Accepted`, a `run_id`, and an `events_url`.
-Responses carry `X-Request-ID`; JSON failures use an `error` envelope with a
-machine-readable code, message, and request ID. SSE event IDs are stable only
-for the in-memory retention window. Current event types are `run.started`,
-`message.delta`, `run.completed`, and `run.error`. The server does not expose
-session history, run status, cancellation, attachment upload/download, or
-durable cross-process replay routes in this slice.
-
-Try the current stream:
-
-```sh
-curl -s http://127.0.0.1:8080/healthz
-curl -s -X POST http://127.0.0.1:8080/api/v1/runs \
-  -H 'content-type: application/json' \
-  -d '{"prompt":"hello"}'
-# Paste the returned run_id between the quotes:
-RUN_ID="paste-run-id"
-curl -N "http://127.0.0.1:8080/api/v1/runs/${RUN_ID}/events"
-```
-
-Runtime runs are bounded by the configured default timeout (45s by default);
-completed in-memory history is retained briefly (about five minutes) to allow
-an immediate late subscription, then released. Persisted session events are
-written synchronously when a session ID is supplied, but no HTTP replay route
-reads them yet.
-
-### Web shell
-
-```sh
+cd frontend
 bun install
 bun run dev:web
 ```
 
-This serves the responsive shell through Vite. Its chat adapter is still a
-local stub, while the settings view can report the MyGo health bridge when
-running inside the desktop shell.
+Vite 会提供响应式 Web 壳。聊天仍使用前端 `StubAdapter`；只有在真正接入 Go API 后，Web 聊天才会验证服务端持久化和 SSE。
 
-### MyGo desktop shell
+### MyGo 桌面壳
 
 ```sh
 bun install
@@ -230,198 +200,97 @@ mygo generate
 bun run build -- -platform darwin/arm64
 ```
 
-The build is unsigned and currently configured for macOS 12+ arm64. Linux
-configuration is present; release packaging and signing are not part of this
-prototype.
+当前产物是未签名 macOS 12+ arm64 构建；Linux 配置存在，但发布打包和签名不在本原型范围内。MyGo 生成的桥接可以覆盖 `frontend/src/mygo.ts`，源码中保留了可在普通 Web 环境构建的类型化兼容实现。
 
-### Attachments
-
-Attachments are accepted by the storage layer as immutable, content-addressed
-blobs. `internal/attachments` streams each upload to a temporary file while
-computing SHA-256, enforces the configured byte and MIME policy, and atomically
-places the blob at `data/blobs/<first-two-hex>/<sha256>`. SQLite stores only
-metadata (`sha256`, byte size, MIME, filename, creation time) and the canonical
-`workspace://attachments/<sha256>` reference. Re-uploading the same bytes is
-idempotent and reuses the existing blob.
-
-The current slice deliberately keeps the attachment API behind the storage
-boundary; callers must resolve references through `storage.AttachmentStore` so
-untracked files cannot be opened. Future HTTP upload/download routes should
-preserve this boundary and apply authentication, quotas, and request limits
-before exposing it remotely.
-
-The SQLite schema migration creates an `attachments` metadata table and indexes
-creation time. Bytes never enter SQLite. A duplicate upload reuses the same
-digest/reference, while an interrupted upload can leave an unreferenced blob;
-garbage collection is intentionally deferred. Back up the database and blob
-root together because either one alone is insufficient to resolve a reference.
-
-### Docker profile
+## Docker 本地 profile
 
 ```sh
 docker compose up --build
-# stop the server; keep the named volume for SQLite/blob persistence
+# 停止服务但保留 named volume 中的数据
 docker compose down
 ```
 
-The process listens on `0.0.0.0:8080` inside the container; Compose publishes
-it only on host `127.0.0.1:8080` and stores SQLite metadata/events plus
-content-addressed attachment blobs under `/data` in the `deepstudent-data`
-volume. Provider credentials are intentionally not included. The image
-pre-creates `/data` with the distroless non-root UID's ownership so a new named
-volume can be opened by the server. Verify this permission when switching
-volume drivers or a pre-existing host bind mount. Back up SQLite and `/data/blobs`
-together: a `workspace://attachments/<sha256>` reference is useful only while
-both its metadata row and blob are retained.
+容器内监听 `0.0.0.0:8080`，Compose 只发布到宿主机 `127.0.0.1:8080`。SQLite、事件和内容寻址附件共同保存在 `deepstudent-data` named volume 的 `/data` 下。镜像以 distroless non-root UID 65532 运行，并预先创建可写的 `/data`；若切换 volume driver 或使用已有 bind mount，请重新核对权限。provider 凭据不会写入 Compose。备份时必须一起保存 `/data/deepstudent.db` 和 `/data/blobs`。
 
-### Development loop
+## 验证与 CI 现状
 
-Run the Go server first, then start the Vite shell in a second terminal:
+仓库包含 [`go-backend.yml`](.github/workflows/go-backend.yml)，当前在 `feature/go-backend-runtime` 与 `goal/go-runtime-foundation` 的 push，以及面向 `main`、这两个 backend 分支的 pull request 中运行 `gofmt`、`go test ./...`、`go vet ./...` 和 CGO-free build。本 checkout 没有可引用的成功 Actions 记录；在观察到真实运行前，不要把后端描述为 CI-green。其他分支可用 `workflow_dispatch` 手动验证。
+
+本地检查：
 
 ```sh
-# terminal 1
-go run ./cmd/server
-
-# terminal 2
-bun install
-bun run dev:web
+gofmt -w cmd internal
+test -z "$(gofmt -l cmd internal)"
+go test ./...
+go vet ./...
+CGO_ENABLED=0 go build ./cmd/server
+cd frontend && bun run typecheck && bun run build
 ```
 
-The default deterministic provider makes this loop offline and reproducible;
-remote provider runs use bounded retries, request timeouts, and redacted errors.
-Use `curl` against `/healthz` and `/api/v1/runs` before debugging the shell;
-the shell's current chat stub does not exercise the Go stream. Keep SQLite and
-`data/blobs` out of commits (both are ignored by `.gitignore`) and never put
-provider credentials in source or frontend code.
-
-## Preview links
-
-These are explicit placeholders until a deployment/artifact URL is recorded:
-
-- Expected Pages URL after a successful deployment (verify before sharing): https://ba7mlv.github.io/DeepStudent-Go/
-- macOS preview artifact: `<MACOS_ARTIFACT_URL>` (the workflow artifact URL is run-specific)
-- CI workflow (real link): [`macOS shell workflow`](https://github.com/BA7MLV/DeepStudent-Go/actions/workflows/macos-shell.yml)
-- Pages workflow (real link): [`Pages preview workflow`](https://github.com/BA7MLV/DeepStudent-Go/actions/workflows/pages-preview.yml)
-
-Do not treat a workflow run as a published app. The macOS job currently emits
-an unsigned arm64 artifact when it succeeds.
-
-## Screenshots / visual review
-
-There are no product screenshots in this checkout yet (only app/logo assets).
-Add real captures under `docs/screenshots/` after running the corresponding
-surface; do not substitute generated or imagined screenshots.
-
-| Surface | Reproducible capture checklist | Suggested file |
+| 表面 | 检查 | 当前结论 |
 | --- | --- | --- |
-| Web shell | Run `bun run dev:web`; capture 1440×900 light and dark chat states, then one learning-resource state | `docs/screenshots/web-shell-light.png`, `web-shell-dark.png`, `web-learning-hub.png` |
-| macOS shell | Build with the MyGo command above; open the unsigned `.app`; capture the chat landing and settings/health state | `docs/screenshots/macos-shell.png` |
-| Go stream | Run `cmd/server`; capture `/healthz` and an SSE run in a terminal or API client | `docs/screenshots/api-sse.png` |
-| iOS experiment | Capture only after a native target exists and its shell reaches the stated experiment gates | `docs/screenshots/ios-shell.png` |
+| Go 格式/测试/vet/build | 上述命令 | 需要在目标工具链中重新运行；本 checkout 未验证 |
+| 前端类型/构建 | `cd frontend && bun run typecheck && bun run build` | 与后端独立；本 checkout 未验证 |
+| HTTP smoke | `/healthz`、`/readyz`、`POST /api/v1/runs` | 需要手工执行 |
+| SSE smoke | `GET /api/v1/runs/:id/events` 并观察终止事件 | 手工执行；仅内存流 |
+| Docker profile | `docker compose up --build` 后重复 health/SSE | 本地手工 profile |
 
-## iOS shell experiment (planned, not built)
+## iOS 壳实验（计划中，尚未构建）
 
-The iOS work is a thin-client experiment around the existing Go contracts. It
-is inspired by Telegram's native iOS information architecture and interaction
-density—compact list rows, fast search, a chat-first detail view, swipe/context
-actions, and a bottom composer—without claiming a Telegram clone or a finished
-iOS product.
+iOS 只被设想为现有 Go contract 的薄客户端实验，借鉴 Telegram iOS 的信息密度和交互节奏，不宣称是 Telegram 克隆或完成品。拟定信息架构：
 
-### Proposed information architecture
+1. **Sessions**：置顶/最近学习会话、搜索、未读和运行状态
+2. **Session detail**：消息时间线、流式增量、运行状态和底部 composer
+3. **Study**：学习资源、待办、闪卡等次级入口
+4. **Settings**：runtime URL、诊断、主题和实验开关
 
-1. **Sessions** — the launch surface: pinned/recent study sessions, compact
-   64–72pt rows, unread/run status, pull-to-refresh, and search
-2. **Session detail** — dense message timeline, streaming assistant deltas,
-   inline run status, and a bottom composer with attachment/tool affordances
-3. **Study** — resources, tasks, and flashcards as secondary shelves
-4. **Settings** — runtime URL, diagnostics, theme, and experiment flags
+客户端应先 `GET /healthz`、`GET /readyz`，再 `POST /api/v1/runs` 并订阅 `events_url`。当前没有远程设备发现、认证 profile、持久 replay 或取消协议；任何 native client 都必须显示可恢复的“连接已断开”，不能假装 run 已经恢复。建议 gate 为：导航与假数据 → 确定性 API/SSE → 明确断线/诊断 → 在正式 replay contract 后再做 resume。
 
-Use `NavigationStack` on iPhone and `NavigationSplitView` on iPad. Keep the
-first spike intentionally small: fake session data and shell interactions first,
-then replace the data source with the Go API without redesigning navigation.
-
-### Go API / SSE seam
-
-The native client should target a configurable base URL and use this sequence:
-
-1. `GET /healthz` and `GET /readyz` before enabling send
-2. `POST /api/v1/runs` with `{ "session_id", "prompt", "model", "max_tokens" }`
-3. Read the returned `events_url` as `text/event-stream`
-4. Map `run.started`, `message.delta`, `run.completed`, and `run.error` into
-   timeline state; keep `id` and `run_id` for diagnostics
-
-The current server does not expose an authenticated iOS profile, durable SSE
-replay endpoint, cancellation route, or remote-device discovery. A native
-client must therefore treat the experiment as local/test-only, avoid embedding
-provider secrets, and show a recoverable “connection lost” state instead of
-pretending that a run resumed. Add replay/cancel/auth contracts before any
-shared or production deployment.
-
-### Suggested experiment gates
-
-- **Spike:** navigation, dense session rows, empty/loading/error states, and
-  fake streaming timeline
-- **API slice:** health check, prompt submission, and live SSE deltas against
-  the deterministic Go provider
-- **Resilience slice:** explicit reconnect/error UI and event diagnostics; only
-  enable resume after a server-side replay contract exists
-- **Decision gate:** compare scroll/typing latency and information density with
-  the web shell before deciding whether to continue a native client
-
-The proposed Swift/Xcode target (for example `ios/DeepStudentShell/`) does not
-exist yet. This section is a design plan, not evidence that an iOS app has been
-built.
-
-## Repository map
+## 仓库地图
 
 ```text
-cmd/server/                 local Go HTTP/SSE server
-cmd/deepstudent/            MyGo desktop entry point
-internal/api/               HTTP, CORS, errors, and SSE transport
-internal/runtime/           provider-neutral contracts and deterministic stub
-internal/attachments/       MIME/size policy and content-addressed blob store
-internal/storage/           SQLite schema and append-only event store
-internal/auth/              future server-side session boundary (disabled)
-frontend/                   React shell and MyGo-compatible health client
-protocol/runtime-v1.md      versioned request/event envelope
-docs/backend-architecture.md
+cmd/server/                 本地 Go HTTP/SSE 服务
+cmd/deepstudent/            MyGo 桌面入口
+internal/api/               HTTP、CORS、错误和 SSE transport
+internal/runtime/           provider-neutral contract、runtime 和确定性 provider
+internal/attachments/       MIME/大小策略与内容寻址 blob store
+internal/storage/           SQLite schema、会话/消息/事件/run 存储
+internal/auth/              未来的服务端 session boundary（默认关闭）
+frontend/                   React 壳与 MyGo-compatible health client
+protocol/runtime-v1.md      版本化 request/event envelope
+docs/backend-architecture.md  后端边界与运维说明
 ```
 
-## Branch relationship
+## 分支关系
 
-- `goal/data-attachment-foundation` is the attachment slice documented here. It
-  adds the SQLite metadata table, content-addressed blob store, MIME/size
-  policy, and Docker persistence boundary on top of the backend runtime base.
-- `feature/go-backend-runtime` is the backend migration base. It adds the local
-  HTTP/SSE service, SQLite event store, deterministic provider, Docker profile,
-  and backend-specific CI workflow.
-- `migration/mygo-shell-poc` is the UI-first shell experiment. Its chat remains
-  a local stub and it has no Go backend verification workflow.
-- The existing DeepStudent implementation remains the source of truth until
-  compatibility, performance, and security gates are agreed and met. Keep the
-  runtime contract versioned when integrating the two branches.
+- `goal/data-attachment-foundation`：在 backend runtime 基础上增加 SQLite 附件元数据、内容寻址 blob、MIME/大小策略和 Docker 持久化边界。
+- `feature/go-backend-runtime`：本地 HTTP/SSE 服务、SQLite 事件存储、确定性 provider、Docker profile 及 backend CI 基础。
+- `migration/mygo-shell-poc`：UI 优先的 MyGo 壳实验；聊天仍是本地 stub，不包含 Go backend 验证工作流。
+- 现有 DeepStudent 实现仍是 source of truth；只有在兼容性、性能、安全 gate 通过后才逐步合并。整合时请继续版本化 runtime contract。
 
-## Known limitations and roadmap
+## 已知缺口与下一步 gate
 
-The current server is local/test-only: authentication is disabled, only the
-deterministic provider is instantiated, and the browser shell is not connected
-to `/api/v1/runs`. SSE history is in-memory and retained briefly for late
-subscriptions; durable replay, reconnect/resume, HTTP cancellation, and remote
-client discovery are not implemented. Tool execution, telemetry, real provider
-adapters, blob garbage collection, signed packaging, and production deployment
-are also out of scope.
+当前服务只适合本地/测试使用：认证关闭，浏览器聊天未接入 `/api/v1/runs`，SSE 历史只在内存中短暂保留，SQLite 事件没有 HTTP replay，取消只作用于进程内 run，工具执行与遥测未形成生产边界，blob GC、签名打包、部署和事故 runbook 也未完成。
 
-Next gates are:
+建议按以下顺序推进：
 
-1. Connect the shell through a typed HTTP/SSE adapter and add contract tests.
-2. Add explicit replay/cancel/auth semantics before shared or remote use.
-3. Integrate a real provider through an environment-backed secret boundary.
-4. Benchmark persistence/runtime behavior and document migration/recovery.
-5. Add accessibility, release-signing, deployment, and incident/runbook gates.
+1. 为 Web/MyGo 壳接入类型化 HTTP/SSE adapter，并补充前后端 contract tests。
+2. 在共享或远程使用前，定义 durable replay、resume、cancel 和 auth 语义。
+3. 通过环境变量密钥边界接入真实 provider，并验证超时、重试和错误脱敏。
+4. 对持久化/runtime 做基准测试，记录迁移、备份和恢复步骤。
+5. 增加可访问性、发布签名、部署权限、监控和事故响应 gate。
 
-## Safety and scope
+## 预览与截图
 
-This workspace is local-first and intentionally conservative: deterministic
-offline behavior is the default, credentials are referenced by environment
-name rather than persisted values, and the first milestone does not migrate the
-full product, delete the existing implementation, or change its data schemas.
+以下链接只有在实际产物出现后才能当作已发布地址：
+
+- Pages 预期地址（部署后核验）：<https://ba7mlv.github.io/DeepStudent-Go/>
+- macOS 预览产物：`<MACOS_ARTIFACT_URL>`（workflow artifact URL 随 run 变化）
+- [macOS shell workflow](https://github.com/BA7MLV/DeepStudent-Go/actions/workflows/macos-shell.yml)
+- [Pages preview workflow](https://github.com/BA7MLV/DeepStudent-Go/actions/workflows/pages-preview.yml)
+
+本 checkout 尚无产品截图。真实运行对应表面后，再将截图放入 `docs/screenshots/`，不要用生成或想象的截图代替：Web light/dark、学习资源、macOS shell、Go health/SSE，以及真正存在后的 iOS 实验。
+
+## 安全与范围
+
+这是一个本地优先、保守推进的迁移工作区：默认行为确定且离线，凭据只以环境变量名引用，附件与数据库都受本地路径边界保护。首个里程碑不会迁移完整产品、删除旧实现或修改旧数据 schema；任何共享/远程部署都必须先补齐认证、回放、工具隔离、备份恢复与发布安全 gate。
