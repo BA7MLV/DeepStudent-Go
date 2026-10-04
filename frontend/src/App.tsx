@@ -909,6 +909,7 @@ function StreamDebugPage() {
       let settledToolCall: ToolCallMessagePart | undefined;
       let response = "";
       emit({ kind: "run", label: "run.start", detail: "本地仿真模型开始生成" , tone: "running" });
+      setProgress(0);
       setStatus("running");
       for (let index = 0; index < responseTokens.length; index += 1) {
         await streamWaitForResume(controlRef.current, abortSignal);
