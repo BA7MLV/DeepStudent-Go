@@ -1175,14 +1175,8 @@ function EmptyState({ title, description }: { title: string; description: string
 function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
 function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
 function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, themeColor, savedThemeColor, onThemeColorPreview, onThemeColorSave, onOpenOnboarding }: { theme: Theme; onTheme: () => void; themeColor: ThemeColor; savedThemeColor: ThemeColor; onThemeColorPreview: (color: ThemeColor) => void; onThemeColorSave: (color: ThemeColor) => void; onOpenOnboarding: () => void }) {
-  const [themeColorDraft, setThemeColorDraft] = useState(savedThemeColor);
-  useEffect(() => setThemeColorDraft(savedThemeColor), [savedThemeColor]);
-  const previewThemeColor = (color: ThemeColor) => { setThemeColorDraft(color); onThemeColorPreview(color); };
-  const cancelThemeColor = () => { setThemeColorDraft(savedThemeColor); onThemeColorPreview(savedThemeColor); };
-  const saveThemeColor = () => onThemeColorSave(isThemeColor(themeColorDraft) ? themeColorDraft : defaultThemeColor);
-
-  return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label><div className="ds-theme-color-setting"><div className="ds-theme-color-setting__heading"><span><b>主题色</b><small>用于按钮、焦点、标题和录音波形</small></span><span className="ds-theme-color-preview"><i style={{ backgroundColor: themeColorDraft }} aria-hidden="true" /><code>{themeColorDraft.toUpperCase()}</code></span></div><div className="ds-theme-color-presets" role="group" aria-label="主题色预设"><span className="ds-theme-color-presets__label">预设</span>{themeColorPresets.map((preset) => <button key={preset.value} type="button" className={`ds-theme-color-swatch${themeColorDraft.toLowerCase() === preset.value ? " is-selected" : ""}`} style={{ backgroundColor: preset.value }} aria-label={`选择${preset.label}主题色`} aria-pressed={themeColorDraft.toLowerCase() === preset.value} onClick={() => previewThemeColor(preset.value)} />)}</div><label className="ds-theme-color-custom"><span>自定义颜色</span><input type="color" value={themeColorDraft} onChange={(event) => previewThemeColor(event.target.value)} aria-label="自定义主题色" /></label><div className="ds-theme-color-actions"><button type="button" className="ds-text-button" onClick={cancelThemeColor}>取消</button><button type="button" className="ds-text-button" onClick={() => previewThemeColor(defaultThemeColor)}>恢复默认</button><button type="button" className="ds-primary-button" onClick={saveThemeColor} disabled={themeColorDraft.toLowerCase() === savedThemeColor.toLowerCase()}>保存主题色</button></div></div></section></div></div></WorkspacePage>;
+function Settings({ theme, onTheme, themeColor, onThemeColor, onOpenOnboarding }: { theme: Theme; onTheme: () => void; themeColor: ThemeColor; onThemeColor: (color: ThemeColor) => void; onOpenOnboarding: () => void }) {
+  return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label><div className="ds-theme-color-setting"><div className="ds-theme-color-setting__heading"><span><b>主题色</b><small>用于按钮、焦点、标题和录音波形</small></span><span className="ds-theme-color-preview"><i style={{ backgroundColor: themeColor }} aria-hidden="true" /><code>{themeColor.toUpperCase()}</code></span></div><div className="ds-theme-color-presets" role="group" aria-label="主题色预设"><span className="ds-theme-color-presets__label">预设</span>{themeColorPresets.map((preset) => <button key={preset.value} type="button" className={`ds-theme-color-swatch${themeColor.toLowerCase() === preset.value ? " is-selected" : ""}`} style={{ backgroundColor: preset.value }} aria-label={`选择${preset.label}主题色`} aria-pressed={themeColor.toLowerCase() === preset.value} onClick={() => onThemeColor(preset.value)} />)}</div><label className="ds-theme-color-custom"><span>自定义颜色</span><input type="color" value={themeColor} onChange={(event) => onThemeColor(event.target.value)} aria-label="自定义主题色" /></label></div></section></div></div></WorkspacePage>;
 }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
@@ -1192,7 +1186,6 @@ export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [themeColor, setThemeColor] = useState<ThemeColor>(() => readThemeColor());
-  const [savedThemeColor, setSavedThemeColor] = useState<ThemeColor>(() => readThemeColor());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
@@ -1220,11 +1213,10 @@ export function App() {
   }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
-  const previewThemeColor = (color: ThemeColor) => setThemeColor(color);
-  const saveThemeColor = (color: ThemeColor) => {
-    setThemeColor(color);
-    setSavedThemeColor(color);
-    window.localStorage.setItem(themeColorStorageKey, color);
+  const updateThemeColor = (color: ThemeColor) => {
+    const nextColor = isThemeColor(color) ? color : defaultThemeColor;
+    setThemeColor(nextColor);
+    window.localStorage.setItem(themeColorStorageKey, nextColor);
   };
   const completeOnboarding = (config: Omit<OnboardingConfig, "completedAt">) => {
     const saved = { ...config, completedAt: new Date().toISOString() };
@@ -1241,8 +1233,8 @@ export function App() {
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "flashcards") return <Flashcards />;
-    return <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} savedThemeColor={savedThemeColor} onThemeColorPreview={previewThemeColor} onThemeColorSave={saveThemeColor} onOpenOnboarding={openOnboarding} />;
-  }, [savedThemeColor, theme, themeColor, view]);
+    return <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} onThemeColor={updateThemeColor} onOpenOnboarding={openOnboarding} />;
+  }, [theme, themeColor, view]);
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
@@ -1258,7 +1250,6 @@ export function App() {
           <span className="ds-sidebar__brand-name">DeepStudent</span>
           <div className="ds-sidebar__brand-actions">
             <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
-            <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏"><Icon name="sidebar" size={16} /></button>
           </div>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
@@ -1276,13 +1267,13 @@ export function App() {
       <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <div className="ds-main__drag-region" aria-hidden="true" />
-        <div className="ds-main__floating-actions" aria-label="窗口与工作区操作">
-          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={sidebarOpen || !sidebarCollapsed}>
+        <div className="ds-main__floating-actions" aria-label="工作区导航">
+          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="切换导航" aria-expanded={sidebarOpen || !sidebarCollapsed}>
             <Icon name="sidebar" size={17} />
           </button>
-          <div className="ds-main__actions">
-            <button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button>
-          </div>
+        </div>
+        <div className="ds-main__actions" aria-label="窗口操作">
+          <button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button>
         </div>
         <WorkspaceDropZone>{content}</WorkspaceDropZone>
       </main>
