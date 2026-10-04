@@ -4,8 +4,14 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+// ErrMessageConflict is returned when a client reuses an idempotency/message
+// id for a different message. Callers can safely map this to HTTP 409 without
+// depending on storage-specific error text.
+var ErrMessageConflict = errors.New("message id conflict")
 
 type StreamEventType string
 

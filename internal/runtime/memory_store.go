@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -135,6 +136,34 @@ func (s *MemorySessionStore) AppendMessage(_ context.Context, message Message) (
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Message IDs are the client idempotency key. Keep the in-memory store's
+	// semantics identical to SQLite so retries cannot create duplicate user or
+	// assistant messages during local development and tests.
+	if message.ID != "" {
+		for _, items := range s.messages {
+			for _, existing := range items {
+				if existing.ID != message.ID {
+					continue
+				}
+				if existing.SessionID != message.SessionID || existing.Role != message.Role || existing.Content != message.Content {
+					return Message{}, fmt.Errorf("%w: message %q does not match the original", ErrMessageConflict, message.ID)
+				}
+				if existing.RunID == "" && message.RunID != "" {
+					// A previous request may have persisted the message before the
+					// runtime was started. Reserve the run id on retry.
+					existing.RunID = message.RunID
+					for index := range items {
+						if items[index].ID == existing.ID {
+							items[index] = existing
+							break
+						}
+					}
+					s.messages[existing.SessionID] = items
+				}
+				return existing, nil
+			}
+		}
+	}
 	if _, ok := s.sessions[message.SessionID]; !ok {
 		now := time.Now().UTC()
 		s.sessions[message.SessionID] = Session{ID: message.SessionID, CreatedAt: now, UpdatedAt: now}
@@ -150,6 +179,23 @@ func (s *MemorySessionStore) AppendMessage(_ context.Context, message Message) (
 	session.UpdatedAt = message.CreatedAt
 	s.sessions[message.SessionID] = session
 	return message, nil
+}
+
+func (s *MemorySessionStore) GetMessage(_ context.Context, messageID string) (Message, error) {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return Message{}, errors.New("message id is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, items := range s.messages {
+		for _, message := range items {
+			if message.ID == messageID {
+				return message, nil
+			}
+		}
+	}
+	return Message{}, fmt.Errorf("message %q not found", messageID)
 }
 
 func (s *MemorySessionStore) Messages(_ context.Context, sessionID string, after time.Time) ([]Message, error) {

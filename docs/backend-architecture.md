@@ -43,7 +43,7 @@ flowchart LR
 - `POST /api/v1/runs/:id/cancel`：请求取消
 - `GET /api/v1/runs/:id/events`：`text/event-stream`
 
-每个响应包含 `X-Request-ID`；错误使用 `error.code`、`error.message`、`error.request_id`。CORS 是精确 Origin allowlist。SSE event ID 在内存保留期内稳定；客户端可携带 `Last-Event-ID` 请求后续事件。
+每个响应包含 `X-Request-ID`；错误使用 `error.code`、`error.message`、`error.request_id`。CORS 是精确 Origin allowlist。SSE event ID 在内存保留期内稳定；客户端可携带 `Last-Event-ID` 请求后续事件。SSE 默认每 15 秒发送注释 heartbeat；run 无论成功、失败还是取消都会发送终止事件。带 `client_message_id`/`message_id` 的消息重试按 ID 幂等，内容冲突返回 409。
 
 一次 run 的顺序是：提交 JSON → API 持久化用户消息和 run 元数据 → runtime 产生 `run.started`/delta/终止事件 → 事件先写 `session_events` 再广播 → assistant delta 写入 `messages` → 终止状态写入 `runs`。当前重放只读取进程内历史（结束后约 5 分钟）；`session_events` 还没有对应的 HTTP durable replay 查询，所以不能声称支持跨进程恢复。
 
@@ -63,7 +63,7 @@ flowchart LR
 2. 会话 `title`、`messages` 表，以及会话/事件/run 查询索引
 3. `attachments` 元数据表及创建时间索引
 
-`session_events` 以 `(session_id, sequence)` 维护顺序；每次追加在短事务中更新会话时间并插入一条事件。附件字节永远不进 SQLite，由 `internal/attachments` 流式计算 SHA-256 并写到内容寻址 blob tree；`AttachmentStore` 只允许通过已登记的 `workspace://attachments/<sha256>` 引用打开文件。SQLite 与 blob 根必须作为同一个备份边界。
+`session_events` 以 `(session_id, sequence)` 维护顺序；每次追加在短事务中更新会话时间并插入一条事件。附件字节永远不进 SQLite，由 `internal/attachments` 流式计算 SHA-256 并写到内容寻址 blob tree；`AttachmentStore` 只允许通过已登记的 `workspace://attachments/<sha256>` 引用打开文件。SQLite 与 blob 根必须作为同一个备份边界。v1 HTTP API 暴露 `POST /api/v1/attachments` multipart 上传，以及 `GET /api/v1/attachments/:id` 内容流/元数据查询（`?metadata=1`、`/metadata`、`/content`、`/download` 为兼容别名）。路径只接受 SHA-256 或严格校验的 `workspace://` 引用，不会将客户端路径直接拼接到 blob 根目录。
 
 本基础架构目前同步提交每个事件，但事件持久化错误不会形成完整的客户端错误语义；批量写入、blob GC、独立读池、崩溃恢复和 durable replay 需要先完成基准测试与契约设计。
 
@@ -75,11 +75,10 @@ flowchart LR
 
 ## 前后端拆分与迁移顺序
 
-`frontend/` 的 React 壳可独立通过 Vite 运行，也可被 MyGo 窗口托管；`frontend/src/mygo.ts` 保留生成兼容的类型化健康桥接。聊天目前用本地 `StubAdapter`，所以 UI 预览不等于 Go 后端集成验证。迁移时建议按以下顺序推进：
+`frontend/` 的 React 壳可独立通过 Vite 运行，也可被 MyGo 窗口托管；`frontend/src/mygo.ts` 保留生成兼容的类型化健康桥接。当前聊天、附件上传和学习资源导入已通过类型化 HTTP/SSE adapter 接入 Go runtime；runtime 不可用时才使用本地 fallback。迁移时建议按以下顺序推进：
 
-1. 先让壳通过类型化 HTTP adapter 读取会话/消息，并用 `/api/v1/runs` + SSE 替换 stub。
-2. 补齐事件顺序、断线、取消和持久 replay 的 contract tests。
-3. 再启用真实 provider、认证、附件 HTTP API 和远程部署。
-4. 最后加入备份/恢复、工具沙箱、监控、签名发布和事故 runbook gate。
+1. 补齐事件顺序、断线、取消和持久 replay 的 contract tests。
+2. 再启用真实 provider、认证和远程部署；附件 HTTP API 已有本地 v1 contract，但远程暴露仍需鉴权和配额 gate。
+3. 加入 RAG、工具沙箱、监控、备份/恢复、签名发布和事故 runbook gate。
 
 在这些 gate 通过前，本目录只能作为本机/测试实验，不应被描述为生产就绪。

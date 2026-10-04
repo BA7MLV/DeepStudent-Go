@@ -46,6 +46,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .ds-scroll-bottom { display:none; }
 .ds-composer { flex:0 0 auto; }
 
+/* Runtime connection and outbox affordances. Keep transient errors explicit
+   so a failed attachment upload or disconnected Go process cannot look like a
+   successful send. */
+.ds-timeline-status { position:sticky; top:8px; z-index:3; display:flex; justify-content:center; gap:6px; min-height:22px; margin:0 auto 4px; pointer-events:none; color:var(--ds-muted); font-size:11px; }
+.ds-timeline-status > span { padding:2px 8px; border:1px solid var(--ds-border); border-radius:999px; background:var(--ds-panel); }
+.ds-outbox-pill.is-queued,.ds-outbox-state.is-queued { color:#b45309; }
+.ds-outbox-pill.is-sent { color:#16804a; }
+.ds-outbox-state { min-width:42px; margin-left:auto; color:var(--ds-muted); font-size:11px; text-align:right; }
+.ds-scroll-bottom { position:sticky; bottom:14px; z-index:4; align-self:center; min-height:30px; margin:8px auto 3px; padding:0 12px; border:1px solid var(--ds-border); border-radius:999px; background:var(--ds-panel); color:var(--ds-fg); box-shadow:0 3px 12px rgba(0,0,0,.12); font-size:12px; }
+.ds-composer-error { display:flex; align-items:center; gap:8px; margin:-3px -4px 8px; padding:7px 9px; border-radius:8px; background:color-mix(in srgb,#b42318 10%,var(--ds-panel)); color:#b42318; font-size:12px; }
+.ds-composer-error button { margin-left:auto; padding:0 3px; background:transparent; color:inherit; font-size:16px; }
+.ds-message-attachment { display:inline-flex; align-items:center; gap:4px; margin:0 0 7px; padding:4px 7px; border:1px solid var(--ds-border); border-radius:6px; color:var(--ds-muted); font-size:11px; }
+
 /* MyGo hidden-titlebar window chrome: reserve only the native traffic-light
    room as a drag handle; the rest of the app remains normal web content. */
 .ds-shell { position:relative; }

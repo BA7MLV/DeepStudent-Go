@@ -73,9 +73,12 @@ func TestDeterministicRuntimeQueuedRunHonorsCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case _, ok := <-run.Events:
-		if ok {
-			t.Fatal("canceled run emitted an event")
+	case event, ok := <-run.Events:
+		if !ok || event.Type != EventRunCanceled || !event.Done {
+			t.Fatalf("canceled run terminal event = %+v, open=%v", event, ok)
+		}
+		if _, ok := <-run.Events; ok {
+			t.Fatal("canceled run emitted more than one terminal event")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for canceled run")

@@ -35,11 +35,14 @@ type Config struct {
 }
 
 type ServerConfig struct {
-    Addr string `json:"addr"`
-    ReadTimeout time.Duration `json:"readTimeout"`
-    WriteTimeout time.Duration `json:"writeTimeout"`
-    IdleTimeout time.Duration `json:"idleTimeout"`
-    CORSAllowlist []string `json:"corsAllowlist"`
+	Addr string `json:"addr"`
+	ReadTimeout time.Duration `json:"readTimeout"`
+	WriteTimeout time.Duration `json:"writeTimeout"`
+	IdleTimeout time.Duration `json:"idleTimeout"`
+	// SSEHeartbeat is the interval for an SSE comment heartbeat. It must stay
+	// below proxy idle timeouts while remaining independent from run timeout.
+	SSEHeartbeat time.Duration `json:"sseHeartbeat"`
+	CORSAllowlist []string `json:"corsAllowlist"`
 }
 
 type StorageConfig struct {
@@ -118,7 +121,7 @@ type ModelSelection struct {
 func Defaults() Config {
     return Config{
         Version: DefaultVersion,
-        Server: ServerConfig{Addr: "127.0.0.1:8080", ReadTimeout: 15*time.Second, WriteTimeout: 0, IdleTimeout: 60*time.Second, CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173"}},
+        Server: ServerConfig{Addr: "127.0.0.1:8080", ReadTimeout: 15*time.Second, WriteTimeout: 0, IdleTimeout: 60*time.Second, SSEHeartbeat: 15*time.Second, CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173"}},
         Storage: StorageConfig{SQLitePath: "data/deepstudent.db", BlobRoot: "data/blobs", AttachmentMaxBytes: 32 << 20, AttachmentAllowedMIMEs: []string{"text/*", "application/json", "application/pdf", "application/octet-stream", "image/*", "audio/*", "video/*"}},
         Runtime: RuntimeConfig{DefaultProvider: "deterministic", DefaultTimeout: 45*time.Second, MaxTokens: 2048, MaxConcurrency: 2},
         Auth: AuthConfig{CookieName: "deepstudent_session", SessionTTL: 24*time.Hour},
@@ -248,6 +251,7 @@ var validInputs = map[string]struct{}{InputText: {}, InputImage: {}, InputAudio:
 func Validate(cfg Config) error {
     if cfg.Version == "" { return errors.New("version must not be empty") }
     if strings.TrimSpace(cfg.Server.Addr) == "" { return errors.New("server addr must not be empty") }
+    if cfg.Server.ReadTimeout < 0 || cfg.Server.WriteTimeout < 0 || cfg.Server.IdleTimeout < 0 || cfg.Server.SSEHeartbeat < 0 { return errors.New("server timeouts must not be negative") }
     if cfg.Storage.SQLitePath == "" { return errors.New("storage sqlitePath must not be empty") }
     if strings.TrimSpace(cfg.Storage.BlobRoot) == "" { return errors.New("storage blobRoot must not be empty") }
     if cfg.Storage.AttachmentMaxBytes < 0 { return errors.New("storage attachmentMaxBytes must not be negative") }

@@ -29,9 +29,19 @@ jobs:
       - name: Resolve Go module checksums
         run: go mod tidy
       - name: Format check
-        run: gofmt -w cmd internal && test -z "$(gofmt -l cmd internal)"
+        shell: bash
+        run: |
+          files="$(gofmt -l cmd internal)"
+          if [[ -n "$files" ]]; then
+            echo "Go files are not gofmt-formatted:"
+            echo "$files"
+            gofmt -d $files
+            exit 1
+          fi
+      - name: Contract tests (HTTP/SSE, replay, attachments, persistence)
+        run: go test -count=1 ./internal/api ./internal/attachments ./internal/storage
       - name: Test
-        run: go test ./...
+        run: go test -count=1 ./...
       - name: Vet
         run: go vet ./...
       - name: Build server

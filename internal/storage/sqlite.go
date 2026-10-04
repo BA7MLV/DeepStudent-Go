@@ -279,8 +279,8 @@ func (s *SQLiteStore) AppendMessage(ctx context.Context, message runtime.Message
 	if err != nil {
 		return runtime.Message{}, err
 	}
-	if stored.SessionID != message.SessionID {
-		return runtime.Message{}, fmt.Errorf("message %q already belongs to another session", message.ID)
+	if stored.SessionID != message.SessionID || stored.Role != message.Role || stored.Content != message.Content {
+		return runtime.Message{}, fmt.Errorf("%w: message %q does not match the original", runtime.ErrMessageConflict, message.ID)
 	}
 	if stored.ID == message.ID && stored.RunID == message.RunID && stored.Content == message.Content {
 		_, err = s.db.ExecContext(ctx, `UPDATE sessions SET updated_at = CASE WHEN updated_at < ? THEN ? ELSE updated_at END WHERE id = ?`, message.CreatedAt.UTC().Format(time.RFC3339Nano), message.CreatedAt.UTC().Format(time.RFC3339Nano), message.SessionID)

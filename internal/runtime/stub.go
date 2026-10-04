@@ -315,6 +315,10 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 	case r.sem <- struct{}{}:
 		r.setStatus(state, RunRunning)
 	case <-ctx.Done():
+		// Even a run canceled while waiting for a concurrency slot has a
+		// terminal event. Without this, an SSE subscriber sees a clean EOF and
+		// cannot distinguish cancellation from a broken connection.
+		r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()})
 		r.setStatus(state, RunCanceled)
 		return
 	}
@@ -334,7 +338,7 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 		Prompt:            request.Prompt,
 		MaxTokens:         request.MaxTokens,
 		InputCapabilities: append([]string(nil), capabilities...),
-		Input:             append([]string(nil), capabilities...),
+		Input:             append([]string(nil), request.Input...),
 	}, func(event StreamEvent) error {
 		event.ID = newID("evt")
 		event.RunID = state.id

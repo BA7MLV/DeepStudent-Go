@@ -29,7 +29,8 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
-	if _, err := storage.NewAttachmentStore(store, cfg.Storage.BlobRoot, attachments.Policy{MaxBytes: cfg.Storage.AttachmentMaxBytes, AllowedMIMEs: cfg.Storage.AttachmentAllowedMIMEs}); err != nil {
+	attachmentStore, err := storage.NewAttachmentStore(store, cfg.Storage.BlobRoot, attachments.Policy{MaxBytes: cfg.Storage.AttachmentMaxBytes, AllowedMIMEs: cfg.Storage.AttachmentAllowedMIMEs})
+	if err != nil {
 		log.Fatal(err)
 	}
 	providers := map[string]runtime.ModelProvider{"deterministic": runtime.NewDeterministicProvider()}
@@ -56,7 +57,7 @@ func main() {
 	defer agent.Close()
 	server := &http.Server{
 		Addr:         cfg.Server.Addr,
-		Handler:      api.NewServer(cfg, agent, store),
+		Handler:      api.NewServer(cfg, agent, store, attachmentStore),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 		IdleTimeout:  cfg.Server.IdleTimeout,

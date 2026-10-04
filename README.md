@@ -4,14 +4,14 @@ DeepStudent-Go 是 DeepStudent 的渐进式 Go 运行时迁移工作区。它把
 
 > **状态：原型 / 迁移实验（prototype / migration workspace）**
 >
-> Go 传输层、确定性事件流、SQLite 事件存储、附件基础设施和桌面壳已经具备可运行的基础。浏览器聊天目前仍使用前端 `StubAdapter`，尚未接入 Go SSE；认证、跨进程 SSE 恢复、生产级工具沙箱和原生 iOS 客户端也尚未完成。现有 DeepStudent 实现仍是兼容性和性能对照的事实来源。
+> Go 传输层、确定性事件流、SQLite 事件存储、附件基础设施和桌面壳已经具备可运行的基础。Web/MyGo 已接入 Go HTTP/SSE，支持文本聊天、附件上传和学习资源导入；认证、RAG/生产级工具沙箱、远程部署和原生 iOS 客户端仍未完成。现有 DeepStudent 实现仍是兼容性和性能对照的事实来源。
 
 ## 先看结论
 
 - **后端是持久化的唯一权威。** 会话、消息、运行记录和会话事件由 Go 服务写入 SQLite；前端应通过 HTTP 读取，而不是把浏览器状态当作数据源。
-- **前端和后端目前还没有接通聊天。** React 壳使用 `assistant-ui` 的本地 `StubAdapter` 生成演示回复；它只调用 MyGo 的类型化健康检查桥接，不会调用 `/api/v1/runs`。
+- **前端和后端已接通聊天。** React 壳通过类型化 runtime adapter 调用 `/api/v1/sessions/:id/messages` 或 `/api/v1/runs`，再订阅 SSE；Go 服务负责会话、消息、附件和运行状态的权威持久化。
 - **实时输出走 SSE。** `POST /api/v1/runs` 返回 `202` 和 `events_url`，客户端随后订阅 `GET /api/v1/runs/:id/events`。
-- **SSE 的短期重放在内存中。** 运行期间以及结束后的约 5 分钟会保留事件历史，可用 `Last-Event-ID` 补发；SQLite 中的 `session_events` 是持久化基础，但本版本还没有从 SQLite 做 HTTP 事件重放的端点。
+- **SSE 支持短期和持久重放。** 运行期间以及结束后的约 5 分钟会保留事件历史，可用 `Last-Event-ID` 补发；进程内存释放后，带 SQLite 的服务会从 `session_events` 恢复该 run 的事件。客户端仍应通过会话/消息接口读取完整历史。
 - **默认配置不访问网络。** `deterministic` provider 用于离线开发和可重复测试。SiliconFlow、DeepSeek 与自定义 OpenAI-compatible provider 只有在显式选择后才会读取环境变量中的凭据。
 - **部署范围是本机或本地 Docker。** 认证默认关闭，远程设备发现、生产工具执行、签名发布和 iOS 客户端均属于后续实验。
 
@@ -22,18 +22,18 @@ DeepStudent-Go 是 DeepStudent 的渐进式 Go 运行时迁移工作区。它把
 | Go runtime | HTTP JSON + SSE；provider-neutral runtime；请求 ID；结构化错误；精确 Origin CORS |
 | 权威持久化 | CGO-free SQLite、WAL、单写入者；会话/消息/运行/追加式事件；运行结束状态同步写入 |
 | 附件 | `data/blobs` 下的 SHA-256 内容寻址文件；SQLite 只保存元数据和 `workspace://` 引用 |
-| Web 预览 | React 19 + TypeScript + Vite；聊天、学习资源、待办、闪卡、设置及明暗主题的响应式壳 |
-| MyGo 桌面壳 | 与 Web 共用 React UI；生成兼容的 `HealthService.Health` 类型化桥接 |
+| Web 预览 | React 19 + TypeScript + Vite；HTTP/SSE 文本聊天、附件上传、学习资源导入、待办、闪卡、设置及明暗主题 |
+| MyGo 桌面壳 | 与 Web 共用 React UI；桌面进程同时托管 Go HTTP/SSE 服务和 `HealthService.Health` 类型化桥接 |
 | CI | Go 格式化/测试/vet/build 检查；Pages 预览；未签名 macOS arm64 工作流 |
-| 尚未完成 | 认证、从 SQLite 的持久 SSE 重放/恢复、生产工具沙箱、附件 HTTP API、原生 iOS 客户端 |
+| 尚未完成 | 认证、RAG/生产工具沙箱、远程部署、原生 iOS 客户端 |
 
 ## 架构与数据流
 
 ```mermaid
 flowchart LR
-  WEB[浏览器 React / assistant-ui] -->|HTTP JSON + SSE（聊天接入待完成）| API[Go API\nHTTP + SSE]
+  WEB[浏览器 React / assistant-ui] -->|HTTP JSON + SSE| API[Go API\nHTTP + SSE]
   DESKTOP[MyGo 桌面窗口] --> WEB
-  WEB -->|当前仅健康桥接| HEALTH[HealthService.Health]
+  WEB -->|桌面健康桥接| HEALTH[HealthService.Health]
   API --> RT[Provider-neutral runtime\nAgentRun + ProviderRouter]
   RT --> DB[(SQLite WAL\nserver-authoritative data)]
   RT --> BLOB[AttachmentStore\nmetadata + SHA-256 blobs]
@@ -47,9 +47,9 @@ flowchart LR
 2. API 先在服务端保存用户消息（若请求带会话），再启动 runtime；runtime 创建 `runs` 记录。
 3. runtime 产生 `run.started`、`message.delta` 和终止事件。每个事件先追加到 `session_events`，再广播给 SSE 订阅者；文本增量同时写入 `messages`。运行状态最终更新为 `completed`、`failed` 或 `canceled`。
 4. API 立即返回 `202 Accepted`、`run_id`、`session_id` 和 `events_url`。客户端再打开 SSE 连接并按事件顺序渲染。
-5. 前端刷新或重新打开会话时，应调用会话/消息查询接口；仅在内存保留窗口内，才可通过 SSE 订阅得到短期事件重放。
+5. 前端刷新或重新打开会话时，应调用会话/消息查询接口；SSE 订阅可用 `Last-Event-ID` 恢复内存或 SQLite 中该 run 的后续事件。
 
-因此，浏览器 UI 是展示层，Go 服务是会话和运行数据的权威源。当前 `StubAdapter` 尚未走这条路径，是迁移期间刻意保留的实验缺口。
+因此，浏览器 UI 是展示层，Go 服务是会话、消息、附件和运行数据的权威源。静态预览在 runtime 不可用时仍可使用本地 fallback，但成功创建 Go run 后不会再启动第二个本地回复。
 
 ## SQLite 数据布局与持久化边界
 
@@ -75,7 +75,7 @@ flowchart LR
 data/blobs/<sha256 前两位>/<完整 sha256>
 ```
 
-SQLite 只保存 `workspace://attachments/<sha256>`。相同内容重复上传是幂等的；中断上传可能留下未引用 blob，垃圾回收尚未实现。备份时必须同时保存 SQLite 文件和 `data/blobs`，缺一不可解析引用。当前附件存储仍在内部边界后面，尚未暴露上传/下载 HTTP 路由。
+SQLite 只保存 `workspace://attachments/<sha256>`。相同内容重复上传是幂等的；中断上传可能留下未引用 blob，垃圾回收尚未实现。备份时必须同时保存 SQLite 文件和 `data/blobs`，缺一不可解析引用。附件 HTTP API 通过严格的 SHA-256/workspace 引用校验暴露上传、元数据查询和内容流。
 
 持久化是服务器权威，但本版本对极端故障的语义仍有限：事件写入错误在 runtime 的事件广播路径中不会变成客户端错误；批量写入、独立读池、blob GC 和崩溃恢复需要基准测试与回放语义后再启用。
 
@@ -98,12 +98,12 @@ data: {"id":"evt-...","run_id":"run-...","type":"message.delta",...}
 - `run.error`
 - `run.canceled`
 
-客户端可在重连时发送 `Last-Event-ID`。确定性 runtime 会在内存历史中找到该 ID 后补发其后的事件，再继续发送实时事件。每个已结束 run 的历史最多保留约 5 分钟，随后 run 和事件频道从进程内存释放；因此：
+客户端可在重连时发送 `Last-Event-ID`。确定性 runtime 会先从内存历史补发其后的事件；内存清理后会读取 SQLite 的 `session_events`（若服务使用持久存储）。每个已结束 run 的内存历史最多保留约 5 分钟，随后 run 和事件频道从进程内存释放；因此：
 
-- 这不是跨进程或跨重启的 durable replay；
-- `session_events` 虽然已经落盘，但目前没有从该表按序列恢复 SSE 的 HTTP 路由；
+- 持久 replay 以已知 `run_id` 和 `Last-Event-ID` 为边界，不是任意历史事件搜索接口；
+- 不带 SQLite 的内存 store 只提供进程内 replay；
 - 客户端不能把“成功重连”误认为“服务端已经恢复了任意旧 run”；
-- 生产部署前必须补充明确的 replay、resume、cancel、鉴权和断线 UI 契约。
+- 生产部署前仍需补充鉴权、配额、cancel 和断线 UI 契约。
 
 ## HTTP API（v1）
 
@@ -121,8 +121,19 @@ data: {"id":"evt-...","run_id":"run-...","type":"message.delta",...}
 - `GET /api/v1/runs/:id`：读取运行状态（当前优先读取内存；内存 run 被清理后，HTTP 查询仍可能返回 404）
 - `POST /api/v1/runs/:id/cancel`：请求取消
 - `GET /api/v1/runs/:id/events`：订阅 SSE
+- `POST /api/v1/attachments`：以 `multipart/form-data` 上传附件（文件字段名推荐 `file`，也接受 `attachment`/`upload`），返回 SHA-256、大小、MIME、文件名和 `workspace://attachments/<sha256>` 引用
+- `GET /api/v1/attachments/:id`：按 SHA-256 ID（或 `workspace://` 引用）读取附件内容流；添加 `?metadata=1` 或 `Accept: application/json` 查询元数据
+- `GET /api/v1/attachments?ref=workspace://attachments/<sha256>`：查询附件元数据；`/metadata/<id>`、`/content/<id>`、`/download/<id>` 是等价的自描述别名
 
-本版本没有会话删除、附件上传/下载、工具调用、登录、跨进程事件恢复或远程客户端发现接口。
+本版本没有会话删除、工具调用、登录、跨进程事件恢复或远程客户端发现接口。
+
+`POST /api/v1/runs` 和会话消息接口接受 `client_message_id`（也兼容
+`message_id`）。同一个会话中重试相同 ID 和内容会返回原来的 `run_id`，
+不同内容会得到 `409 message_id_conflict`；客户端遇到未知的 POST 结果时应
+重试原请求，而不是启动本地第二个回复。SSE 在运行期间每 15 秒发送一条
+注释 heartbeat，并且每个取消、失败或成功的 run 都发送一个终止事件。
+
+附件 API 只接受由服务端生成的 `workspace://attachments/<sha256>`（兼容解析早期的 `workspace://<sha256>`）；不会把请求中的路径直接拼接到文件系统。Blob 在写入前通过大小上限和 MIME allowlist 校验，下载响应带 `ETag` 和 `Accept-Ranges`，元数据与 blob 分开存储在 SQLite 和内容寻址目录中。
 
 快速验证当前 SSE 流：
 
@@ -189,7 +200,7 @@ bun install
 bun run dev:web
 ```
 
-Vite 会提供响应式 Web 壳。聊天仍使用前端 `StubAdapter`；只有在真正接入 Go API 后，Web 聊天才会验证服务端持久化和 SSE。
+Vite 会提供响应式 Web 壳。聊天通过 Go HTTP/SSE runtime 运行；runtime 不可用时才使用本地 fallback，附件和学习资源导入走 v1 HTTP API。
 
 ### MyGo 桌面壳
 
@@ -244,13 +255,13 @@ iOS 只被设想为现有 Go contract 的薄客户端实验，借鉴 Telegram iO
 3. **Study**：学习资源、待办、闪卡等次级入口
 4. **Settings**：runtime URL、诊断、主题和实验开关
 
-客户端应先 `GET /healthz`、`GET /readyz`，再 `POST /api/v1/runs` 并订阅 `events_url`。当前没有远程设备发现、认证 profile、持久 replay 或取消协议；任何 native client 都必须显示可恢复的“连接已断开”，不能假装 run 已经恢复。建议 gate 为：导航与假数据 → 确定性 API/SSE → 明确断线/诊断 → 在正式 replay contract 后再做 resume。
+客户端应先 `GET /healthz`、`GET /readyz`，再 `POST /api/v1/runs` 并订阅 `events_url`。当前没有远程设备发现或认证 profile，取消只作用于当前进程；任何 native client 都必须显示可恢复的“连接已断开”，不能假装 run 已经恢复。建议 gate 为：导航与假数据 → 确定性 API/SSE → 明确断线/诊断 → 鉴权和配额后再做远程接入。
 
 ## 仓库地图
 
 ```text
 cmd/server/                 本地 Go HTTP/SSE 服务
-cmd/deepstudent/            MyGo 桌面入口
+cmd/deepstudent/            MyGo 桌面入口（同时托管本地 HTTP/SSE 服务）
 internal/api/               HTTP、CORS、错误和 SSE transport
 internal/runtime/           provider-neutral contract、runtime 和确定性 provider
 internal/attachments/       MIME/大小策略与内容寻址 blob store
@@ -265,20 +276,19 @@ docs/backend-architecture.md  后端边界与运维说明
 
 - `goal/data-attachment-foundation`：在 backend runtime 基础上增加 SQLite 附件元数据、内容寻址 blob、MIME/大小策略和 Docker 持久化边界。
 - `feature/go-backend-runtime`：本地 HTTP/SSE 服务、SQLite 事件存储、确定性 provider、Docker profile 及 backend CI 基础。
-- `migration/mygo-shell-poc`：UI 优先的 MyGo 壳实验；聊天仍是本地 stub，不包含 Go backend 验证工作流。
+- `migration/mygo-shell-poc`：历史 UI 优先的 MyGo 壳实验；当前可运行聊天路径以本分支的 Go HTTP/SSE contract 为准。
 - 现有 DeepStudent 实现仍是 source of truth；只有在兼容性、性能、安全 gate 通过后才逐步合并。整合时请继续版本化 runtime contract。
 
 ## 已知缺口与下一步 gate
 
-当前服务只适合本地/测试使用：认证关闭，浏览器聊天未接入 `/api/v1/runs`，SSE 历史只在内存中短暂保留，SQLite 事件没有 HTTP replay，取消只作用于进程内 run，工具执行与遥测未形成生产边界，blob GC、签名打包、部署和事故 runbook 也未完成。
+当前服务只适合本地/测试使用：认证关闭，SSE 历史主要在内存中短暂保留，SQLite 事件虽可用于运行后 replay 但尚未提供完整跨进程 HTTP resume contract，取消只作用于进程内 run，RAG/工具执行与遥测未形成生产边界，blob GC、签名打包、部署和事故 runbook 也未完成。
 
 建议按以下顺序推进：
 
-1. 为 Web/MyGo 壳接入类型化 HTTP/SSE adapter，并补充前后端 contract tests。
-2. 在共享或远程使用前，定义 durable replay、resume、cancel 和 auth 语义。
-3. 通过环境变量密钥边界接入真实 provider，并验证超时、重试和错误脱敏。
-4. 对持久化/runtime 做基准测试，记录迁移、备份和恢复步骤。
-5. 增加可访问性、发布签名、部署权限、监控和事故响应 gate。
+1. 在共享或远程使用前，定义 durable replay、resume、cancel 和 auth 语义。
+2. 补齐 RAG、生产工具沙箱、真实 provider 的资源限制、超时、重试和错误脱敏。
+3. 对持久化/runtime 做基准测试，记录迁移、备份和恢复步骤。
+4. 增加可访问性、发布签名、部署权限、监控和事故响应 gate。
 
 ## 预览与截图
 

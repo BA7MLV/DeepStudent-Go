@@ -7,9 +7,12 @@ import {
   unstable_useComposerInput,
   useLocalRuntime,
   type ChatModelAdapter,
+  type AttachmentAdapter,
 } from "@assistant-ui/react";
-import { useEffect, useMemo, useState } from "react";
-import { HealthService } from "./mygo";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createRuntimeSession, getRuntimeReadiness, getRuntimeSessionMessages, listRuntimeSessions, uploadRuntimeAttachment, type RuntimeMessage, type RuntimeSession } from "./mygo";
+import { createGoRuntimeAdapter } from "./go-runtime";
+import ResourceLibrary, { type ResourceQuestion } from "./ResourceLibrary";
 
 type ViewId =
   | "chat-v2"
@@ -21,6 +24,116 @@ type ViewId =
   | "template-management"
   | "settings";
 type Theme = "light" | "dark";
+type OutboxStatus = "idle" | "sending" | "queued" | "sent" | "failed";
+
+type PersistedMessage = {
+  id: string;
+  role: string;
+  content: unknown;
+  createdAt?: string;
+  status?: unknown;
+  parentId?: string | null;
+  sourceId?: string | null;
+  metadata?: unknown;
+  attachments?: unknown;
+};
+
+type ChatSession = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  draft: string;
+  unread: number;
+  pinned?: boolean;
+  messages: PersistedMessage[];
+};
+
+const SESSION_STORAGE_KEY = "dstu-chat-sessions-v1";
+
+function createSession(): ChatSession {
+  return {
+    id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    title: "新会话",
+    updatedAt: Date.now(),
+    draft: "",
+    unread: 0,
+    messages: [],
+  };
+}
+
+function readSessions(): ChatSession[] {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(SESSION_STORAGE_KEY) ?? "null");
+    if (Array.isArray(stored) && stored.length > 0) return stored as ChatSession[];
+  } catch {
+    // A malformed local cache should never prevent the chat shell from opening.
+  }
+  return [createSession()];
+}
+
+function messageText(message: PersistedMessage | undefined): string {
+  if (!message || !Array.isArray(message.content)) return "";
+  return message.content
+    .filter((part): part is { type: "text"; text: string } => Boolean(part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"))
+    .map((part) => part.text)
+    .join(" ")
+    .trim();
+}
+
+function serializeMessages(messages: readonly unknown[]): PersistedMessage[] {
+  return messages.map((message) => {
+    const item = message as PersistedMessage;
+    const createdAt: unknown = (message as { createdAt?: unknown }).createdAt;
+    return { ...item, createdAt: createdAt instanceof Date ? createdAt.toISOString() : typeof createdAt === "string" ? createdAt : undefined };
+  });
+}
+
+function restoreMessages(messages: PersistedMessage[]): unknown[] {
+  return messages.map((message) => ({ ...message, createdAt: message.createdAt ? new Date(message.createdAt) : undefined }));
+}
+
+function serverTimestamp(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/** Convert append-only Go messages into the assistant-ui transcript shape. */
+function serverMessagesToPersisted(messages: RuntimeMessage[]): PersistedMessage[] {
+  const result: PersistedMessage[] = [];
+  for (const message of messages) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const text = typeof message.content === "string" ? message.content : String(message.content ?? "");
+    if (!text) continue;
+    const previous = result.at(-1);
+    const previousRunId = previous?.metadata && typeof previous.metadata === "object" ? (previous.metadata as { runId?: unknown }).runId : undefined;
+    if (message.role === "assistant" && previous?.role === "assistant" && (message.run_id ? previousRunId === message.run_id : true)) {
+      previous.content = [{ type: "text", text: `${messageText(previous)}${text}` }];
+      if (message.created_at) previous.createdAt = message.created_at;
+      continue;
+    }
+    result.push({
+      id: message.id || `server-message-${result.length}`,
+      role: message.role,
+      content: [{ type: "text", text }],
+      createdAt: message.created_at,
+      metadata: { sessionId: message.session_id, runId: message.run_id },
+    });
+  }
+  return result;
+}
+
+function serverSessionToLocal(session: RuntimeSession, messages: PersistedMessage[] | undefined, local: ChatSession | undefined): ChatSession {
+  return {
+    id: session.id,
+    title: session.title?.trim() || local?.title || "新会话",
+    updatedAt: serverTimestamp(session.updated_at, local?.updatedAt ?? Date.now()),
+    draft: local?.draft ?? "",
+    unread: local?.unread ?? 0,
+    pinned: local?.pinned,
+    messages: messages !== undefined ? messages : (local?.messages ?? []),
+  };
+}
 
 type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "template" | "settings" | "plus" | "search" | "sliders" | "chevron-down" | "chevron-left" | "sun" | "home" | "folder" | "send" | "paperclip" | "wand" | "brain";
 
@@ -77,8 +190,9 @@ const readTheme = (): Theme => {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 };
 
-const StubAdapter: ChatModelAdapter = {
-  async *run({ messages }) {
+function makeOfflineAdapter(statusRef: { current: (status: OutboxStatus) => void }): ChatModelAdapter {
+  return {
+    async *run({ messages }) {
     const last = messages.at(-1);
     const text = last?.content
       .filter((part): part is { type: "text"; text: string } => part.type === "text")
@@ -90,17 +204,59 @@ const StubAdapter: ChatModelAdapter = {
         {
           type: "text",
           text: text
-            ? `收到「${text}」，我们可以从理解、整理和复习开始。`
-            : "准备好开始学习。",
+            ? `收到「${text}」，本地运行时暂不可用，稍后可重试。`
+            : "本地运行时暂不可用。",
         },
       ],
     };
-  },
-};
+    statusRef.current("queued");
+    },
+  };
+}
+
+function createRuntimeAttachmentAdapter(onError: (message: string) => void): AttachmentAdapter {
+  return {
+    accept: "*",
+    async add({ file }) {
+      return {
+        id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        type: file.type.startsWith("image/") ? "image" : "document",
+        name: file.name,
+        contentType: file.type || "application/octet-stream",
+        file,
+        status: { type: "requires-action", reason: "composer-send" },
+      };
+    },
+    async send(attachment, options) {
+      try {
+        const uploaded = await uploadRuntimeAttachment(attachment.file, { signal: options?.signal });
+        return {
+          ...attachment,
+          status: { type: "complete" },
+          content: [{
+            type: "file",
+            filename: uploaded.filename || attachment.name,
+            data: uploaded.workspace_ref,
+            mimeType: uploaded.mime || attachment.contentType || "application/octet-stream",
+            sourceType: "id",
+          }],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "附件上传失败";
+        onError(`附件上传失败：${message}`);
+        throw error;
+      }
+    },
+    async remove() {
+      // Blobs are immutable and can be garbage-collected by the runtime later.
+    },
+  };
+}
 
 function ChatMessage() {
   return (
     <MessagePrimitive.Root className="ds-chat-message">
+      <MessagePrimitive.Attachments>{({ attachment }) => <span className="ds-message-attachment">📎 {attachment.name}</span>}</MessagePrimitive.Attachments>
       <MessagePrimitive.Parts components={{ Text: MessageText }} />
     </MessagePrimitive.Root>
   );
@@ -134,27 +290,132 @@ function ChatEmptyState() {
   );
 }
 
-function ChatWorkspace() {
-  const runtime = useLocalRuntime(StubAdapter);
+function ChatWorkspace({ session, onSessionChange, queuedPrompt, onPromptConsumed }: { session: ChatSession; onSessionChange: (patch: Partial<ChatSession>) => void; queuedPrompt?: string; onPromptConsumed?: () => void }) {
+  const statusRef = useRef<(status: OutboxStatus) => void>(() => undefined);
+  const [outboxStatus, setOutboxStatus] = useState<OutboxStatus>("idle");
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
+  const [unread, setUnread] = useState(session.unread);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [messageCount, setMessageCount] = useState(session.messages.length);
+  const [attachmentError, setAttachmentError] = useState("");
+  const isAtBottomRef = useRef(true);
+  const persistedCountRef = useRef(session.messages.length);
+  const unreadRef = useRef(session.unread);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  statusRef.current = setOutboxStatus;
+  const adapter = useMemo(() => createGoRuntimeAdapter({
+    sessionId: session.id,
+    // Fallback is deliberately limited in go-runtime.ts to unavailable
+    // preflight requests without attachments. Server/application errors stay visible.
+    fallback: makeOfflineAdapter(statusRef),
+  }), [session.id]);
+  const attachmentAdapter = useMemo(() => createRuntimeAttachmentAdapter(setAttachmentError), []);
+  const runtime = useLocalRuntime(adapter, {
+    initialMessages: restoreMessages(session.messages) as never,
+    adapters: { attachments: attachmentAdapter },
+  });
+
+  useEffect(() => {
+    const onOnline = () => { setIsOnline(true); setOutboxStatus("idle"); };
+    const onOffline = () => { setIsOnline(false); };
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
+  }, []);
+
+  useEffect(() => {
+    runtime.thread.composer.setText(session.draft);
+    const saveDraft = () => onSessionChange({ draft: runtime.thread.composer.getState().text, updatedAt: Date.now() });
+    saveDraft();
+    return runtime.thread.composer.subscribe(saveDraft);
+  }, [onSessionChange, runtime, session.draft]);
+
+  useEffect(() => {
+    if (!queuedPrompt) return;
+    // Let the runtime commit the text update before starting attachment/run
+    // processing. This avoids a send racing the composer state store when a
+    // resource question navigates from the library into the chat view.
+    const timer = window.setTimeout(() => {
+      runtime.thread.composer.setText(queuedPrompt);
+      window.queueMicrotask(() => runtime.thread.composer.send());
+      onPromptConsumed?.();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [onPromptConsumed, queuedPrompt, runtime]);
+
+  useEffect(() => {
+    const persist = () => {
+      const state = runtime.thread.getState();
+      const messages = serializeMessages(state.messages);
+      const previousCount = persistedCountRef.current;
+      setMessageCount(messages.length);
+      persistedCountRef.current = messages.length;
+      if (state.isRunning) setOutboxStatus(isOnline ? "sending" : "queued");
+      else if (messages.length > previousCount && isOnline) {
+        setOutboxStatus("sent");
+        window.setTimeout(() => setOutboxStatus("idle"), 1000);
+      }
+      if (messages.length > previousCount && !isAtBottomRef.current) {
+        const nextUnread = unreadRef.current + messages.length - previousCount;
+        unreadRef.current = nextUnread;
+        setUnread(nextUnread);
+        onSessionChange({ unread: nextUnread });
+      }
+      onSessionChange({
+        messages,
+        updatedAt: Date.now(),
+        title: session.title === "新会话" ? (messageText(messages.find((item) => item.role === "user")) || session.title).slice(0, 36) : session.title,
+      });
+    };
+    persist();
+    return runtime.thread.subscribe(persist);
+  }, [isOnline, onSessionChange, runtime, session.title]);
+
+  const handleScroll = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 28;
+    isAtBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+    if (atBottom) {
+      unreadRef.current = 0;
+      setUnread(0);
+      onSessionChange({ unread: 0 });
+    }
+  }, [onSessionChange]);
+
+  const jumpToBottom = () => {
+    viewportRef.current?.scrollTo({ top: viewportRef.current.scrollHeight, behavior: "smooth" });
+    unreadRef.current = 0;
+    setUnread(0);
+    onSessionChange({ unread: 0 });
+  };
+
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <section className="ds-chat-page" aria-labelledby="chat-welcome-title">
         <ThreadPrimitive.Root className="ds-chat-thread">
-          <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll>
+          <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
+            <div className="ds-timeline-status" aria-live="polite">
+              <span>{messageCount ? `${messageCount} 条消息` : "新会话"}</span>
+              {!isOnline && <span className="ds-outbox-pill is-queued">离线 · 稍后发送</span>}
+              {outboxStatus === "sending" && <span className="ds-outbox-pill">发送中…</span>}
+              {outboxStatus === "sent" && <span className="ds-outbox-pill is-sent">已保存</span>}
+            </div>
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-            <ThreadPrimitive.Empty>
-              <ChatEmptyState />
-            </ThreadPrimitive.Empty>
-            <ThreadPrimitive.ScrollToBottom className="ds-scroll-bottom">↓</ThreadPrimitive.ScrollToBottom>
+            <ThreadPrimitive.Empty><ChatEmptyState /></ThreadPrimitive.Empty>
+            {!isAtBottom && <button type="button" className="ds-scroll-bottom" onClick={jumpToBottom} aria-label="跳到底部">{unread ? `${unread} 条新消息 ↓` : "跳到底部 ↓"}</button>}
           </ThreadPrimitive.Viewport>
           <ComposerPrimitive.Root className="ds-composer" compact>
+            {attachmentError && <div className="ds-composer-error" role="alert">{attachmentError}<button type="button" onClick={() => setAttachmentError("")} aria-label="关闭错误">×</button></div>}
             <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
             <div className="ds-composer__toolbar">
               <div className="ds-composer__tools">
                 <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="paperclip" size={16} /></ComposerPrimitive.AddAttachment>
-                <button type="button" className="ds-composer-tool" aria-label="调用工具"><Icon name="wand" size={16} /></button>
-                <button type="button" className="ds-composer-tool" aria-label="深度思考"><Icon name="brain" size={16} /></button>
+                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="调用工具"><Icon name="wand" size={16} /></button>
+                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="深度思考"><Icon name="brain" size={16} /></button>
               </div>
+              <span className={`ds-outbox-state is-${outboxStatus}`} aria-live="polite">{outboxStatus === "queued" ? "待发送" : outboxStatus === "failed" ? "发送失败" : ""}</span>
               <ComposerPrimitive.Send className="ds-send-button" aria-label="发送"><Icon name="send" size={15} strokeWidth={2} /></ComposerPrimitive.Send>
             </div>
           </ComposerPrimitive.Root>
@@ -164,10 +425,8 @@ function ChatWorkspace() {
   );
 }
 
-function LearningHub() {
-  return <WorkspacePage eyebrow="学习中心" title="学习资源" description="浏览、搜索并打开你的笔记、教材、试卷和文件" action="＋ 添加资源">
-    <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button">＋</button></div><label className="ds-search-field">⌕ <input placeholder="搜索资源…" /></label><button className="ds-resource-row is-active">▤ 全部资源 <em>24</em></button><button className="ds-resource-row">▱ 笔记 <em>8</em></button><button className="ds-resource-row">□ 教材 <em>10</em></button><button className="ds-resource-row">◌ 试卷 <em>6</em></button></aside><div className="ds-resource-grid"><ResourceCard icon="PDF" color="blue" title="Calculus — Chapter 3" detail="教材 · 12.4 MB · 2 小时前" /><ResourceCard icon="N" color="purple" title="概率论复习笔记" detail="笔记 · 昨天更新" /><ResourceCard icon="↗" color="green" title="Linear Algebra Visualized" detail="网页 · 3 天前" /><div className="ds-empty-card"><span>＋</span><b>拖入文件或添加资源</b><small>支持 PDF、Markdown、网页和图片</small></div></div></div>
-  </WorkspacePage>;
+function LearningHub({ onAsk }: { onAsk?: (question: ResourceQuestion) => void }) {
+  return <ResourceLibrary onAsk={onAsk} />;
 }
 
 function ResourceCard({ icon, color, title, detail }: { icon: string; color: string; title: string; detail: string }) {
@@ -184,7 +443,7 @@ function Metric({ label, value, suffix, note }: { label: string; value: string; 
 function Deck({ title, detail, status, color }: { title: string; detail: string; status: string; color: string }) { return <button className="ds-deck-row"><span className={`ds-deck-icon ds-deck-icon--${color}`}>∑</span><span><b>{title}</b><small>{detail}</small></span><em>{status}</em></button>; }
 function Templates() { return <WorkspacePage eyebrow="输出偏好" title="模板管理" description="让重复的学习输出保持一致" action="＋ 新建模板"><div className="ds-template-list ds-panel"><Template title="默认学习笔记" detail="Markdown · 最近使用" /><Template title="Anki 基础卡片" detail="正面 / 背面 · 12 个字段" /><Template title="论文阅读摘要" detail="结构化摘要 · 6 个字段" /></div></WorkspacePage>; }
 function Template({ title, detail }: { title: string; detail: string }) { return <button className="ds-template-row"><span>▥</span><span><b>{title}</b><small>{detail}</small></span><em>→</em></button>; }
-function Settings({ theme, onTheme }: { theme: Theme; onTheme: () => void }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section><section className="ds-panel ds-setting-section"><PanelHeading title="运行时连接" meta="当前 MyGo 桌面壳连接状态" /><div className="ds-runtime-row"><span className="ds-status"><i></i>Go runtime 已连接</span><code>HealthService.Health</code></div></section></div></div></WorkspacePage>; }
+function Settings({ theme, onTheme, runtimeStatus }: { theme: Theme; onTheme: () => void; runtimeStatus: string }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section><section className="ds-panel ds-setting-section"><PanelHeading title="运行时连接" meta="实时就绪检查" /><div className="ds-runtime-row"><span className="ds-status"><i></i>{runtimeStatus}</span><code>GET /readyz</code></div></section></div></div></WorkspacePage>; }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
 function WorkspacePage({ eyebrow, title, description, action, children }: { eyebrow: string; title: string; description: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><div><span className="ds-eyebrow">{eyebrow}</span><h2>{title}</h2><p>{description}</p></div>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
@@ -195,6 +454,13 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState("连接 Go runtime…");
+  const [sessions, setSessions] = useState<ChatSession[]>(() => readSessions());
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [sessionHydrationVersion, setSessionHydrationVersion] = useState(0);
+  const [queuedPrompt, setQueuedPrompt] = useState("");
+  const sessionsRef = useRef(sessions);
+  const activeSessionIdRef = useRef(activeSessionId);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -202,27 +468,96 @@ export function App() {
     window.localStorage.setItem("dstu-theme-mode", theme);
   }, [theme]);
   useEffect(() => {
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
+    sessionsRef.current = sessions;
+  }, [sessions]);
+  useEffect(() => {
+    if (!sessions.some((session) => session.id === activeSessionId) && sessions[0]) setActiveSessionId(sessions[0].id);
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId, sessions]);
+  useEffect(() => {
     let active = true;
-    void HealthService.health().then((health) => {
-      if (active) setRuntimeStatus(`${health.runtime} runtime · ${health.status}`);
-    }).catch(() => {
-      if (active) setRuntimeStatus("Go runtime bridge unavailable");
+    void getRuntimeReadiness().then((ready) => {
+      if (active) setRuntimeStatus(`Go runtime · ${ready.status}`);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      const status = error && typeof error === "object" && "status" in error ? (error as { status?: number }).status : undefined;
+      setRuntimeStatus(status === 503 ? "Go runtime starting" : "Go runtime unavailable");
     });
     return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    const hydrate = async () => {
+      try {
+        const remoteSessions = await listRuntimeSessions();
+        if (cancelled) return;
+        const hydrated = await Promise.all(remoteSessions.map(async (remote) => {
+          try {
+            const messages = await getRuntimeSessionMessages(remote.id);
+            return { remote, messages: serverMessagesToPersisted(messages) };
+          } catch {
+            return { remote, messages: undefined };
+          }
+        }));
+        if (cancelled) return;
+        setSessions((current) => {
+          const localById = new Map(current.map((session) => [session.id, session]));
+          const remote = hydrated.map(({ remote: serverSession, messages }) => serverSessionToLocal(serverSession, messages, localById.get(serverSession.id)));
+          const remoteIds = new Set(remote.map((session) => session.id));
+          return [...remote, ...current.filter((session) => !remoteIds.has(session.id))];
+        });
+        // Do not remount the active assistant-ui runtime over a draft/send that
+        // happened while hydration was in flight. Empty local sessions are safe
+        // to replace with the authoritative server transcript.
+        const currentActiveId = activeSessionIdRef.current || sessionsRef.current[0]?.id;
+        const currentActive = sessionsRef.current.find((session) => session.id === currentActiveId);
+        const activeWasIdle = !currentActive || (currentActive.messages.length === 0 && currentActive.draft.trim() === "");
+        if (hydrated.length > 0 && activeWasIdle && hydrated.some(({ remote }) => remote.id === currentActiveId)) {
+          setSessionHydrationVersion((version) => version + 1);
+        }
+      } catch {
+        // Static previews and offline shells retain their local transcript.
+      }
+    };
+    void hydrate();
+    return () => { cancelled = true; };
   }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
   const selectView = (next: ViewId) => { setView(next); setSidebarOpen(false); };
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? createSession();
+  const updateSession = useCallback((patch: Partial<ChatSession>) => {
+    setSessions((current) => current.map((session) => session.id === activeSession.id ? { ...session, ...patch } : session));
+  }, [activeSession.id]);
+  const newSession = () => {
+    const session = createSession();
+    setSessions((current) => [session, ...current]);
+    setActiveSessionId(session.id);
+    setView("chat-v2");
+    setSidebarOpen(false);
+    void createRuntimeSession(session).catch(() => undefined);
+  };
+  const askFromResource = (question: ResourceQuestion) => {
+    setActiveSessionId(activeSession.id);
+    setQueuedPrompt(question.prompt);
+    setView("chat-v2");
+    setSidebarOpen(false);
+  };
+  const consumeQueuedPrompt = useCallback(() => setQueuedPrompt(""), []);
+  const visibleSessions = sessions
+    .filter((session) => !sessionSearch.trim() || session.title.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase()))
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
   const content = useMemo(() => {
-    if (view === "chat-v2") return <ChatWorkspace />;
-    if (view === "learning-hub") return <LearningHub />;
+    if (view === "chat-v2") return <ChatWorkspace key={`${activeSession.id}:${sessionHydrationVersion}`} session={activeSession} onSessionChange={updateSession} queuedPrompt={queuedPrompt} onPromptConsumed={consumeQueuedPrompt} />;
+    if (view === "learning-hub") return <LearningHub onAsk={askFromResource} />;
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "task-dashboard") return <Anki />;
     if (view === "flashcards") return <Flashcards />;
     if (view === "template-management") return <Templates />;
-    return <Settings theme={theme} onTheme={toggleTheme} />;
-  }, [theme, view]);
+    return <Settings theme={theme} onTheme={toggleTheme} runtimeStatus={runtimeStatus} />;
+  }, [activeSession, consumeQueuedPrompt, queuedPrompt, sessionHydrationVersion, theme, updateSession, view]);
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
@@ -235,21 +570,21 @@ export function App() {
     <div className="ds-body">
       <aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
-          <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏">
-            <Icon name="chevron-left" size={16} />
-          </button>
+          <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏"><Icon name="chevron-left" size={16} /></button>
           <span className="ds-sidebar__brand-name">DeepStudent</span>
-          <div className="ds-sidebar__brand-actions">
-            <button className="ds-icon-button" aria-label="搜索会话"><Icon name="search" size={15} /></button>
-          </div>
+          <div className="ds-sidebar__brand-actions"><button className="ds-icon-button" aria-label="搜索会话"><Icon name="search" size={15} /></button></div>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
-          {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
+          {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => item.id === "chat-v2" ? newSession() : selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
         </nav>
         <div className="ds-sidebar__scroll">
-          <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><button className="ds-thread-row"><span className="ds-thread-dot ds-thread-dot--accent"><Icon name="sparkle" size={13} /></span><span>开始一个新对话</span></button></section>
-          <section className="ds-sidebar-section"><div className="ds-section-label"><span>主题</span><span className="ds-section-tools"><button className="ds-section-action" aria-label="收起主题"><Icon name="chevron-down" size={14} /></button><button className="ds-section-action" aria-label="新建主题"><Icon name="plus" size={14} /></button></span></div><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="home" size={14} /></span><span>高中生物</span><em>2</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>智能学习助手介绍</span></button><button className="ds-thread-row ds-thread-row--nested"><span>完善高中生物思维导图</span></button><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="book" size={14} /></span><span>高中英语</span><em>1</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>制作读后续写 Anki 卡片</span></button><button className="ds-topic-row"><span className="ds-topic-icon"><Icon name="folder" size={14} /></span><span>LLM研究</span><em>6</em><b><Icon name="chevron-down" size={12} /></b></button><button className="ds-thread-row ds-thread-row--nested"><span>最新 LLM 研究论文汇总</span></button><button className="ds-thread-row ds-thread-row--nested"><span>Context7 查询 LLM 文档</span></button></section>
-          <section className="ds-sidebar-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={() => selectView("chat-v2")} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><button className="ds-thread-row ds-thread-row--active"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>未命名会话</span><small>刚刚</small></button><button className="ds-thread-row"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>复习概率论</span><small>昨天</small></button><button className="ds-thread-row"><span className="ds-thread-dot"><Icon name="sparkle" size={12} /></span><span>帮我读这篇论文</span><small>周一</small></button></section>
+          <section className="ds-sidebar-section ds-conversation-section">
+            <div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={newSession} aria-label="新建对话"><Icon name="plus" size={14} /></button></div>
+            <label className="ds-conversation-search"><Icon name="search" size={13} /><input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话…" aria-label="搜索会话" /></label>
+            {visibleSessions.length === 0 ? <p className="ds-sidebar-empty">没有匹配的会话</p> : visibleSessions.map((session) => <button type="button" key={session.id} className="ds-thread-row" data-active={session.id === activeSession.id} onClick={() => { setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); setSessions((current) => current.map((item) => item.id === session.id ? { ...item, unread: 0 } : item)); }}><span className={`ds-thread-dot ${session.unread ? "ds-thread-dot--accent" : ""}`}>{session.unread ? "●" : "○"}</span><span>{session.title}</span>{session.unread > 0 && <small>{session.unread}</small>}</button>)}
+          </section>
+          <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><p className="ds-sidebar-empty">将重要会话置顶，方便快速返回</p></section>
+          <section className="ds-sidebar-section"><div className="ds-section-label"><span>主题</span><span className="ds-section-tools"><button className="ds-section-action" aria-label="收起主题"><Icon name="chevron-down" size={14} /></button><button className="ds-section-action" aria-label="新建主题"><Icon name="plus" size={14} /></button></span></div><p className="ds-sidebar-empty">暂无主题</p></section>
         </div>
         <div className="ds-sidebar__footer">
           <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
@@ -261,14 +596,8 @@ export function App() {
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <div className="ds-main__drag-region" aria-hidden="true" />
         <div className="ds-main__floating-actions" aria-label="窗口与工作区操作">
-          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={sidebarCollapsed || sidebarOpen}>
-            <Icon name="sliders" size={17} />
-          </button>
-          <div className="ds-main__actions">
-            <button className="ds-icon-button" onClick={() => selectView("learning-hub")} aria-label="搜索"><Icon name="search" size={16} /></button>
-            <button className="ds-icon-button" onClick={() => selectView("chat-v2")} aria-label="新建"><Icon name="plus" size={16} /></button>
-            <button className="ds-icon-button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button>
-          </div>
+          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={sidebarCollapsed || sidebarOpen}><Icon name="sliders" size={17} /></button>
+          <div className="ds-main__actions"><button className="ds-icon-button" onClick={() => selectView("learning-hub")} aria-label="搜索"><Icon name="search" size={16} /></button><button className="ds-icon-button" onClick={newSession} aria-label="新建"><Icon name="plus" size={16} /></button><button className="ds-icon-button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
         </div>
         <div className="ds-main__content">{content}</div>
       </main>
