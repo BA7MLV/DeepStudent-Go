@@ -13,7 +13,7 @@ import {
   type ToolCallMessagePart,
   AttachmentPrimitive,
 } from "@assistant-ui/react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   ArrowCounterClockwise,
@@ -40,6 +40,7 @@ import {
   type Icon as PhosphorIcon,
 } from "@phosphor-icons/react";
 import { HealthService } from "./mygo";
+import { createGoRuntimeAdapter } from "./go-runtime";
 
 type ViewId =
   | "chat-v2"
@@ -51,6 +52,41 @@ type ViewId =
   | "settings";
 type Theme = "light" | "dark";
 type ThemeColor = string;
+type OutboxStatus = "idle" | "sending" | "queued" | "sent" | "failed";
+
+type PersistedMessage = {
+  id: string;
+  role: string;
+  content: unknown;
+  createdAt?: string;
+  status?: unknown;
+  parentId?: string | null;
+  sourceId?: string | null;
+  metadata?: unknown;
+  attachments?: unknown;
+};
+type ChatSession = { id: string; title: string; updatedAt: number; draft: string; unread: number; pinned?: boolean; messages: PersistedMessage[] };
+const sessionStorageKey = "dstu-chat-sessions-v1";
+function createSession(): ChatSession { return { id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: "新会话", updatedAt: Date.now(), draft: "", unread: 0, messages: [] }; }
+function readSessions(): ChatSession[] {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(sessionStorageKey) ?? "null");
+    if (Array.isArray(stored) && stored.length > 0) return stored as ChatSession[];
+  } catch { /* malformed cache falls back to a new chat */ }
+  return [createSession()];
+}
+function messageText(message: PersistedMessage | undefined): string {
+  if (!message || !Array.isArray(message.content)) return "";
+  return message.content.filter((part): part is { type: "text"; text: string } => Boolean(part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string")).map((part) => part.text).join(" ").trim();
+}
+function serializeMessages(messages: readonly unknown[]): PersistedMessage[] {
+  return messages.map((message) => {
+    const item = message as PersistedMessage;
+    const createdAt: unknown = (message as { createdAt?: unknown }).createdAt;
+    return { ...item, createdAt: createdAt instanceof Date ? createdAt.toISOString() : typeof createdAt === "string" ? createdAt : undefined };
+  });
+}
+function restoreMessages(messages: PersistedMessage[]): unknown[] { return messages.map((message) => ({ ...message, createdAt: message.createdAt ? new Date(message.createdAt) : undefined })); }
 
 const themeColorStorageKey = "dstu-theme-color";
 const defaultThemeColor: ThemeColor = "#2563eb";
@@ -256,15 +292,21 @@ function getThemeColorTokens(themeColor: ThemeColor, theme: Theme): ThemeColorTo
   const rgb = hexToRgb(themeColor);
   const isLightColor = relativeLuminance(rgb) > 0.48;
   const accentStrong = theme === "dark" ? mixRgb(rgb, [255, 255, 255], isLightColor ? 0.1 : 0.24) : mixRgb(rgb, [0, 0, 0], isLightColor ? 0.2 : 0.12);
-  const titleAccent = theme === "dark" ? mixRgb(rgb, [255, 255, 255], 0.16) : mixRgb(rgb, [0, 0, 0], 0.06);
   const onAccent = relativeLuminance(rgb) > 0.48 ? "#111827" : "#ffffff";
+
+  // Keep decorative surfaces, helper text, focus rings, and voice feedback tied to
+  // the stable light/dark palette. The selected accent is limited to controls and
+  // selected states so changing the theme color never recolors the shell itself.
+  const stableAccent = theme === "dark" ? "#60a5fa" : "#2563eb";
+  const stableAccentSoft = theme === "dark" ? "rgba(96, 165, 250, 0.2)" : "rgba(37, 99, 235, 0.12)";
+  const stableTitleAccent = theme === "dark" ? "#93c5fd" : "#2563eb";
   return {
     accent: rgbToHex(rgb),
     accentStrong: rgbToHex(accentStrong),
-    accentSoft: rgba(rgb, theme === "dark" ? 0.2 : 0.12),
-    focus: rgbToHex(titleAccent),
-    titleAccent: rgbToHex(titleAccent),
-    voice: rgbToHex(rgb),
+    accentSoft: stableAccentSoft,
+    focus: stableTitleAccent,
+    titleAccent: stableTitleAccent,
+    voice: stableAccent,
     selection: rgba(rgb, theme === "dark" ? 0.26 : 0.16),
     onAccent,
   };
@@ -813,7 +855,7 @@ function WorkspaceDropZone({ children }: { children: React.ReactNode }) {
   </div>;
 }
 
-function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime> }) {
+function ChatComposer({ runtime, outboxStatus = "idle" }: { runtime: ReturnType<typeof useLocalRuntime>; outboxStatus?: OutboxStatus }) {
   const composer = unstable_useComposerInput();
   const [voiceState, setVoiceState] = useState<VoiceOverlayState>({ recording: false, cancelZone: false, level: 0, elapsed: 0 });
   const gestureRef = useRef<ComposerGestureHandlers | null>(null);
@@ -868,22 +910,79 @@ function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime>
       <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
       <div className="ds-composer__toolbar">
         <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} onVoiceStateChange={setVoiceState} />
+        <span className={`ds-outbox-state is-${outboxStatus}`} aria-live="polite">{outboxStatus === "queued" ? "待发送" : outboxStatus === "sending" ? "发送中…" : outboxStatus === "sent" ? "已保存" : outboxStatus === "failed" ? "发送失败" : ""}</span>
       </div>
     </ComposerPrimitive.Root>
-    {voiceState.recording && <div className="ds-voice-recording-status" role="status" aria-live="polite">
+    <div className="ds-voice-recording-status" role="status" aria-live="polite" aria-hidden={!voiceState.recording}>
       <time aria-hidden="true">{formatRecordingElapsed(voiceState.elapsed)}</time>
       <span>上滑取消</span>
-    </div>}
+    </div>
   </div>;
 }
 
-function ChatWorkspace() {
-  const runtime = useLocalRuntime(StubAdapter, { adapters: { attachments: LocalFileAttachmentAdapter } });
+function ChatWorkspace({ session, onSessionChange }: { session: ChatSession; onSessionChange: (patch: Partial<ChatSession>) => void }) {
+  const adapter = useMemo(() => createGoRuntimeAdapter({ sessionId: session.id, fallback: StubAdapter }), [session.id]);
+  const runtime = useLocalRuntime(adapter, { adapters: { attachments: LocalFileAttachmentAdapter }, initialMessages: restoreMessages(session.messages) as never });
+  const [outboxStatus, setOutboxStatus] = useState<OutboxStatus>("idle");
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
+  const [unread, setUnread] = useState(session.unread);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [messageCount, setMessageCount] = useState(session.messages.length);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const persistedCountRef = useRef(session.messages.length);
+  const unreadRef = useRef(session.unread);
+
+  useEffect(() => {
+    const onOnline = () => { setIsOnline(true); setOutboxStatus("idle"); };
+    const onOffline = () => { setIsOnline(false); setOutboxStatus("queued"); };
+    window.addEventListener("online", onOnline); window.addEventListener("offline", onOffline);
+    return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
+  }, []);
+  useEffect(() => {
+    runtime.thread.composer.setText(session.draft);
+    const saveDraft = () => onSessionChange({ draft: runtime.thread.composer.getState().text, updatedAt: Date.now() });
+    saveDraft();
+    return runtime.thread.composer.subscribe(saveDraft);
+  }, [onSessionChange, runtime]);
+  useEffect(() => {
+    const persist = () => {
+      const state = runtime.thread.getState();
+      const messages = serializeMessages(state.messages);
+      const previousCount = persistedCountRef.current;
+      setMessageCount(messages.length);
+      persistedCountRef.current = messages.length;
+      if (state.isRunning) setOutboxStatus(isOnline ? "sending" : "queued");
+      else if (messages.length > previousCount && isOnline) {
+        setOutboxStatus("sent");
+        window.setTimeout(() => setOutboxStatus("idle"), 1000);
+      }
+      if (messages.length > previousCount && !isAtBottomRef.current) {
+        const nextUnread = unreadRef.current + messages.length - previousCount;
+        unreadRef.current = nextUnread; setUnread(nextUnread); onSessionChange({ unread: nextUnread });
+      }
+      const firstUser = messages.find((item) => item.role === "user");
+      onSessionChange({ messages, updatedAt: Date.now(), title: session.title === "新会话" ? (messageText(firstUser) || session.title).slice(0, 36) : session.title });
+    };
+    persist();
+    return runtime.thread.subscribe(persist);
+  }, [isOnline, onSessionChange, runtime, session.title]);
+  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const viewport = event.currentTarget;
+    const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 28;
+    isAtBottomRef.current = atBottom; setIsAtBottom(atBottom);
+    if (atBottom) { unreadRef.current = 0; setUnread(0); onSessionChange({ unread: 0 }); }
+  };
+  const jumpToBottom = () => {
+    viewportRef.current?.scrollTo({ top: viewportRef.current.scrollHeight, behavior: "smooth" });
+    unreadRef.current = 0; setUnread(0); onSessionChange({ unread: 0 });
+  };
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <section className="ds-chat-page" aria-labelledby="chat-welcome-title">
         <ThreadPrimitive.Root className="ds-chat-thread">
-          <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll>
+          <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
+            <div className="ds-timeline-status" aria-live="polite"><span>{messageCount ? `${messageCount} 条消息` : "新会话"}</span>{!isOnline && <span className="ds-outbox-pill is-queued">离线 · 稍后发送</span>}</div>
             <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
             <ThreadPrimitive.Empty>
               <div className="ds-chat-empty-state">
@@ -891,108 +990,144 @@ function ChatWorkspace() {
                 <ChatQuickPrompts />
               </div>
             </ThreadPrimitive.Empty>
-            <ThreadPrimitive.ScrollToBottom className="ds-scroll-bottom">↓</ThreadPrimitive.ScrollToBottom>
+            {!isAtBottom && <button type="button" className="ds-scroll-bottom" onClick={jumpToBottom} aria-label="跳到底部">{unread ? `${unread} 条新消息 ↓` : "跳到底部 ↓"}</button>}
           </ThreadPrimitive.Viewport>
-          <div className="ds-composer-dock"><ChatComposer runtime={runtime} /></div>
+          <div className="ds-composer-dock"><ChatComposer runtime={runtime} outboxStatus={outboxStatus} /></div>
         </ThreadPrimitive.Root>
       </section>
     </AssistantRuntimeProvider>
   );
 }
 
-type StreamStatus = "idle" | "running" | "paused" | "complete";
-type StreamCodeLanguage = "javascript" | "json" | "go" | "python";
-type StreamEventKind = "run" | "token" | "tool" | "render" | "status";
-type StreamEvent = { id: number; kind: StreamEventKind; label: string; detail: string; tone?: "running" | "complete" | "paused" };
+type StreamStatus = "idle" | "running" | "paused" | "complete" | "error";
+type StreamEventKind = "run" | "token" | "tool" | "render" | "status" | "error";
+type StreamEvent = { id: number; kind: StreamEventKind; label: string; detail: string; tone?: "running" | "complete" | "paused" | "error"; payload?: unknown };
 type StreamDebugSettings = {
-  provider: "siliconflow" | "deepseek" | "custom";
+  provider: "siliconflow" | "deepseek" | "openai" | "custom";
   model: string;
   baseUrl: string;
-  streaming: boolean;
+  streamingMode: "events" | "buffered";
   timeout: number;
   retry: number;
-  mode: "simulation" | "real";
-  showEventLog: boolean;
 };
 
+const streamSettingsStorageKey = "dstu-stream-settings-v1";
 const defaultStreamDebugSettings: StreamDebugSettings = {
   provider: "siliconflow",
   model: "DeepSeek-R1-Distill-Qwen-7B",
   baseUrl: "https://api.siliconflow.cn/v1",
-  streaming: true,
+  streamingMode: "events",
   timeout: 30,
   retry: 1,
-  mode: "simulation",
-  showEventLog: true,
 };
 
-type StreamControl = {
-  paused: boolean;
-  generation: number;
-  waiters: Array<() => void>;
-};
+function readStreamDebugSettings(): StreamDebugSettings {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(streamSettingsStorageKey) ?? "null") as Partial<StreamDebugSettings> | null;
+    if (!parsed) return defaultStreamDebugSettings;
+    return {
+      ...defaultStreamDebugSettings,
+      ...parsed,
+      provider: parsed.provider === "siliconflow" || parsed.provider === "deepseek" || parsed.provider === "openai" || parsed.provider === "custom" ? parsed.provider : defaultStreamDebugSettings.provider,
+      streamingMode: parsed.streamingMode === "buffered" ? "buffered" : "events",
+      timeout: Number.isFinite(parsed.timeout) && Number(parsed.timeout) > 0 ? Number(parsed.timeout) : defaultStreamDebugSettings.timeout,
+      retry: Number.isFinite(parsed.retry) && Number(parsed.retry) >= 0 ? Number(parsed.retry) : defaultStreamDebugSettings.retry,
+    };
+  } catch {
+    return defaultStreamDebugSettings;
+  }
+}
 
-const streamCode: Record<StreamCodeLanguage, string> = {
-  javascript: `const stream = async function* () {\n  for (const token of tokens) {\n    yield token;\n    await wait(120);\n  }\n};`,
-  json: `{"event":"token","index":7,"value":"规划","done":false}`,
-  go: `for _, token := range tokens {\n    fmt.Fprint(writer, token)\n    writer.Flush()\n    time.Sleep(120 * time.Millisecond)\n}`,
-  python: `async for token in response.aiter_tokens():\n    print(token, end="", flush=True)\n    await asyncio.sleep(0.12)`,
+type RuntimeStreamRequest = {
+  version: "deepstudent.runtime.v1";
+  id: string;
+  method: "llm.stream";
+  params: {
+    provider: StreamDebugSettings["provider"];
+    model: string;
+    baseUrl: string;
+    streamingMode: StreamDebugSettings["streamingMode"];
+    messages: Array<{ role: string; content: string }>;
+  };
 };
+type RuntimeStreamEvent = {
+  version: "deepstudent.runtime.v1";
+  id: string;
+  type: "llm.run.start" | "llm.delta" | "llm.tool.call" | "llm.tool.result" | "llm.render" | "llm.run.complete" | "llm.error";
+  data: Record<string, unknown>;
+};
+type RuntimeStreamAdapter = (request: RuntimeStreamRequest, signal: AbortSignal) => AsyncIterable<RuntimeStreamEvent>;
 
-const streamCodeLabels: Record<StreamCodeLanguage, string> = {
-  javascript: "JS",
-  json: "JSON",
-  go: "Go",
-  python: "Python",
-};
+declare global {
+  interface Window {
+    deepstudent?: { runtime?: { stream?: RuntimeStreamAdapter } };
+  }
+}
 
 const streamResponseTokens = [
   "我先把你的问题拆成几个小步骤。",
-  "接着读取本地示例上下文，",
+  "接着读取本地上下文，",
   "再把结果整理成可以继续追问的回复。",
-  "整个过程只在浏览器中运行，",
-  "你可以随时暂停、继续或清空这次对话。",
+  "你可以看到每个增量逐步到达。",
+  "如果需要，随时暂停、继续或清空这次运行。",
 ];
 
 const streamDelay = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
-  if (signal.aborted) {
-    reject(new DOMException("Stream cancelled", "AbortError"));
-    return;
-  }
-  const timer = window.setTimeout(() => {
-    signal.removeEventListener("abort", onAbort);
-    resolve();
-  }, ms);
-  const onAbort = () => {
-    window.clearTimeout(timer);
-    signal.removeEventListener("abort", onAbort);
-    reject(new DOMException("Stream cancelled", "AbortError"));
-  };
+  if (signal.aborted) { reject(new DOMException("Stream cancelled", "AbortError")); return; }
+  const timer = window.setTimeout(() => { signal.removeEventListener("abort", onAbort); resolve(); }, ms);
+  const onAbort = () => { window.clearTimeout(timer); signal.removeEventListener("abort", onAbort); reject(new DOMException("Stream cancelled", "AbortError")); };
   signal.addEventListener("abort", onAbort, { once: true });
 });
 
 const streamWaitForResume = (control: StreamControl, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
-  if (!control.paused) {
-    resolve();
-    return;
-  }
-  const onAbort = () => {
-    control.waiters = control.waiters.filter((waiter) => waiter !== resume);
-    reject(new DOMException("Stream cancelled", "AbortError"));
-  };
-  const resume = () => {
-    signal.removeEventListener("abort", onAbort);
-    resolve();
-  };
+  if (!control.paused) { resolve(); return; }
+  const onAbort = () => { control.waiters = control.waiters.filter((waiter) => waiter !== resume); reject(new DOMException("Stream cancelled", "AbortError")); };
+  const resume = () => { signal.removeEventListener("abort", onAbort); resolve(); };
   control.waiters.push(resume);
   signal.addEventListener("abort", onAbort, { once: true });
 });
+
+type StreamControl = { paused: boolean; generation: number; waiters: Array<() => void> };
+
+function makeRuntimeRequest(settings: StreamDebugSettings, messages: readonly { role: string; content: unknown }[]): RuntimeStreamRequest {
+  return {
+    version: "deepstudent.runtime.v1",
+    id: `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    method: "llm.stream",
+    params: {
+      provider: settings.provider,
+      model: settings.model,
+      baseUrl: settings.baseUrl,
+      streamingMode: settings.streamingMode,
+      messages: messages.map((message) => ({ role: message.role, content: Array.isArray(message.content) ? message.content.map((part) => typeof part === "object" && part !== null && "text" in part ? String((part as { text?: unknown }).text ?? "") : "").join("") : String(message.content ?? "") })),
+    },
+  };
+}
+
+async function* localRuntimeStream(request: RuntimeStreamRequest, signal: AbortSignal): AsyncIterable<RuntimeStreamEvent> {
+  const prompt = request.params.messages.at(-1)?.content.trim() || "继续学习";
+  const id = request.id;
+  yield { version: "deepstudent.runtime.v1", id, type: "llm.run.start", data: { provider: request.params.provider, model: request.params.model } };
+  for (const [index, text] of [`收到你的问题「${prompt}」。`, ...streamResponseTokens].entries()) {
+    await streamDelay(index === 0 ? 180 : 145, signal);
+    yield { version: "deepstudent.runtime.v1", id, type: "llm.delta", data: { index, text } };
+    if (index === 1) {
+      await streamDelay(120, signal);
+      const toolCallId = `${id}-context`;
+      yield { version: "deepstudent.runtime.v1", id, type: "llm.tool.call", data: { toolCallId, toolName: "local_context", args: { query: prompt.slice(0, 72) } } };
+      await streamDelay(360, signal);
+      yield { version: "deepstudent.runtime.v1", id, type: "llm.tool.result", data: { toolCallId, toolName: "local_context", result: "2 个本地示例" } };
+    }
+    yield { version: "deepstudent.runtime.v1", id, type: "llm.render", data: { progress: (index + 1) / 6, target: "message" } };
+  }
+  yield { version: "deepstudent.runtime.v1", id, type: "llm.run.complete", data: { finishReason: "stop" } };
+}
 
 function StreamToolPart({ toolName, args, result, isPreliminary }: ToolCallMessagePartProps) {
   const isDone = result !== undefined && !isPreliminary;
   return <div className={`ds-stream-tool-event${isDone ? " is-complete" : " is-running"}`}>
     <span className="ds-stream-tool-event__icon"><Icon name={isDone ? "check-circle" : "wrench"} size={14} /></span>
-    <span className="ds-stream-tool-event__copy"><b>{toolName === "local_context" ? "读取本地上下文" : "本地工具调用"}</b><small>{isDone ? `完成 · ${String(result)}` : `进行中 · ${JSON.stringify(args)}`}</small></span>
+    <span className="ds-stream-tool-event__copy"><b>{toolName === "local_context" ? "读取本地上下文" : toolName}</b><small>{isDone ? `完成 · ${String(result)}` : `进行中 · ${JSON.stringify(args)}`}</small></span>
     <em>{isDone ? "完成" : "运行中"}</em>
   </div>;
 }
@@ -1022,139 +1157,152 @@ function StreamDebugPage() {
   const eventSinkRef = useRef<(event: Omit<StreamEvent, "id">) => void>(() => undefined);
   const [status, setStatus] = useState<StreamStatus>("idle");
   const [events, setEvents] = useState<StreamEvent[]>([]);
-  const [codeLanguage, setCodeLanguage] = useState<StreamCodeLanguage>("javascript");
   const [progress, setProgress] = useState(0);
-  const [settings, setSettings] = useState<StreamDebugSettings>(defaultStreamDebugSettings);
-  const [settingsDraft, setSettingsDraft] = useState<StreamDebugSettings>(defaultStreamDebugSettings);
+  const [settings, setSettings] = useState<StreamDebugSettings>(() => readStreamDebugSettings());
+  const [settingsDraft, setSettingsDraft] = useState<StreamDebugSettings>(() => readStreamDebugSettings());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   const adapter = useMemo<ChatModelAdapter>(() => ({
     async *run({ messages, abortSignal }) {
       const currentGeneration = controlRef.current.generation;
-      const latest = messages.at(-1);
-      const prompt = latest?.content.filter((part): part is { type: "text"; text: string } => part.type === "text").map((part) => part.text).join(" ").trim() || "这个本地仿真是怎么工作的？";
-      const emit = (event: Omit<StreamEvent, "id">) => eventSinkRef.current(event);
-      const responseTokens = [`收到你的问题「${prompt}」。`, ...streamResponseTokens];
-      const toolCallId = `local-context-${currentGeneration}-${Date.now()}`;
-      const toolArgs = { query: prompt.slice(0, 72) };
-      let settledToolCall: ToolCallMessagePart | undefined;
+      const request = makeRuntimeRequest(settings, messages);
+      const transport = window.deepstudent?.runtime?.stream ?? localRuntimeStream;
       let response = "";
-      emit({ kind: "run", label: "run.start", detail: "本地仿真模型开始生成" , tone: "running" });
-      setProgress(0);
-      setStatus("running");
-      for (let index = 0; index < responseTokens.length; index += 1) {
-        await streamWaitForResume(controlRef.current, abortSignal);
-        await streamDelay(index === 0 ? 220 : 155, abortSignal);
-        response += responseTokens[index];
-        emit({ kind: "token", label: `token.${index + 1}`, detail: responseTokens[index], tone: "running" });
-        setProgress((index + 1) / (responseTokens.length + 1));
-        if (index === 1) {
-          emit({ kind: "tool", label: "tool.start · local_context", detail: "查找本地示例上下文", tone: "running" });
-          yield { content: [{ type: "text", text: response }, { type: "tool-call", toolCallId, toolName: "local_context", args: toolArgs, argsText: JSON.stringify(toolArgs), isPreliminary: true }] };
+      let settledToolCall: ToolCallMessagePart | undefined;
+      let toolCallId = `${request.id}-context`;
+      const emit = (event: Omit<StreamEvent, "id">) => eventSinkRef.current(event);
+      const append = (content: ToolCallMessagePart | undefined = settledToolCall) => {
+        const contentParts: Array<{ type: "text"; text: string } | ToolCallMessagePart> = [{ type: "text", text: response }];
+        if (content) contentParts.push(content);
+        return contentParts;
+      };
+      try {
+        for await (const event of transport(request, abortSignal)) {
+          if (currentGeneration !== controlRef.current.generation) return;
           await streamWaitForResume(controlRef.current, abortSignal);
-          await streamDelay(420, abortSignal);
-          emit({ kind: "tool", label: "tool.end · local_context", detail: "已返回 2 个本地示例", tone: "complete" });
-          settledToolCall = { type: "tool-call", toolCallId, toolName: "local_context", args: toolArgs, argsText: JSON.stringify(toolArgs), result: "2 个本地示例", isPreliminary: false };
-          yield { content: [{ type: "text", text: response }, settledToolCall] };
-          setProgress((index + 1.6) / (responseTokens.length + 1));
-        } else {
-          yield { content: settledToolCall ? [{ type: "text", text: response }, settledToolCall] : [{ type: "text", text: response }] };
+          const data = event.data ?? {};
+          if (event.type === "llm.run.start") {
+            setStatus("running");
+            emit({ kind: "run", label: "run.start", detail: `${String(data.provider ?? request.params.provider)} · ${String(data.model ?? request.params.model)}`, tone: "running", payload: event });
+            continue;
+          }
+          if (event.type === "llm.delta") {
+            const text = String(data.text ?? "");
+            response += text;
+            emit({ kind: "token", label: `delta.${String(data.index ?? "")}`, detail: text, tone: "running", payload: event });
+            setProgress(Math.min(0.96, Number(data.progress ?? 0) || (response.length / 240)));
+            if (settings.streamingMode === "events") yield { content: append() };
+            continue;
+          }
+          if (event.type === "llm.tool.call") {
+            toolCallId = String(data.toolCallId ?? toolCallId);
+            const args = (data.args && typeof data.args === "object" ? data.args : {}) as ToolCallMessagePart["args"];
+            emit({ kind: "tool", label: `tool.call · ${String(data.toolName ?? "tool")}`, detail: JSON.stringify(args), tone: "running", payload: event });
+            const preliminary: ToolCallMessagePart = { type: "tool-call", toolCallId, toolName: String(data.toolName ?? "tool"), args, argsText: JSON.stringify(args), isPreliminary: true };
+            if (settings.streamingMode === "events") yield { content: append(preliminary) };
+            continue;
+          }
+          if (event.type === "llm.tool.result") {
+            const result = String(data.result ?? "");
+            emit({ kind: "tool", label: `tool.result · ${String(data.toolName ?? "tool")}`, detail: result, tone: "complete", payload: event });
+            settledToolCall = { type: "tool-call", toolCallId: String(data.toolCallId ?? toolCallId), toolName: String(data.toolName ?? "tool"), args: {}, argsText: "{}", result, isPreliminary: false };
+            if (settings.streamingMode === "events") yield { content: append(settledToolCall) };
+            continue;
+          }
+          if (event.type === "llm.render") {
+            const nextProgress = Number(data.progress);
+            if (Number.isFinite(nextProgress)) setProgress(Math.max(0, Math.min(1, nextProgress)));
+            emit({ kind: "render", label: "render.sync", detail: `${String(data.target ?? "message")} · ${Math.round(Math.max(0, Math.min(1, nextProgress || 0)) * 100)}%`, tone: "running", payload: event });
+            continue;
+          }
+          if (event.type === "llm.error") {
+            const message = String(data.message ?? "runtime stream error");
+            emit({ kind: "error", label: "run.error", detail: message, tone: "error", payload: event });
+            setStatus("error");
+            if (settings.streamingMode === "events") yield { content: [{ type: "text", text: `${response}\n\n错误：${message}` }] };
+            return;
+          }
+          if (event.type === "llm.run.complete") {
+            if (settings.streamingMode === "buffered") yield { content: append() };
+            setProgress(1);
+            emit({ kind: "status", label: "run.complete", detail: String(data.finishReason ?? "stop"), tone: "complete", payload: event });
+            setStatus("complete");
+            yield { content: append(), status: { type: "complete", reason: "stop" } };
+          }
         }
-        emit({ kind: "render", label: "render.sync", detail: "消息、事件和 SVG 已同步", tone: "running" });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        const message = error instanceof Error ? error.message : String(error);
+        emit({ kind: "error", label: "run.error", detail: message, tone: "error", payload: { message } });
+        setStatus("error");
+        if (response) yield { content: [{ type: "text", text: `${response}\n\n错误：${message}` }] };
       }
-      await streamWaitForResume(controlRef.current, abortSignal);
-      setProgress(1);
-      emit({ kind: "status", label: "run.complete", detail: "本地仿真流已完成", tone: "complete" });
-      setStatus("complete");
-      const finalToolPart = settledToolCall ?? { type: "tool-call" as const, toolCallId, toolName: "local_context", args: toolArgs, argsText: JSON.stringify(toolArgs), result: "2 个本地示例", isPreliminary: false };
-      yield { content: [{ type: "text", text: response }, finalToolPart], status: { type: "complete", reason: "stop" } };
     },
-  }), []);
+  }), [settings]);
   const runtime = useLocalRuntime(adapter);
 
   const pushEvent = (event: Omit<StreamEvent, "id">) => {
     eventSequenceRef.current += 1;
-    setEvents((current) => [...current.slice(-39), { ...event, id: eventSequenceRef.current }]);
+    setEvents((current) => [...current.slice(-79), { ...event, id: eventSequenceRef.current }]);
   };
   eventSinkRef.current = pushEvent;
-
-  const openSettings = () => {
-    setSettingsDraft(settings);
-    setSettingsOpen(true);
-  };
+  const openSettings = () => { setSettingsDraft(settings); setSettingsOpen(true); };
   const saveSettings = () => {
     setSettings(settingsDraft);
+    window.localStorage.setItem(streamSettingsStorageKey, JSON.stringify(settingsDraft));
     setSettingsOpen(false);
   };
-
   const resetStream = () => {
     controlRef.current.generation += 1;
     controlRef.current.paused = false;
     controlRef.current.waiters.splice(0).forEach((resume) => resume());
     runtime.thread.cancelRun();
     runtime.thread.reset();
-    setStatus("idle");
-    setEvents([]);
-    setProgress(0);
+    setStatus("idle"); setEvents([]); setProgress(0);
   };
   const pauseStream = () => {
     if (status !== "running") return;
-    controlRef.current.paused = true;
-    setStatus("paused");
+    controlRef.current.paused = true; setStatus("paused");
     pushEvent({ kind: "status", label: "run.pause", detail: "等待继续输出", tone: "paused" });
   };
   const resumeStream = () => {
     if (status !== "paused") return;
-    controlRef.current.paused = false;
-    controlRef.current.waiters.splice(0).forEach((resume) => resume());
-    setStatus("running");
-    pushEvent({ kind: "status", label: "run.resume", detail: "继续本地事件流", tone: "running" });
+    controlRef.current.paused = false; controlRef.current.waiters.splice(0).forEach((resume) => resume());
+    setStatus("running"); pushEvent({ kind: "status", label: "run.resume", detail: "继续事件流", tone: "running" });
   };
-
-  const statusLabel: Record<StreamStatus, string> = { idle: "等待输入", running: "模型生成中", paused: "已暂停", complete: "已完成" };
-  const svgProgress = Math.min(1, progress);
+  const statusLabel: Record<StreamStatus, string> = { idle: "等待输入", running: "模型生成中", paused: "已暂停", complete: "已完成", error: "运行错误" };
 
   return <section className="ds-workspace-page ds-stream-debug-page" aria-label="流式对话">
     <div className="ds-stream-debug__toolbar" role="toolbar" aria-label="流式输出控制">
       <span className={`ds-stream-status ds-stream-status--${status}`}><span className="ds-stream-status__dot" />{statusLabel[status]}</span>
+      <span className="ds-stream-model-status">{settings.provider} · {settings.model} · {settings.streamingMode === "events" ? "事件流" : "缓冲"}</span>
       <button type="button" className="ds-secondary-button" onClick={status === "paused" ? resumeStream : pauseStream} disabled={status !== "running" && status !== "paused"}><Icon name={status === "paused" ? "play" : "pause"} size={14} />{status === "paused" ? "继续" : "暂停"}</button>
       <button type="button" className="ds-secondary-button" onClick={resetStream} disabled={status === "idle" && events.length === 0}><Icon name="reset" size={14} />清空 / 重置</button>
-      <button type="button" className="ds-icon-button ds-stream-inspector-trigger" onClick={() => setInspectorOpen(true)} aria-label="打开事件面板" aria-expanded={inspectorOpen} title="打开事件面板"><Icon name="menu" size={16} /></button>
       <button type="button" className="ds-icon-button ds-stream-settings-trigger" onClick={openSettings} aria-label="打开流式调试设置" title="流式调试设置"><Icon name="settings" size={16} /></button>
     </div>
 
-    <div className={`ds-stream-chat-layout${inspectorOpen ? " is-inspector-open" : ""}`}>
-      <section className="ds-stream-chat-panel" aria-label="流式对话">
-        <AssistantRuntimeProvider runtime={runtime}>
-          <ThreadPrimitive.Root className="ds-stream-thread">
-            <ThreadPrimitive.Viewport className="ds-stream-thread__viewport" autoScroll>
-              <ThreadPrimitive.Messages components={{ Message: StreamDebugMessage }} />
-            </ThreadPrimitive.Viewport>
-            <div className="ds-stream-composer-dock"><StreamDebugComposer /></div>
-          </ThreadPrimitive.Root>
-        </AssistantRuntimeProvider>
-      </section>
+    <section className="ds-stream-chat-panel" aria-label="流式对话">
+      <AssistantRuntimeProvider runtime={runtime}>
+        <ThreadPrimitive.Root className="ds-stream-thread">
+          <ThreadPrimitive.Viewport className="ds-stream-thread__viewport" autoScroll>
+            <ThreadPrimitive.Messages components={{ Message: StreamDebugMessage }} />
+            <ThreadPrimitive.Empty><div className="ds-stream-thread__empty"><Icon name="sparkle" size={22} /><b>DeepStudent</b></div></ThreadPrimitive.Empty>
+          </ThreadPrimitive.Viewport>
+          <div className="ds-stream-composer-dock"><StreamDebugComposer /></div>
+        </ThreadPrimitive.Root>
+      </AssistantRuntimeProvider>
+    </section>
 
-      {inspectorOpen && <aside className="ds-stream-inspector" aria-label="流式事件面板">
-        <div className="ds-stream-inspector__header"><b>事件面板</b><button type="button" className="ds-icon-button" onClick={() => setInspectorOpen(false)} aria-label="关闭事件面板"><Icon name="x" size={16} /></button></div>
-        {settings.showEventLog && <section className="ds-panel ds-stream-event-panel"><div className="ds-panel-heading"><div><b>Event log</b><p>与消息渲染同步的本地事件</p></div><span className="ds-stream-counter">{events.length} events</span></div><ol className="ds-stream-event-log">{events.length === 0 ? <li className="ds-stream-event-log__empty">发送一条消息后，这里会实时出现 run、token、tool 和 render 事件</li> : events.map((event) => <li key={event.id} className={`ds-stream-event-log__item${event.tone ? ` is-${event.tone}` : ""}`}><span className="ds-stream-event-log__dot" /><span><b>{event.label}</b><small>{event.detail}</small></span></li>)}</ol></section>}
-        <section className="ds-panel ds-stream-drawing-panel"><div className="ds-panel-heading"><div><b>SVG stroke</b><p>由同一进度驱动逐步绘制</p></div><span className="ds-stream-progress">{Math.round(svgProgress * 100)}%</span></div><div className="ds-stream-svg-wrap"><svg className="ds-stream-svg" viewBox="0 0 280 150" role="img" aria-label={`SVG 绘制进度 ${Math.round(svgProgress * 100)}%`}><path className="ds-stream-svg__guide" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" /><path className="ds-stream-svg__path" pathLength="1" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" style={{ strokeDasharray: 1, strokeDashoffset: 1 - svgProgress }} /><circle className="ds-stream-svg__endpoint" cx={24 + svgProgress * 242} cy={111 - Math.sin(svgProgress * Math.PI) * 62} r="4" /></svg><div className="ds-stream-svg-wrap__caption"><Icon name="wrench" size={13} />render.sync 驱动 stroke-dashoffset</div></div></section>
-        <section className="ds-panel ds-stream-code-panel"><div className="ds-panel-heading"><div><b>事件载荷示例</b><p>同一事件的多语言实现</p></div></div><div className="ds-stream-code-tabs" role="tablist" aria-label="代码语言">{(Object.keys(streamCode) as StreamCodeLanguage[]).map((language) => <button key={language} type="button" role="tab" aria-selected={codeLanguage === language} className={codeLanguage === language ? "is-active" : ""} onClick={() => setCodeLanguage(language)}>{streamCodeLabels[language]}</button>)}</div><pre className="ds-stream-code-block"><code>{streamCode[codeLanguage]}</code></pre></section>
-      </aside>}
-    </div>
     {settingsOpen && <div className="ds-stream-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="stream-settings-title">
       <button type="button" className="ds-stream-settings-modal__backdrop" aria-label="关闭设置" onClick={() => setSettingsOpen(false)} />
       <form className="ds-stream-settings-modal__card" onSubmit={(event) => { event.preventDefault(); saveSettings(); }}>
-        <div className="ds-stream-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />调试设置</span><h3 id="stream-settings-title">流式模型配置</h3><p>当前页面默认只运行本地仿真，不会发送到远端 API</p></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={() => setSettingsOpen(false)}><Icon name="x" size={16} /></button></div>
+        <div className="ds-stream-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />运行时设置</span><h3 id="stream-settings-title">LLM 连接配置</h3></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={() => setSettingsOpen(false)}><Icon name="x" size={16} /></button></div>
         <div className="ds-stream-settings-modal__body">
-          <label className="ds-stream-setting-field"><span>Provider</span><select value={settingsDraft.provider} onChange={(event) => setSettingsDraft((current) => ({ ...current, provider: event.target.value as StreamDebugSettings["provider"] }))}><option value="siliconflow">SiliconFlow</option><option value="deepseek">DeepSeek</option><option value="custom">Custom</option></select></label>
+          <label className="ds-stream-setting-field"><span>Provider</span><select value={settingsDraft.provider} onChange={(event) => setSettingsDraft((current) => ({ ...current, provider: event.target.value as StreamDebugSettings["provider"] }))}><option value="siliconflow">SiliconFlow</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">Custom</option></select></label>
           <label className="ds-stream-setting-field"><span>Model</span><input value={settingsDraft.model} onChange={(event) => setSettingsDraft((current) => ({ ...current, model: event.target.value }))} /></label>
-          <label className="ds-stream-setting-field"><span>Base URL</span><input value={settingsDraft.baseUrl} onChange={(event) => setSettingsDraft((current) => ({ ...current, baseUrl: event.target.value }))} /></label>
+          <label className="ds-stream-setting-field"><span>Base URL</span><input type="url" value={settingsDraft.baseUrl} onChange={(event) => setSettingsDraft((current) => ({ ...current, baseUrl: event.target.value }))} /></label>
           <div className="ds-stream-settings-grid"><label className="ds-stream-setting-field"><span>Timeout (s)</span><input type="number" min={1} max={300} value={settingsDraft.timeout} onChange={(event) => setSettingsDraft((current) => ({ ...current, timeout: Number(event.target.value) || 1 }))} /></label><label className="ds-stream-setting-field"><span>Retry</span><input type="number" min={0} max={5} value={settingsDraft.retry} onChange={(event) => setSettingsDraft((current) => ({ ...current, retry: Number(event.target.value) || 0 }))} /></label></div>
-          <label className="ds-stream-setting-check"><input type="checkbox" checked={settingsDraft.streaming} onChange={(event) => setSettingsDraft((current) => ({ ...current, streaming: event.target.checked }))} /><span><b>Streaming</b><small>按事件流逐段更新 assistant message</small></span></label>
-          <label className="ds-stream-setting-check"><input type="checkbox" checked={settingsDraft.showEventLog} onChange={(event) => setSettingsDraft((current) => ({ ...current, showEventLog: event.target.checked }))} /><span><b>显示 Event log</b><small>在右侧展示与消息同步的事件</small></span></label>
-          <fieldset className="ds-stream-setting-mode"><legend>运行模式</legend><label className={settingsDraft.mode === "simulation" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="simulation" checked={settingsDraft.mode === "simulation"} onChange={() => setSettingsDraft((current) => ({ ...current, mode: "simulation" }))} /><span><b>本地仿真</b><small>推荐 · 不调用真实 API</small></span></label><label className={settingsDraft.mode === "real" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="real" checked={settingsDraft.mode === "real"} onChange={() => setSettingsDraft((current) => ({ ...current, mode: "real" }))} /><span><b>真实 API</b><small>尚未接入，保存后仍保持本地仿真</small></span></label></fieldset>
+          <fieldset className="ds-stream-setting-mode"><legend>Streaming mode</legend><label className={settingsDraft.streamingMode === "events" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="events" checked={settingsDraft.streamingMode === "events"} onChange={() => setSettingsDraft((current) => ({ ...current, streamingMode: "events" }))} /><span><b>事件流</b><small>每个 delta 立即更新 assistant message</small></span></label><label className={settingsDraft.streamingMode === "buffered" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="buffered" checked={settingsDraft.streamingMode === "buffered"} onChange={() => setSettingsDraft((current) => ({ ...current, streamingMode: "buffered" }))} /><span><b>缓冲</b><small>收齐事件后一次性提交 assistant message</small></span></label></fieldset>
         </div>
         <div className="ds-stream-settings-modal__footer"><button type="button" className="ds-secondary-button" onClick={() => setSettingsOpen(false)}>取消</button><button type="submit" className="ds-primary-button">保存设置</button></div>
       </form>
@@ -1190,6 +1338,9 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
   const [onboardingOpen, setOnboardingOpen] = useState(() => onboardingConfig === null);
+  const [sessions, setSessions] = useState<ChatSession[]>(() => readSessions());
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [sessionSearch, setSessionSearch] = useState("");
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -1208,6 +1359,8 @@ export function App() {
     root.style.setProperty("--ds-selection", tokens.selection);
     root.style.setProperty("--ds-on-accent", tokens.onAccent);
   }, [theme, themeColor]);
+  useEffect(() => { window.localStorage.setItem(sessionStorageKey, JSON.stringify(sessions)); }, [sessions]);
+  useEffect(() => { if (!sessions.some((session) => session.id === activeSessionId) && sessions[0]) setActiveSessionId(sessions[0].id); }, [activeSessionId, sessions]);
   useEffect(() => {
     void HealthService.health().catch(() => undefined);
   }, []);
@@ -1226,15 +1379,19 @@ export function App() {
   };
   const openOnboarding = () => setOnboardingOpen(true);
   const selectView = (next: ViewId) => { setView(next); setSidebarOpen(false); };
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? createSession();
+  const updateSession = useCallback((patch: Partial<ChatSession>) => setSessions((current) => current.map((session) => session.id === activeSession.id ? { ...session, ...patch } : session)), [activeSession.id]);
+  const newSession = () => { const session = createSession(); setSessions((current) => [session, ...current]); setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); };
+  const visibleSessions = sessions.filter((session) => !sessionSearch.trim() || session.title.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase())).sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
   const content = useMemo(() => {
-    if (view === "chat-v2") return <ChatWorkspace />;
+    if (view === "chat-v2") return <ChatWorkspace key={activeSession.id} session={activeSession} onSessionChange={updateSession} />;
     if (view === "stream-debug") return <StreamDebugPage />;
     if (view === "learning-hub") return <LearningHub />;
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "flashcards") return <Flashcards />;
     return <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} onThemeColor={updateThemeColor} onOpenOnboarding={openOnboarding} />;
-  }, [theme, themeColor, view]);
+  }, [activeSession, theme, themeColor, updateSession, view]);
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
@@ -1253,12 +1410,12 @@ export function App() {
           </div>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
-          {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
+          {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => item.id === "chat-v2" ? newSession() : selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
         </nav>
         <div className="ds-sidebar__scroll">
           <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><p className="ds-sidebar-empty">暂无置顶会话</p></section>
           <section className="ds-sidebar-section"><div className="ds-section-label"><span>主题</span><span className="ds-section-tools"><button className="ds-section-action" aria-label="收起主题"><Icon name="chevron-down" size={14} /></button><button className="ds-section-action" aria-label="新建主题"><Icon name="plus" size={14} /></button></span></div><p className="ds-sidebar-empty">暂无主题</p></section>
-          <section className="ds-sidebar-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={() => selectView("chat-v2")} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><p className="ds-sidebar-empty">暂无对话</p></section>
+          <section className="ds-sidebar-section ds-conversation-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={newSession} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><label className="ds-conversation-search"><MagnifyingGlass size={13} /><input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话…" aria-label="搜索会话" /></label>{visibleSessions.length === 0 ? <p className="ds-sidebar-empty">没有匹配的会话</p> : visibleSessions.map((session) => <button type="button" key={session.id} className="ds-thread-row" data-active={session.id === activeSession.id} onClick={() => { setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); setSessions((current) => current.map((item) => item.id === session.id ? { ...item, unread: 0 } : item)); }}><span className={`ds-thread-dot ${session.unread ? "ds-thread-dot--accent" : ""}`}>{session.unread ? "●" : "○"}</span><span>{session.title}</span>{session.unread > 0 && <small>{session.unread}</small>}</button>)}</section>
         </div>
         <div className="ds-sidebar__footer">
           <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
