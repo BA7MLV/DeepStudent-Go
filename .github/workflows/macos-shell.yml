@@ -29,7 +29,9 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install JavaScript dependencies
-        run: bun install --force
+        run: |
+          bun install --force
+          bun add --no-save @rollup/rollup-darwin-arm64@4.63.6
 
       - name: Resolve Go module checksums
         run: go mod tidy
