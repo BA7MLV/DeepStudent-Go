@@ -230,6 +230,46 @@ const readThemeColor = (): ThemeColor => {
   return saved && isThemeColor(saved) ? saved : defaultThemeColor;
 };
 
+type ThemeColorTokens = {
+  accent: string;
+  accentStrong: string;
+  accentSoft: string;
+  focus: string;
+  titleAccent: string;
+  voice: string;
+  selection: string;
+  onAccent: string;
+};
+
+const hexToRgb = (hex: ThemeColor): [number, number, number] => [
+  Number.parseInt(hex.slice(1, 3), 16),
+  Number.parseInt(hex.slice(3, 5), 16),
+  Number.parseInt(hex.slice(5, 7), 16),
+];
+
+const rgbToHex = ([red, green, blue]: [number, number, number]) => `#${[red, green, blue].map((channel) => Math.round(Math.max(0, Math.min(255, channel))).toString(16).padStart(2, "0")).join("")}`;
+const mixRgb = (color: [number, number, number], target: [number, number, number], amount: number): [number, number, number] => color.map((channel, index) => channel + (target[index] - channel) * amount) as [number, number, number];
+const rgba = ([red, green, blue]: [number, number, number], alpha: number) => `rgba(${Math.round(red)}, ${Math.round(green)}, ${Math.round(blue)}, ${alpha})`;
+const relativeLuminance = ([red, green, blue]: [number, number, number]) => [red, green, blue].map((channel) => channel / 255).map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+
+function getThemeColorTokens(themeColor: ThemeColor, theme: Theme): ThemeColorTokens {
+  const rgb = hexToRgb(themeColor);
+  const isLightColor = relativeLuminance(rgb) > 0.48;
+  const accentStrong = theme === "dark" ? mixRgb(rgb, [255, 255, 255], isLightColor ? 0.1 : 0.24) : mixRgb(rgb, [0, 0, 0], isLightColor ? 0.2 : 0.12);
+  const titleAccent = theme === "dark" ? mixRgb(rgb, [255, 255, 255], 0.16) : mixRgb(rgb, [0, 0, 0], 0.06);
+  const onAccent = relativeLuminance(rgb) > 0.48 ? "#111827" : "#ffffff";
+  return {
+    accent: rgbToHex(rgb),
+    accentStrong: rgbToHex(accentStrong),
+    accentSoft: rgba(rgb, theme === "dark" ? 0.2 : 0.12),
+    focus: rgbToHex(titleAccent),
+    titleAccent: rgbToHex(titleAccent),
+    voice: rgbToHex(rgb),
+    selection: rgba(rgb, theme === "dark" ? 0.26 : 0.16),
+    onAccent,
+  };
+}
+
 const StubAdapter: ChatModelAdapter = {
   async *run({ messages }) {
     const last = messages.at(-1);
@@ -626,8 +666,8 @@ function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }
   return <button
     type="button"
     className={`ds-send-button ds-composer-send${hasText ? " is-text-ready" : " is-empty"}${recording ? " is-recording" : ""}${cancelZone ? " is-cancel-zone" : ""}`}
-    aria-label={error ?? (hasText ? "发送" : cancelZone ? "松开取消录音" : recording ? "松开结束录音" : "按住说话")}
-    title={error ?? (hasText ? "发送" : cancelZone ? "松开取消" : recording ? "松开结束" : "按住说话")}
+    aria-label={error ?? (hasText ? "发送" : recording ? "上滑取消" : "按住说话")}
+    title={error ?? (hasText ? "发送" : recording ? "上滑取消" : "按住说话")}
     onClick={handleClick}
     onPointerDown={handlePointerDown}
     onPointerMove={handlePointerMove}
@@ -759,12 +799,6 @@ function WorkspaceDropZone({ children }: { children: React.ReactNode }) {
   };
   useEffect(() => () => clearDropFeedback(), []);
 
-  const dropStateLabel: Record<Exclude<WorkspaceDropState, "idle">, string> = {
-    dragging: canDrop ? "松开以添加附件" : "当前页面不支持附件",
-    adding: "正在加入附件…",
-    added: "附件已加入待发送",
-    error: "附件未能加入",
-  };
   const contextValue = useMemo<WorkspaceDropContextValue>(() => ({ registerDropHandler }), []);
   return <div
     className="ds-main__content"
@@ -775,7 +809,7 @@ function WorkspaceDropZone({ children }: { children: React.ReactNode }) {
     onDrop={handleDrop}
   >
     <WorkspaceDropContext.Provider value={contextValue}>{children}</WorkspaceDropContext.Provider>
-    {dropState !== "idle" && <div className="ds-workspace-drop-overlay" data-drop-state={dropState} role="status" aria-live="polite"><div className="ds-workspace-drop-overlay__card"><Icon name="stack" size={22} /><b>{dropStateLabel[dropState]}</b><small>{dropState === "dragging" && canDrop ? "文件会保留在当前会话的待发送队列中" : dropState === "adding" ? "正在使用当前附件适配器处理文件" : dropState === "added" ? "发送消息时才会读取文件内容" : "请在支持附件的聊天会话中重试"}</small></div></div>}
+    {dropState !== "idle" && <div className="ds-workspace-drop-overlay" data-drop-state={dropState} aria-hidden="true"><i className="ds-workspace-drop-overlay__wave ds-workspace-drop-overlay__wave--one" /><i className="ds-workspace-drop-overlay__wave ds-workspace-drop-overlay__wave--two" /><i className="ds-workspace-drop-overlay__wave ds-workspace-drop-overlay__wave--three" /></div>}
   </div>;
 }
 
@@ -811,35 +845,36 @@ function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime>
     "--ds-voice-level": voiceState.level.toFixed(3),
     "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
   } as React.CSSProperties;
-  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
-    <div className="ds-composer__attachments" aria-label="待发送附件">
-      <ComposerPrimitive.Attachments>
-        {({ attachment }) => <AttachmentPrimitive.Root className="ds-composer-attachment">
-          <AttachmentPrimitive.unstable_Thumb className="ds-composer-attachment__thumb" />
-          <span className="ds-composer-attachment__name"><AttachmentPrimitive.Name /></span>
-          <small>{attachment.status.type === "requires-action" ? "待发送" : attachment.status.type === "complete" ? "已准备" : "处理失败"}</small>
-          <AttachmentPrimitive.Remove className="ds-composer-attachment__remove" aria-label={`移除 ${attachment.name}`}><Icon name="x" size={13} /></AttachmentPrimitive.Remove>
-        </AttachmentPrimitive.Root>}
-      </ComposerPrimitive.Attachments>
-    </div>
-    <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
-    <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
-    <div className="ds-composer__toolbar">
-      <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} onVoiceStateChange={setVoiceState} />
-    </div>
-    <div className="ds-voice-overlay" aria-hidden="true" style={overlayStyle}>
+  return <div className="ds-composer-shell" data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} style={overlayStyle}>
+    <div className="ds-voice-overlay" aria-hidden="true">
       <div className="ds-voice-overlay__wash" />
       <div className="ds-voice-overlay__aurora" />
       <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--one" />
       <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--two" />
       <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--three" />
     </div>
+    <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
+      <div className="ds-composer__attachments" aria-label="待发送附件">
+        <ComposerPrimitive.Attachments>
+          {({ attachment }) => <AttachmentPrimitive.Root className="ds-composer-attachment">
+            <AttachmentPrimitive.unstable_Thumb className="ds-composer-attachment__thumb" />
+            <span className="ds-composer-attachment__name"><AttachmentPrimitive.Name /></span>
+            <small>{attachment.status.type === "requires-action" ? "待发送" : attachment.status.type === "complete" ? "已准备" : "处理失败"}</small>
+            <AttachmentPrimitive.Remove className="ds-composer-attachment__remove" aria-label={`移除 ${attachment.name}`}><Icon name="x" size={13} /></AttachmentPrimitive.Remove>
+          </AttachmentPrimitive.Root>}
+        </ComposerPrimitive.Attachments>
+      </div>
+      <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
+      <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
+      <div className="ds-composer__toolbar">
+        <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} onVoiceStateChange={setVoiceState} />
+      </div>
+    </ComposerPrimitive.Root>
     {voiceState.recording && <div className="ds-voice-recording-status" role="status" aria-live="polite">
-      <strong>{voiceState.cancelZone ? "松开取消录音" : "正在录音"}</strong>
-      <span>{voiceState.cancelZone ? "上移手指放开以取消" : "松开结束 · 上滑取消"}</span>
       <time aria-hidden="true">{formatRecordingElapsed(voiceState.elapsed)}</time>
+      <span>上滑取消</span>
     </div>}
-  </ComposerPrimitive.Root>;
+  </div>;
 }
 
 function ChatWorkspace() {
@@ -970,13 +1005,13 @@ function StreamDebugMessage() {
   const parts = { Text: StreamMessageText, tools: { Fallback: StreamToolPart } };
   return <MessagePrimitive.Root className="ds-stream-message">
     <MessagePrimitive.If user><div className="ds-stream-message__bubble ds-stream-message__bubble--user"><span className="ds-stream-message__role">你</span><MessagePrimitive.Parts components={parts} /></div></MessagePrimitive.If>
-    <MessagePrimitive.If assistant><div className="ds-stream-message__bubble ds-stream-message__bubble--assistant"><span className="ds-stream-message__role">DeepStudent · 本地仿真</span><MessagePrimitive.Parts components={parts} /></div></MessagePrimitive.If>
+    <MessagePrimitive.If assistant><div className="ds-stream-message__bubble ds-stream-message__bubble--assistant"><span className="ds-stream-message__role">DeepStudent</span><MessagePrimitive.Parts components={parts} /></div></MessagePrimitive.If>
   </MessagePrimitive.Root>;
 }
 
 function StreamDebugComposer() {
   return <ComposerPrimitive.Root className="ds-stream-composer">
-    <ComposerPrimitive.Input rows={1} placeholder="在本地仿真 Chat 中继续提问…" aria-label="输入调试消息" />
+    <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
     <ComposerPrimitive.Send className="ds-stream-composer__send" aria-label="发送消息"><Icon name="arrow-up" size={16} /></ComposerPrimitive.Send>
   </ComposerPrimitive.Root>;
 }
@@ -992,6 +1027,7 @@ function StreamDebugPage() {
   const [settings, setSettings] = useState<StreamDebugSettings>(defaultStreamDebugSettings);
   const [settingsDraft, setSettingsDraft] = useState<StreamDebugSettings>(defaultStreamDebugSettings);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   const adapter = useMemo<ChatModelAdapter>(() => ({
     async *run({ messages, abortSignal }) {
@@ -1032,7 +1068,7 @@ function StreamDebugPage() {
       emit({ kind: "status", label: "run.complete", detail: "本地仿真流已完成", tone: "complete" });
       setStatus("complete");
       const finalToolPart = settledToolCall ?? { type: "tool-call" as const, toolCallId, toolName: "local_context", args: toolArgs, argsText: JSON.stringify(toolArgs), result: "2 个本地示例", isPreliminary: false };
-      yield { content: [{ type: "text", text: response }, finalToolPart, { type: "text", text: "\n\n以上回复来自本地事件流仿真，不会调用真实 API。" }], status: { type: "complete", reason: "stop" } };
+      yield { content: [{ type: "text", text: response }, finalToolPart], status: { type: "complete", reason: "stop" } };
     },
   }), []);
   const runtime = useLocalRuntime(adapter);
@@ -1079,38 +1115,33 @@ function StreamDebugPage() {
   const statusLabel: Record<StreamStatus, string> = { idle: "等待输入", running: "模型生成中", paused: "已暂停", complete: "已完成" };
   const svgProgress = Math.min(1, progress);
 
-  return <section className="ds-workspace-page ds-stream-debug-page" aria-labelledby="stream-debug-title">
-    <div className="ds-stream-debug__heading">
-      <div><div className="ds-stream-debug__eyebrow"><Icon name="bug" size={14} />前端调试工具</div><h2 id="stream-debug-title">调试流式输出</h2><p>真实消息状态 + 可观察的本地事件流</p></div>
-      <span className="ds-stream-sim-badge"><span className="ds-stream-sim-badge__dot" />本地仿真流 · 不连接真实 API</span>
-    </div>
+  return <section className="ds-workspace-page ds-stream-debug-page" aria-label="流式对话">
     <div className="ds-stream-debug__toolbar" role="toolbar" aria-label="流式输出控制">
       <span className={`ds-stream-status ds-stream-status--${status}`}><span className="ds-stream-status__dot" />{statusLabel[status]}</span>
-      <span className="ds-stream-model-status">{settings.mode === "simulation" ? "本地仿真" : "真实 API（尚未接入，仍本地仿真）"} · {settings.provider} / {settings.model}</span>
       <button type="button" className="ds-secondary-button" onClick={status === "paused" ? resumeStream : pauseStream} disabled={status !== "running" && status !== "paused"}><Icon name={status === "paused" ? "play" : "pause"} size={14} />{status === "paused" ? "继续" : "暂停"}</button>
       <button type="button" className="ds-secondary-button" onClick={resetStream} disabled={status === "idle" && events.length === 0}><Icon name="reset" size={14} />清空 / 重置</button>
+      <button type="button" className="ds-icon-button ds-stream-inspector-trigger" onClick={() => setInspectorOpen(true)} aria-label="打开事件面板" aria-expanded={inspectorOpen} title="打开事件面板"><Icon name="menu" size={16} /></button>
       <button type="button" className="ds-icon-button ds-stream-settings-trigger" onClick={openSettings} aria-label="打开流式调试设置" title="流式调试设置"><Icon name="settings" size={16} /></button>
     </div>
 
-    <div className="ds-stream-chat-layout">
-      <section className="ds-stream-chat-panel" aria-label="本地仿真 Chat">
-        <div className="ds-stream-chat-panel__header"><div><b>本地仿真 Chat</b><p>输入消息，回复会逐段进入对话</p></div><span className="ds-stream-mini-label">ASSISTANT-UI</span></div>
+    <div className={`ds-stream-chat-layout${inspectorOpen ? " is-inspector-open" : ""}`}>
+      <section className="ds-stream-chat-panel" aria-label="流式对话">
         <AssistantRuntimeProvider runtime={runtime}>
           <ThreadPrimitive.Root className="ds-stream-thread">
             <ThreadPrimitive.Viewport className="ds-stream-thread__viewport" autoScroll>
               <ThreadPrimitive.Messages components={{ Message: StreamDebugMessage }} />
-              <ThreadPrimitive.Empty><div className="ds-stream-thread__empty"><Sparkle size={20} /><b>开始一次可暂停的本地仿真</b><p>试着问“解释一下事件流”，然后观察消息、工具事件和右侧日志同步变化</p></div></ThreadPrimitive.Empty>
             </ThreadPrimitive.Viewport>
             <div className="ds-stream-composer-dock"><StreamDebugComposer /></div>
           </ThreadPrimitive.Root>
         </AssistantRuntimeProvider>
       </section>
 
-      <aside className="ds-stream-inspector" aria-label="流式事件检查器">
+      {inspectorOpen && <aside className="ds-stream-inspector" aria-label="流式事件面板">
+        <div className="ds-stream-inspector__header"><b>事件面板</b><button type="button" className="ds-icon-button" onClick={() => setInspectorOpen(false)} aria-label="关闭事件面板"><Icon name="x" size={16} /></button></div>
         {settings.showEventLog && <section className="ds-panel ds-stream-event-panel"><div className="ds-panel-heading"><div><b>Event log</b><p>与消息渲染同步的本地事件</p></div><span className="ds-stream-counter">{events.length} events</span></div><ol className="ds-stream-event-log">{events.length === 0 ? <li className="ds-stream-event-log__empty">发送一条消息后，这里会实时出现 run、token、tool 和 render 事件</li> : events.map((event) => <li key={event.id} className={`ds-stream-event-log__item${event.tone ? ` is-${event.tone}` : ""}`}><span className="ds-stream-event-log__dot" /><span><b>{event.label}</b><small>{event.detail}</small></span></li>)}</ol></section>}
         <section className="ds-panel ds-stream-drawing-panel"><div className="ds-panel-heading"><div><b>SVG stroke</b><p>由同一进度驱动逐步绘制</p></div><span className="ds-stream-progress">{Math.round(svgProgress * 100)}%</span></div><div className="ds-stream-svg-wrap"><svg className="ds-stream-svg" viewBox="0 0 280 150" role="img" aria-label={`SVG 绘制进度 ${Math.round(svgProgress * 100)}%`}><path className="ds-stream-svg__guide" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" /><path className="ds-stream-svg__path" pathLength="1" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" style={{ strokeDasharray: 1, strokeDashoffset: 1 - svgProgress }} /><circle className="ds-stream-svg__endpoint" cx={24 + svgProgress * 242} cy={111 - Math.sin(svgProgress * Math.PI) * 62} r="4" /></svg><div className="ds-stream-svg-wrap__caption"><Icon name="wrench" size={13} />render.sync 驱动 stroke-dashoffset</div></div></section>
         <section className="ds-panel ds-stream-code-panel"><div className="ds-panel-heading"><div><b>事件载荷示例</b><p>同一事件的多语言实现</p></div></div><div className="ds-stream-code-tabs" role="tablist" aria-label="代码语言">{(Object.keys(streamCode) as StreamCodeLanguage[]).map((language) => <button key={language} type="button" role="tab" aria-selected={codeLanguage === language} className={codeLanguage === language ? "is-active" : ""} onClick={() => setCodeLanguage(language)}>{streamCodeLabels[language]}</button>)}</div><pre className="ds-stream-code-block"><code>{streamCode[codeLanguage]}</code></pre></section>
-      </aside>
+      </aside>}
     </div>
     {settingsOpen && <div className="ds-stream-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="stream-settings-title">
       <button type="button" className="ds-stream-settings-modal__backdrop" aria-label="关闭设置" onClick={() => setSettingsOpen(false)} />
@@ -1144,12 +1175,14 @@ function EmptyState({ title, description }: { title: string; description: string
 function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
 function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
 function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, themeColor, onThemeColor, onOpenOnboarding }: { theme: Theme; onTheme: () => void; themeColor: ThemeColor; onThemeColor: (color: ThemeColor) => void; onOpenOnboarding: () => void }) {
-  const [themeColorDraft, setThemeColorDraft] = useState(themeColor);
-  useEffect(() => setThemeColorDraft(themeColor), [themeColor]);
-  const saveThemeColor = () => onThemeColor(isThemeColor(themeColorDraft) ? themeColorDraft : defaultThemeColor);
+function Settings({ theme, onTheme, themeColor, savedThemeColor, onThemeColorPreview, onThemeColorSave, onOpenOnboarding }: { theme: Theme; onTheme: () => void; themeColor: ThemeColor; savedThemeColor: ThemeColor; onThemeColorPreview: (color: ThemeColor) => void; onThemeColorSave: (color: ThemeColor) => void; onOpenOnboarding: () => void }) {
+  const [themeColorDraft, setThemeColorDraft] = useState(savedThemeColor);
+  useEffect(() => setThemeColorDraft(savedThemeColor), [savedThemeColor]);
+  const previewThemeColor = (color: ThemeColor) => { setThemeColorDraft(color); onThemeColorPreview(color); };
+  const cancelThemeColor = () => { setThemeColorDraft(savedThemeColor); onThemeColorPreview(savedThemeColor); };
+  const saveThemeColor = () => onThemeColorSave(isThemeColor(themeColorDraft) ? themeColorDraft : defaultThemeColor);
 
-  return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label><div className="ds-theme-color-setting"><div className="ds-theme-color-setting__heading"><span><b>主题色</b><small>用于按钮、焦点、标题和录音波形</small></span><span className="ds-theme-color-preview"><i style={{ backgroundColor: themeColorDraft }} aria-hidden="true" /><code>{themeColorDraft.toUpperCase()}</code></span></div><div className="ds-theme-color-presets" role="group" aria-label="主题色预设"><span className="ds-theme-color-presets__label">预设</span>{themeColorPresets.map((preset) => <button key={preset.value} type="button" className={`ds-theme-color-swatch${themeColorDraft.toLowerCase() === preset.value ? " is-selected" : ""}`} style={{ backgroundColor: preset.value }} aria-label={`选择${preset.label}主题色`} aria-pressed={themeColorDraft.toLowerCase() === preset.value} onClick={() => setThemeColorDraft(preset.value)} />)}</div><label className="ds-theme-color-custom"><span>自定义颜色</span><input type="color" value={themeColorDraft} onChange={(event) => setThemeColorDraft(event.target.value)} aria-label="自定义主题色" /></label><div className="ds-theme-color-actions"><button type="button" className="ds-text-button" onClick={() => setThemeColorDraft(themeColor)}>取消</button><button type="button" className="ds-text-button" onClick={() => setThemeColorDraft(defaultThemeColor)}>恢复默认</button><button type="button" className="ds-primary-button" onClick={saveThemeColor} disabled={themeColorDraft.toLowerCase() === themeColor.toLowerCase()}>保存主题色</button></div></div></section></div></div></WorkspacePage>;
+  return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label><div className="ds-theme-color-setting"><div className="ds-theme-color-setting__heading"><span><b>主题色</b><small>用于按钮、焦点、标题和录音波形</small></span><span className="ds-theme-color-preview"><i style={{ backgroundColor: themeColorDraft }} aria-hidden="true" /><code>{themeColorDraft.toUpperCase()}</code></span></div><div className="ds-theme-color-presets" role="group" aria-label="主题色预设"><span className="ds-theme-color-presets__label">预设</span>{themeColorPresets.map((preset) => <button key={preset.value} type="button" className={`ds-theme-color-swatch${themeColorDraft.toLowerCase() === preset.value ? " is-selected" : ""}`} style={{ backgroundColor: preset.value }} aria-label={`选择${preset.label}主题色`} aria-pressed={themeColorDraft.toLowerCase() === preset.value} onClick={() => previewThemeColor(preset.value)} />)}</div><label className="ds-theme-color-custom"><span>自定义颜色</span><input type="color" value={themeColorDraft} onChange={(event) => previewThemeColor(event.target.value)} aria-label="自定义主题色" /></label><div className="ds-theme-color-actions"><button type="button" className="ds-text-button" onClick={cancelThemeColor}>取消</button><button type="button" className="ds-text-button" onClick={() => previewThemeColor(defaultThemeColor)}>恢复默认</button><button type="button" className="ds-primary-button" onClick={saveThemeColor} disabled={themeColorDraft.toLowerCase() === themeColor.toLowerCase()}>保存主题色</button></div></div></section></div></div></WorkspacePage>;
 }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
@@ -1159,6 +1192,7 @@ export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [themeColor, setThemeColor] = useState<ThemeColor>(() => readThemeColor());
+  const [savedThemeColor, setSavedThemeColor] = useState<ThemeColor>(() => readThemeColor());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
@@ -1171,17 +1205,27 @@ export function App() {
   }, [theme]);
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--ds-accent", themeColor);
-    root.style.setProperty("--ds-focus", themeColor);
-    root.style.setProperty("--ds-title-accent", themeColor);
-    root.style.setProperty("--ds-voice-color", themeColor);
-    window.localStorage.setItem(themeColorStorageKey, themeColor);
-  }, [themeColor]);
+    const tokens = getThemeColorTokens(themeColor, theme);
+    root.style.setProperty("--ds-accent", tokens.accent);
+    root.style.setProperty("--ds-accent-strong", tokens.accentStrong);
+    root.style.setProperty("--ds-accent-soft", tokens.accentSoft);
+    root.style.setProperty("--ds-focus", tokens.focus);
+    root.style.setProperty("--ds-title-accent", tokens.titleAccent);
+    root.style.setProperty("--ds-voice-color", tokens.voice);
+    root.style.setProperty("--ds-selection", tokens.selection);
+    root.style.setProperty("--ds-on-accent", tokens.onAccent);
+  }, [theme, themeColor]);
   useEffect(() => {
     void HealthService.health().catch(() => undefined);
   }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
+  const previewThemeColor = (color: ThemeColor) => setThemeColor(color);
+  const saveThemeColor = (color: ThemeColor) => {
+    setThemeColor(color);
+    setSavedThemeColor(color);
+    window.localStorage.setItem(themeColorStorageKey, color);
+  };
   const completeOnboarding = (config: Omit<OnboardingConfig, "completedAt">) => {
     const saved = { ...config, completedAt: new Date().toISOString() };
     window.localStorage.setItem(onboardingStorageKey, JSON.stringify(saved));
@@ -1197,8 +1241,8 @@ export function App() {
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "flashcards") return <Flashcards />;
-    return <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} onThemeColor={setThemeColor} onOpenOnboarding={openOnboarding} />;
-  }, [theme, themeColor, view]);
+    return <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} savedThemeColor={savedThemeColor} onThemeColorPreview={previewThemeColor} onThemeColorSave={saveThemeColor} onOpenOnboarding={openOnboarding} />;
+  }, [savedThemeColor, theme, themeColor, view]);
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
