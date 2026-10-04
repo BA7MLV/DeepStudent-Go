@@ -9,6 +9,8 @@ import {
   type AttachmentAdapter,
   type ThreadComposerRuntime,
   type ChatModelAdapter,
+  type ToolCallMessagePartProps,
+  type ToolCallMessagePart,
   AttachmentPrimitive,
 } from "@assistant-ui/react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -769,23 +771,35 @@ function ChatWorkspace() {
 
 type StreamStatus = "idle" | "running" | "paused" | "complete";
 type StreamCodeLanguage = "javascript" | "json" | "go" | "python";
+type StreamEventKind = "run" | "token" | "tool" | "render" | "status";
+type StreamEvent = { id: number; kind: StreamEventKind; label: string; detail: string; tone?: "running" | "complete" | "paused" };
+type StreamDebugSettings = {
+  provider: "siliconflow" | "deepseek" | "custom";
+  model: string;
+  baseUrl: string;
+  streaming: boolean;
+  timeout: number;
+  retry: number;
+  mode: "simulation" | "real";
+  showEventLog: boolean;
+};
 
-const streamTokens = [
-  "你好",
-  "，",
-  "这里是",
-  "一段",
-  "流式输出",
-  "仿真。",
-  "我会",
-  "先规划",
-  "步骤，",
-  "再调用",
-  "工具，",
-  "最后",
-  "逐 token",
-  "绘制结果。",
-];
+const defaultStreamDebugSettings: StreamDebugSettings = {
+  provider: "siliconflow",
+  model: "DeepSeek-R1-Distill-Qwen-7B",
+  baseUrl: "https://api.siliconflow.cn/v1",
+  streaming: true,
+  timeout: 30,
+  retry: 1,
+  mode: "simulation",
+  showEventLog: true,
+};
+
+type StreamControl = {
+  paused: boolean;
+  generation: number;
+  waiters: Array<() => void>;
+};
 
 const streamCode: Record<StreamCodeLanguage, string> = {
   javascript: `const stream = async function* () {\n  for (const token of tokens) {\n    yield token;\n    await wait(120);\n  }\n};`,
@@ -801,122 +815,222 @@ const streamCodeLabels: Record<StreamCodeLanguage, string> = {
   python: "Python",
 };
 
-const streamToolSteps = [
-  { label: "规划响应", detail: "拆分任务与输出结构", start: 0, end: 4 },
-  { label: "调用学习资源", detail: "读取本地示例上下文", start: 4, end: 9 },
-  { label: "渲染流式结果", detail: "逐 token 更新文本与 SVG", start: 9, end: streamTokens.length },
+const streamResponseTokens = [
+  "我先把你的问题拆成几个小步骤。",
+  "接着读取本地示例上下文，",
+  "再把结果整理成可以继续追问的回复。",
+  "整个过程只在浏览器中运行，",
+  "你可以随时暂停、继续或清空这次对话。",
 ];
 
+const streamDelay = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal.aborted) {
+    reject(new DOMException("Stream cancelled", "AbortError"));
+    return;
+  }
+  const timer = window.setTimeout(() => {
+    signal.removeEventListener("abort", onAbort);
+    resolve();
+  }, ms);
+  const onAbort = () => {
+    window.clearTimeout(timer);
+    signal.removeEventListener("abort", onAbort);
+    reject(new DOMException("Stream cancelled", "AbortError"));
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+});
+
+const streamWaitForResume = (control: StreamControl, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (!control.paused) {
+    resolve();
+    return;
+  }
+  const onAbort = () => {
+    control.waiters = control.waiters.filter((waiter) => waiter !== resume);
+    reject(new DOMException("Stream cancelled", "AbortError"));
+  };
+  const resume = () => {
+    signal.removeEventListener("abort", onAbort);
+    resolve();
+  };
+  control.waiters.push(resume);
+  signal.addEventListener("abort", onAbort, { once: true });
+});
+
+function StreamToolPart({ toolName, args, result, isPreliminary }: ToolCallMessagePartProps) {
+  const isDone = result !== undefined && !isPreliminary;
+  return <div className={`ds-stream-tool-event${isDone ? " is-complete" : " is-running"}`}>
+    <span className="ds-stream-tool-event__icon"><Icon name={isDone ? "check-circle" : "wrench"} size={14} /></span>
+    <span className="ds-stream-tool-event__copy"><b>{toolName === "local_context" ? "读取本地上下文" : "本地工具调用"}</b><small>{isDone ? `完成 · ${String(result)}` : `进行中 · ${JSON.stringify(args)}`}</small></span>
+    <em>{isDone ? "完成" : "运行中"}</em>
+  </div>;
+}
+
+function StreamMessageText() {
+  return <MessagePartPrimitive.Text component="span" smooth />;
+}
+
+function StreamDebugMessage() {
+  const parts = { Text: StreamMessageText, tools: { Fallback: StreamToolPart } };
+  return <MessagePrimitive.Root className="ds-stream-message">
+    <MessagePrimitive.If user><div className="ds-stream-message__bubble ds-stream-message__bubble--user"><span className="ds-stream-message__role">你</span><MessagePrimitive.Parts components={parts} /></div></MessagePrimitive.If>
+    <MessagePrimitive.If assistant><div className="ds-stream-message__bubble ds-stream-message__bubble--assistant"><span className="ds-stream-message__role">DeepStudent · 本地仿真</span><MessagePrimitive.Parts components={parts} /></div></MessagePrimitive.If>
+  </MessagePrimitive.Root>;
+}
+
+function StreamDebugComposer() {
+  return <ComposerPrimitive.Root className="ds-stream-composer">
+    <ComposerPrimitive.Input rows={1} placeholder="在本地仿真 Chat 中继续提问…" aria-label="输入调试消息" />
+    <ComposerPrimitive.Send className="ds-stream-composer__send" aria-label="发送消息"><Icon name="arrow-up" size={16} /></ComposerPrimitive.Send>
+  </ComposerPrimitive.Root>;
+}
+
 function StreamDebugPage() {
+  const controlRef = useRef<StreamControl>({ paused: false, generation: 0, waiters: [] });
+  const eventSequenceRef = useRef(0);
+  const eventSinkRef = useRef<(event: Omit<StreamEvent, "id">) => void>(() => undefined);
   const [status, setStatus] = useState<StreamStatus>("idle");
-  const [tokenIndex, setTokenIndex] = useState(0);
+  const [events, setEvents] = useState<StreamEvent[]>([]);
   const [codeLanguage, setCodeLanguage] = useState<StreamCodeLanguage>("javascript");
-  const visibleTokens = streamTokens.slice(0, tokenIndex);
-  const progress = streamTokens.length === 0 ? 0 : tokenIndex / streamTokens.length;
+  const [progress, setProgress] = useState(0);
+  const [settings, setSettings] = useState<StreamDebugSettings>(defaultStreamDebugSettings);
+  const [settingsDraft, setSettingsDraft] = useState<StreamDebugSettings>(defaultStreamDebugSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  useEffect(() => {
-    if (status !== "running") return;
-    const timer = window.setTimeout(() => {
-      setTokenIndex((current) => Math.min(streamTokens.length, current + 1));
-    }, 145);
-    return () => window.clearTimeout(timer);
-  }, [status, tokenIndex]);
+  const adapter = useMemo<ChatModelAdapter>(() => ({
+    async *run({ messages, abortSignal }) {
+      const currentGeneration = controlRef.current.generation;
+      const latest = messages.at(-1);
+      const prompt = latest?.content.filter((part): part is { type: "text"; text: string } => part.type === "text").map((part) => part.text).join(" ").trim() || "这个本地仿真是怎么工作的？";
+      const emit = (event: Omit<StreamEvent, "id">) => eventSinkRef.current(event);
+      const responseTokens = [`收到你的问题「${prompt}」。`, ...streamResponseTokens];
+      const toolCallId = `local-context-${currentGeneration}-${Date.now()}`;
+      const toolArgs = { query: prompt.slice(0, 72) };
+      let settledToolCall: ToolCallMessagePart | undefined;
+      let response = "";
+      emit({ kind: "run", label: "run.start", detail: "本地仿真模型开始生成" , tone: "running" });
+      setStatus("running");
+      for (let index = 0; index < responseTokens.length; index += 1) {
+        await streamWaitForResume(controlRef.current, abortSignal);
+        await streamDelay(index === 0 ? 220 : 155, abortSignal);
+        response += responseTokens[index];
+        emit({ kind: "token", label: `token.${index + 1}`, detail: responseTokens[index], tone: "running" });
+        setProgress((index + 1) / (responseTokens.length + 1));
+        if (index === 1) {
+          emit({ kind: "tool", label: "tool.start · local_context", detail: "查找本地示例上下文", tone: "running" });
+          yield { content: [{ type: "text", text: response }, { type: "tool-call", toolCallId, toolName: "local_context", args: toolArgs, argsText: JSON.stringify(toolArgs), isPreliminary: true }] };
+          await streamWaitForResume(controlRef.current, abortSignal);
+          await streamDelay(420, abortSignal);
+          emit({ kind: "tool", label: "tool.end · local_context", detail: "已返回 2 个本地示例", tone: "complete" });
+          settledToolCall = { type: "tool-call", toolCallId, toolName: "local_context", args: toolArgs, argsText: JSON.stringify(toolArgs), result: "2 个本地示例", isPreliminary: false };
+          yield { content: [{ type: "text", text: response }, settledToolCall] };
+          setProgress((index + 1.6) / (responseTokens.length + 1));
+        } else {
+          yield { content: settledToolCall ? [{ type: "text", text: response }, settledToolCall] : [{ type: "text", text: response }] };
+        }
+        emit({ kind: "render", label: "render.sync", detail: "消息、事件和 SVG 已同步", tone: "running" });
+      }
+      await streamWaitForResume(controlRef.current, abortSignal);
+      setProgress(1);
+      emit({ kind: "status", label: "run.complete", detail: "本地仿真流已完成", tone: "complete" });
+      setStatus("complete");
+      const finalToolPart = settledToolCall ?? { type: "tool-call" as const, toolCallId, toolName: "local_context", args: toolArgs, argsText: JSON.stringify(toolArgs), result: "2 个本地示例", isPreliminary: false };
+      yield { content: [{ type: "text", text: response }, finalToolPart, { type: "text", text: "\n\n以上回复来自本地事件流仿真，不会调用真实 API。" }], status: { type: "complete", reason: "stop" } };
+    },
+  }), []);
+  const runtime = useLocalRuntime(adapter);
 
-  useEffect(() => {
-    if (status === "running" && tokenIndex >= streamTokens.length) setStatus("complete");
-  }, [status, tokenIndex]);
-
-  const startStream = () => {
-    if (status === "complete" || tokenIndex >= streamTokens.length) setTokenIndex(0);
-    setStatus("running");
+  const pushEvent = (event: Omit<StreamEvent, "id">) => {
+    eventSequenceRef.current += 1;
+    setEvents((current) => [...current.slice(-39), { ...event, id: eventSequenceRef.current }]);
   };
-  const pauseStream = () => setStatus((current) => current === "running" ? "paused" : current);
+  eventSinkRef.current = pushEvent;
+
+  const openSettings = () => {
+    setSettingsDraft(settings);
+    setSettingsOpen(true);
+  };
+  const saveSettings = () => {
+    setSettings(settingsDraft);
+    setSettingsOpen(false);
+  };
+
   const resetStream = () => {
+    controlRef.current.generation += 1;
+    controlRef.current.paused = false;
+    controlRef.current.waiters.splice(0).forEach((resume) => resume());
+    runtime.thread.cancelRun();
+    runtime.thread.reset();
     setStatus("idle");
-    setTokenIndex(0);
+    setEvents([]);
+    setProgress(0);
+  };
+  const pauseStream = () => {
+    if (status !== "running") return;
+    controlRef.current.paused = true;
+    setStatus("paused");
+    pushEvent({ kind: "status", label: "run.pause", detail: "等待继续输出", tone: "paused" });
+  };
+  const resumeStream = () => {
+    if (status !== "paused") return;
+    controlRef.current.paused = false;
+    controlRef.current.waiters.splice(0).forEach((resume) => resume());
+    setStatus("running");
+    pushEvent({ kind: "status", label: "run.resume", detail: "继续本地事件流", tone: "running" });
   };
 
-  const statusLabels: Record<StreamStatus, string> = {
-    idle: "未开始",
-    running: "流式输出中",
-    paused: "已暂停",
-    complete: "已完成",
-  };
+  const statusLabel: Record<StreamStatus, string> = { idle: "等待输入", running: "模型生成中", paused: "已暂停", complete: "已完成" };
+  const svgProgress = Math.min(1, progress);
 
   return <section className="ds-workspace-page ds-stream-debug-page" aria-labelledby="stream-debug-title">
     <div className="ds-stream-debug__heading">
-      <div>
-        <div className="ds-stream-debug__eyebrow"><Icon name="bug" size={14} />前端调试工具</div>
-        <h2 id="stream-debug-title">调试流式输出</h2>
-        <p>观察文本、工具调用和 SVG 绘制如何随着 token 到达而更新</p>
-      </div>
-      <span className="ds-stream-sim-badge"><span className="ds-stream-sim-badge__dot" />仿真模式 · 不连接真实后端</span>
+      <div><div className="ds-stream-debug__eyebrow"><Icon name="bug" size={14} />前端调试工具</div><h2 id="stream-debug-title">调试流式输出</h2><p>真实消息状态 + 可观察的本地事件流</p></div>
+      <span className="ds-stream-sim-badge"><span className="ds-stream-sim-badge__dot" />本地仿真流 · 不连接真实 API</span>
     </div>
-
     <div className="ds-stream-debug__toolbar" role="toolbar" aria-label="流式输出控制">
-      <button type="button" className="ds-primary-button" onClick={startStream} disabled={status === "running"}>
-        <Icon name="play" size={14} />{status === "complete" ? "重新开始" : status === "paused" ? "继续输出" : "开始输出"}
-      </button>
-      <button type="button" className="ds-secondary-button" onClick={pauseStream} disabled={status !== "running"}>
-        <Icon name="pause" size={14} />暂停
-      </button>
-      <button type="button" className="ds-secondary-button" onClick={resetStream} disabled={status === "idle"}>
-        <Icon name="reset" size={14} />重置
-      </button>
-      <span className={`ds-stream-status ds-stream-status--${status}`}><span className="ds-stream-status__dot" />{statusLabels[status]}</span>
-      <span className="ds-stream-counter">{tokenIndex} / {streamTokens.length} tokens</span>
+      <span className={`ds-stream-status ds-stream-status--${status}`}><span className="ds-stream-status__dot" />{statusLabel[status]}</span>
+      <span className="ds-stream-model-status">{settings.mode === "simulation" ? "本地仿真" : "真实 API（尚未接入，仍本地仿真）"} · {settings.provider} / {settings.model}</span>
+      <button type="button" className="ds-secondary-button" onClick={status === "paused" ? resumeStream : pauseStream} disabled={status !== "running" && status !== "paused"}><Icon name={status === "paused" ? "play" : "pause"} size={14} />{status === "paused" ? "继续" : "暂停"}</button>
+      <button type="button" className="ds-secondary-button" onClick={resetStream} disabled={status === "idle" && events.length === 0}><Icon name="reset" size={14} />清空 / 重置</button>
+      <button type="button" className="ds-icon-button ds-stream-settings-trigger" onClick={openSettings} aria-label="打开流式调试设置" title="流式调试设置"><Icon name="settings" size={16} /></button>
     </div>
 
-    <div className="ds-stream-debug__grid">
-      <section className="ds-panel ds-stream-console" aria-label="仿真 Chat 输出">
-        <div className="ds-panel-heading"><div><b>仿真 Chat</b><p>每 145ms 推送一个 token，支持随时暂停</p></div><span className="ds-stream-mini-label">LOCAL UI</span></div>
-        <div className="ds-stream-console__body">
-          <div className="ds-stream-bubble ds-stream-bubble--user"><span className="ds-stream-bubble__role">你</span><span>请演示一次带工具调用的流式回复</span></div>
-          <div className="ds-stream-bubble ds-stream-bubble--assistant">
-            <span className="ds-stream-bubble__role">DeepStudent · 仿真</span>
-            <p className="ds-stream-token-text" aria-live="polite">{visibleTokens.length === 0 ? <span className="ds-stream-placeholder">点击“开始输出”查看逐 token 文本…</span> : visibleTokens.map((token, index) => <span key={`${index}-${token}`} className="ds-stream-token">{token}</span>)}{status === "running" && <span className="ds-stream-cursor" aria-hidden="true" />}</p>
-            <span className="ds-stream-bubble__meta">{status === "complete" ? "输出完成 · 仿真结果" : status === "idle" ? "等待开始" : "实时更新中"}</span>
-          </div>
-        </div>
-        <div className="ds-stream-timeline" aria-label="工具调用状态时间线">
-          <div className="ds-stream-timeline__heading"><b>工具调用时间线</b><span>仅前端状态仿真</span></div>
-          <ol>
-            {streamToolSteps.map((step, index) => {
-              const stepStatus = tokenIndex >= step.end ? "complete" : tokenIndex >= step.start && status !== "idle" ? "running" : "pending";
-              const stepIcon: IconName = stepStatus === "complete" ? "check-circle" : stepStatus === "running" ? "wrench" : "chevron-down";
-              return <li key={step.label} className={`ds-stream-timeline__item ds-stream-timeline__item--${stepStatus}`}>
-                <span className="ds-stream-timeline__marker"><Icon name={stepIcon} size={14} /></span>
-                <span className="ds-stream-timeline__line" aria-hidden="true" />
-                <span className="ds-stream-timeline__copy"><b>{step.label}</b><small>{step.detail}</small></span>
-                <em>{stepStatus === "complete" ? "完成" : stepStatus === "running" ? "进行中" : "等待"}</em>
-                {index === streamToolSteps.length - 1 && <span className="ds-stream-timeline__last" aria-hidden="true" />}
-              </li>;
-            })}
-          </ol>
-        </div>
+    <div className="ds-stream-chat-layout">
+      <section className="ds-stream-chat-panel" aria-label="本地仿真 Chat">
+        <div className="ds-stream-chat-panel__header"><div><b>本地仿真 Chat</b><p>输入消息，回复会逐段进入对话</p></div><span className="ds-stream-mini-label">ASSISTANT-UI</span></div>
+        <AssistantRuntimeProvider runtime={runtime}>
+          <ThreadPrimitive.Root className="ds-stream-thread">
+            <ThreadPrimitive.Viewport className="ds-stream-thread__viewport" autoScroll>
+              <ThreadPrimitive.Messages components={{ Message: StreamDebugMessage }} />
+              <ThreadPrimitive.Empty><div className="ds-stream-thread__empty"><Sparkle size={20} /><b>开始一次可暂停的本地仿真</b><p>试着问“解释一下事件流”，然后观察消息、工具事件和右侧日志同步变化</p></div></ThreadPrimitive.Empty>
+            </ThreadPrimitive.Viewport>
+            <div className="ds-stream-composer-dock"><StreamDebugComposer /></div>
+          </ThreadPrimitive.Root>
+        </AssistantRuntimeProvider>
       </section>
 
-      <aside className="ds-stream-debug__aside">
-        <section className="ds-panel ds-stream-drawing-panel">
-          <div className="ds-panel-heading"><div><b>逐步绘制 SVG</b><p>stroke-dashoffset 随进度归零</p></div><span className="ds-stream-progress">{Math.round(progress * 100)}%</span></div>
-          <div className="ds-stream-svg-wrap">
-            <svg className="ds-stream-svg" viewBox="0 0 280 150" role="img" aria-label={`SVG 绘制进度 ${Math.round(progress * 100)}%`}>
-              <path className="ds-stream-svg__guide" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" />
-              <path className="ds-stream-svg__path" pathLength="1" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" style={{ strokeDasharray: 1, strokeDashoffset: 1 - progress }} />
-              <circle className="ds-stream-svg__endpoint" cx={24 + progress * 242} cy={111 - Math.sin(progress * Math.PI) * 62} r="4" />
-            </svg>
-            <div className="ds-stream-svg-wrap__caption"><Icon name="wrench" size={13} />绘制轨迹会随 token 一笔画出</div>
-          </div>
-        </section>
-        <section className="ds-panel ds-stream-code-panel">
-          <div className="ds-panel-heading"><div><b>事件载荷示例</b><p>同一模拟事件的多语言实现</p></div></div>
-          <div className="ds-stream-code-tabs" role="tablist" aria-label="代码语言">
-            {(Object.keys(streamCode) as StreamCodeLanguage[]).map((language) => <button key={language} type="button" role="tab" aria-selected={codeLanguage === language} className={codeLanguage === language ? "is-active" : ""} onClick={() => setCodeLanguage(language)}>{streamCodeLabels[language]}</button>)}
-          </div>
-          <pre className="ds-stream-code-block"><code>{streamCode[codeLanguage]}</code></pre>
-        </section>
+      <aside className="ds-stream-inspector" aria-label="流式事件检查器">
+        {settings.showEventLog && <section className="ds-panel ds-stream-event-panel"><div className="ds-panel-heading"><div><b>Event log</b><p>与消息渲染同步的本地事件</p></div><span className="ds-stream-counter">{events.length} events</span></div><ol className="ds-stream-event-log">{events.length === 0 ? <li className="ds-stream-event-log__empty">发送一条消息后，这里会实时出现 run、token、tool 和 render 事件</li> : events.map((event) => <li key={event.id} className={`ds-stream-event-log__item${event.tone ? ` is-${event.tone}` : ""}`}><span className="ds-stream-event-log__dot" /><span><b>{event.label}</b><small>{event.detail}</small></span></li>)}</ol></section>}
+        <section className="ds-panel ds-stream-drawing-panel"><div className="ds-panel-heading"><div><b>SVG stroke</b><p>由同一进度驱动逐步绘制</p></div><span className="ds-stream-progress">{Math.round(svgProgress * 100)}%</span></div><div className="ds-stream-svg-wrap"><svg className="ds-stream-svg" viewBox="0 0 280 150" role="img" aria-label={`SVG 绘制进度 ${Math.round(svgProgress * 100)}%`}><path className="ds-stream-svg__guide" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" /><path className="ds-stream-svg__path" pathLength="1" d="M24 111 C56 28 91 28 121 88 S183 142 208 71 S247 24 266 52" style={{ strokeDasharray: 1, strokeDashoffset: 1 - svgProgress }} /><circle className="ds-stream-svg__endpoint" cx={24 + svgProgress * 242} cy={111 - Math.sin(svgProgress * Math.PI) * 62} r="4" /></svg><div className="ds-stream-svg-wrap__caption"><Icon name="wrench" size={13} />render.sync 驱动 stroke-dashoffset</div></div></section>
+        <section className="ds-panel ds-stream-code-panel"><div className="ds-panel-heading"><div><b>事件载荷示例</b><p>同一事件的多语言实现</p></div></div><div className="ds-stream-code-tabs" role="tablist" aria-label="代码语言">{(Object.keys(streamCode) as StreamCodeLanguage[]).map((language) => <button key={language} type="button" role="tab" aria-selected={codeLanguage === language} className={codeLanguage === language ? "is-active" : ""} onClick={() => setCodeLanguage(language)}>{streamCodeLabels[language]}</button>)}</div><pre className="ds-stream-code-block"><code>{streamCode[codeLanguage]}</code></pre></section>
       </aside>
     </div>
+    {settingsOpen && <div className="ds-stream-settings-modal" role="dialog" aria-modal="true" aria-labelledby="stream-settings-title">
+      <button type="button" className="ds-stream-settings-modal__backdrop" aria-label="关闭设置" onClick={() => setSettingsOpen(false)} />
+      <form className="ds-stream-settings-modal__card" onSubmit={(event) => { event.preventDefault(); saveSettings(); }}>
+        <div className="ds-stream-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />调试设置</span><h3 id="stream-settings-title">流式模型配置</h3><p>当前页面默认只运行本地仿真，不会发送到远端 API</p></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={() => setSettingsOpen(false)}><Icon name="x" size={16} /></button></div>
+        <div className="ds-stream-settings-modal__body">
+          <label className="ds-stream-setting-field"><span>Provider</span><select value={settingsDraft.provider} onChange={(event) => setSettingsDraft((current) => ({ ...current, provider: event.target.value as StreamDebugSettings["provider"] }))}><option value="siliconflow">SiliconFlow</option><option value="deepseek">DeepSeek</option><option value="custom">Custom</option></select></label>
+          <label className="ds-stream-setting-field"><span>Model</span><input value={settingsDraft.model} onChange={(event) => setSettingsDraft((current) => ({ ...current, model: event.target.value }))} /></label>
+          <label className="ds-stream-setting-field"><span>Base URL</span><input value={settingsDraft.baseUrl} onChange={(event) => setSettingsDraft((current) => ({ ...current, baseUrl: event.target.value }))} /></label>
+          <div className="ds-stream-settings-grid"><label className="ds-stream-setting-field"><span>Timeout (s)</span><input type="number" min={1} max={300} value={settingsDraft.timeout} onChange={(event) => setSettingsDraft((current) => ({ ...current, timeout: Number(event.target.value) || 1 }))} /></label><label className="ds-stream-setting-field"><span>Retry</span><input type="number" min={0} max={5} value={settingsDraft.retry} onChange={(event) => setSettingsDraft((current) => ({ ...current, retry: Number(event.target.value) || 0 }))} /></label></div>
+          <label className="ds-stream-setting-check"><input type="checkbox" checked={settingsDraft.streaming} onChange={(event) => setSettingsDraft((current) => ({ ...current, streaming: event.target.checked }))} /><span><b>Streaming</b><small>按事件流逐段更新 assistant message</small></span></label>
+          <label className="ds-stream-setting-check"><input type="checkbox" checked={settingsDraft.showEventLog} onChange={(event) => setSettingsDraft((current) => ({ ...current, showEventLog: event.target.checked }))} /><span><b>显示 Event log</b><small>在右侧展示与消息同步的事件</small></span></label>
+          <fieldset className="ds-stream-setting-mode"><legend>运行模式</legend><label className={settingsDraft.mode === "simulation" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="simulation" checked={settingsDraft.mode === "simulation"} onChange={() => setSettingsDraft((current) => ({ ...current, mode: "simulation" }))} /><span><b>本地仿真</b><small>推荐 · 不调用真实 API</small></span></label><label className={settingsDraft.mode === "real" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="real" checked={settingsDraft.mode === "real"} onChange={() => setSettingsDraft((current) => ({ ...current, mode: "real" }))} /><span><b>真实 API</b><small>尚未接入，保存后仍保持本地仿真</small></span></label></fieldset>
+        </div>
+        <div className="ds-stream-settings-modal__footer"><button type="button" className="ds-secondary-button" onClick={() => setSettingsOpen(false)}>取消</button><button type="submit" className="ds-primary-button">保存设置</button></div>
+      </form>
+    </div>}
   </section>;
 }
 
