@@ -970,3 +970,11 @@ func requestID(candidate string) string {
 	}
 	return "req-" + hex.EncodeToString(bytes[:])
 }
+
+func newID(prefix string) string {
+	var bytes [12]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	}
+	return prefix + "-" + hex.EncodeToString(bytes[:])
+}
