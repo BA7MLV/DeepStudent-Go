@@ -13,7 +13,7 @@ import {
   type ToolCallMessagePart,
   AttachmentPrimitive,
 } from "@assistant-ui/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   ArrowCounterClockwise,
@@ -50,6 +50,18 @@ type ViewId =
   | "flashcards"
   | "settings";
 type Theme = "light" | "dark";
+type ThemeColor = string;
+
+const themeColorStorageKey = "dstu-theme-color";
+const defaultThemeColor: ThemeColor = "#2563eb";
+const themeColorPresets: Array<{ value: ThemeColor; label: string }> = [
+  { value: "#2563eb", label: "靛蓝" },
+  { value: "#0f766e", label: "青绿" },
+  { value: "#7c3aed", label: "紫罗兰" },
+  { value: "#ea580c", label: "橙色" },
+  { value: "#db2777", label: "玫红" },
+  { value: "#16a34a", label: "翠绿" },
+];
 
 type LearningGoal = "exam" | "course" | "skill";
 type LearningMode = "practice" | "notes" | "plan";
@@ -164,16 +176,6 @@ const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "flashcards", label: "闪卡", icon: "stack" },
 ];
 
-const viewTitles: Record<ViewId, string> = {
-  "chat-v2": "",
-  "stream-debug": "调试流式输出",
-  "learning-hub": "学习资源",
-  todo: "待办事项",
-  "skills-management": "技能管理",
-  flashcards: "闪卡",
-  settings: "设置",
-};
-
 const quickPrompts: Array<{ label: string; icon: IconName }> = [
   { label: "复习今天的课程", icon: "book" },
   { label: "整理一份学习笔记", icon: "book" },
@@ -219,6 +221,13 @@ const readTheme = (): Theme => {
   const saved = window.localStorage.getItem("dstu-theme-mode");
   if (saved === "dark" || saved === "light") return saved;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+};
+
+const isThemeColor = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value);
+
+const readThemeColor = (): ThemeColor => {
+  const saved = window.localStorage.getItem(themeColorStorageKey);
+  return saved && isThemeColor(saved) ? saved : defaultThemeColor;
 };
 
 const StubAdapter: ChatModelAdapter = {
@@ -330,6 +339,13 @@ type ComposerGestureHandlers = {
 };
 
 type VoiceOverlayState = { recording: boolean; cancelZone: boolean; level: number; elapsed: number };
+
+function formatRecordingElapsed(elapsed: number) {
+  const totalSeconds = Math.max(0, Math.floor(elapsed / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
 
 function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }: { composer: ThreadComposerRuntime; input: ComposerInput; onRegister?: (handlers: ComposerGestureHandlers | null) => void; onVoiceStateChange?: (state: VoiceOverlayState) => void }) {
   const [recording, setRecording] = useState(false);
@@ -536,8 +552,8 @@ function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }
 
   const isGestureArea = (event: React.PointerEvent<HTMLElement>) => {
     if (!(event.target instanceof Element)) return true;
-    // Keep regular controls clickable. The textarea and the empty composer
-    // surface are the intentional long-press recording targets.
+    // Keep actionable controls clickable. The textarea and the rest of the
+    // composer are intentional long-press recording targets when empty.
     return !event.target.closest("button, input, select, a");
   };
 
@@ -619,32 +635,30 @@ function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }
     onPointerCancel={handlePointerCancel}
   >
     <Icon name={hasText ? "arrow-up" : cancelZone ? "x" : "microphone"} size={17} strokeWidth={1.9} />
-    {recording && <span className="ds-voice-status" aria-hidden="true">{cancelZone ? "松开取消" : "松开结束"}</span>}
   </button>;
 }
 
-type ComposerDropState = "idle" | "dragging" | "adding" | "added" | "error";
+type WorkspaceDropState = "idle" | "dragging" | "adding" | "added" | "error";
+type WorkspaceDropResult = { added: number; failed: number };
+type WorkspaceDropHandler = (files: File[]) => Promise<WorkspaceDropResult>;
+type WorkspaceDropContextValue = { registerDropHandler: (handler: WorkspaceDropHandler | null) => () => void };
 
-function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime> }) {
-  const composer = unstable_useComposerInput();
-  const [voiceState, setVoiceState] = useState<VoiceOverlayState>({ recording: false, cancelZone: false, level: 0, elapsed: 0 });
-  const [dropState, setDropState] = useState<ComposerDropState>("idle");
-  const gestureRef = useRef<ComposerGestureHandlers | null>(null);
+const WorkspaceDropContext = createContext<WorkspaceDropContextValue | null>(null);
+
+function WorkspaceDropZone({ children }: { children: React.ReactNode }) {
+  const [dropState, setDropState] = useState<WorkspaceDropState>("idle");
+  const [canDrop, setCanDrop] = useState(false);
+  const dropHandlerRef = useRef<WorkspaceDropHandler | null>(null);
   const dragDepthRef = useRef(0);
   const dropFeedbackTimerRef = useRef<number | null>(null);
-  const registerGesture = (handlers: ComposerGestureHandlers | null) => { gestureRef.current = handlers; };
-  const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerDown(event);
-  const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerMove(event);
-  const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerUp(event);
-  const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerCancel(event);
-  const hasFiles = (event: React.DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types).includes("Files");
+
   const clearDropFeedback = () => {
     if (dropFeedbackTimerRef.current !== null) {
       window.clearTimeout(dropFeedbackTimerRef.current);
       dropFeedbackTimerRef.current = null;
     }
   };
-  const showDropFeedback = (state: Exclude<ComposerDropState, "idle" | "dragging">) => {
+  const showDropFeedback = (state: Exclude<WorkspaceDropState, "idle" | "dragging">) => {
     clearDropFeedback();
     setDropState(state);
     dropFeedbackTimerRef.current = window.setTimeout(() => {
@@ -652,78 +666,152 @@ function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime>
       setDropState("idle");
     }, 2200);
   };
-  const isInsideComposer = (event: React.DragEvent<HTMLElement>) => {
+  const registerDropHandler = (handler: WorkspaceDropHandler | null) => {
+    dropHandlerRef.current = handler;
+    setCanDrop(handler !== null);
+    return () => {
+      if (dropHandlerRef.current === handler) {
+        dropHandlerRef.current = null;
+        setCanDrop(false);
+      }
+    };
+  };
+  const hasFiles = (event: React.DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types).includes("Files");
+  const isExcludedDropTarget = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest("[data-drop-ignore], button, input, textarea, select, [contenteditable=\"true\"], [role=\"button\"]"));
+  };
+  const isInsideWorkspace = (event: React.DragEvent<HTMLElement>) => {
     const next = event.relatedTarget;
     return next instanceof Node && event.currentTarget.contains(next);
   };
+  const clearDragStateIfOutside = (event: React.DragEvent<HTMLElement>) => {
+    if (isInsideWorkspace(event)) return;
+    dragDepthRef.current = 0;
+    if (dropState === "dragging") setDropState("idle");
+  };
   const handleDragEnter = (event: React.DragEvent<HTMLElement>) => {
     if (!hasFiles(event)) return;
-    event.preventDefault();
-    if (!runtime.thread.getState().capabilities.attachments) {
-      event.dataTransfer.dropEffect = "none";
-      showDropFeedback("error");
+    if (isExcludedDropTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearDragStateIfOutside(event);
       return;
     }
-    if (isInsideComposer(event)) return;
+    event.preventDefault();
+    if (isInsideWorkspace(event)) return;
     dragDepthRef.current += 1;
     clearDropFeedback();
     setDropState("dragging");
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
   };
   const handleDragOver = (event: React.DragEvent<HTMLElement>) => {
     if (!hasFiles(event)) return;
-    event.preventDefault();
-    if (!runtime.thread.getState().capabilities.attachments) {
-      event.dataTransfer.dropEffect = "none";
+    if (isExcludedDropTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearDragStateIfOutside(event);
       return;
     }
-    event.dataTransfer.dropEffect = "copy";
+    event.preventDefault();
+    event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
     if (dropState === "idle") setDropState("dragging");
   };
   const handleDragLeave = (event: React.DragEvent<HTMLElement>) => {
     if (!hasFiles(event)) return;
+    if (isExcludedDropTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearDragStateIfOutside(event);
+      return;
+    }
     event.preventDefault();
-    if (isInsideComposer(event)) return;
+    if (isInsideWorkspace(event)) return;
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0 && dropState === "dragging") setDropState("idle");
   };
   const handleDrop = (event: React.DragEvent<HTMLElement>) => {
     if (!hasFiles(event)) return;
+    if (isExcludedDropTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepthRef.current = 0;
+      if (dropState === "dragging") setDropState("idle");
+      return;
+    }
     event.preventDefault();
+    event.stopPropagation();
     dragDepthRef.current = 0;
     clearDropFeedback();
     const files = Array.from(event.dataTransfer.files);
-    if (!runtime.thread.getState().capabilities.attachments || files.length === 0) {
-      setDropState("idle");
+    const handler = dropHandlerRef.current;
+    if (files.length === 0 || handler === null) {
+      showDropFeedback("error");
       return;
     }
 
     setDropState("adding");
-    void (async () => {
-      let failed = 0;
-      for (const file of files) {
-        try {
-          await runtime.thread.composer.addAttachment(file);
-        } catch {
-          failed += 1;
-        }
-      }
-      showDropFeedback(failed === files.length ? "error" : "added");
-    })();
+    void handler(files).then((result) => {
+      showDropFeedback(result.added > 0 ? "added" : "error");
+    }).catch(() => {
+      showDropFeedback("error");
+    });
   };
   useEffect(() => () => clearDropFeedback(), []);
-  const overlayStyle = {
-    "--ds-voice-level": voiceState.level.toFixed(3),
-    "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
-  } as React.CSSProperties;
-  const dropStateLabel: Record<Exclude<ComposerDropState, "idle">, string> = {
-    dragging: "松开以添加附件",
+
+  const dropStateLabel: Record<Exclude<WorkspaceDropState, "idle">, string> = {
+    dragging: canDrop ? "松开以添加附件" : "当前页面不支持附件",
     adding: "正在加入附件…",
     added: "附件已加入待发送",
     error: "附件未能加入",
   };
-  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} data-drop-state={dropState} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel} onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-    {dropState !== "idle" && <div className="ds-composer__drop-state" role="status" aria-live="polite">{dropStateLabel[dropState]}</div>}
+  const contextValue = useMemo<WorkspaceDropContextValue>(() => ({ registerDropHandler }), []);
+  return <div
+    className="ds-main__content"
+    data-drop-state={dropState}
+    onDragEnter={handleDragEnter}
+    onDragOver={handleDragOver}
+    onDragLeave={handleDragLeave}
+    onDrop={handleDrop}
+  >
+    <WorkspaceDropContext.Provider value={contextValue}>{children}</WorkspaceDropContext.Provider>
+    {dropState !== "idle" && <div className="ds-workspace-drop-overlay" data-drop-state={dropState} role="status" aria-live="polite"><div className="ds-workspace-drop-overlay__card"><Icon name="stack" size={22} /><b>{dropStateLabel[dropState]}</b><small>{dropState === "dragging" && canDrop ? "文件会保留在当前会话的待发送队列中" : dropState === "adding" ? "正在使用当前附件适配器处理文件" : dropState === "added" ? "发送消息时才会读取文件内容" : "请在支持附件的聊天会话中重试"}</small></div></div>}
+  </div>;
+}
+
+function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime> }) {
+  const composer = unstable_useComposerInput();
+  const [voiceState, setVoiceState] = useState<VoiceOverlayState>({ recording: false, cancelZone: false, level: 0, elapsed: 0 });
+  const gestureRef = useRef<ComposerGestureHandlers | null>(null);
+  const workspaceDrop = useContext(WorkspaceDropContext);
+  const registerGesture = (handlers: ComposerGestureHandlers | null) => { gestureRef.current = handlers; };
+  const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerDown(event);
+  const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerMove(event);
+  const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerUp(event);
+  const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerCancel(event);
+  useEffect(() => {
+    if (!workspaceDrop) return;
+    const addFiles = async (files: File[]): Promise<WorkspaceDropResult> => {
+      if (!runtime.thread.getState().capabilities.attachments) return { added: 0, failed: files.length };
+      let added = 0;
+      let failed = 0;
+      for (const file of files) {
+        try {
+          await runtime.thread.composer.addAttachment(file);
+          added += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      return { added, failed };
+    };
+    return workspaceDrop.registerDropHandler(addFiles);
+  }, [runtime, workspaceDrop]);
+  const overlayStyle = {
+    "--ds-voice-level": voiceState.level.toFixed(3),
+    "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
+  } as React.CSSProperties;
+  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
     <div className="ds-composer__attachments" aria-label="待发送附件">
       <ComposerPrimitive.Attachments>
         {({ attachment }) => <AttachmentPrimitive.Root className="ds-composer-attachment">
@@ -741,8 +829,16 @@ function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime>
     </div>
     <div className="ds-voice-overlay" aria-hidden="true" style={overlayStyle}>
       <div className="ds-voice-overlay__wash" />
-      <div className="ds-voice-overlay__wave">{Array.from({ length: 18 }, (_, index) => <i key={index} style={{ "--ds-voice-bar": index } as React.CSSProperties} />)}</div>
+      <div className="ds-voice-overlay__aurora" />
+      <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--one" />
+      <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--two" />
+      <i className="ds-voice-overlay__ripple ds-voice-overlay__ripple--three" />
     </div>
+    {voiceState.recording && <div className="ds-voice-recording-status" role="status" aria-live="polite">
+      <strong>{voiceState.cancelZone ? "松开取消录音" : "正在录音"}</strong>
+      <span>{voiceState.cancelZone ? "上移手指放开以取消" : "松开结束 · 上滑取消"}</span>
+      <time aria-hidden="true">{formatRecordingElapsed(voiceState.elapsed)}</time>
+    </div>}
   </ComposerPrimitive.Root>;
 }
 
@@ -1016,7 +1112,7 @@ function StreamDebugPage() {
         <section className="ds-panel ds-stream-code-panel"><div className="ds-panel-heading"><div><b>事件载荷示例</b><p>同一事件的多语言实现</p></div></div><div className="ds-stream-code-tabs" role="tablist" aria-label="代码语言">{(Object.keys(streamCode) as StreamCodeLanguage[]).map((language) => <button key={language} type="button" role="tab" aria-selected={codeLanguage === language} className={codeLanguage === language ? "is-active" : ""} onClick={() => setCodeLanguage(language)}>{streamCodeLabels[language]}</button>)}</div><pre className="ds-stream-code-block"><code>{streamCode[codeLanguage]}</code></pre></section>
       </aside>
     </div>
-    {settingsOpen && <div className="ds-stream-settings-modal" role="dialog" aria-modal="true" aria-labelledby="stream-settings-title">
+    {settingsOpen && <div className="ds-stream-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="stream-settings-title">
       <button type="button" className="ds-stream-settings-modal__backdrop" aria-label="关闭设置" onClick={() => setSettingsOpen(false)} />
       <form className="ds-stream-settings-modal__card" onSubmit={(event) => { event.preventDefault(); saveSettings(); }}>
         <div className="ds-stream-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />调试设置</span><h3 id="stream-settings-title">流式模型配置</h3><p>当前页面默认只运行本地仿真，不会发送到远端 API</p></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={() => setSettingsOpen(false)}><Icon name="x" size={16} /></button></div>
@@ -1048,7 +1144,13 @@ function EmptyState({ title, description }: { title: string; description: string
 function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
 function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
 function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) { return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
+function Settings({ theme, onTheme, themeColor, onThemeColor, onOpenOnboarding }: { theme: Theme; onTheme: () => void; themeColor: ThemeColor; onThemeColor: (color: ThemeColor) => void; onOpenOnboarding: () => void }) {
+  const [themeColorDraft, setThemeColorDraft] = useState(themeColor);
+  useEffect(() => setThemeColorDraft(themeColor), [themeColor]);
+  const saveThemeColor = () => onThemeColor(isThemeColor(themeColorDraft) ? themeColorDraft : defaultThemeColor);
+
+  return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label><div className="ds-theme-color-setting"><div className="ds-theme-color-setting__heading"><span><b>主题色</b><small>用于按钮、焦点、标题和录音波形</small></span><span className="ds-theme-color-preview"><i style={{ backgroundColor: themeColorDraft }} aria-hidden="true" /><code>{themeColorDraft.toUpperCase()}</code></span></div><div className="ds-theme-color-presets" role="group" aria-label="主题色预设"><span className="ds-theme-color-presets__label">预设</span>{themeColorPresets.map((preset) => <button key={preset.value} type="button" className={`ds-theme-color-swatch${themeColorDraft.toLowerCase() === preset.value ? " is-selected" : ""}`} style={{ backgroundColor: preset.value }} aria-label={`选择${preset.label}主题色`} aria-pressed={themeColorDraft.toLowerCase() === preset.value} onClick={() => setThemeColorDraft(preset.value)} />)}</div><label className="ds-theme-color-custom"><span>自定义颜色</span><input type="color" value={themeColorDraft} onChange={(event) => setThemeColorDraft(event.target.value)} aria-label="自定义主题色" /></label><div className="ds-theme-color-actions"><button type="button" className="ds-text-button" onClick={() => setThemeColorDraft(themeColor)}>取消</button><button type="button" className="ds-text-button" onClick={() => setThemeColorDraft(defaultThemeColor)}>恢复默认</button><button type="button" className="ds-primary-button" onClick={saveThemeColor} disabled={themeColorDraft.toLowerCase() === themeColor.toLowerCase()}>保存主题色</button></div></div></section></div></div></WorkspacePage>;
+}
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
 function WorkspacePage({ action, children }: { action?: React.ReactNode; children: React.ReactNode }) { return <section className="ds-workspace-page">{action && <div className="ds-page-actions"><button className="ds-primary-button">{action}</button></div>}{children}</section>; }
@@ -1056,6 +1158,7 @@ function WorkspacePage({ action, children }: { action?: React.ReactNode; childre
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
+  const [themeColor, setThemeColor] = useState<ThemeColor>(() => readThemeColor());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
@@ -1066,6 +1169,14 @@ export function App() {
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem("dstu-theme-mode", theme);
   }, [theme]);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--ds-accent", themeColor);
+    root.style.setProperty("--ds-focus", themeColor);
+    root.style.setProperty("--ds-title-accent", themeColor);
+    root.style.setProperty("--ds-voice-color", themeColor);
+    window.localStorage.setItem(themeColorStorageKey, themeColor);
+  }, [themeColor]);
   useEffect(() => {
     void HealthService.health().catch(() => undefined);
   }, []);
@@ -1086,8 +1197,8 @@ export function App() {
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
     if (view === "flashcards") return <Flashcards />;
-    return <Settings theme={theme} onTheme={toggleTheme} onOpenOnboarding={openOnboarding} />;
-  }, [theme, view]);
+    return <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} onThemeColor={setThemeColor} onOpenOnboarding={openOnboarding} />;
+  }, [theme, themeColor, view]);
   const toggleSidebar = () => {
     if (window.matchMedia("(max-width: 767px)").matches) {
       setSidebarOpen((open) => !open);
@@ -1098,7 +1209,7 @@ export function App() {
 
   return <div className="ds-shell" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed} data-view={view}>
     <div className="ds-body">
-      <aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口">
+      <aside className="ds-sidebar" data-shell-layer="navigation" data-drop-ignore="true" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
           <span className="ds-sidebar__brand-name">DeepStudent</span>
           <div className="ds-sidebar__brand-actions">
@@ -1120,14 +1231,16 @@ export function App() {
       </aside>
       <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
-        <header className="ds-main__header">
-          <div className="ds-main__leading">
-            <button className="ds-menu-button" type="button" onClick={toggleSidebar} aria-label="切换边栏" aria-expanded={sidebarOpen || !sidebarCollapsed}><Icon name="menu" size={17} /></button>
+        <div className="ds-main__drag-region" aria-hidden="true" />
+        <div className="ds-main__floating-actions" aria-label="窗口与工作区操作">
+          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={sidebarOpen || !sidebarCollapsed}>
+            <Icon name="sidebar" size={17} />
+          </button>
+          <div className="ds-main__actions">
+            <button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button>
           </div>
-          {viewTitles[view] && <h1 className="ds-main__title">{viewTitles[view]}</h1>}
-          <div className="ds-main__actions"><button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
-        </header>
-        <div className="ds-main__content">{content}</div>
+        </div>
+        <WorkspaceDropZone>{content}</WorkspaceDropZone>
       </main>
     </div>
     {onboardingOpen && <Onboarding initial={onboardingConfig} onComplete={completeOnboarding} />}
