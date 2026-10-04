@@ -12,7 +12,7 @@
   "dependencies": {
     "@assistant-ui/react": "^0.15.23",
     "@phosphor-icons/react": "^2.1.10",
-    "mygo-runtime": "0.1.22",
+    "mygo-runtime": "0.2.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
