@@ -53,10 +53,10 @@ func TestHTTPContractSidecarRuntimeSSEToolOrdering(t *testing.T) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusAccepted {
-		t.Fatalf("POST /runs status=%d body=%s", response.StatusCode, response.Body.String())
+		t.Fatalf("POST /runs status=%d body=%s", response.StatusCode, readResponseBody(t, response.Body))
 	}
 	var accepted acceptedRunContract
-	decodeJSONBody(t, response, &accepted)
+	if err := json.NewDecoder(response.Body).Decode(&accepted); err != nil { t.Fatal(err) }
 	if accepted.RunID == "" || accepted.EventsURL == "" {
 		t.Fatalf("accepted run = %+v", accepted)
 	}
@@ -89,4 +89,11 @@ func TestHTTPContractSidecarRuntimeSSEToolOrdering(t *testing.T) {
 	if toolResult, ok := events[3].Data["tool_result"].(map[string]any); !ok || toolResult["call_id"] != "c1" {
 		t.Fatalf("tool.result SSE payload = %+v", events[3].Data)
 	}
+}
+
+func readResponseBody(t *testing.T, body io.Reader) string {
+	t.Helper()
+	b, err := io.ReadAll(body)
+	if err != nil { t.Fatal(err) }
+	return string(b)
 }
