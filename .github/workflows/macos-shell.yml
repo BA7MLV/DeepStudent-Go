@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - migration/mygo-shell-poc
+      - feature/go-backend-runtime
   pull_request:
     branches:
       - main
