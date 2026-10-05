@@ -5,11 +5,54 @@ services:
       DEEPSTUDENT_DB_PATH: /data/deepstudent.db
       DEEPSTUDENT_BLOB_ROOT: /data/blobs
       DEEPSTUDENT_HTTP_ADDR: 0.0.0.0:8080
+      # Optional external Pi endpoint. Compose deliberately does not start a
+      # sidecar image; set both values when a separately supervised endpoint
+      # is available on the Docker network.
+      # Leave mode empty so config can infer external mode when the legacy
+      # DEEPSTUDENT_PI_ENDPOINT/PI_SKIP_START variables are supplied.
+      DEEPSTUDENT_SIDECAR_MODE: ${DEEPSTUDENT_SIDECAR_MODE:-}
+      DEEPSTUDENT_SIDECAR_URL: ${DEEPSTUDENT_SIDECAR_URL:-}
+      # Optional external pi-agent sidecar. Leave unset for the deterministic
+      # local runtime; when set, the Go API POSTs /run and /run/<id>/cancel.
+      DEEPSTUDENT_PI_ENDPOINT: ${DEEPSTUDENT_PI_ENDPOINT:-}
+      DEEPSTUDENT_PI_SKIP_START: ${DEEPSTUDENT_PI_SKIP_START:-0}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - deepstudent-data:/data
+    # Give the Go process time to close active SSE runs and flush SQLite WAL
+    # transactions after Docker sends SIGTERM.
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD", "/app/deepstudent-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
     restart: unless-stopped
+
+  # Optional protocol-compatible sidecar. Fake mode is deterministic; set
+  # PI_SIDECAR_MODE=pi and provider env vars in this service for Pi agent-core.
+  # Enable with `docker compose --profile agent up --build` and configure the
+  # Go endpoint via DEEPSTUDENT_SIDECAR_URL=http://sidecar:8787.
+  sidecar:
+    build: ./packages/agent-sidecar
+    profiles: ["agent"]
+    expose:
+      - "8787"
+    environment:
+      PI_SIDECAR_HOST: 0.0.0.0
+      PI_SIDECAR_PORT: 8787
+      PI_SIDECAR_MODE: ${PI_SIDECAR_MODE:-fake}
+      PI_BASE_URL: ${PI_BASE_URL:-}
+      PI_MODEL: ${PI_MODEL:-}
+      PI_PROVIDER: ${PI_PROVIDER:-}
+      PI_API_KEY: ${PI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 volumes:
   deepstudent-data:
