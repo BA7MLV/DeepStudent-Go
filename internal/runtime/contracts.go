@@ -19,10 +19,31 @@ const (
 	EventRunStarted   StreamEventType = "run.started"
 	EventTextDelta    StreamEventType = "message.delta"
 	EventToolCall     StreamEventType = "tool.call"
+	EventToolResult   StreamEventType = "tool.result"
 	EventRunCompleted StreamEventType = "run.completed"
 	EventRunError     StreamEventType = "run.error"
 	EventRunCanceled  StreamEventType = "run.canceled"
 )
+
+// ToolCall is the provider-neutral representation of one model tool call.
+// Arguments are kept as JSON so the runtime can validate them against the
+// registered tool schema before invoking the handler.
+type ToolCall struct {
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+// ToolResult is the provider-neutral representation of a completed tool
+// invocation. Output is JSON on success; ErrorMessage is populated when the
+// tool failed and should be returned to the model as a toolResult message.
+type ToolResult struct {
+	CallID       string          `json:"call_id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Output       json.RawMessage `json:"output,omitempty"`
+	Error        bool            `json:"error,omitempty"`
+	ErrorMessage string          `json:"error_message,omitempty"`
+}
 
 type StreamEvent struct {
 	ID           string          `json:"id"`
@@ -35,6 +56,8 @@ type StreamEvent struct {
 	Done         bool            `json:"done,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
 	Metadata     map[string]any  `json:"metadata,omitempty"`
+	ToolCall     *ToolCall       `json:"tool_call,omitempty"`
+	ToolResult   *ToolResult     `json:"tool_result,omitempty"`
 }
 
 type ModelRequest struct {
@@ -48,6 +71,7 @@ type ModelRequest struct {
 	Input             []string       `json:"input,omitempty"`
 	Temperature       float64        `json:"temperature,omitempty"`
 	Metadata          map[string]any `json:"metadata,omitempty"`
+	Tools             []Tool         `json:"tools,omitempty"`
 }
 
 type Message struct {
@@ -56,6 +80,9 @@ type Message struct {
 	RunID     string    `json:"run_id,omitempty"`
 	Role      string    `json:"role"`
 	Content   string    `json:"content"`
+	ToolCallID string   `json:"tool_call_id,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 
@@ -191,6 +218,8 @@ type AgentRunRequest struct {
 	MaxTokens         int      `json:"max_tokens,omitempty"`
 	InputCapabilities []string `json:"input_capabilities,omitempty"`
 	Input             []string `json:"input,omitempty"`
+	Messages          []Message `json:"messages,omitempty"`
+	Tools             []Tool    `json:"tools,omitempty"`
 }
 
 type AgentRun struct {
