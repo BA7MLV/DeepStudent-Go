@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.23",
-    "mygo-runtime": "0.1.22",
+    "mygo-runtime": "0.2.5",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
