@@ -67,13 +67,15 @@ func run() error {
 	mygo.Bind(runtime.NewHealthService())
 
 	mygo.App.WhenReady(func() {
-		webMode := os.Getenv("DEEPSTUDENT_WEB_SHELL") == "1"
-		nativeMode := !webMode
+		// The native shell is now the default desktop surface. Set
+		// DEEPSTUDENT_WEB_SHELL=1 to open the legacy React WebView while the
+		// remaining rich editor and attachment flows migrate incrementally.
+		nativeMode := os.Getenv("DEEPSTUDENT_WEB_SHELL") != "1"
 		var shell *nativeShell
 		var window *mygo.Window
 		var chatWindow *mygo.Window
 		if nativeMode {
-			shell = newNativeShell()
+			shell = newNativeShell(nativeRuntimeBaseURL(listener))
 		}
 		installNativeMenu(func(command string) {
 			if nativeMode && shell != nil {
@@ -104,7 +106,7 @@ func run() error {
 				return
 			}
 			chatWindow = mygo.NewWindow(mygo.WindowOptions{
-				Title: "DeepStudent Chat", URL: "/", Parent: window, Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 44, BackgroundColor: "#f7f7f5", StateKey: "chat-web" ,
+				Title: "DeepStudent Chat", URL: "/", Parent: window, Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 44, BackgroundColor: "#f7f7f5", StateKey: "chat-web",
 			})
 		}
 		if shell != nil {
@@ -127,6 +129,9 @@ func run() error {
 			opts.URL = "/"
 		}
 		window = mygo.NewWindow(opts)
+		if shell != nil {
+			shell.invalidate = window.Invalidate
+		}
 	})
 
 	return mygo.App.Run()
@@ -148,6 +153,17 @@ func resolveDesktopStoragePaths(cfg config.Config) (config.Config, error) {
 		cfg.Storage.BlobRoot = filepath.Join(root, cfg.Storage.BlobRoot)
 	}
 	return cfg, nil
+}
+
+func nativeRuntimeBaseURL(listener net.Listener) string {
+	host, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil || port == "" {
+		return "http://127.0.0.1:8080"
+	}
+	if host == "" || host == "::" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 
 // installNativeMenu keeps desktop-level actions in the MyGo native menu instead
