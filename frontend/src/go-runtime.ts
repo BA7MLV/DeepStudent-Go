@@ -106,33 +106,30 @@ type SseFrame = {
 };
 
 const defaultBaseUrl = (): string => {
-  // Do not put provider URLs or credentials in the bundle. This is only a
-  // local API route and can be overridden by the deployment environment.
   const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env;
   const configured = typeof env?.VITE_GO_RUNTIME_URL === "string" ? env.VITE_GO_RUNTIME_URL.trim() : "";
   if (configured) return configured;
-  // MyGo desktop windows do not inherit the Vite dev-server proxy. Point the
-  // native shell at the local Go HTTP service while keeping browser previews
-  // same-origin and proxy-friendly.
   const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
-  return protocol !== "http:" && protocol !== "https:" ? "http://127.0.0.1:8080/api/v1" : "/api/v1";
+  return protocol === "http:" || protocol === "https:" ? "/api/v1" : "http://127.0.0.1:8080/api/v1";
 };
 
 const normalizeBaseUrl = (value: string): string => value.trim().replace(/\/+$/, "") || "/api/v1";
 
 const runtimeUrl = (baseUrl: string, path: string): string => `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 
-const canUseLocalFallback = (error: unknown): boolean => {
-  if (error instanceof GoRuntimeError) {
-    // Keep a local adapter for a missing/offline Go process, while surfacing
-    // client errors (bad model, invalid prompt, etc.) to the user instead of
-    // silently changing the meaning of the request.
-    return error.retryable || ["http_404", "stream_disconnected", "stream_unsupported", "timeout", "network_unavailable"].includes(error.code);
-  }
-  // Fetch rejects with TypeError for a refused connection in browsers. Avoid
-  // treating arbitrary provider/application exceptions as an offline runtime.
-  return error instanceof TypeError;
+export type RuntimeAttachment = {
+  sha256: string; size: number; mime: string; filename?: string; workspace_ref: string;
 };
+
+export async function uploadRuntimeAttachment(file: File, baseUrl?: string, signal?: AbortSignal): Promise<RuntimeAttachment> {
+  const form = new FormData(); form.append("file", file, file.name);
+  const response = await fetch(runtimeUrl(normalizeBaseUrl(baseUrl ?? defaultBaseUrl()), "/attachments"), { method: "POST", headers: { Accept: "application/json", "X-Request-ID": randomRequestId() }, body: form, signal });
+  if (!response.ok) throw new GoRuntimeError(`Attachment upload failed (HTTP ${response.status})`, { code: `http_${response.status}` });
+  const payload = await response.json() as { attachment?: RuntimeAttachment } | RuntimeAttachment;
+  const attachment = "attachment" in payload ? payload.attachment : payload;
+  if (!attachment || typeof (attachment as RuntimeAttachment).workspace_ref !== "string") throw new GoRuntimeError("Runtime returned an invalid attachment", { code: "invalid_attachment" });
+  return attachment as RuntimeAttachment;
+}
 
 const randomRequestId = (): string => {
   const cryptoApi = typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto : undefined;
@@ -178,11 +175,10 @@ const parseRunStart = (value: unknown): RunStartResponse => {
   return candidate as RunStartResponse;
 };
 
-const readPrompt = (message: ThreadMessage | undefined): { prompt: string; capabilities: RuntimeInputCapability[]; inputs: string[] } => {
-  if (!message) return { prompt: "", capabilities: ["text"], inputs: [] };
+const readPrompt = (message: ThreadMessage | undefined): { prompt: string; capabilities: RuntimeInputCapability[] } => {
+  if (!message) return { prompt: "", capabilities: ["text"] };
   const capabilities = new Set<RuntimeInputCapability>();
   const text: string[] = [];
-  const inputs: string[] = [];
   for (const part of message.content) {
     if (part.type === "text") {
       text.push(part.text);
@@ -191,18 +187,14 @@ const readPrompt = (message: ThreadMessage | undefined): { prompt: string; capab
     }
     if (part.type === "image") capabilities.add("image");
     else if (part.type === "file") {
-      const mimeType = (part.mimeType || "").toLowerCase();
+      const mimeType = part.mimeType.toLowerCase();
       if (mimeType.startsWith("audio/")) capabilities.add("audio");
       else if (mimeType.startsWith("video/")) capabilities.add("video");
       else capabilities.add("file");
-      // Attachment adapters upload bytes first and return a workspace reference
-      // in the file part. Send only that opaque reference to Go; never inline
-      // file bytes or credentials in the run request.
-      if (typeof part.data === "string" && part.data.trim()) inputs.push(part.data.trim());
     }
   }
   if (capabilities.size === 0) capabilities.add("text");
-  return { prompt: text.join(" ").trim(), capabilities: [...capabilities], inputs };
+  return { prompt: text.join(" ").trim(), capabilities: [...capabilities] };
 };
 
 const assistantText = (text: string): ChatModelRunResult => ({
@@ -440,9 +432,7 @@ async function* runFallback(adapter: ChatModelAdapter, options: RunOptions): Asy
 export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): ChatModelAdapter {
   const baseUrl = normalizeBaseUrl(options.baseUrl ?? defaultBaseUrl());
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
-  // Keep the browser budget above the Go runtime's default 45s run timeout;
-  // otherwise a slow but healthy provider is canceled by the shell first.
-  const timeoutMs = Math.max(250, options.timeoutMs ?? 60_000);
+  const timeoutMs = Math.max(250, options.timeoutMs ?? 8_000);
   const reconnectAttempts = Math.max(0, Math.floor(options.reconnectAttempts ?? 2));
   const reconnectDelayMs = Math.max(0, options.reconnectDelayMs ?? 250);
   const eventSourceImpl = options.eventSourceImpl ?? (typeof globalThis.EventSource === "function" ? globalThis.EventSource : undefined);
@@ -452,15 +442,8 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
       const fallback = options.fallback;
       let controller: AbortController | undefined;
       let runId: string | undefined;
-      // Once POST /runs has succeeded, the server owns the run and may have
-      // already persisted user/output messages. Falling back to a local
-      // adapter after an SSE disconnect would create a second, divergent
-      // response in the same thread. Fallback is therefore limited to errors
-      // encountered before a server run was created.
-      let runtimeStarted = false;
       let cancelSent = false;
       let completed = false;
-      let hasInputs = false;
       let onParentAbort: (() => void) | undefined;
       let onRuntimeAbort: (() => void) | undefined;
       let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
@@ -480,8 +463,7 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
         controller.signal.addEventListener("abort", onRuntimeAbort, { once: true });
 
         const latest = [...runOptions.messages].reverse().find((message) => message.role === "user");
-        const { prompt, capabilities, inputs } = readPrompt(latest);
-        hasInputs = inputs.length > 0;
+        const { prompt, capabilities } = readPrompt(latest);
         if (!prompt) {
           if (fallback) {
             yield* runFallback(fallback, runOptions);
@@ -489,13 +471,12 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
           }
           throw new GoRuntimeError("A prompt is required", { code: "invalid_request" });
         }
-        const sessionId = options.sessionId ?? runOptions.unstable_threadId;
         const body: Record<string, unknown> = {
           version: RUNTIME_VERSION,
           prompt,
           input_capabilities: capabilities,
         };
-        if (inputs.length > 0) body.input = inputs;
+        const sessionId = options.sessionId ?? runOptions.unstable_threadId;
         const provider = customString(runOptions, "provider") ?? options.provider;
         const model = customString(runOptions, "model") ?? options.model;
         const reasoningEffort = customString(runOptions, "reasoning_effort");
@@ -507,11 +488,7 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
         if (reasoningEffort) body.reasoning_effort = reasoningEffort;
         if (maxTokens) body.max_tokens = maxTokens;
 
-        // Session-scoped sends let the API persist the user message and keep
-        // the run attached to the same server session used for hydration.
-        // Playground runs without a session still use the generic route.
-        const startPath = sessionId ? `/sessions/${encodeURIComponent(sessionId)}/messages` : "/runs";
-        const startResponse = await fetchImpl(runtimeUrl(baseUrl, startPath), {
+        const startResponse = await fetchImpl(runtimeUrl(baseUrl, "/runs"), {
           method: "POST",
           headers: { Accept: "application/json", "Content-Type": "application/json", "X-Request-ID": randomRequestId() },
           body: JSON.stringify(body),
@@ -520,20 +497,7 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
         if (!startResponse.ok) throw await responseError(startResponse);
         const start = parseRunStart(await startResponse.json());
         runId = start.run_id;
-        runtimeStarted = true;
-        const fallbackEventsUrl = runtimeUrl(baseUrl, `/runs/${encodeURIComponent(runId)}/events`);
-        const eventsUrl = start.events_url ? (() => {
-          try {
-            if (/^https?:\/\//i.test(start.events_url!)) return start.events_url!;
-            if (startResponse.url) return new URL(start.events_url!, startResponse.url).toString();
-            // Fetch mocks and native bridges may omit Response.url. Keep a
-            // relative server path in that case rather than throwing before
-            // the SSE subscription starts.
-            return start.events_url!.startsWith("/") ? start.events_url! : runtimeUrl(baseUrl, start.events_url!);
-          } catch {
-            return fallbackEventsUrl;
-          }
-        })() : fallbackEventsUrl;
+        const eventsUrl = start.events_url ? new URL(start.events_url, startResponse.url || runtimeUrl(baseUrl, "/runs")).toString() : runtimeUrl(baseUrl, `/runs/${encodeURIComponent(runId)}/events`);
         let text = "";
         const toolCalls = new Map<string, ToolCallMessagePart<any>>();
         let lastToolCallId: string | undefined;
@@ -592,10 +556,7 @@ export function createGoRuntimeAdapter(options: GoRuntimeAdapterOptions = {}): C
         if (controller?.signal.aborted && timer !== undefined) {
           throw new GoRuntimeError("Go runtime request timed out", { code: "timeout", retryable: true });
         }
-        // A local fallback cannot interpret uploaded workspace references. Do
-        // not turn an attachment send into a misleading fake success when the
-        // runtime is offline; surface the original error instead.
-        if (fallback && !runtimeStarted && !hasInputs && canUseLocalFallback(error)) {
+        if (fallback) {
           yield* runFallback(fallback, runOptions);
           return;
         }
