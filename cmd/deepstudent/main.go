@@ -68,9 +68,9 @@ func run() error {
 
 	mygo.App.WhenReady(func() {
 		// The native shell is now the default desktop surface. Set
-		// DEEPSTUDENT_WEB_SHELL=1 to open the legacy React WebView while the
-		// remaining rich editor and attachment flows migrate incrementally.
-		nativeMode := os.Getenv("DEEPSTUDENT_WEB_SHELL") != "1"
+		// DEEPSTUDENT_NATIVE_SHELL=1 enables the native UI experiment; the
+		// default remains the complete React WebView experience.
+		nativeMode := os.Getenv("DEEPSTUDENT_NATIVE_SHELL") == "1"
 		var shell *nativeShell
 		var window *mygo.Window
 		var chatWindow *mygo.Window
