@@ -16,6 +16,7 @@ import (
 	"github.com/BA7MLV/DeepStudent-Go/internal/runtime"
 	"github.com/BA7MLV/DeepStudent-Go/internal/serverapp"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 func main() {
@@ -66,20 +67,51 @@ func run() error {
 	mygo.Bind(runtime.NewHealthService())
 
 	mygo.App.WhenReady(func() {
+		nativeMode := os.Getenv("DEEPSTUDENT_NATIVE_SHELL") == "1"
+		var shell *nativeShell
 		var window *mygo.Window
+		if nativeMode {
+			shell = newNativeShell()
+		}
 		installNativeMenu(func(command string) {
+			if nativeMode && shell != nil {
+				switch command {
+				case "settings":
+					shell.selected = "settings"
+				case "new-session":
+					shell.selected = "chat"
+				case "learning-hub":
+					shell.selected = "resources"
+				case "toggle-theme":
+					shell.dark = !shell.dark
+				}
+				if window != nil {
+					window.Invalidate()
+				}
+				return
+			}
 			if window == nil || window.Page() == nil {
 				return
 			}
 			_, _ = window.Page().Eval("window.dispatchEvent(new CustomEvent('deepstudent:command',{detail:{command:" + strconv.Quote(command) + "}}))")
 		})
-		window = mygo.NewWindow(mygo.WindowOptions{
+		opts := mygo.WindowOptions{
 			Title:           "DeepStudent Go",
-			URL:             "/",
 			TitleBarStyle:   mygo.TitleBarHidden,
 			TitleBarHeight:  44,
 			BackgroundColor: "#f7f7f5",
-		})
+			Width:           1200,
+			Height:          780,
+			MinWidth:        860,
+			MinHeight:       560,
+			StateKey:        "main",
+		}
+		if nativeMode {
+			opts.Content = ui.View(shell.view)
+		} else {
+			opts.URL = "/"
+		}
+		window = mygo.NewWindow(opts)
 	})
 
 	return mygo.App.Run()
