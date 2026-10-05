@@ -10,7 +10,7 @@ import {
   type AttachmentAdapter,
 } from "@assistant-ui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createRuntimeSession, getRuntimeReadiness, getRuntimeSessionMessages, listRuntimeSessions, uploadRuntimeAttachment, type RuntimeMessage, type RuntimeSession } from "./mygo";
+import { createRuntimeSession, getRuntimeReadiness, getRuntimeSessionMessages, listRuntimeSessions, uploadRuntimeAttachment, type RuntimeMessage, type RuntimeSession } from "./runtime-api";
 import { createGoRuntimeAdapter } from "./go-runtime";
 import ResourceLibrary, { type ResourceQuestion } from "./ResourceLibrary";
 
