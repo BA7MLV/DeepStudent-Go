@@ -107,6 +107,7 @@ func (r *SidecarRuntime) Start(ctx context.Context, request AgentRunRequest) (Ag
 	if runID == "" {
 		runID = newID("run")
 	}
+	request.RunID = runID
 	streamCtx, cancel := context.WithCancel(ctx)
 	state := &sidecarRun{
 		id: runID, sessionID: request.SessionID, cancel: cancel,
