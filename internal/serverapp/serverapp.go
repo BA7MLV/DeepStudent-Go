@@ -170,7 +170,7 @@ func startManagedSidecar(command string, args []string, endpoint string) (*manag
 	if err != nil || parsed.Host == "" { return nil, errors.New("invalid managed sidecar endpoint") }
 	host, port := parsed.Hostname(), parsed.Port()
 	if host == "" { host = "127.0.0.1" }
-	if port == "" { _, port = net.SplitHostPort(parsed.Host); if port == "" { port = "8787" } }
+	if port == "" { port = "8787" }
 	cmd := exec.Command(command, args...)
 	cmd.Env = append(os.Environ(), "PI_SIDECAR_HOST="+host, "PI_SIDECAR_PORT="+port)
 	cmd.Stdin = nil
