@@ -36,6 +36,7 @@ func TestHTTPContractSidecarRuntimeSSEToolOrdering(t *testing.T) {
 			if err := runtime.WriteSidecarEnvelope(w, envelope); err != nil {
 				return
 			}
+			if flusher, ok := w.(http.Flusher); ok { flusher.Flush() }
 		}
 	}))
 	defer sidecar.Close()
