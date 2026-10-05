@@ -35,7 +35,7 @@ jobs:
         run: go mod tidy
 
       - name: Install MyGo CLI
-        run: go install github.com/egoist/mygo/cmd/mygo@v0.1.22
+        run: go install github.com/egoist/mygo/cmd/mygo@v0.2.5
 
       - name: Generate typed bindings
         run: mygo generate
