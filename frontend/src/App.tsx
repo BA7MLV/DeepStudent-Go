@@ -1,30 +1,89 @@
 import {
+  ActionBarPrimitive,
+  AuiIf,
   AssistantRuntimeProvider,
+  BranchPickerPrimitive,
   ComposerPrimitive,
   MessagePartPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   unstable_useComposerInput,
+  useAui,
+  useAuiState,
   useLocalRuntime,
-  type ChatModelAdapter,
   type AttachmentAdapter,
+  type ThreadComposerRuntime,
+  type ChatModelAdapter,
+  type ToolCallMessagePartProps,
+  type ToolCallMessagePart,
+  AttachmentPrimitive,
 } from "@assistant-ui/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createRuntimeSession, getRuntimeReadiness, getRuntimeSessionMessages, listRuntimeSessions, uploadRuntimeAttachment, type RuntimeMessage, type RuntimeSession } from "./runtime-api";
-import { createGoRuntimeAdapter } from "./go-runtime";
-import ResourceLibrary, { type ResourceQuestion } from "./ResourceLibrary";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowUp,
+  ArrowCounterClockwise,
+  BookOpen,
+  Brain,
+  Bug,
+  Cards,
+  CaretDown,
+  CaretLeft,
+  CaretRight,
+  CheckSquare,
+  CheckCircle,
+  Check,
+  Copy,
+  Gear,
+  List,
+  MagnifyingGlass,
+  Microphone,
+  PencilSimple,
+  Pause,
+  Play,
+  Plus,
+  SidebarSimple,
+  Sparkle,
+  StackSimple,
+  Sun,
+  Wrench,
+  X,
+  type Icon as PhosphorIcon,
+  DownloadSimple,
+} from "@phosphor-icons/react";
+import { HealthService } from "./mygo";
+import { createGoRuntimeAdapter, uploadRuntimeAttachment } from "./go-runtime";
 
 type ViewId =
   | "chat-v2"
+  | "stream-debug"
   | "learning-hub"
   | "todo"
   | "skills-management"
-  | "task-dashboard"
   | "flashcards"
-  | "template-management"
   | "settings";
 type Theme = "light" | "dark";
+type ThemeColor = string;
 type OutboxStatus = "idle" | "sending" | "queued" | "sent" | "failed";
+
+const themeColorStorageKey = "dstu-theme-color";
+const defaultThemeColor = "#2563eb";
+const themeColorPresets: Array<{ value: ThemeColor; label: string }> = [
+  { value: "#2563eb", label: "靛蓝" },
+  { value: "#0f766e", label: "青绿" },
+  { value: "#7c3aed", label: "紫罗兰" },
+  { value: "#ea580c", label: "橙色" },
+  { value: "#db2777", label: "玫红" },
+];
+
+const isThemeColor = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value);
+const readThemeColor = (): ThemeColor => {
+  const saved = window.localStorage.getItem(themeColorStorageKey);
+  return saved && isThemeColor(saved) ? saved : defaultThemeColor;
+};
+const themeColorLuminance = (hex: ThemeColor) => {
+  const channels = [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset + 1, offset + 3), 16) / 255);
+  return channels.map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+};
 
 type PersistedMessage = {
   id: string;
@@ -37,49 +96,20 @@ type PersistedMessage = {
   metadata?: unknown;
   attachments?: unknown;
 };
-
-type ChatSession = {
-  id: string;
-  title: string;
-  updatedAt: number;
-  draft: string;
-  unread: number;
-  pinned?: boolean;
-  messages: PersistedMessage[];
-};
-
-const SESSION_STORAGE_KEY = "dstu-chat-sessions-v1";
-
-function createSession(): ChatSession {
-  return {
-    id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    title: "新会话",
-    updatedAt: Date.now(),
-    draft: "",
-    unread: 0,
-    messages: [],
-  };
-}
-
+type ChatSession = { id: string; title: string; updatedAt: number; draft: string; unread: number; pinned?: boolean; messages: PersistedMessage[] };
+const sessionStorageKey = "dstu-chat-sessions-v1";
+function createSession(): ChatSession { return { id: `session-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, title: "新会话", updatedAt: Date.now(), draft: "", unread: 0, messages: [] }; }
 function readSessions(): ChatSession[] {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(SESSION_STORAGE_KEY) ?? "null");
+    const stored = JSON.parse(window.localStorage.getItem(sessionStorageKey) ?? "null");
     if (Array.isArray(stored) && stored.length > 0) return stored as ChatSession[];
-  } catch {
-    // A malformed local cache should never prevent the chat shell from opening.
-  }
+  } catch { /* malformed cache falls back to a new chat */ }
   return [createSession()];
 }
-
 function messageText(message: PersistedMessage | undefined): string {
   if (!message || !Array.isArray(message.content)) return "";
-  return message.content
-    .filter((part): part is { type: "text"; text: string } => Boolean(part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string"))
-    .map((part) => part.text)
-    .join(" ")
-    .trim();
+  return message.content.filter((part): part is { type: "text"; text: string } => Boolean(part && typeof part === "object" && (part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string")).map((part) => part.text).join(" ").trim();
 }
-
 function serializeMessages(messages: readonly unknown[]): PersistedMessage[] {
   return messages.map((message) => {
     const item = message as PersistedMessage;
@@ -87,69 +117,124 @@ function serializeMessages(messages: readonly unknown[]): PersistedMessage[] {
     return { ...item, createdAt: createdAt instanceof Date ? createdAt.toISOString() : typeof createdAt === "string" ? createdAt : undefined };
   });
 }
+function restoreMessages(messages: PersistedMessage[]): unknown[] { return messages.map((message) => ({ ...message, createdAt: message.createdAt ? new Date(message.createdAt) : undefined })); }
 
-function restoreMessages(messages: PersistedMessage[]): unknown[] {
-  return messages.map((message) => ({ ...message, createdAt: message.createdAt ? new Date(message.createdAt) : undefined }));
-}
+type LearningGoal = "exam" | "course" | "skill";
+type LearningMode = "practice" | "notes" | "plan";
+type ModelChoice = "local" | "openai" | "compatible";
+type RuntimeChoice = "go" | "browser";
+type OnboardingConfig = { goal: LearningGoal; mode: LearningMode; model: ModelChoice; runtime: RuntimeChoice; completedAt: string };
 
-function serverTimestamp(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
+const onboardingStorageKey = "dstu-onboarding-config-v1";
+const defaultOnboardingConfig: Omit<OnboardingConfig, "completedAt"> = { goal: "course", mode: "practice", model: "local", runtime: "go" };
 
-/** Convert append-only Go messages into the assistant-ui transcript shape. */
-function serverMessagesToPersisted(messages: RuntimeMessage[]): PersistedMessage[] {
-  const result: PersistedMessage[] = [];
-  for (const message of messages) {
-    if (message.role !== "user" && message.role !== "assistant") continue;
-    const text = typeof message.content === "string" ? message.content : String(message.content ?? "");
-    if (!text) continue;
-    const previous = result.at(-1);
-    const previousRunId = previous?.metadata && typeof previous.metadata === "object" ? (previous.metadata as { runId?: unknown }).runId : undefined;
-    if (message.role === "assistant" && previous?.role === "assistant" && (message.run_id ? previousRunId === message.run_id : true)) {
-      previous.content = [{ type: "text", text: `${messageText(previous)}${text}` }];
-      if (message.created_at) previous.createdAt = message.created_at;
-      continue;
+function readOnboardingConfig(): OnboardingConfig | null {
+  const raw = window.localStorage.getItem(onboardingStorageKey);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<OnboardingConfig>;
+    if ((parsed.goal === "exam" || parsed.goal === "course" || parsed.goal === "skill") && (parsed.mode === "practice" || parsed.mode === "notes" || parsed.mode === "plan") && (parsed.model === "local" || parsed.model === "openai" || parsed.model === "compatible") && (parsed.runtime === "go" || parsed.runtime === "browser")) {
+      return { goal: parsed.goal, mode: parsed.mode, model: parsed.model, runtime: parsed.runtime, completedAt: typeof parsed.completedAt === "string" ? parsed.completedAt : new Date().toISOString() };
     }
-    result.push({
-      id: message.id || `server-message-${result.length}`,
-      role: message.role,
-      content: [{ type: "text", text }],
-      createdAt: message.created_at,
-      metadata: { sessionId: message.session_id, runId: message.run_id },
-    });
-  }
-  return result;
+  } catch { /* invalid local state behaves like a first visit */ }
+  return null;
 }
 
-function serverSessionToLocal(session: RuntimeSession, messages: PersistedMessage[] | undefined, local: ChatSession | undefined): ChatSession {
-  return {
-    id: session.id,
-    title: session.title?.trim() || local?.title || "新会话",
-    updatedAt: serverTimestamp(session.updated_at, local?.updatedAt ?? Date.now()),
-    draft: local?.draft ?? "",
-    unread: local?.unread ?? 0,
-    pinned: local?.pinned,
-    messages: messages !== undefined ? messages : (local?.messages ?? []),
+const onboardingGoals: Array<{ value: LearningGoal; label: string; description: string }> = [
+  { value: "exam", label: "备考与考试", description: "按考试节奏复习" },
+  { value: "course", label: "跟上课程", description: "理解课程并完成练习" },
+  { value: "skill", label: "长期掌握技能", description: "持续积累可迁移能力" },
+];
+const onboardingModes: Array<{ value: LearningMode; label: string; description: string }> = [
+  { value: "practice", label: "练习优先", description: "先练习，再看反馈" },
+  { value: "notes", label: "整理优先", description: "整理资料和笔记" },
+  { value: "plan", label: "计划优先", description: "按目标安排行动" },
+];
+const onboardingModels: Array<{ value: ModelChoice; label: string; description: string }> = [
+  { value: "local", label: "DeepStudent Local", description: "本机模型，数据留在当前环境" },
+  { value: "openai", label: "OpenAI", description: "使用已配置的模型" },
+  { value: "compatible", label: "兼容 OpenAI 的服务", description: "连接兼容接口" },
+];
+
+const onboardingRuntimeOptions: Array<{ value: RuntimeChoice; label: string; description: string }> = [
+  { value: "go", label: "Go runtime", description: "推荐，适合完整功能" },
+  { value: "browser", label: "浏览器运行时", description: "无需本地服务" },
+];
+
+function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null; onComplete: (config: Omit<OnboardingConfig, "completedAt">) => void }) {
+  const [draft, setDraft] = useState<Omit<OnboardingConfig, "completedAt">>(() => initial ? { goal: initial.goal, mode: initial.mode, model: initial.model, runtime: initial.runtime } : defaultOnboardingConfig);
+  const [step, setStep] = useState(0);
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
+  const select = <K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) => setDraft((current) => ({ ...current, [key]: value }));
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 767px)");
+    const onChange = () => setIsMobile(query.matches);
+    onChange();
+    query.addEventListener?.("change", onChange);
+    return () => query.removeEventListener?.("change", onChange);
+  }, []);
+
+  const renderOptions = <K extends keyof typeof draft>(key: K, title: string, options: Array<{ value: (typeof draft)[K]; label: string; description: string }>) => (
+    <div key={String(key)} className="ds-onboarding__group">
+      <h2>{title}</h2>
+      <div className="ds-onboarding__options">
+        {options.map((option) => <button key={String(option.value)} type="button" className={`ds-onboarding-option${draft[key] === option.value ? " is-selected" : ""}`} aria-pressed={draft[key] === option.value} onClick={() => select(key, option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}
+      </div>
+    </div>
+  );
+
+  const renderRuntime = () => (
+    <div key="runtime" className="ds-onboarding__group ds-onboarding__runtime-group">
+      <h2>运行时</h2>
+      <div className="ds-onboarding__options">
+        {onboardingRuntimeOptions.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.runtime === option.value ? " is-selected" : ""}`} aria-pressed={draft.runtime === option.value} onClick={() => select("runtime", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}
+      </div>
+    </div>
+  );
+
+  const steps = [
+    renderOptions("goal", "学习目标", onboardingGoals),
+    renderOptions("mode", "学习方式", onboardingModes),
+    renderOptions("model", "模型", onboardingModels),
+    renderRuntime(),
+  ];
+  const finishOrAdvance = () => {
+    if (!isMobile || step === steps.length - 1) onComplete(draft);
+    else setStep((current) => current + 1);
   };
+
+  return <div className="ds-onboarding" role="dialog" aria-modal="true" aria-labelledby="ds-onboarding-title">
+    <section className="ds-onboarding__card">
+      <header className="ds-onboarding__header"><div><span className="ds-onboarding__brand">DeepStudent</span><span className="ds-onboarding__kicker">首次设置</span></div>{isMobile && <span className="ds-onboarding__progress">{step + 1} / {steps.length}</span>}</header>
+      <main className="ds-onboarding__body">
+        <h1 id="ds-onboarding-title">设置你的学习方式</h1>
+        {isMobile ? <div className="ds-onboarding__mobile-step">{steps[step]}</div> : <>{steps}</>}
+      </main>
+      <footer className="ds-onboarding__footer">
+        <button type="button" className="ds-text-button" onClick={() => onComplete(defaultOnboardingConfig)}>使用默认设置</button>
+        <div className="ds-onboarding__footer-main">
+          {isMobile && step > 0 && <button type="button" className="ds-secondary-button" onClick={() => setStep((current) => current - 1)}>上一步</button>}
+          <button type="button" className="ds-primary-button" onClick={finishOrAdvance}>{isMobile && step < steps.length - 1 ? "下一步" : "完成设置"}</button>
+        </div>
+      </footer>
+    </section>
+  </div>;
 }
 
-type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "template" | "settings" | "plus" | "search" | "sliders" | "chevron-down" | "chevron-left" | "sun" | "home" | "folder" | "send" | "paperclip" | "wand" | "brain";
+type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "menu" | "chevron-down" | "sun" | "arrow-up" | "microphone" | "x" | "brain" | "bug" | "play" | "pause" | "reset" | "wrench" | "check-circle";
 
 const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "chat-v2", label: "新会话", icon: "sparkle" },
+  { id: "stream-debug", label: "调试流式输出", icon: "bug" },
   { id: "learning-hub", label: "学习资源", icon: "book" },
   { id: "todo", label: "待办事项", icon: "check" },
   { id: "skills-management", label: "技能管理", icon: "sparkle-two" },
-  { id: "task-dashboard", label: "Anki制卡", icon: "cards" },
   { id: "flashcards", label: "闪卡", icon: "stack" },
-  { id: "template-management", label: "模板管理", icon: "template" },
 ];
 
 const quickPrompts: Array<{ label: string; icon: IconName }> = [
   { label: "复习今天的课程", icon: "book" },
-  { label: "整理一份学习笔记", icon: "template" },
+  { label: "整理一份学习笔记", icon: "book" },
   { label: "解释一个概念", icon: "brain" },
   { label: "生成知识点卡片", icon: "cards" },
   { label: "制定复习计划", icon: "check" },
@@ -157,31 +242,35 @@ const quickPrompts: Array<{ label: string; icon: IconName }> = [
   { label: "创建学习线程", icon: "sparkle" },
 ];
 
-function Icon({ name, size = 16, strokeWidth = 1.8 }: { name: IconName; size?: number; strokeWidth?: number }) {
-  const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, ariaHidden: true };
-  const paths: Record<IconName, React.ReactNode> = {
-    sparkle: <><path d="m12 3-1.15 4.1a3.8 3.8 0 0 1-2.65 2.65L4.1 11 8.2 12.15a3.8 3.8 0 0 1 2.65 2.65L12 18.9l1.15-4.1a3.8 3.8 0 0 1 2.65-2.65L19.9 11l-4.1-1.15a3.8 3.8 0 0 1-2.65-2.65Z"/><path d="m19 16-.42 1.58a2 2 0 0 1-1.42 1.42L15.58 19l1.58.42a2 2 0 0 1 1.42 1.42L19 22l.42-1.16a2 2 0 0 1 1.42-1.42L22 19l-1.16-.42a2 2 0 0 1-1.42-1.42Z"/></>,
-    book: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5Z"/><path d="M4 5.5v16M8 7h8M8 11h8"/></>,
-    check: <><path d="M5 4h14v16H5z"/><path d="m8 12 2.5 2.5L16 9"/></>,
-    "sparkle-two": <><path d="m8 3-.8 3.2a4 4 0 0 1-3 3L1 10l3.2.8a4 4 0 0 1 3 3L8 17l.8-3.2a4 4 0 0 1 3-3L15 10l-3.2-.8a4 4 0 0 1-3-3Z"/><path d="m18 14-.55 2.45A2 2 0 0 1 16 18l-2.45.55L16 19.1a2 2 0 0 1 1.45 1.45L18 23l.55-2.45A2 2 0 0 1 20 19.1l2.45-.55L20 18a2 2 0 0 1-1.45-1.45Z"/></>,
-    cards: <><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 8h8M8 12h5M8 16h3"/></>,
-    stack: <><path d="m12 3 8 4-8 4-8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></>,
-    template: <><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/></>,
-    settings: <><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.8 1.8 0 0 0-3.1 1.3v.2a2 2 0 1 1-4 0v-.2a1.8 1.8 0 0 0-3.1-1.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.8 1.8 0 0 0 2.3 12a1.8 1.8 0 0 0 1.3-3.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.8 1.8 0 0 0 9.5 4.8v-.2a2 2 0 1 1 4 0v.2a1.8 1.8 0 0 0 3.1 1.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.8 1.8 0 0 0 20.7 12a1.8 1.8 0 0 0-1.3 3Z"/></>,
-    plus: <><path d="M12 5v14M5 12h14"/></>,
-    search: <><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></>,
-    sliders: <><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="11" cy="18" r="2" fill="currentColor" stroke="none"/></>,
-    "chevron-down": <path d="m6 9 6 6 6-6"/>,
-    "chevron-left": <path d="m15 6-6 6 6 6"/>,
-    sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></>,
-    home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
-    folder: <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2h8A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5Z"/>,
-    send: <path d="m4 4 17 8-17 8 3-8Z"/>,
-    paperclip: <path d="m20.5 11.5-8.7 8.7a5 5 0 0 1-7.1-7.1l8.8-8.8a3.5 3.5 0 0 1 5 5l-8.8 8.8a2 2 0 1 1-2.8-2.8l8.1-8.1"/>,
-    wand: <><path d="m15 4 5 5M13 6l5 5M4 20l8-8M5 5l.5 1.5L7 7l-1.5.5L5 9l-.5-1.5L3 7l1.5-.5Z"/><path d="m18 15 .5 1.5L20 17l-1.5.5L18 19l-.5-1.5L16 17l1.5-.5Z"/></>,
-    brain: <><path d="M9.5 4.5a3 3 0 0 0-5.5 1.7A3.5 3.5 0 0 0 5 12a3.5 3.5 0 0 0 1.3 6.7A3 3 0 0 0 12 17V7a3 3 0 0 0-2.5-2.5Z"/><path d="M14.5 4.5a3 3 0 0 1 5.5 1.7A3.5 3.5 0 0 1 19 12a3.5 3.5 0 0 1-1.3 6.7A3 3 0 0 1 12 17V7a3 3 0 0 1 2.5-2.5Z"/></>,
-  };
-  return <svg {...common} aria-hidden="true">{paths[name]}</svg>;
+const phosphorIcons: Record<IconName, PhosphorIcon> = {
+  sparkle: Sparkle,
+  book: BookOpen,
+  check: CheckSquare,
+  "sparkle-two": Sparkle,
+  cards: Cards,
+  stack: StackSimple,
+  settings: Gear,
+  plus: Plus,
+  search: MagnifyingGlass,
+  sidebar: SidebarSimple,
+  menu: List,
+  "chevron-down": CaretDown,
+  sun: Sun,
+  "arrow-up": ArrowUp,
+  microphone: Microphone,
+  x: X,
+  brain: Brain,
+  bug: Bug,
+  play: Play,
+  pause: Pause,
+  reset: ArrowCounterClockwise,
+  wrench: Wrench,
+  "check-circle": CheckCircle,
+};
+
+function Icon({ name, size = 16, strokeWidth: _strokeWidth = 1.8 }: { name: IconName; size?: number; strokeWidth?: number }) {
+  const Glyph = phosphorIcons[name];
+  return <Glyph size={size} weight="regular" aria-hidden="true" />;
 }
 
 const readTheme = (): Theme => {
@@ -190,10 +279,10 @@ const readTheme = (): Theme => {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 };
 
-function makeOfflineAdapter(statusRef: { current: (status: OutboxStatus) => void }): ChatModelAdapter {
-  return {
-    async *run({ messages }) {
+const StubAdapter: ChatModelAdapter = {
+  async *run({ messages }) {
     const last = messages.at(-1);
+    const hasVoiceAttachment = last?.content.some((part) => part.type === "file" && part.mimeType.startsWith("audio/"));
     const text = last?.content
       .filter((part): part is { type: "text"; text: string } => part.type === "text")
       .map((part) => part.text)
@@ -203,146 +292,710 @@ function makeOfflineAdapter(statusRef: { current: (status: OutboxStatus) => void
       content: [
         {
           type: "text",
-          text: text
-            ? `收到「${text}」，本地运行时暂不可用，稍后可重试。`
-            : "本地运行时暂不可用。",
+          text: hasVoiceAttachment
+            ? "已收到语音消息，可以继续学习。"
+            : text
+            ? `收到「${text}」，我们可以从理解、整理和复习开始。`
+            : "准备好开始学习。",
         },
       ],
     };
-    statusRef.current("queued");
-    },
-  };
+  },
+};
+
+/**
+ * ChatGPT's example keeps text rendering as a named component so the message
+ * primitive can swap in markdown/tool renderers without changing the thread.
+ * DeepStudent intentionally keeps the renderer dependency-free and lets the
+ * primitive stream text smoothly into a block-level surface.
+ */
+function MarkdownText() {
+  return <MessagePartPrimitive.Text component="div" smooth />;
 }
 
-function createRuntimeAttachmentAdapter(onError: (message: string) => void): AttachmentAdapter {
-  return {
-    accept: "*",
-    async add({ file }) {
-      return {
-        id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        type: file.type.startsWith("image/") ? "image" : "document",
-        name: file.name,
-        contentType: file.type || "application/octet-stream",
-        file,
-        status: { type: "requires-action", reason: "composer-send" },
-      };
-    },
-    async send(attachment, options) {
-      try {
-        const uploaded = await uploadRuntimeAttachment(attachment.file, { signal: options?.signal });
-        return {
-          ...attachment,
-          status: { type: "complete" },
-          content: [{
-            type: "file",
-            filename: uploaded.filename || attachment.name,
-            data: uploaded.workspace_ref,
-            mimeType: uploaded.mime || attachment.contentType || "application/octet-stream",
-            sourceType: "id",
-          }],
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "附件上传失败";
-        onError(`附件上传失败：${message}`);
-        throw error;
-      }
-    },
-    async remove() {
-      // Blobs are immutable and can be garbage-collected by the runtime later.
-    },
-  };
-}
-
-function ChatMessage() {
+function ChatGPTAttachmentUI() {
+  const aui = useAui();
+  const isComposer = aui.attachment.source !== "message";
   return (
-    <MessagePrimitive.Root className="ds-chat-message">
-      <MessagePrimitive.Attachments>{({ attachment }) => <span className="ds-message-attachment">📎 {attachment.name}</span>}</MessagePrimitive.Attachments>
-      <MessagePrimitive.Parts components={{ Text: MessageText }} />
-    </MessagePrimitive.Root>
+    <AttachmentPrimitive.Root className="ds-chat-attachment">
+      <AuiIf condition={(state) => state.attachment.type === "image"}>
+        <AttachmentPrimitive.unstable_Thumb className="ds-chat-attachment__thumb ds-chat-attachment__thumb--image" />
+      </AuiIf>
+      <AuiIf condition={(state) => state.attachment.type !== "image"}>
+        <AttachmentPrimitive.unstable_Thumb className="ds-chat-attachment__thumb" />
+      </AuiIf>
+      <span className="ds-chat-attachment__name"><AttachmentPrimitive.Name /></span>
+      {isComposer && <AttachmentPrimitive.Remove className="ds-chat-attachment__remove" aria-label="移除附件"><Icon name="x" size={13} /></AttachmentPrimitive.Remove>}
+    </AttachmentPrimitive.Root>
   );
 }
 
-function MessageText() {
-  return <MessagePartPrimitive.Text component="span" smooth />;
-}
-
 function ChatEmptyState() {
-  const composer = unstable_useComposerInput();
-
   return (
     <div className="ds-chat-center">
       <h2 id="chat-welcome-title">把今天学会的，变成真正掌握的</h2>
-      <p>从一个学习目标开始，理解、整理，再用练习巩固</p>
-      <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
-        {quickPrompts.map((prompt) => (
-          <button
-            key={prompt.label}
-            className="ds-chat-prompt"
-            type="button"
-            onClick={() => composer.setText(prompt.label)}
-          >
-            <Icon name={prompt.icon} size={16} />
-            <span>{prompt.label}</span>
-          </button>
-        ))}
-      </div>
     </div>
   );
 }
 
-function ChatWorkspace({ session, onSessionChange, queuedPrompt, onPromptConsumed }: { session: ChatSession; onSessionChange: (patch: Partial<ChatSession>) => void; queuedPrompt?: string; onPromptConsumed?: () => void }) {
-  const statusRef = useRef<(status: OutboxStatus) => void>(() => undefined);
+function ChatQuickPrompts() {
+  const composer = unstable_useComposerInput();
+  const rows = [quickPrompts.slice(0, 3), quickPrompts.slice(3, 5), quickPrompts.slice(5, 7)];
+  return <div className="ds-chat-prompts" aria-label="学习场景快捷提示">
+    {rows.map((row, index) => <div className={`ds-chat-prompts__row ds-chat-prompts__row--${index + 1}`} key={`prompt-row-${index}`}>
+      {row.map((prompt) => <button key={prompt.label} className="ds-chat-prompt" type="button" onClick={() => composer.setText(prompt.label)}><Icon name={prompt.icon} size={15} /><span>{prompt.label}</span></button>)}
+    </div>)}
+  </div>;
+}
+
+function ChatBranchPicker() {
+  return (
+    <BranchPickerPrimitive.Root hideWhenSingleBranch className="ds-chat-branch-picker">
+      <BranchPickerPrimitive.Previous className="ds-chat-action" aria-label="上一分支"><CaretLeft size={14} /></BranchPickerPrimitive.Previous>
+      <span><BranchPickerPrimitive.Number />/<BranchPickerPrimitive.Count /></span>
+      <BranchPickerPrimitive.Next className="ds-chat-action" aria-label="下一分支"><CaretRight size={14} /></BranchPickerPrimitive.Next>
+    </BranchPickerPrimitive.Root>
+  );
+}
+
+function ChatActionBar({ assistant = false }: { assistant?: boolean }) {
+  return (
+    <div className="ds-chat-message-actions">
+      <ActionBarPrimitive.Root hideWhenRunning autohide="always" autohideFloat="single-branch" className="ds-chat-action-bar">
+        <ActionBarPrimitive.Copy className="ds-chat-action" aria-label="复制"><AuiIf condition={(state) => state.message.isCopied}><Check size={14} /></AuiIf><AuiIf condition={(state) => !state.message.isCopied}><Copy size={14} /></AuiIf></ActionBarPrimitive.Copy>
+        {!assistant && <ActionBarPrimitive.Edit className="ds-chat-action" aria-label="编辑"><PencilSimple size={14} /></ActionBarPrimitive.Edit>}
+        {assistant && <ActionBarPrimitive.Reload className="ds-chat-action" aria-label="重新生成"><ArrowCounterClockwise size={14} /></ActionBarPrimitive.Reload>}
+        {assistant && <ActionBarPrimitive.ExportMarkdown className="ds-chat-action" aria-label="导出 Markdown"><DownloadSimple size={14} /></ActionBarPrimitive.ExportMarkdown>}
+      </ActionBarPrimitive.Root>
+      <ChatBranchPicker />
+    </div>
+  );
+}
+
+function ChatEditComposer() {
+  return (
+    <ComposerPrimitive.Root className="ds-chat-edit-composer">
+      <ComposerPrimitive.Input aria-label="编辑消息" />
+      <div className="ds-chat-edit-composer__actions">
+        <ComposerPrimitive.Cancel className="ds-secondary-button">取消</ComposerPrimitive.Cancel>
+        <ComposerPrimitive.Send className="ds-primary-button">发送</ComposerPrimitive.Send>
+      </div>
+    </ComposerPrimitive.Root>
+  );
+}
+
+function ChatToolCallPart({ part }: { part: ToolCallMessagePart }) {
+  const completed = part.result !== undefined && !part.isPreliminary;
+  const detail = completed ? (typeof part.result === "string" ? part.result : JSON.stringify(part.result)) : (part.argsText || JSON.stringify(part.args));
+  return <div className={`ds-chat-tool-call${completed ? " is-complete" : " is-running"}`}>
+    <span className="ds-chat-tool-call__icon"><Icon name={completed ? "check-circle" : "wrench"} size={13} /></span>
+    <span className="ds-chat-tool-call__copy"><b>{part.toolName}</b><small>{detail}</small></span>
+    <em>{completed ? "完成" : "运行中"}</em>
+  </div>;
+}
+
+function ChatMessage() {
+  const isEditing = useAuiState((state) => state.message.composer.isEditing);
+  if (isEditing) return <ChatEditComposer />;
+  return (
+    <MessagePrimitive.Root className="ds-chat-message">
+      <MessagePrimitive.If user>
+        <div className="ds-chat-message__user">
+          <div className="ds-chat-message__attachments"><MessagePrimitive.Attachments components={{ Attachment: ChatGPTAttachmentUI }} /></div>
+          <div className="ds-chat-message__bubble"><MessagePrimitive.Parts /></div>
+          <ChatActionBar />
+        </div>
+      </MessagePrimitive.If>
+      <MessagePrimitive.If assistant>
+        <div className="ds-chat-message__assistant">
+          <div className="ds-chat-message__content">
+            <MessagePrimitive.Parts>{({ part }) => {
+              if (part.type === "text") return <MarkdownText />;
+              if (part.type === "tool-call") return part.toolUI ?? <ChatToolCallPart part={part} />;
+              return null;
+            }}</MessagePrimitive.Parts>
+          </div>
+          <ChatActionBar assistant />
+        </div>
+      </MessagePrimitive.If>
+    </MessagePrimitive.Root>
+  );
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(reader.error ?? new Error("无法读取录音"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function normalizeDataUrlMime(dataUrl: string, mimeType: string) {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return dataUrl;
+  return `data:${mimeType};base64,${dataUrl.slice(comma + 1)}`;
+}
+
+// The local runtime has no server upload endpoint yet. Keep dropped files in
+// the assistant-ui pending queue, including the original File object, and
+// only materialize a data URL when the message is sent.
+const LocalFileAttachmentAdapter: AttachmentAdapter = {
+  accept: "*",
+  async add({ file }) {
+    return {
+      id: `local-file-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      type: "file",
+      name: file.name,
+      contentType: file.type || "application/octet-stream",
+      file,
+      status: { type: "requires-action", reason: "composer-send" },
+    };
+  },
+  async send(attachment, options) {
+    const uploaded = await uploadRuntimeAttachment(attachment.file, undefined, options?.signal);
+    return {
+      ...attachment,
+      contentType: uploaded.mime || attachment.contentType || "application/octet-stream",
+      content: [{ type: "file", data: uploaded.workspace_ref, mimeType: uploaded.mime, filename: uploaded.filename || attachment.name, sourceType: "id" }],
+      status: { type: "complete" },
+    };
+  },
+  async remove() {
+    // Local files are only held in the composer until they are sent or removed.
+  },
+};
+
+type ComposerInput = ReturnType<typeof unstable_useComposerInput>;
+
+type ComposerGestureHandlers = {
+  onPointerDown: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerMove: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerUp: (event: React.PointerEvent<HTMLElement>) => void;
+  onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
+};
+
+type VoiceOverlayState = { recording: boolean; cancelZone: boolean; level: number; elapsed: number };
+
+function formatRecordingElapsed(elapsed: number) {
+  const totalSeconds = Math.max(0, Math.floor(elapsed / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }: { composer: ThreadComposerRuntime; input: ComposerInput; onRegister?: (handlers: ComposerGestureHandlers | null) => void; onVoiceStateChange?: (state: VoiceOverlayState) => void }) {
+  const [recording, setRecording] = useState(false);
+  const [cancelZone, setCancelZone] = useState(false);
+  const [voiceLevel, setVoiceLevel] = useState(0);
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const meterFrameRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef(0);
+  const chunksRef = useRef<Blob[]>([]);
+  const pressingRef = useRef(false);
+  const cancelZoneRef = useRef(false);
+  const startYRef = useRef(0);
+  const suppressClickRef = useRef(false);
+  const longPressTimerRef = useRef<number | null>(null);
+  const hasText = input.value.trim().length > 0;
+
+  useEffect(() => {
+    onVoiceStateChange?.({ recording, cancelZone, level: voiceLevel, elapsed: recordingElapsed });
+  }, [cancelZone, onVoiceStateChange, recording, recordingElapsed, voiceLevel]);
+
+  const clearLongPressTimer = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const stopMeter = () => {
+    if (meterFrameRef.current !== null) {
+      window.cancelAnimationFrame(meterFrameRef.current);
+      meterFrameRef.current = null;
+    }
+    audioSourceRef.current?.disconnect();
+    audioSourceRef.current = null;
+    analyserRef.current = null;
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    if (audioContext) void audioContext.close().catch(() => undefined);
+    recordingStartedAtRef.current = 0;
+  };
+
+  const resetRecording = () => {
+    stopMeter();
+    recorderRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    chunksRef.current = [];
+    pressingRef.current = false;
+    cancelZoneRef.current = false;
+    clearLongPressTimer();
+    setRecording(false);
+    setCancelZone(false);
+    setVoiceLevel(0);
+    setRecordingElapsed(0);
+  };
+
+  const sendRecording = async (blob: Blob) => {
+    try {
+      const dataUrl = await blobToDataUrl(blob);
+      const contentType = blob.type || "audio/webm";
+      const filename = `voice-${Date.now()}.webm`;
+      await composer.addAttachment({
+        type: "file",
+        name: filename,
+        contentType,
+        content: [{ type: "file", data: dataUrl, mimeType: contentType, filename }],
+      });
+      composer.send();
+    } catch {
+      // Local runtime has no attachment adapter by default. Keep the gesture
+      // useful in that configuration while leaving text chat unaffected.
+      input.setText("语音消息");
+      input.send();
+    }
+  };
+
+  const stopRecording = (cancel: boolean) => {
+    const recorder = recorderRef.current;
+    if (!recorder) {
+      pressingRef.current = false;
+      cancelZoneRef.current = false;
+      clearLongPressTimer();
+      setCancelZone(false);
+      return;
+    }
+    if (recorder.state !== "inactive") {
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        resetRecording();
+        if (!cancel && blob.size > 0) void sendRecording(blob);
+      };
+      recorder.stop();
+    } else {
+      resetRecording();
+    }
+  };
+
+  const startRecording = async () => {
+    if (!pressingRef.current || recorderRef.current) return;
+    setError(null);
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      pressingRef.current = false;
+      setError("当前设备不支持录音");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!pressingRef.current || cancelZoneRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (chunk) => {
+        if (chunk.data.size > 0) chunksRef.current.push(chunk.data);
+      };
+      recorderRef.current = recorder;
+      streamRef.current = stream;
+      recorder.start();
+      recordingStartedAtRef.current = performance.now();
+      setRecording(true);
+      suppressClickRef.current = true;
+
+      // Use the microphone signal when available. CSS still animates the
+      // overlay by time, so a browser without Web Audio remains expressive.
+      try {
+        const audioContext = new AudioContext();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 64;
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+        audioSourceRef.current = source;
+      } catch {
+        audioContextRef.current = null;
+        analyserRef.current = null;
+        audioSourceRef.current = null;
+      }
+
+      const meterData = analyserRef.current ? new Uint8Array(analyserRef.current.fftSize) : null;
+      const updateMeter = () => {
+        if (!recorderRef.current) return;
+        const elapsed = performance.now() - recordingStartedAtRef.current;
+        setRecordingElapsed(elapsed);
+        const analyser = analyserRef.current;
+        if (analyser && meterData) {
+          analyser.getByteTimeDomainData(meterData);
+          let sum = 0;
+          for (const sample of meterData) {
+            const normalized = (sample - 128) / 128;
+            sum += normalized * normalized;
+          }
+          setVoiceLevel(Math.min(1, Math.sqrt(sum / meterData.length) * 3.5));
+        } else {
+          setVoiceLevel(0.2 + (Math.sin(elapsed / 130) + 1) * 0.08);
+        }
+        meterFrameRef.current = window.requestAnimationFrame(updateMeter);
+      };
+      meterFrameRef.current = window.requestAnimationFrame(updateMeter);
+    } catch {
+      pressingRef.current = false;
+      setError("无法访问麦克风");
+    }
+  };
+
+  const handlePointerDown = async (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const isMobile = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+    if (hasText || !isMobile || recording || pressingRef.current) return;
+    pressingRef.current = true;
+    startYRef.current = event.clientY;
+    setError(null);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    await startRecording();
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!pressingRef.current) return;
+    const inCancelZone = startYRef.current - event.clientY > 64;
+    cancelZoneRef.current = inCancelZone;
+    setCancelZone(inCancelZone);
+  };
+
+  const handlePointerUp = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    clearLongPressTimer();
+    pressingRef.current = false;
+    stopRecording(cancelZoneRef.current);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const handlePointerCancel = () => {
+    clearLongPressTimer();
+    pressingRef.current = false;
+    stopRecording(true);
+  };
+
+  const isGestureArea = (event: React.PointerEvent<HTMLElement>) => {
+    if (!(event.target instanceof Element)) return true;
+    // The whole empty composer is a press-and-hold recording surface. Keep
+    // explicit controls (attachment/remove/send) clickable and let the
+    // textarea itself participate in the long-press gesture.
+    return !event.target.closest("button, select, a, [data-drop-ignore]");
+  };
+
+  const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => {
+    const isMobile = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+    if (!isMobile || hasText || recording || pressingRef.current || !isGestureArea(event)) return;
+    pressingRef.current = true;
+    startYRef.current = event.clientY;
+    cancelZoneRef.current = false;
+    setCancelZone(false);
+    setError(null);
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    clearLongPressTimer();
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
+      void startRecording();
+    }, 320);
+  };
+
+  const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    if (!pressingRef.current || !isGestureArea(event)) return;
+    const inCancelZone = startYRef.current - event.clientY > 64;
+    cancelZoneRef.current = inCancelZone;
+    setCancelZone(inCancelZone);
+    if (inCancelZone && !recording) clearLongPressTimer();
+    if (recording) event.preventDefault();
+  };
+
+  const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    if (!isGestureArea(event)) return;
+    const wasRecording = recording || recorderRef.current !== null;
+    clearLongPressTimer();
+    if (wasRecording) event.preventDefault();
+    pressingRef.current = false;
+    stopRecording(wasRecording && cancelZoneRef.current);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => {
+    if (!isGestureArea(event)) return;
+    clearLongPressTimer();
+    pressingRef.current = false;
+    stopRecording(true);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  useEffect(() => {
+    const handlers: ComposerGestureHandlers = {
+      onPointerDown: handleAreaPointerDown,
+      onPointerMove: handleAreaPointerMove,
+      onPointerUp: handleAreaPointerUp,
+      onPointerCancel: handleAreaPointerCancel,
+    };
+    onRegister?.(handlers);
+    return () => onRegister?.(null);
+  });
+
+  useEffect(() => () => clearLongPressTimer(), []);
+
+  useEffect(() => () => stopMeter(), []);
+
+  const handleClick = () => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    if (hasText) input.send();
+  };
+
+  return <button
+    type="button"
+    className={`ds-send-button ds-composer-send${hasText ? " is-text-ready" : " is-empty"}${recording ? " is-recording" : ""}${cancelZone ? " is-cancel-zone" : ""}`}
+    aria-label={error ?? (hasText ? "发送" : recording ? "上滑取消" : "按住说话")}
+    title={error ?? (hasText ? "发送" : recording ? "上滑取消" : "按住说话")}
+    onClick={handleClick}
+    onPointerDown={handlePointerDown}
+    onPointerMove={handlePointerMove}
+    onPointerUp={handlePointerUp}
+    onPointerCancel={handlePointerCancel}
+  >
+    <Icon name={hasText ? "arrow-up" : cancelZone ? "x" : "microphone"} size={17} strokeWidth={1.9} />
+  </button>;
+}
+
+type WorkspaceDropState = "idle" | "dragging" | "adding" | "added" | "error";
+type WorkspaceDropResult = { added: number; failed: number };
+type WorkspaceDropHandler = (files: File[]) => Promise<WorkspaceDropResult>;
+type WorkspaceDropContextValue = { registerDropHandler: (handler: WorkspaceDropHandler | null) => () => void };
+
+const WorkspaceDropContext = createContext<WorkspaceDropContextValue | null>(null);
+
+function WorkspaceDropZone({ children }: { children: React.ReactNode }) {
+  const [dropState, setDropState] = useState<WorkspaceDropState>("idle");
+  const [canDrop, setCanDrop] = useState(false);
+  const dropHandlerRef = useRef<WorkspaceDropHandler | null>(null);
+  const dragDepthRef = useRef(0);
+  const dropFeedbackTimerRef = useRef<number | null>(null);
+
+  const clearDropFeedback = () => {
+    if (dropFeedbackTimerRef.current !== null) {
+      window.clearTimeout(dropFeedbackTimerRef.current);
+      dropFeedbackTimerRef.current = null;
+    }
+  };
+  const showDropFeedback = (state: Exclude<WorkspaceDropState, "idle" | "dragging">) => {
+    clearDropFeedback();
+    setDropState(state);
+    dropFeedbackTimerRef.current = window.setTimeout(() => {
+      dropFeedbackTimerRef.current = null;
+      setDropState("idle");
+    }, 2200);
+  };
+  const registerDropHandler = (handler: WorkspaceDropHandler | null) => {
+    dropHandlerRef.current = handler;
+    setCanDrop(handler !== null);
+    return () => {
+      if (dropHandlerRef.current === handler) {
+        dropHandlerRef.current = null;
+        setCanDrop(false);
+      }
+    };
+  };
+  const hasFiles = (event: React.DragEvent<HTMLElement>) => Array.from(event.dataTransfer.types).includes("Files");
+  const isExcludedDropTarget = (target: EventTarget | null) => {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest("[data-drop-ignore], button, input, textarea, select, [contenteditable=\"true\"], [role=\"button\"]"));
+  };
+  const isInsideWorkspace = (event: React.DragEvent<HTMLElement>) => {
+    const next = event.relatedTarget;
+    return next instanceof Node && event.currentTarget.contains(next);
+  };
+  const clearDragStateIfOutside = (event: React.DragEvent<HTMLElement>) => {
+    if (isInsideWorkspace(event)) return;
+    dragDepthRef.current = 0;
+    if (dropState === "dragging") setDropState("idle");
+  };
+  const handleDragEnter = (event: React.DragEvent<HTMLElement>) => {
+    if (!hasFiles(event)) return;
+    if (isExcludedDropTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearDragStateIfOutside(event);
+      return;
+    }
+    event.preventDefault();
+    if (isInsideWorkspace(event)) return;
+    dragDepthRef.current += 1;
+    clearDropFeedback();
+    setDropState("dragging");
+    event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+  };
+  const handleDragOver = (event: React.DragEvent<HTMLElement>) => {
+    if (!hasFiles(event)) return;
+    if (isExcludedDropTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearDragStateIfOutside(event);
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = canDrop ? "copy" : "none";
+    if (dropState === "idle") setDropState("dragging");
+  };
+  const handleDragLeave = (event: React.DragEvent<HTMLElement>) => {
+    if (!hasFiles(event)) return;
+    if (isExcludedDropTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      clearDragStateIfOutside(event);
+      return;
+    }
+    event.preventDefault();
+    if (isInsideWorkspace(event)) return;
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0 && dropState === "dragging") setDropState("idle");
+  };
+  const handleDrop = (event: React.DragEvent<HTMLElement>) => {
+    if (!hasFiles(event)) return;
+    if (isExcludedDropTarget(event.target)) {
+      event.preventDefault();
+      event.stopPropagation();
+      dragDepthRef.current = 0;
+      if (dropState === "dragging") setDropState("idle");
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepthRef.current = 0;
+    clearDropFeedback();
+    const files = Array.from(event.dataTransfer.files);
+    const handler = dropHandlerRef.current;
+    if (files.length === 0 || handler === null) {
+      showDropFeedback("error");
+      return;
+    }
+
+    setDropState("adding");
+    void handler(files).then((result) => {
+      showDropFeedback(result.added > 0 ? "added" : "error");
+    }).catch(() => {
+      showDropFeedback("error");
+    });
+  };
+  useEffect(() => () => clearDropFeedback(), []);
+
+  const contextValue = useMemo<WorkspaceDropContextValue>(() => ({ registerDropHandler }), []);
+  return <div
+    className="ds-main__content"
+    data-drop-state={dropState}
+    onDragEnter={handleDragEnter}
+    onDragOver={handleDragOver}
+    onDragLeave={handleDragLeave}
+    onDrop={handleDrop}
+  >
+    <WorkspaceDropContext.Provider value={contextValue}>{children}</WorkspaceDropContext.Provider>
+    {dropState !== "idle" && <div className="ds-workspace-drop-overlay" data-drop-state={dropState} aria-hidden="true"><i className="ds-workspace-drop-overlay__wave ds-workspace-drop-overlay__wave--one" /><i className="ds-workspace-drop-overlay__wave ds-workspace-drop-overlay__wave--two" /><i className="ds-workspace-drop-overlay__wave ds-workspace-drop-overlay__wave--three" /></div>}
+  </div>;
+}
+
+function ChatComposer({ runtime, outboxStatus = "idle" }: { runtime: ReturnType<typeof useLocalRuntime>; outboxStatus?: OutboxStatus }) {
+  const composer = unstable_useComposerInput();
+  const hasComposerText = composer.value.trim().length > 0;
+  const [voiceState, setVoiceState] = useState<VoiceOverlayState>({ recording: false, cancelZone: false, level: 0, elapsed: 0 });
+  const gestureRef = useRef<ComposerGestureHandlers | null>(null);
+  const workspaceDrop = useContext(WorkspaceDropContext);
+  const registerGesture = (handlers: ComposerGestureHandlers | null) => { gestureRef.current = handlers; };
+  const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerDown(event);
+  const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerMove(event);
+  const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerUp(event);
+  const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerCancel(event);
+  useEffect(() => {
+    if (!workspaceDrop) return;
+    const addFiles = async (files: File[]): Promise<WorkspaceDropResult> => {
+      if (!runtime.thread.getState().capabilities.attachments) return { added: 0, failed: files.length };
+      let added = 0;
+      let failed = 0;
+      for (const file of files) {
+        try {
+          await runtime.thread.composer.addAttachment(file);
+          added += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      return { added, failed };
+    };
+    return workspaceDrop.registerDropHandler(addFiles);
+  }, [runtime, workspaceDrop]);
+  const overlayStyle = {
+    "--ds-voice-level": voiceState.level.toFixed(3),
+    "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
+  } as React.CSSProperties;
+  return <div className="ds-composer-shell" data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} style={overlayStyle}>
+    <div className="ds-voice-wave" aria-hidden="true" />
+    <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
+      <div className="ds-composer__attachments" aria-label="待发送附件">
+        <ComposerPrimitive.Attachments>
+          {({ attachment }) => <AttachmentPrimitive.Root className="ds-composer-attachment">
+            <AttachmentPrimitive.unstable_Thumb className="ds-composer-attachment__thumb" />
+            <span className="ds-composer-attachment__name"><AttachmentPrimitive.Name /></span>
+            <small>{attachment.status.type === "requires-action" ? "待发送" : attachment.status.type === "complete" ? "已准备" : "处理失败"}</small>
+            <AttachmentPrimitive.Remove className="ds-composer-attachment__remove" aria-label={`移除 ${attachment.name}`}><Icon name="x" size={13} /></AttachmentPrimitive.Remove>
+          </AttachmentPrimitive.Root>}
+        </ComposerPrimitive.Attachments>
+      </div>
+      <ComposerPrimitive.AddAttachment className={`ds-composer-tool${hasComposerText ? " is-disabled" : ""}`} disabled={hasComposerText} aria-label={hasComposerText ? "有文本时不可添加附件" : "添加附件"}><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
+      <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
+      <div className="ds-composer__toolbar">
+        <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} onVoiceStateChange={setVoiceState} />
+        <span className={`ds-outbox-state is-${outboxStatus}`} aria-live="polite">{outboxStatus === "queued" ? "待发送" : outboxStatus === "sending" ? "发送中…" : outboxStatus === "sent" ? "已保存" : outboxStatus === "failed" ? "发送失败" : ""}</span>
+      </div>
+    </ComposerPrimitive.Root>
+    <div className="ds-voice-recording-status" role="status" aria-live="polite" aria-hidden={!voiceState.recording}>
+      <time>{formatRecordingElapsed(voiceState.elapsed)}</time>
+      <span>{voiceState.cancelZone ? "松开取消" : "上滑取消"}</span>
+    </div>
+  </div>;
+}
+
+function ChatWorkspace({ session, onSessionChange }: { session: ChatSession; onSessionChange: (patch: Partial<ChatSession>) => void }) {
+  const adapter = useMemo(() => createGoRuntimeAdapter({ sessionId: session.id, fallback: StubAdapter }), [session.id]);
+  const runtime = useLocalRuntime(adapter, { adapters: { attachments: LocalFileAttachmentAdapter }, initialMessages: restoreMessages(session.messages) as never });
   const [outboxStatus, setOutboxStatus] = useState<OutboxStatus>("idle");
   const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine);
   const [unread, setUnread] = useState(session.unread);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [messageCount, setMessageCount] = useState(session.messages.length);
-  const [attachmentError, setAttachmentError] = useState("");
+  const viewportRef = useRef<HTMLDivElement>(null);
   const isAtBottomRef = useRef(true);
   const persistedCountRef = useRef(session.messages.length);
   const unreadRef = useRef(session.unread);
-  const viewportRef = useRef<HTMLDivElement>(null);
-  statusRef.current = setOutboxStatus;
-  const adapter = useMemo(() => createGoRuntimeAdapter({
-    sessionId: session.id,
-    // Fallback is deliberately limited in go-runtime.ts to unavailable
-    // preflight requests without attachments. Server/application errors stay visible.
-    fallback: makeOfflineAdapter(statusRef),
-  }), [session.id]);
-  const attachmentAdapter = useMemo(() => createRuntimeAttachmentAdapter(setAttachmentError), []);
-  const runtime = useLocalRuntime(adapter, {
-    initialMessages: restoreMessages(session.messages) as never,
-    adapters: { attachments: attachmentAdapter },
-  });
 
   useEffect(() => {
     const onOnline = () => { setIsOnline(true); setOutboxStatus("idle"); };
-    const onOffline = () => { setIsOnline(false); };
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
+    const onOffline = () => { setIsOnline(false); setOutboxStatus("queued"); };
+    window.addEventListener("online", onOnline); window.addEventListener("offline", onOffline);
     return () => { window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
   }, []);
-
   useEffect(() => {
     runtime.thread.composer.setText(session.draft);
     const saveDraft = () => onSessionChange({ draft: runtime.thread.composer.getState().text, updatedAt: Date.now() });
     saveDraft();
     return runtime.thread.composer.subscribe(saveDraft);
-  }, [onSessionChange, runtime, session.draft]);
-
-  useEffect(() => {
-    if (!queuedPrompt) return;
-    // Let the runtime commit the text update before starting attachment/run
-    // processing. This avoids a send racing the composer state store when a
-    // resource question navigates from the library into the chat view.
-    const timer = window.setTimeout(() => {
-      runtime.thread.composer.setText(queuedPrompt);
-      window.queueMicrotask(() => runtime.thread.composer.send());
-      onPromptConsumed?.();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [onPromptConsumed, queuedPrompt, runtime]);
-
+  }, [onSessionChange, runtime]);
   useEffect(() => {
     const persist = () => {
       const state = runtime.thread.getState();
@@ -357,110 +1010,214 @@ function ChatWorkspace({ session, onSessionChange, queuedPrompt, onPromptConsume
       }
       if (messages.length > previousCount && !isAtBottomRef.current) {
         const nextUnread = unreadRef.current + messages.length - previousCount;
-        unreadRef.current = nextUnread;
-        setUnread(nextUnread);
-        onSessionChange({ unread: nextUnread });
+        unreadRef.current = nextUnread; setUnread(nextUnread); onSessionChange({ unread: nextUnread });
       }
-      onSessionChange({
-        messages,
-        updatedAt: Date.now(),
-        title: session.title === "新会话" ? (messageText(messages.find((item) => item.role === "user")) || session.title).slice(0, 36) : session.title,
-      });
+      const firstUser = messages.find((item) => item.role === "user");
+      onSessionChange({ messages, updatedAt: Date.now(), title: session.title === "新会话" ? (messageText(firstUser) || session.title).slice(0, 36) : session.title });
     };
     persist();
     return runtime.thread.subscribe(persist);
   }, [isOnline, onSessionChange, runtime, session.title]);
-
-  const handleScroll = useCallback(() => {
-    const viewport = viewportRef.current;
-    if (!viewport) return;
+  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const viewport = event.currentTarget;
     const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 28;
-    isAtBottomRef.current = atBottom;
-    setIsAtBottom(atBottom);
-    if (atBottom) {
-      unreadRef.current = 0;
-      setUnread(0);
-      onSessionChange({ unread: 0 });
-    }
-  }, [onSessionChange]);
-
+    isAtBottomRef.current = atBottom; setIsAtBottom(atBottom);
+    if (atBottom) { unreadRef.current = 0; setUnread(0); onSessionChange({ unread: 0 }); }
+  };
   const jumpToBottom = () => {
     viewportRef.current?.scrollTo({ top: viewportRef.current.scrollHeight, behavior: "smooth" });
-    unreadRef.current = 0;
-    setUnread(0);
-    onSessionChange({ unread: 0 });
+    unreadRef.current = 0; setUnread(0); onSessionChange({ unread: 0 });
   };
-
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <section className="ds-chat-page" aria-labelledby="chat-welcome-title">
+      <section className="ds-chat-page ds-chatgpt-page" aria-labelledby="chat-welcome-title">
         <ThreadPrimitive.Root className="ds-chat-thread">
-          <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
-            <div className="ds-timeline-status" aria-live="polite">
-              <span>{messageCount ? `${messageCount} 条消息` : "新会话"}</span>
-              {!isOnline && <span className="ds-outbox-pill is-queued">离线 · 稍后发送</span>}
-              {outboxStatus === "sending" && <span className="ds-outbox-pill">发送中…</span>}
-              {outboxStatus === "sent" && <span className="ds-outbox-pill is-sent">已保存</span>}
-            </div>
-            <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-            <ThreadPrimitive.Empty><ChatEmptyState /></ThreadPrimitive.Empty>
-            {!isAtBottom && <button type="button" className="ds-scroll-bottom" onClick={jumpToBottom} aria-label="跳到底部">{unread ? `${unread} 条新消息 ↓` : "跳到底部 ↓"}</button>}
-          </ThreadPrimitive.Viewport>
-          <ComposerPrimitive.Root className="ds-composer" compact>
-            {attachmentError && <div className="ds-composer-error" role="alert">{attachmentError}<button type="button" onClick={() => setAttachmentError("")} aria-label="关闭错误">×</button></div>}
-            <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
-            <div className="ds-composer__toolbar">
-              <div className="ds-composer__tools">
-                <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="paperclip" size={16} /></ComposerPrimitive.AddAttachment>
-                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="调用工具"><Icon name="wand" size={16} /></button>
-                <button type="button" className="ds-composer-tool ds-composer-tool--secondary" aria-label="深度思考"><Icon name="brain" size={16} /></button>
-              </div>
-              <span className={`ds-outbox-state is-${outboxStatus}`} aria-live="polite">{outboxStatus === "queued" ? "待发送" : outboxStatus === "failed" ? "发送失败" : ""}</span>
-              <ComposerPrimitive.Send className="ds-send-button" aria-label="发送"><Icon name="send" size={15} strokeWidth={2} /></ComposerPrimitive.Send>
-            </div>
-          </ComposerPrimitive.Root>
+          <AuiIf condition={(state) => state.thread.isEmpty}>
+            <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
+              <ThreadPrimitive.Empty>
+                <div className="ds-chat-empty-state">
+                  <ChatEmptyState />
+                  <ChatQuickPrompts />
+                </div>
+              </ThreadPrimitive.Empty>
+            </ThreadPrimitive.Viewport>
+            <div className="ds-composer-dock"><ChatComposer runtime={runtime} outboxStatus={outboxStatus} /></div>
+          </AuiIf>
+          <AuiIf condition={(state) => !state.thread.isEmpty}>
+            <ThreadPrimitive.Viewport ref={viewportRef} className="ds-thread-viewport ds-chatgpt-viewport" autoScroll turnAnchor="bottom" onScroll={handleScroll}>
+              <div className="ds-timeline-status" aria-live="polite"><span>{messageCount ? `${messageCount} 条消息` : "新会话"}</span>{!isOnline && <span className="ds-outbox-pill is-queued">离线 · 稍后发送</span>}</div>
+              <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+              <ThreadPrimitive.ViewportFooter className="ds-composer-dock ds-chatgpt-footer">
+                {(!isAtBottom || unread > 0) && <ThreadPrimitive.ScrollToBottom asChild>
+                  <button type="button" className="ds-scroll-bottom" aria-label={unread ? `${unread} 条新消息，跳到底部` : "跳到底部"} title={unread ? `${unread} 条新消息` : "跳到底部"}><Icon name="chevron-down" size={15} /></button>
+                </ThreadPrimitive.ScrollToBottom>}
+                <ChatComposer runtime={runtime} outboxStatus={outboxStatus} />
+                <p className="ds-chatgpt-disclaimer">DeepStudent 可能会出错，请核对重要信息</p>
+              </ThreadPrimitive.ViewportFooter>
+            </ThreadPrimitive.Viewport>
+          </AuiIf>
         </ThreadPrimitive.Root>
       </section>
     </AssistantRuntimeProvider>
   );
 }
 
-function LearningHub({ onAsk }: { onAsk?: (question: ResourceQuestion) => void }) {
-  return <ResourceLibrary onAsk={onAsk} />;
+type StreamDebugSettings = {
+  provider: "siliconflow" | "deepseek" | "openai" | "custom";
+  model: string;
+  baseUrl: string;
+  streamingMode: "events" | "buffered";
+  timeout: number;
+  retry: number;
+};
+
+const streamSettingsStorageKey = "dstu-stream-settings-v1";
+const defaultStreamDebugSettings: StreamDebugSettings = {
+  provider: "siliconflow",
+  model: "DeepSeek-R1-Distill-Qwen-7B",
+  baseUrl: "/api/v1",
+  streamingMode: "events",
+  timeout: 30,
+  retry: 2,
+};
+
+function readStreamDebugSettings(): StreamDebugSettings {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(streamSettingsStorageKey) ?? "null") as Partial<StreamDebugSettings> | null;
+    if (!parsed) return defaultStreamDebugSettings;
+    return {
+      ...defaultStreamDebugSettings,
+      ...parsed,
+      provider: parsed.provider === "siliconflow" || parsed.provider === "deepseek" || parsed.provider === "openai" || parsed.provider === "custom" ? parsed.provider : defaultStreamDebugSettings.provider,
+      streamingMode: parsed.streamingMode === "buffered" ? "buffered" : "events",
+      timeout: Number.isFinite(parsed.timeout) && Number(parsed.timeout) > 0 ? Number(parsed.timeout) : defaultStreamDebugSettings.timeout,
+      retry: Number.isFinite(parsed.retry) && Number(parsed.retry) >= 0 ? Number(parsed.retry) : defaultStreamDebugSettings.retry,
+    };
+  } catch {
+    return defaultStreamDebugSettings;
+  }
 }
 
-function ResourceCard({ icon, color, title, detail }: { icon: string; color: string; title: string; detail: string }) {
-  return <article className="ds-resource-card"><span className={`ds-resource-card__icon ds-resource-card__icon--${color}`}>{icon}</span><div><b>{title}</b><p>{detail}</p></div><button className="ds-icon-button">⋯</button></article>;
+function StreamDebugSettingsModal({ draft, onChange, onClose, onSave }: {
+  draft: StreamDebugSettings;
+  onChange: (patch: Partial<StreamDebugSettings>) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return <div className="ds-stream-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="stream-settings-title">
+    <button type="button" className="ds-stream-settings-modal__backdrop" aria-label="关闭设置" onClick={onClose} />
+    <form className="ds-stream-settings-modal__card" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
+      <div className="ds-stream-settings-modal__header"><div><span className="ds-stream-debug__eyebrow"><Icon name="settings" size={14} />运行时设置</span><h3 id="stream-settings-title">LLM 连接配置</h3><p>这些选项只影响当前 playground 对话</p></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={onClose}><Icon name="x" size={16} /></button></div>
+      <div className="ds-stream-settings-modal__body">
+        <label className="ds-stream-setting-field"><span>Provider</span><select value={draft.provider} onChange={(event) => onChange({ provider: event.target.value as StreamDebugSettings["provider"] })}><option value="siliconflow">SiliconFlow</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">Custom</option></select></label>
+        <label className="ds-stream-setting-field"><span>Model</span><input value={draft.model} onChange={(event) => onChange({ model: event.target.value })} /></label>
+        <label className="ds-stream-setting-field"><span>Runtime API</span><input value={draft.baseUrl} onChange={(event) => onChange({ baseUrl: event.target.value })} placeholder="/api/v1" /></label>
+        <div className="ds-stream-settings-grid"><label className="ds-stream-setting-field"><span>Timeout (s)</span><input type="number" min={1} max={300} value={draft.timeout} onChange={(event) => onChange({ timeout: Math.max(1, Number(event.target.value) || 1) })} /></label><label className="ds-stream-setting-field"><span>Reconnect attempts</span><input type="number" min={0} max={5} value={draft.retry} onChange={(event) => onChange({ retry: Math.max(0, Number(event.target.value) || 0) })} /></label></div>
+        <fieldset className="ds-stream-setting-mode"><legend>Streaming mode</legend><label className={draft.streamingMode === "events" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="events" checked={draft.streamingMode === "events"} onChange={() => onChange({ streamingMode: "events" })} /><span><b>事件流</b><small>每个 delta 到达时立即更新回复</small></span></label><label className={draft.streamingMode === "buffered" ? "is-selected" : ""}><input type="radio" name="stream-mode" value="buffered" checked={draft.streamingMode === "buffered"} onChange={() => onChange({ streamingMode: "buffered" })} /><span><b>缓冲</b><small>运行完成后一次性显示回复</small></span></label></fieldset>
+      </div>
+      <div className="ds-stream-settings-modal__footer"><button type="button" className="ds-secondary-button" onClick={onClose}>取消</button><button type="submit" className="ds-primary-button">保存设置</button></div>
+    </form>
+  </div>;
 }
 
-function Todo() { return <WorkspacePage eyebrow="今日行动" title="待办事项" description="把下一步学习行动放在眼前" action="＋ 新建待办"><div className="ds-todo-list ds-panel"><PanelHeading title="今天" meta=" · 3 项任务" /><TodoRow title="完成微积分第三章练习" detail="学习资源 · 今天 18:00" status="待开始" /><TodoRow title="整理概率论复习笔记" detail="笔记 · 今天 20:00" status="进行中" /><TodoRow title="复习英语学术词汇" detail="闪卡 · 今天 21:00" status="待开始" /></div></WorkspacePage>; }
-function TodoRow({ title, detail, status }: { title: string; detail: string; status: string }) { return <label className="ds-todo-row"><input type="checkbox" /><span><b>{title}</b><small>{detail}</small></span><em>{status}</em></label>; }
-function Skills() { return <WorkspacePage eyebrow="可组合能力" title="技能管理" description="安装、启用和编辑 DeepStudent 的技能" action="＋ 添加技能"><div className="ds-skill-grid"><Skill title="网页搜索" description="搜索并整理公开网页资料" enabled /><Skill title="学习资源" description="从资源库引用上下文" enabled /><Skill title="知识整理" description="生成笔记、提纲和复习卡片" /></div></WorkspacePage>; }
-function Skill({ title, description, enabled }: { title: string; description: string; enabled?: boolean }) { return <article className="ds-skill-card"><span className="ds-skill-icon">✧</span><div><b>{title}</b><p>{description}</p></div><span className={`ds-toggle${enabled ? " is-on" : ""}`}></span></article>; }
-function Anki() { return <WorkspacePage eyebrow="学习自动化" title="Anki 制卡" description="选择资料和模板，批量生成闪卡" action="＋ 新建制卡任务"><div className="ds-job-card ds-panel"><div className="ds-job-card__icon">▱</div><div><b>还没有制卡任务</b><p>从学习资源中选择一份资料开始</p></div><button className="ds-secondary-button">浏览学习资源</button></div></WorkspacePage>; }
-function Flashcards() { return <WorkspacePage eyebrow="主动回忆" title="闪卡" description="用短时练习巩固真正理解的内容" action="＋ 新建卡组"><div className="ds-metric-grid"><Metric label="今日待复习" value="12" suffix="张" note="约 8 分钟" /><Metric label="掌握率" value="78" suffix="%" note="↑ 比上周多 6%" /><Metric label="连续学习" value="8" suffix="天" note="保持节奏" /></div><div className="ds-panel"><PanelHeading title="我的卡组" action="查看全部" /><Deck title="微积分基础" detail="32 张 · 最近复习 2 小时前" status="8 张待复习 →" color="blue" /><Deck title="概率论" detail="48 张 · 最近复习昨天" status="4 张待复习 →" color="purple" /><Deck title="英语学术词汇" detail="120 张 · 最近复习 9 月 28 日" status="已完成" color="green" /></div></WorkspacePage>; }
-function Metric({ label, value, suffix, note }: { label: string; value: string; suffix: string; note: string }) { return <div className="ds-metric-card"><span>{label}</span><strong>{value} <small>{suffix}</small></strong><em>{note}</em></div>; }
-function Deck({ title, detail, status, color }: { title: string; detail: string; status: string; color: string }) { return <button className="ds-deck-row"><span className={`ds-deck-icon ds-deck-icon--${color}`}>∑</span><span><b>{title}</b><small>{detail}</small></span><em>{status}</em></button>; }
-function Templates() { return <WorkspacePage eyebrow="输出偏好" title="模板管理" description="让重复的学习输出保持一致" action="＋ 新建模板"><div className="ds-template-list ds-panel"><Template title="默认学习笔记" detail="Markdown · 最近使用" /><Template title="Anki 基础卡片" detail="正面 / 背面 · 12 个字段" /><Template title="论文阅读摘要" detail="结构化摘要 · 6 个字段" /></div></WorkspacePage>; }
-function Template({ title, detail }: { title: string; detail: string }) { return <button className="ds-template-row"><span>▥</span><span><b>{title}</b><small>{detail}</small></span><em>→</em></button>; }
-function Settings({ theme, onTheme, runtimeStatus }: { theme: Theme; onTheme: () => void; runtimeStatus: string }) { return <WorkspacePage eyebrow="偏好设置" title="设置" description="让 DeepStudent 更贴合你的学习方式"><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section><section className="ds-panel ds-setting-section"><PanelHeading title="运行时连接" meta="实时就绪检查" /><div className="ds-runtime-row"><span className="ds-status"><i></i>{runtimeStatus}</span><code>GET /readyz</code></div></section></div></div></WorkspacePage>; }
+function StreamDebugPage() {
+  const [settings, setSettings] = useState<StreamDebugSettings>(() => readStreamDebugSettings());
+  const [settingsDraft, setSettingsDraft] = useState<StreamDebugSettings>(() => readStreamDebugSettings());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const sessionIdRef = useRef(`playground-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const adapter = useMemo(() => createGoRuntimeAdapter({
+    sessionId: sessionIdRef.current,
+    baseUrl: settings.baseUrl,
+    provider: settings.provider,
+    model: settings.model,
+    streamingMode: settings.streamingMode,
+    timeoutMs: settings.timeout * 1000,
+    reconnectAttempts: settings.retry,
+    fallback: StubAdapter,
+  }), [settings]);
+  const runtime = useLocalRuntime(adapter);
+  const openSettings = () => { setSettingsDraft(settings); setSettingsOpen(true); };
+  const saveSettings = () => {
+    setSettings(settingsDraft);
+    window.localStorage.setItem(streamSettingsStorageKey, JSON.stringify(settingsDraft));
+    setSettingsOpen(false);
+  };
+
+  return <section className="ds-chat-page ds-chatgpt-page ds-playground-page" aria-label="DeepStudent playground">
+    <div className="ds-playground-toolbar" role="toolbar" aria-label="对话设置">
+      <span className="ds-playground-model">{settings.provider} · {settings.model}</span>
+      <button type="button" className="ds-icon-button" onClick={openSettings} aria-label="打开模型设置" title="模型设置"><Icon name="settings" size={16} /></button>
+    </div>
+    <AssistantRuntimeProvider runtime={runtime}>
+      <ThreadPrimitive.Root className="ds-chat-thread">
+        <AuiIf condition={(state) => state.thread.isEmpty}>
+          <ThreadPrimitive.Viewport className="ds-thread-viewport" autoScroll turnAnchor="bottom">
+            <ThreadPrimitive.Empty><div className="ds-chat-empty-state"><ChatEmptyState /><ChatQuickPrompts /></div></ThreadPrimitive.Empty>
+          </ThreadPrimitive.Viewport>
+          <div className="ds-composer-dock"><ChatComposer runtime={runtime} /></div>
+        </AuiIf>
+        <AuiIf condition={(state) => !state.thread.isEmpty}>
+          <ThreadPrimitive.Viewport className="ds-thread-viewport ds-chatgpt-viewport" autoScroll turnAnchor="bottom">
+            <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+            <ThreadPrimitive.ViewportFooter className="ds-composer-dock ds-chatgpt-footer"><ChatComposer runtime={runtime} /><p className="ds-chatgpt-disclaimer">DeepStudent 可能会出错，请核对重要信息</p></ThreadPrimitive.ViewportFooter>
+          </ThreadPrimitive.Viewport>
+        </AuiIf>
+      </ThreadPrimitive.Root>
+    </AssistantRuntimeProvider>
+    {settingsOpen && <StreamDebugSettingsModal draft={settingsDraft} onChange={(patch) => setSettingsDraft((current) => ({ ...current, ...patch }))} onClose={() => setSettingsOpen(false)} onSave={saveSettings} />}
+  </section>;
+}
+
+function LearningHub() {
+  return <WorkspacePage action={<><Icon name="plus" size={14} />添加资源</>}>
+    <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button" aria-label="添加资源">＋</button></div><label className="ds-search-field"><Icon name="search" size={14} /><input placeholder="搜索资源…" /></label><p className="ds-sidebar-empty">暂无资源</p></aside><div className="ds-resource-grid"><EmptyState title="还没有学习资源" description="添加 PDF、Markdown、网页或图片，开始整理你的学习资料" /></div></div>
+  </WorkspacePage>;
+}
+
+function EmptyState({ title, description }: { title: string; description: string }) {
+  return <div className="ds-empty-state"><p><b>{title}</b>，{description}</p></div>;
+}
+
+function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
+function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
+function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
+function Settings({ theme, onTheme, themeColor, onThemeColor, onOpenOnboarding, onClose }: { theme: Theme; onTheme: () => void; themeColor: ThemeColor; onThemeColor: (color: ThemeColor) => void; onOpenOnboarding: () => void; onClose: () => void }) {
+  const [section, setSection] = useState<"general" | "appearance">("general");
+  return <div className="ds-settings-modal" data-drop-ignore="true" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <button type="button" className="ds-settings-modal__backdrop" aria-label="关闭设置" onClick={onClose} />
+    <section className="ds-settings-modal__card">
+      <header className="ds-settings-modal__header"><div><h2 id="settings-title">设置</h2></div><button type="button" className="ds-icon-button" aria-label="关闭设置" onClick={onClose}><Icon name="x" size={16} /></button></header>
+      <div className="ds-settings-modal__body">
+        <nav className="ds-settings-nav" aria-label="设置分类">
+          <button type="button" className={section === "general" ? "is-active" : ""} onClick={() => setSection("general")}>常规</button>
+          <button type="button" className={section === "appearance" ? "is-active" : ""} onClick={() => setSection("appearance")}>外观</button>
+          <button type="button" disabled>AI 助手</button><button type="button" disabled>快捷键</button><button type="button" disabled>关于</button>
+        </nav>
+        <div className="ds-settings-content">
+          {section === "general" && <section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section>}
+          {section === "appearance" && <section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label><div className="ds-theme-color-setting"><div><b>主题色</b><small>用于按钮、链接和选中状态</small></div><div className="ds-theme-color-presets" role="group" aria-label="主题色预设">{themeColorPresets.map((preset) => <button key={preset.value} type="button" className={`ds-theme-color-swatch${themeColor.toLowerCase() === preset.value ? " is-selected" : ""}`} style={{ backgroundColor: preset.value }} aria-label={`选择${preset.label}主题色`} aria-pressed={themeColor.toLowerCase() === preset.value} onClick={() => onThemeColor(preset.value)} />)}</div></div></section>}
+        </div>
+      </div>
+    </section>
+  </div>;
+}
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
-function WorkspacePage({ eyebrow, title, description, action, children }: { eyebrow: string; title: string; description: string; action?: string; children: React.ReactNode }) { return <section className="ds-workspace-page"><div className="ds-page-heading"><div><span className="ds-eyebrow">{eyebrow}</span><h2>{title}</h2><p>{description}</p></div>{action && <button className="ds-primary-button">{action}</button>}</div>{children}</section>; }
+function WorkspacePage({ action, children }: { action?: React.ReactNode; children: React.ReactNode }) { return <section className="ds-workspace-page">{action && <div className="ds-page-actions"><button className="ds-primary-button">{action}</button></div>}{children}</section>; }
 
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
+  const [themeColor, setThemeColor] = useState<ThemeColor>(() => readThemeColor());
+  const [isMobile, setIsMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [runtimeStatus, setRuntimeStatus] = useState("连接 Go runtime…");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
+  const [onboardingOpen, setOnboardingOpen] = useState(() => onboardingConfig === null);
   const [sessions, setSessions] = useState<ChatSession[]>(() => readSessions());
   const [activeSessionId, setActiveSessionId] = useState("");
   const [sessionSearch, setSessionSearch] = useState("");
-  const [sessionHydrationVersion, setSessionHydrationVersion] = useState(0);
-  const [queuedPrompt, setQueuedPrompt] = useState("");
-  const sessionsRef = useRef(sessions);
-  const activeSessionIdRef = useRef(activeSessionId);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -468,109 +1225,80 @@ export function App() {
     window.localStorage.setItem("dstu-theme-mode", theme);
   }, [theme]);
   useEffect(() => {
-    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
-    sessionsRef.current = sessions;
-  }, [sessions]);
+    const root = document.documentElement;
+    const luminance = themeColorLuminance(themeColor);
+    root.style.setProperty("--ds-accent", themeColor);
+    root.style.setProperty("--ds-accent-strong", `color-mix(in srgb, ${themeColor} 82%, ${theme === "dark" ? "white" : "black"})`);
+    root.style.setProperty("--ds-focus", themeColor);
+    root.style.setProperty("--ds-title-accent", themeColor);
+    root.style.setProperty("--ds-selection", `color-mix(in srgb, ${themeColor} ${theme === "dark" ? "26%" : "16%"}, transparent)`);
+    root.style.setProperty("--ds-on-accent", luminance > 0.48 ? "#111827" : "#ffffff");
+    window.localStorage.setItem(themeColorStorageKey, themeColor);
+  }, [theme, themeColor]);
   useEffect(() => {
-    if (!sessions.some((session) => session.id === activeSessionId) && sessions[0]) setActiveSessionId(sessions[0].id);
-    activeSessionIdRef.current = activeSessionId;
-  }, [activeSessionId, sessions]);
-  useEffect(() => {
-    let active = true;
-    void getRuntimeReadiness().then((ready) => {
-      if (active) setRuntimeStatus(`Go runtime · ${ready.status}`);
-    }).catch((error: unknown) => {
-      if (!active) return;
-      const status = error && typeof error === "object" && "status" in error ? (error as { status?: number }).status : undefined;
-      setRuntimeStatus(status === 503 ? "Go runtime starting" : "Go runtime unavailable");
-    });
-    return () => { active = false; };
+    const query = window.matchMedia("(max-width: 767px)");
+    const onChange = () => setIsMobile(query.matches);
+    onChange();
+    query.addEventListener?.("change", onChange);
+    return () => query.removeEventListener?.("change", onChange);
   }, []);
+  useEffect(() => { window.localStorage.setItem(sessionStorageKey, JSON.stringify(sessions)); }, [sessions]);
+  useEffect(() => { if (!sessions.some((session) => session.id === activeSessionId) && sessions[0]) setActiveSessionId(sessions[0].id); }, [activeSessionId, sessions]);
   useEffect(() => {
-    let cancelled = false;
-    const hydrate = async () => {
-      try {
-        const remoteSessions = await listRuntimeSessions();
-        if (cancelled) return;
-        const hydrated = await Promise.all(remoteSessions.map(async (remote) => {
-          try {
-            const messages = await getRuntimeSessionMessages(remote.id);
-            return { remote, messages: serverMessagesToPersisted(messages) };
-          } catch {
-            return { remote, messages: undefined };
-          }
-        }));
-        if (cancelled) return;
-        setSessions((current) => {
-          const localById = new Map(current.map((session) => [session.id, session]));
-          const remote = hydrated.map(({ remote: serverSession, messages }) => serverSessionToLocal(serverSession, messages, localById.get(serverSession.id)));
-          const remoteIds = new Set(remote.map((session) => session.id));
-          return [...remote, ...current.filter((session) => !remoteIds.has(session.id))];
-        });
-        // Do not remount the active assistant-ui runtime over a draft/send that
-        // happened while hydration was in flight. Empty local sessions are safe
-        // to replace with the authoritative server transcript.
-        const currentActiveId = activeSessionIdRef.current || sessionsRef.current[0]?.id;
-        const currentActive = sessionsRef.current.find((session) => session.id === currentActiveId);
-        const activeWasIdle = !currentActive || (currentActive.messages.length === 0 && currentActive.draft.trim() === "");
-        if (hydrated.length > 0 && activeWasIdle && hydrated.some(({ remote }) => remote.id === currentActiveId)) {
-          setSessionHydrationVersion((version) => version + 1);
-        }
-      } catch {
-        // Static previews and offline shells retain their local transcript.
-      }
-    };
-    void hydrate();
-    return () => { cancelled = true; };
+    void HealthService.health().catch(() => undefined);
   }, []);
 
   const toggleTheme = () => setTheme((current) => current === "dark" ? "light" : "dark");
-  const selectView = (next: ViewId) => { setView(next); setSidebarOpen(false); };
+  const updateThemeColor = (color: ThemeColor) => {
+    if (isThemeColor(color)) setThemeColor(color.toLowerCase());
+  };
+  const completeOnboarding = (config: Omit<OnboardingConfig, "completedAt">) => {
+    const saved = { ...config, completedAt: new Date().toISOString() };
+    window.localStorage.setItem(onboardingStorageKey, JSON.stringify(saved));
+    setOnboardingConfig(saved);
+    setOnboardingOpen(false);
+  };
+  const openOnboarding = () => setOnboardingOpen(true);
+  const selectView = (next: ViewId) => {
+    if (next === "settings") {
+      setSettingsOpen(true);
+      setSidebarOpen(false);
+      return;
+    }
+    setView(next);
+    setSettingsOpen(false);
+    setSidebarOpen(false);
+  };
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0] ?? createSession();
-  const updateSession = useCallback((patch: Partial<ChatSession>) => {
-    setSessions((current) => current.map((session) => session.id === activeSession.id ? { ...session, ...patch } : session));
-  }, [activeSession.id]);
-  const newSession = () => {
-    const session = createSession();
-    setSessions((current) => [session, ...current]);
-    setActiveSessionId(session.id);
-    setView("chat-v2");
-    setSidebarOpen(false);
-    void createRuntimeSession(session).catch(() => undefined);
+  const updateSession = useCallback((patch: Partial<ChatSession>) => setSessions((current) => current.map((session) => session.id === activeSession.id ? { ...session, ...patch } : session)), [activeSession.id]);
+  const newSession = () => { const session = createSession(); setSessions((current) => [session, ...current]); setActiveSessionId(session.id); setView("chat-v2"); setSettingsOpen(false); setSidebarOpen(false); };
+  const deleteSession = (sessionId: string) => {
+    const remaining = sessions.filter((session) => session.id !== sessionId);
+    if (remaining.length === 0) {
+      const replacement = createSession();
+      setSessions([replacement]);
+      setActiveSessionId(replacement.id);
+      setView("chat-v2");
+      return;
+    }
+    setSessions(remaining);
+    if (activeSessionId === sessionId) {
+      setActiveSessionId(remaining[0].id);
+      setView("chat-v2");
+    }
   };
-  useEffect(() => {
-    const onNativeCommand = (event: Event) => {
-      const command = (event as CustomEvent<{ command?: unknown }>).detail?.command;
-      if (command === "new-session") newSession();
-      else if (command === "learning-hub") selectView("learning-hub");
-      else if (command === "settings") selectView("settings");
-      else if (command === "toggle-theme") toggleTheme();
-    };
-    window.addEventListener("deepstudent:command", onNativeCommand);
-    return () => window.removeEventListener("deepstudent:command", onNativeCommand);
-  });
-  const askFromResource = (question: ResourceQuestion) => {
-    setActiveSessionId(activeSession.id);
-    setQueuedPrompt(question.prompt);
-    setView("chat-v2");
-    setSidebarOpen(false);
-  };
-  const consumeQueuedPrompt = useCallback(() => setQueuedPrompt(""), []);
-  const visibleSessions = sessions
-    .filter((session) => !sessionSearch.trim() || session.title.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase()))
-    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
+  const visibleSessions = sessions.filter((session) => !sessionSearch.trim() || session.title.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase())).sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt - a.updatedAt);
   const content = useMemo(() => {
-    if (view === "chat-v2") return <ChatWorkspace key={`${activeSession.id}:${sessionHydrationVersion}`} session={activeSession} onSessionChange={updateSession} queuedPrompt={queuedPrompt} onPromptConsumed={consumeQueuedPrompt} />;
-    if (view === "learning-hub") return <LearningHub onAsk={askFromResource} />;
+    if (view === "chat-v2") return <ChatWorkspace key={activeSession.id} session={activeSession} onSessionChange={updateSession} />;
+    if (view === "stream-debug") return <StreamDebugPage />;
+    if (view === "learning-hub") return <LearningHub />;
     if (view === "todo") return <Todo />;
     if (view === "skills-management") return <Skills />;
-    if (view === "task-dashboard") return <Anki />;
     if (view === "flashcards") return <Flashcards />;
-    if (view === "template-management") return <Templates />;
-    return <Settings theme={theme} onTheme={toggleTheme} runtimeStatus={runtimeStatus} />;
-  }, [activeSession, consumeQueuedPrompt, queuedPrompt, sessionHydrationVersion, theme, updateSession, view]);
+    return <ChatWorkspace key={activeSession.id} session={activeSession} onSessionChange={updateSession} />;
+  }, [activeSession, theme, updateSession, view]);
   const toggleSidebar = () => {
-    if (window.matchMedia("(max-width: 767px)").matches) {
+    if (isMobile) {
       setSidebarOpen((open) => !open);
       return;
     }
@@ -579,39 +1307,42 @@ export function App() {
 
   return <div className="ds-shell" data-sidebar-open={sidebarOpen} data-sidebar-collapsed={sidebarCollapsed} data-view={view}>
     <div className="ds-body">
-      <aside className="ds-sidebar" data-shell-layer="navigation" aria-label="DeepStudent 主入口">
+      <aside className="ds-sidebar" data-shell-layer="navigation" data-drop-ignore="true" aria-label="DeepStudent 主入口">
         <div className="ds-sidebar__brand">
-          <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏"><Icon name="chevron-left" size={16} /></button>
+          {isMobile && sidebarOpen && <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="关闭导航" aria-expanded={sidebarOpen}><Icon name="menu" size={16} /></button>}
           <span className="ds-sidebar__brand-name">DeepStudent</span>
-          <div className="ds-sidebar__brand-actions"><button className="ds-icon-button" aria-label="搜索会话"><Icon name="search" size={15} /></button></div>
+          <div className="ds-sidebar__brand-actions">
+            <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
+            {!isMobile && !sidebarCollapsed && <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起导航" aria-expanded={!sidebarCollapsed}><Icon name="sidebar" size={16} /></button>}
+          </div>
         </div>
         <nav className="ds-primary-nav" aria-label="主入口">
           {navItems.map((item) => <button key={item.id} className="ds-nav-row" onClick={() => item.id === "chat-v2" ? newSession() : selectView(item.id)} data-active={item.id === view}><span className="ds-nav-icon"><Icon name={item.icon} size={16} /></span><span>{item.label}</span></button>)}
         </nav>
         <div className="ds-sidebar__scroll">
-          <section className="ds-sidebar-section ds-conversation-section">
-            <div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={newSession} aria-label="新建对话"><Icon name="plus" size={14} /></button></div>
-            <label className="ds-conversation-search"><Icon name="search" size={13} /><input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话…" aria-label="搜索会话" /></label>
-            {visibleSessions.length === 0 ? <p className="ds-sidebar-empty">没有匹配的会话</p> : visibleSessions.map((session) => <button type="button" key={session.id} className="ds-thread-row" data-active={session.id === activeSession.id} onClick={() => { setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); setSessions((current) => current.map((item) => item.id === session.id ? { ...item, unread: 0 } : item)); }}><span className={`ds-thread-dot ${session.unread ? "ds-thread-dot--accent" : ""}`}>{session.unread ? "●" : "○"}</span><span>{session.title}</span>{session.unread > 0 && <small>{session.unread}</small>}</button>)}
-          </section>
-          <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><p className="ds-sidebar-empty">将重要会话置顶，方便快速返回</p></section>
+          <section className="ds-sidebar-section"><div className="ds-section-label"><span>置顶</span><button className="ds-section-action" aria-label="收起置顶"><Icon name="chevron-down" size={14} /></button></div><p className="ds-sidebar-empty">暂无置顶会话</p></section>
           <section className="ds-sidebar-section"><div className="ds-section-label"><span>主题</span><span className="ds-section-tools"><button className="ds-section-action" aria-label="收起主题"><Icon name="chevron-down" size={14} /></button><button className="ds-section-action" aria-label="新建主题"><Icon name="plus" size={14} /></button></span></div><p className="ds-sidebar-empty">暂无主题</p></section>
+          <section className="ds-sidebar-section ds-conversation-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={newSession} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><label className="ds-conversation-search"><MagnifyingGlass size={13} /><input value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话…" aria-label="搜索会话" /></label>{visibleSessions.length === 0 ? <p className="ds-sidebar-empty">没有匹配的会话</p> : visibleSessions.map((session) => <div key={session.id} className="ds-thread-row" data-active={session.id === activeSession.id}><button type="button" className="ds-thread-row__main" onClick={() => { setActiveSessionId(session.id); setView("chat-v2"); setSidebarOpen(false); setSessions((current) => current.map((item) => item.id === session.id ? { ...item, unread: 0 } : item)); }}><span className={`ds-thread-dot ${session.unread ? "ds-thread-dot--accent" : ""}`}>{session.unread ? "●" : "○"}</span><span>{session.title}</span>{session.unread > 0 && <small>{session.unread}</small>}</button><button type="button" className="ds-thread-row__delete" onClick={() => deleteSession(session.id)} aria-label={`删除会话 ${session.title}`} title="删除会话"><Icon name="x" size={13} /></button></div>)}</section>
         </div>
         <div className="ds-sidebar__footer">
-          <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
-          <div className="ds-runtime-status" id="runtime-status"><i></i><span>{runtimeStatus}</span></div>
-          <div className="ds-sidebar__version">DeepStudent Go · 0.1</div>
+          <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings" || settingsOpen}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
         </div>
       </aside>
       <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
       <main className="ds-main" data-shell-layer="workspace" data-view={view}>
         <div className="ds-main__drag-region" aria-hidden="true" />
-        <div className="ds-main__floating-actions" aria-label="窗口与工作区操作">
-          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={sidebarCollapsed || sidebarOpen}><Icon name="sliders" size={17} /></button>
-          <div className="ds-main__actions"><button className="ds-icon-button" onClick={() => selectView("learning-hub")} aria-label="搜索"><Icon name="search" size={16} /></button><button className="ds-icon-button" onClick={newSession} aria-label="新建"><Icon name="plus" size={16} /></button><button className="ds-icon-button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button></div>
+        {((isMobile && !sidebarOpen) || (!isMobile && sidebarCollapsed)) && <div className="ds-main__floating-actions" aria-label="工作区导航">
+          <button className="ds-sidebar-affordance" type="button" onClick={toggleSidebar} aria-label="打开导航" aria-expanded={isMobile ? sidebarOpen : !sidebarCollapsed}>
+            <Icon name={isMobile ? "menu" : "sidebar"} size={17} />
+          </button>
+        </div>}
+        <div className="ds-main__actions" aria-label="窗口操作">
+          <button className="ds-icon-button" type="button" onClick={toggleTheme} aria-label="切换主题"><Icon name="sun" size={16} /></button>
         </div>
-        <div className="ds-main__content">{content}</div>
+        <WorkspaceDropZone>{content}</WorkspaceDropZone>
       </main>
     </div>
+    {settingsOpen && <Settings theme={theme} onTheme={toggleTheme} themeColor={themeColor} onThemeColor={updateThemeColor} onOpenOnboarding={openOnboarding} onClose={() => setSettingsOpen(false)} />}
+    {onboardingOpen && <Onboarding initial={onboardingConfig} onComplete={completeOnboarding} />}
   </div>;
 }
