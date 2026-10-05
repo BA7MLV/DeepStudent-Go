@@ -67,9 +67,11 @@ func run() error {
 	mygo.Bind(runtime.NewHealthService())
 
 	mygo.App.WhenReady(func() {
-		nativeMode := os.Getenv("DEEPSTUDENT_NATIVE_SHELL") == "1"
+		webMode := os.Getenv("DEEPSTUDENT_WEB_SHELL") == "1"
+		nativeMode := !webMode
 		var shell *nativeShell
 		var window *mygo.Window
+		var chatWindow *mygo.Window
 		if nativeMode {
 			shell = newNativeShell()
 		}
@@ -95,6 +97,19 @@ func run() error {
 			}
 			_, _ = window.Page().Eval("window.dispatchEvent(new CustomEvent('deepstudent:command',{detail:{command:" + strconv.Quote(command) + "}}))")
 		})
+		openChat := func() {
+			if chatWindow != nil {
+				chatWindow.Show()
+				chatWindow.Focus()
+				return
+			}
+			chatWindow = mygo.NewWindow(mygo.WindowOptions{
+				Title: "DeepStudent Chat", URL: "/", Parent: window, Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 44, BackgroundColor: "#f7f7f5", StateKey: "chat-web" ,
+			})
+		}
+		if shell != nil {
+			shell.openChat = openChat
+		}
 		opts := mygo.WindowOptions{
 			Title:           "DeepStudent Go",
 			TitleBarStyle:   mygo.TitleBarHidden,
