@@ -22,6 +22,7 @@ type nativeShell struct {
 	dark           bool
 	lastRefresh    time.Time
 	runtimeHealthy bool
+	openChat       func()
 }
 
 func newNativeShell() *nativeShell {
@@ -163,9 +164,12 @@ func (s *nativeShell) chatPage(c *ui.Context) {
 			statusDot(c, t.Success)
 			ui.Text(c, "serverapp HTTP/SSE runtime is running").TextColor(t.TextMuted)
 		})
+		if ui.PrimaryButton(c, "Open chat workspace").Clicked() && s.openChat != nil {
+			s.openChat()
+		}
 		ui.Box(c).Padding(t.Space(4)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
-			ui.Text(c, "Next native migration seam").Bold()
-			ui.Text(c, "Replace this card with a native thread list and composer while retaining the existing /api and SSE endpoints.").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "Native migration boundary").Bold()
+			ui.Text(c, "The native shell owns navigation and desktop controls. Chat remains a full WebView window and keeps the same Go HTTP/SSE contract.").FontSize(12).TextColor(t.TextMuted)
 		})
 	})
 }
