@@ -100,14 +100,14 @@ func run() error {
 			TitleBarStyle:   mygo.TitleBarHidden,
 			TitleBarHeight:  44,
 			BackgroundColor: "#f7f7f5",
-			Width:           1200,
-			Height:          780,
-			MinWidth:        860,
-			MinHeight:       560,
-			StateKey:        "main",
 		}
 		if nativeMode {
 			opts.Content = ui.View(shell.view)
+			opts.Width = 1200
+			opts.Height = 780
+			opts.MinWidth = 860
+			opts.MinHeight = 560
+			opts.StateKey = "native-main"
 		} else {
 			opts.URL = "/"
 		}
