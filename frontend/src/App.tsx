@@ -538,6 +538,17 @@ export function App() {
     setSidebarOpen(false);
     void createRuntimeSession(session).catch(() => undefined);
   };
+  useEffect(() => {
+    const onNativeCommand = (event: Event) => {
+      const command = (event as CustomEvent<{ command?: unknown }>).detail?.command;
+      if (command === "new-session") newSession();
+      else if (command === "learning-hub") selectView("learning-hub");
+      else if (command === "settings") selectView("settings");
+      else if (command === "toggle-theme") toggleTheme();
+    };
+    window.addEventListener("deepstudent:command", onNativeCommand);
+    return () => window.removeEventListener("deepstudent:command", onNativeCommand);
+  });
   const askFromResource = (question: ResourceQuestion) => {
     setActiveSessionId(activeSession.id);
     setQueuedPrompt(question.prompt);
