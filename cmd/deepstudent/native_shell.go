@@ -236,7 +236,7 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 	default:
 		ui.Text(c, "General").FontSize(16).Bold()
 		ui.Text(c, "Desktop shell preferences and navigation are now native. Account and model configuration remain served by the existing Go API.").TextColor(t.TextMuted)
-	})
+	}
 }
 
 func (s *nativeShell) statusBar(c *ui.Context) {
