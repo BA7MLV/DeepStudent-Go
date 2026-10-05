@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/BA7MLV/DeepStudent-Go/internal/config"
@@ -65,10 +66,19 @@ func run() error {
 	mygo.Bind(runtime.NewHealthService())
 
 	mygo.App.WhenReady(func() {
-		mygo.NewWindow(mygo.WindowOptions{
-			Title:         "DeepStudent Go",
-			URL:           "/",
-			TitleBarStyle: mygo.TitleBarHidden,
+		var window *mygo.Window
+		installNativeMenu(func(command string) {
+			if window == nil || window.Page() == nil {
+				return
+			}
+			_, _ = window.Page().Eval("window.dispatchEvent(new CustomEvent('deepstudent:command',{detail:{command:" + strconv.Quote(command) + "}}))")
+		})
+		window = mygo.NewWindow(mygo.WindowOptions{
+			Title:           "DeepStudent Go",
+			URL:             "/",
+			TitleBarStyle:   mygo.TitleBarHidden,
+			TitleBarHeight:  44,
+			BackgroundColor: "#f7f7f5",
 		})
 	})
 
@@ -91,4 +101,27 @@ func resolveDesktopStoragePaths(cfg config.Config) (config.Config, error) {
 		cfg.Storage.BlobRoot = filepath.Join(root, cfg.Storage.BlobRoot)
 	}
 	return cfg, nil
+}
+
+// installNativeMenu keeps desktop-level actions in the MyGo native menu instead
+// of duplicating them as web-only affordances. The page receives a small,
+// explicit command event for actions that belong to the React workspace.
+func installNativeMenu(dispatch func(string)) {
+	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+		{Role: mygo.RoleAppMenu},
+		{Label: "File", Submenu: []*mygo.MenuItem{
+			{Label: "New Session", Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) { dispatch("new-session") }},
+			mygo.Separator(),
+			{Role: mygo.RoleClose},
+		}},
+		{Label: "View", Submenu: []*mygo.MenuItem{
+			{Label: "Learning Resources", Accelerator: "CmdOrCtrl+Shift+L", Click: func(*mygo.MenuItem, *mygo.Window) { dispatch("learning-hub") }},
+			{Label: "Settings", Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) { dispatch("settings") }},
+			{Label: "Toggle Theme", Click: func(*mygo.MenuItem, *mygo.Window) { dispatch("toggle-theme") }},
+			mygo.Separator(),
+			{Role: mygo.RoleReload},
+		}},
+		{Role: mygo.RoleEditMenu},
+		{Role: mygo.RoleWindowMenu},
+	}))
 }
