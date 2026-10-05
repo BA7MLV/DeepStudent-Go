@@ -14,6 +14,16 @@ the Go server translates these records into its existing SSE events.
 - cancellation is `POST /run/<run_id>/cancel`; the sidecar emits a final
   `run.canceled` record before closing when possible
 
+The Go `SidecarRuntime` adapter uses an externally managed endpoint by default.
+The optional `packages/agent-sidecar` process can be supervised by Compose (or
+`runtime.piCommand` in managed mode); Go never uses shell expansion.
+`POST <endpoint>/run` opens the stream and
+`POST <endpoint>/run/<run_id>/cancel` requests cancellation. A local MyGo or
+Docker process with no endpoint configured keeps the deterministic runtime.
+When an endpoint is configured, `serverapp` probes `GET /healthz`; `/healthz`
+on Go remains live while `/readyz` stays `503` until the sidecar becomes
+reachable, then flips ready without restarting the desktop or container.
+
 Every record uses this envelope:
 
 ```json
@@ -22,6 +32,13 @@ Every record uses this envelope:
 
 `seq` starts at one and increases strictly within a run. The Go bridge uses it
 as the SSE `id` and rejects a sequence regression or a changed `run_id`.
+
+For the first tool-capable run, the sidecar must preserve this ordering:
+`run.started`, zero or more `message.delta`, each `tool.call` followed by its
+matching `tool.result`, then exactly one terminal (`run.completed`,
+`run.error`, or `run.canceled`). A stream that closes without a terminal is
+converted to `run.error` with `sidecar_stream_closed`; malformed NDJSON or an
+event after a terminal is `sidecar_stream_error`.
 
 ## Event payloads
 

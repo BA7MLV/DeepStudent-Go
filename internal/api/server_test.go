@@ -22,6 +22,29 @@ func TestHealthAndRequestID(t *testing.T) {
 	}
 }
 
+func TestReadyzTracksRuntimeReadiness(t *testing.T) {
+	server := NewServer(config.Defaults(), nil)
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("not-ready response = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+
+	server = NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("ready response = %d, want %d", response.Code, http.StatusOK)
+	}
+	server.SetReady(false)
+	response = httptest.NewRecorder()
+	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("manually disabled response = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+}
+
 func TestRunSSE(t *testing.T) {
 	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
 	res := httptest.NewRecorder()

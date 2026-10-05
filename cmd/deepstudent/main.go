@@ -50,19 +50,7 @@ func run() error {
 	go func() {
 		serveDone <- components.HTTP.Serve(listener)
 	}()
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = components.HTTP.Shutdown(shutdownCtx)
-		_ = listener.Close()
-		select {
-		case serveErr := <-serveDone:
-			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-				log.Printf("deepstudent HTTP server stopped: %v", serveErr)
-			}
-		default:
-		}
-	}()
+	defer shutdownDesktopHTTP(components.HTTP, listener, serveDone)
 
 	mygo.Bind(runtime.NewHealthService())
 
@@ -135,6 +123,46 @@ func run() error {
 	})
 
 	return mygo.App.Run()
+}
+
+// shutdownDesktopHTTP closes the HTTP listener before releasing the runtime
+// and its backing store. Waiting for Serve to return matters here: closing the
+// store while Serve is still starting can race with a handler that has already
+// accepted a request, and it also leaves the Serve goroutine behind when the
+// native app exits before the HTTP goroutine gets scheduled.
+func shutdownDesktopHTTP(server *http.Server, listener net.Listener, serveDone <-chan error) {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if server != nil {
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("deepstudent HTTP shutdown failed: %v", err)
+			// Shutdown leaves connections that did not drain before the
+			// deadline open. Force-close those connections before releasing the
+			// runtime and SQLite store, otherwise a late handler can race the
+			// resource teardown below.
+			_ = server.Close()
+		}
+	}
+	if listener != nil {
+		// Shutdown normally closes Serve's listener. Keep this explicit for the
+		// startup race where Serve has not registered it with the server yet.
+		_ = listener.Close()
+	}
+	if serveDone == nil {
+		return
+	}
+	// Serve should return immediately once the listener is closed. Keep a
+	// bounded wait so a malformed custom listener cannot block app shutdown.
+	wait := time.NewTimer(time.Second)
+	defer wait.Stop()
+	select {
+	case serveErr := <-serveDone:
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			log.Printf("deepstudent HTTP server stopped: %v", serveErr)
+		}
+	case <-wait.C:
+		log.Printf("deepstudent HTTP server did not stop before shutdown deadline")
+	}
 }
 
 // resolveDesktopStoragePaths keeps a Finder-launched app from trying to create
