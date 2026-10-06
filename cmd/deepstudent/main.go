@@ -35,6 +35,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// MyGo serves the embedded React document from this custom origin. Keep
+	// the origin desktop-only so the shared server defaults remain strict.
+	cfg.Server.CORSAllowlist = append(cfg.Server.CORSAllowlist, "mygo://localhost")
 	components, err := serverapp.New(context.Background(), cfg)
 	if err != nil {
 		return err

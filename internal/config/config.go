@@ -121,10 +121,7 @@ type ModelSelection struct {
 func Defaults() Config {
     return Config{
         Version: DefaultVersion,
-		// The MyGo embedded WebView uses mygo://localhost as its origin. Keep it
-		// on the local allowlist so the desktop React shell can reach the loopback
-		// API server when it sends runs and subscribes to SSE events.
-		Server: ServerConfig{Addr: "127.0.0.1:8080", ReadTimeout: 15*time.Second, WriteTimeout: 0, IdleTimeout: 60*time.Second, SSEHeartbeat: 15*time.Second, CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173", "mygo://localhost"}},
+        Server: ServerConfig{Addr: "127.0.0.1:8080", ReadTimeout: 15*time.Second, WriteTimeout: 0, IdleTimeout: 60*time.Second, SSEHeartbeat: 15*time.Second, CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173"}},
         Storage: StorageConfig{SQLitePath: "data/deepstudent.db", BlobRoot: "data/blobs", AttachmentMaxBytes: 32 << 20, AttachmentAllowedMIMEs: []string{"text/*", "application/json", "application/pdf", "application/octet-stream", "image/*", "audio/*", "video/*"}},
         Runtime: RuntimeConfig{DefaultProvider: "deterministic", DefaultTimeout: 45*time.Second, MaxTokens: 2048, MaxConcurrency: 2},
         Auth: AuthConfig{CookieName: "deepstudent_session", SessionTTL: 24*time.Hour},
