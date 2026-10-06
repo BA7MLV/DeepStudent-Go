@@ -594,13 +594,13 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="ds-settings-empty-state" role="status">
           <span className="ds-settings-empty-state__icon"><Icon name="settings" size={20} /></span>
           <div>
-            <b>提供商配置由 Go runtime 管理</b>
-            <p>浏览器没有可编辑的密钥配置。请在启动 runtime 的环境变量或配置文件中设置；密钥不会进入页面，也不会写入浏览器存储。</p>
+            <b>尚未读取提供商配置</b>
+            <p>Go runtime 当前没有配置读写端点。请在启动 runtime 的环境变量或配置文件中设置；密钥不会进入页面，也不会写入浏览器存储。</p>
           </div>
         </div>
         <section className="ds-settings-provider" aria-labelledby="ds-provider-heading">
           <div className="ds-settings-provider__heading">
-            <div><h2 id="ds-provider-heading">当前配置</h2><p>以下字段只展示 runtime 配置契约，不会改变服务端设置。</p></div>
+            <div><h2 id="ds-provider-heading">配置字段预览</h2><p>选择一个内置 profile 查看字段；这些值不会改变服务端设置。</p></div>
             <span className="ds-settings-provider__badge">仅预览</span>
           </div>
           <label className="ds-settings-field">
