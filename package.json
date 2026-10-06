@@ -6,10 +6,11 @@
   "scripts": {
     "dev:web": "cd frontend && bun run dev",
     "build:web": "cd frontend && bun run build",
+    "contract:test": "node scripts/validate-runtime-contract.mjs",
     "generate": "mygo generate",
     "build": "mygo build"
   },
   "devDependencies": {
-    "mygo-cli": "0.2.4"
+    "mygo-cli": "0.2.5"
   }
 }

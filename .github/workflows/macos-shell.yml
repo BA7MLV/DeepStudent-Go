@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - migration/mygo-shell-poc
+      - feature/go-backend-runtime
+      - integration/agent-loop
   pull_request:
     branches:
       - main
@@ -29,18 +31,16 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install JavaScript dependencies
-        run: |
-          bun install --force
-          bun add --no-save @rollup/rollup-darwin-arm64@4.63.6
+        run: bun install
 
       - name: Resolve Go module checksums
         run: go mod tidy
 
       - name: Install MyGo CLI
-        run: go install github.com/egoist/mygo/cmd/mygo@v0.2.4
+        run: go install github.com/egoist/mygo/cmd/mygo@v0.2.5
 
-      - name: Generate typed bindings
-        run: mygo generate
+      - name: Verify checked-in typed bindings
+        run: test -s frontend/src/mygo.ts
 
       - name: Build unsigned macOS app
         run: bun run build -- -platform darwin/arm64

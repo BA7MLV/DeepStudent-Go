@@ -1,0 +1,50 @@
+name: Verify Go backend
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/go-backend-runtime
+      - goal/go-runtime-foundation
+      - integration/agent-loop
+  pull_request:
+    branches:
+      - main
+      - feature/go-backend-runtime
+      - goal/go-runtime-foundation
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Resolve Go module checksums
+        run: go mod tidy
+      - name: Normalize Go formatting
+        run: gofmt -w cmd internal
+      - name: Contract tests (HTTP/SSE, replay, attachments, persistence)
+        run: go test -count=1 ./internal/api ./internal/attachments ./internal/storage
+      - name: Test
+        run: |
+          set -o pipefail
+          go test -count=1 ./... 2>&1 | tee go-test.log
+      - name: Upload Go test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-log
+          path: go-test.log
+          if-no-files-found: ignore
+      - name: Vet
+        run: go vet ./...
+      - name: Build server
+        run: CGO_ENABLED=0 go build ./cmd/server

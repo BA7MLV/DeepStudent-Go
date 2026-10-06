@@ -106,16 +106,38 @@ type SseFrame = {
 };
 
 const defaultBaseUrl = (): string => {
-  // Do not put provider URLs or credentials in the bundle. This is only a
-  // local API route and can be overridden by the deployment environment.
   const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env;
   const configured = typeof env?.VITE_GO_RUNTIME_URL === "string" ? env.VITE_GO_RUNTIME_URL.trim() : "";
-  return configured || "/api/v1";
+  if (configured) return configured;
+  // MyGo serves the embedded frontend from `mygo://localhost`, so a relative
+  // `/api/v1` URL would stay on that custom scheme and never reach the local
+  // HTTP runtime. The desktop shell appends this value at window creation;
+  // static web previews continue to use the same-origin API below.
+  if (typeof window !== "undefined") {
+    const shellRuntime = new URLSearchParams(window.location.search).get("runtime");
+    if (shellRuntime?.trim()) return shellRuntime.trim();
+  }
+  const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
+  return protocol === "http:" || protocol === "https:" ? "/api/v1" : "http://127.0.0.1:8080/api/v1";
 };
 
 const normalizeBaseUrl = (value: string): string => value.trim().replace(/\/+$/, "") || "/api/v1";
 
 const runtimeUrl = (baseUrl: string, path: string): string => `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+
+export type RuntimeAttachment = {
+  sha256: string; size: number; mime: string; filename?: string; workspace_ref: string;
+};
+
+export async function uploadRuntimeAttachment(file: File, baseUrl?: string, signal?: AbortSignal): Promise<RuntimeAttachment> {
+  const form = new FormData(); form.append("file", file, file.name);
+  const response = await fetch(runtimeUrl(normalizeBaseUrl(baseUrl ?? defaultBaseUrl()), "/attachments"), { method: "POST", headers: { Accept: "application/json", "X-Request-ID": randomRequestId() }, body: form, signal });
+  if (!response.ok) throw new GoRuntimeError(`Attachment upload failed (HTTP ${response.status})`, { code: `http_${response.status}` });
+  const payload = await response.json() as { attachment?: RuntimeAttachment } | RuntimeAttachment;
+  const attachment = "attachment" in payload ? payload.attachment : payload;
+  if (!attachment || typeof (attachment as RuntimeAttachment).workspace_ref !== "string") throw new GoRuntimeError("Runtime returned an invalid attachment", { code: "invalid_attachment" });
+  return attachment as RuntimeAttachment;
+}
 
 const randomRequestId = (): string => {
   const cryptoApi = typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto : undefined;
