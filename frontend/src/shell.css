@@ -115,6 +115,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    the shell provides a quiet level-reactive surface behind the capsule. */
 .ds-composer-shell { position:relative; width:100%; isolation:isolate; }
 .ds-composer-shell > .ds-composer { position:relative; z-index:1; }
+.ds-composer-shell > .ds-composer > .ds-composer__toolbar,
+.ds-composer-shell > .ds-composer > .ds-composer-tool,
+.ds-composer-shell > .ds-composer > textarea { position:relative; z-index:1; }
 .ds-composer-shell > .ds-composer .ds-voice-overlay {
   position:absolute; z-index:0; inset:0; display:block; overflow:hidden; border-radius:inherit;
   pointer-events:none; isolation:isolate; opacity:0; visibility:hidden;
