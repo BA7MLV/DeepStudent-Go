@@ -54,19 +54,7 @@ func run() error {
 	go func() {
 		serveDone <- components.HTTP.Serve(listener)
 	}()
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = components.HTTP.Shutdown(shutdownCtx)
-		_ = listener.Close()
-		select {
-		case serveErr := <-serveDone:
-			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-				log.Printf("deepstudent HTTP server stopped: %v", serveErr)
-			}
-		default:
-		}
-	}()
+	defer shutdownDesktopHTTP(components.HTTP, listener, serveDone)
 
 	mygo.Bind(runtime.NewHealthService())
 
@@ -173,6 +161,35 @@ func nativeRuntimeBaseURL(listener net.Listener) string {
 		host = "127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+// shutdownDesktopHTTP closes the listener before releasing the runtime/store.
+// Waiting for Serve to return prevents a late handler from racing teardown.
+func shutdownDesktopHTTP(server *http.Server, listener net.Listener, serveDone <-chan error) {
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if server != nil {
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("deepstudent HTTP shutdown failed: %v", err)
+			_ = server.Close()
+		}
+	}
+	if listener != nil {
+		_ = listener.Close()
+	}
+	if serveDone == nil {
+		return
+	}
+	wait := time.NewTimer(time.Second)
+	defer wait.Stop()
+	select {
+	case serveErr := <-serveDone:
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			log.Printf("deepstudent HTTP server stopped: %v", serveErr)
+		}
+	case <-wait.C:
+		log.Printf("deepstudent HTTP server did not stop before shutdown deadline")
+	}
 }
 
 // desktopWebURL points the embedded React document at the loopback API while
