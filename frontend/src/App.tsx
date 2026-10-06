@@ -492,7 +492,7 @@ function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime>
   const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerUp(event);
   const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerCancel(event);
   return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
-    <ComposerPrimitive.AddAttachment className="ds-composer-tool" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
+    <ComposerPrimitive.AddAttachment className="ds-composer-tool ds-composer-attachment" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
     <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
     <div className="ds-composer__toolbar">
       <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} />
