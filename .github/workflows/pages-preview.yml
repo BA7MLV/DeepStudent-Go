@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - migration/mygo-shell-poc
+      - integration/agent-loop
   pull_request:
     branches:
       - main
