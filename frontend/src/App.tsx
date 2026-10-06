@@ -474,9 +474,10 @@ function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }
 
   const isGestureArea = (event: React.PointerEvent<HTMLElement>) => {
     if (!(event.target instanceof Element)) return true;
-    // Keep regular controls clickable. The textarea and the empty composer
-    // surface are the intentional long-press recording targets.
-    return !event.target.closest("button, input, select, a");
+    // The whole empty composer is the long-press surface, including the
+    // textarea itself. Keep only actionable controls out of the gesture so
+    // attachment/send buttons retain their normal click behavior.
+    return !event.target.closest("button, select, a, [role=button], [data-voice-control]");
   };
 
   const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => {
