@@ -6,6 +6,7 @@
   "scripts": {
     "dev:web": "cd frontend && bun run dev",
     "build:web": "cd frontend && bun run build",
+    "contract:test": "node scripts/validate-runtime-contract.mjs",
     "generate": "mygo generate",
     "build": "mygo build"
   },

@@ -14,7 +14,6 @@ export type GoRuntimeEventType =
   | "run.started"
   | "message.delta"
   | "tool.call"
-  | "tool.result"
   | "run.completed"
   | "run.error"
   | "run.canceled"
@@ -36,8 +35,6 @@ export type GoRuntimeEvent = {
   done?: boolean;
   created_at?: string;
   metadata?: Record<string, unknown>;
-  tool_call?: { id?: string; name?: string; arguments?: unknown };
-  tool_result?: { call_id?: string; name?: string; output?: unknown; error?: boolean; error_message?: string };
 };
 
 type RunStartResponse = {
@@ -112,6 +109,14 @@ const defaultBaseUrl = (): string => {
   const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env;
   const configured = typeof env?.VITE_GO_RUNTIME_URL === "string" ? env.VITE_GO_RUNTIME_URL.trim() : "";
   if (configured) return configured;
+  // MyGo serves the embedded frontend from `mygo://localhost`, so a relative
+  // `/api/v1` URL would stay on that custom scheme and never reach the local
+  // HTTP runtime. The desktop shell appends this value at window creation;
+  // static web previews continue to use the same-origin API below.
+  if (typeof window !== "undefined") {
+    const shellRuntime = new URLSearchParams(window.location.search).get("runtime");
+    if (shellRuntime?.trim()) return shellRuntime.trim();
+  }
   const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
   return protocol === "http:" || protocol === "https:" ? "/api/v1" : "http://127.0.0.1:8080/api/v1";
 };
@@ -224,18 +229,6 @@ const eventValue = (event: GoRuntimeEvent, ...keys: string[]): unknown => {
   for (const key of keys) {
     if (record[key] !== undefined) return record[key];
     if (event.metadata && event.metadata[key] !== undefined) return event.metadata[key];
-    if (event.tool_call) {
-      if ((key === "tool_call_id" || key === "toolCallId" || key === "id") && event.tool_call.id !== undefined) return event.tool_call.id;
-      if ((key === "tool_name" || key === "toolName" || key === "name") && event.tool_call.name !== undefined) return event.tool_call.name;
-      if ((key === "arguments" || key === "args" || key === "input") && event.tool_call.arguments !== undefined) return event.tool_call.arguments;
-    }
-    if (event.tool_result) {
-      if ((key === "tool_call_id" || key === "toolCallId" || key === "id") && event.tool_result.call_id !== undefined) return event.tool_result.call_id;
-      if ((key === "tool_name" || key === "toolName" || key === "name") && event.tool_result.name !== undefined) return event.tool_result.name;
-      if ((key === "result" || key === "output" || key === "text") && event.tool_result.output !== undefined) return event.tool_result.output;
-      if (key === "error" && event.tool_result.error !== undefined) return event.tool_result.error;
-      if ((key === "error_message" || key === "errorMessage") && event.tool_result.error_message !== undefined) return event.tool_result.error_message;
-    }
   }
   return undefined;
 };
@@ -323,7 +316,7 @@ async function* readEventSource(url: string, signal: AbortSignal, EventSourceCto
   let wake: (() => void) | undefined;
   let failed: unknown;
   let closed = false;
-  const eventNames = ["run.started", "message.delta", "tool.call", "tool.result", "run.completed", "run.error", "run.canceled", "run", "completed", "error", "canceled"];
+  const eventNames = ["run.started", "message.delta", "tool.call", "run.completed", "run.error", "run.canceled", "run", "completed", "error", "canceled"];
   const push = (event: MessageEvent<string>, eventName?: string) => {
     queue.push({ id: event.lastEventId || undefined, event: eventName, data: event.data });
     wake?.();

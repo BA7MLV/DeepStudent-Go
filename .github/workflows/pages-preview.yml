@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - migration/mygo-shell-poc
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -20,16 +23,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
         with:
-          bun-version: 1.2.21
-      - run: bun install --frozen-lockfile
-      - run: cd frontend && VITE_DEPLOY_TARGET=pages bun run build
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run contract:test
+      - run: VITE_DEPLOY_TARGET=pages npm run build --workspace frontend
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist
 
   deploy:
+    if: github.event_name == 'push'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

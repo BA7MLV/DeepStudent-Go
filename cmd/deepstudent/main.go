@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -50,7 +51,19 @@ func run() error {
 	go func() {
 		serveDone <- components.HTTP.Serve(listener)
 	}()
-	defer shutdownDesktopHTTP(components.HTTP, listener, serveDone)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = components.HTTP.Shutdown(shutdownCtx)
+		_ = listener.Close()
+		select {
+		case serveErr := <-serveDone:
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				log.Printf("deepstudent HTTP server stopped: %v", serveErr)
+			}
+		default:
+		}
+	}()
 
 	mygo.Bind(runtime.NewHealthService())
 
@@ -59,6 +72,11 @@ func run() error {
 		// DEEPSTUDENT_NATIVE_SHELL=1 enables the native UI experiment; the
 		// default remains the complete React WebView experience.
 		nativeMode := os.Getenv("DEEPSTUDENT_NATIVE_SHELL") == "1"
+		// The embedded MyGo document is served from mygo://localhost. Pass the
+		// actual loopback listener to the React shell so its Go adapter can send
+		// POST /runs and follow the SSE stream instead of resolving /api/v1 on the
+		// custom mygo:// origin.
+		webURL := desktopWebURL(listener)
 		var shell *nativeShell
 		var window *mygo.Window
 		var chatWindow *mygo.Window
@@ -94,7 +112,7 @@ func run() error {
 				return
 			}
 			chatWindow = mygo.NewWindow(mygo.WindowOptions{
-				Title: "DeepStudent Chat", URL: "/", Parent: window, Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 44, BackgroundColor: "#f7f7f5", StateKey: "chat-web",
+				Title: "DeepStudent Chat", URL: webURL, Parent: window, Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 44, BackgroundColor: "#f7f7f5", StateKey: "chat-web",
 			})
 		}
 		if shell != nil {
@@ -114,7 +132,7 @@ func run() error {
 			opts.MinHeight = 560
 			opts.StateKey = "native-main"
 		} else {
-			opts.URL = "/"
+			opts.URL = webURL
 		}
 		window = mygo.NewWindow(opts)
 		if shell != nil {
@@ -123,46 +141,6 @@ func run() error {
 	})
 
 	return mygo.App.Run()
-}
-
-// shutdownDesktopHTTP closes the HTTP listener before releasing the runtime
-// and its backing store. Waiting for Serve to return matters here: closing the
-// store while Serve is still starting can race with a handler that has already
-// accepted a request, and it also leaves the Serve goroutine behind when the
-// native app exits before the HTTP goroutine gets scheduled.
-func shutdownDesktopHTTP(server *http.Server, listener net.Listener, serveDone <-chan error) {
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if server != nil {
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Printf("deepstudent HTTP shutdown failed: %v", err)
-			// Shutdown leaves connections that did not drain before the
-			// deadline open. Force-close those connections before releasing the
-			// runtime and SQLite store, otherwise a late handler can race the
-			// resource teardown below.
-			_ = server.Close()
-		}
-	}
-	if listener != nil {
-		// Shutdown normally closes Serve's listener. Keep this explicit for the
-		// startup race where Serve has not registered it with the server yet.
-		_ = listener.Close()
-	}
-	if serveDone == nil {
-		return
-	}
-	// Serve should return immediately once the listener is closed. Keep a
-	// bounded wait so a malformed custom listener cannot block app shutdown.
-	wait := time.NewTimer(time.Second)
-	defer wait.Stop()
-	select {
-	case serveErr := <-serveDone:
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			log.Printf("deepstudent HTTP server stopped: %v", serveErr)
-		}
-	case <-wait.C:
-		log.Printf("deepstudent HTTP server did not stop before shutdown deadline")
-	}
 }
 
 // resolveDesktopStoragePaths keeps a Finder-launched app from trying to create
@@ -192,6 +170,12 @@ func nativeRuntimeBaseURL(listener net.Listener) string {
 		host = "127.0.0.1"
 	}
 	return "http://" + net.JoinHostPort(host, port)
+}
+
+// desktopWebURL points the embedded React document at the loopback API while
+// preserving the mygo://localhost origin used to load frontend/dist.
+func desktopWebURL(listener net.Listener) string {
+	return "/?runtime=" + url.QueryEscape(nativeRuntimeBaseURL(listener)+"/api/v1")
 }
 
 // installNativeMenu keeps desktop-level actions in the MyGo native menu instead

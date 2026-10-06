@@ -59,17 +59,6 @@ type RuntimeConfig struct {
     DefaultTimeout time.Duration `json:"defaultTimeout"`
     MaxTokens int `json:"maxTokens"`
     MaxConcurrency int `json:"maxConcurrency"`
-	// PiEndpoint selects an external pi-agent sidecar. When it is empty the
-	// local deterministic runtime remains the safe default for MyGo and tests.
-	// PiSkipStart is for deployments where another supervisor owns the sidecar
-	// process. Managed mode requires an explicit PiCommand and never uses shell
-	// expansion.
-	PiEndpoint string `json:"piEndpoint,omitempty"`
-	PiSkipStart bool `json:"piSkipStart,omitempty"`
-	PiMode string `json:"piMode,omitempty"`
-	PiCommand string `json:"piCommand,omitempty"`
-	PiArgs []string `json:"piArgs,omitempty"`
-	PiCancelTimeout time.Duration `json:"piCancelTimeout,omitempty"`
 }
 
 type AuthConfig struct {
@@ -132,7 +121,10 @@ type ModelSelection struct {
 func Defaults() Config {
     return Config{
         Version: DefaultVersion,
-        Server: ServerConfig{Addr: "127.0.0.1:8080", ReadTimeout: 15*time.Second, WriteTimeout: 0, IdleTimeout: 60*time.Second, SSEHeartbeat: 15*time.Second, CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173"}},
+		// The MyGo embedded WebView uses mygo://localhost as its origin. Keep it
+		// on the local allowlist so the desktop React shell can reach the loopback
+		// API server when it sends runs and subscribes to SSE events.
+		Server: ServerConfig{Addr: "127.0.0.1:8080", ReadTimeout: 15*time.Second, WriteTimeout: 0, IdleTimeout: 60*time.Second, SSEHeartbeat: 15*time.Second, CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173", "mygo://localhost"}},
         Storage: StorageConfig{SQLitePath: "data/deepstudent.db", BlobRoot: "data/blobs", AttachmentMaxBytes: 32 << 20, AttachmentAllowedMIMEs: []string{"text/*", "application/json", "application/pdf", "application/octet-stream", "image/*", "audio/*", "video/*"}},
         Runtime: RuntimeConfig{DefaultProvider: "deterministic", DefaultTimeout: 45*time.Second, MaxTokens: 2048, MaxConcurrency: 2},
         Auth: AuthConfig{CookieName: "deepstudent_session", SessionTTL: 24*time.Hour},
@@ -229,13 +221,6 @@ func applyEnv(cfg *Config, lookup lookupEnv) error {
     if v, ok := lookup("DEEPSTUDENT_DEFAULT_TIMEOUT"); ok { d, err := time.ParseDuration(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_DEFAULT_TIMEOUT: %w", err) }; cfg.Runtime.DefaultTimeout = d }
     if v, ok := lookup("DEEPSTUDENT_MAX_TOKENS"); ok { n, err := strconv.Atoi(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_MAX_TOKENS: %w", err) }; cfg.Runtime.MaxTokens = n }
     if v, ok := lookup("DEEPSTUDENT_MAX_CONCURRENCY"); ok { n, err := strconv.Atoi(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_MAX_CONCURRENCY: %w", err) }; cfg.Runtime.MaxConcurrency = n }
-	if v, ok := lookup("DEEPSTUDENT_PI_ENDPOINT"); ok { cfg.Runtime.PiEndpoint = strings.TrimSpace(v) }
-	if v, ok := lookup("DEEPSTUDENT_SIDECAR_URL"); ok { cfg.Runtime.PiEndpoint = strings.TrimSpace(v) }
-	if v, ok := lookup("DEEPSTUDENT_PI_SKIP_START"); ok { b, err := strconv.ParseBool(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_PI_SKIP_START: %w", err) }; cfg.Runtime.PiSkipStart = b }
-	if v, ok := lookup("DEEPSTUDENT_SIDECAR_MODE"); ok { cfg.Runtime.PiMode = strings.TrimSpace(v) }
-	if v, ok := lookup("DEEPSTUDENT_PI_COMMAND"); ok { cfg.Runtime.PiCommand = strings.TrimSpace(v) }
-	if v, ok := lookup("DEEPSTUDENT_PI_ARGS"); ok { cfg.Runtime.PiArgs = splitList(v) }
-	if v, ok := lookup("DEEPSTUDENT_PI_CANCEL_TIMEOUT"); ok { d, err := time.ParseDuration(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_PI_CANCEL_TIMEOUT: %w", err) }; cfg.Runtime.PiCancelTimeout = d }
     if v, ok := lookup("DEEPSTUDENT_AUTH_ENABLED"); ok { b, err := strconv.ParseBool(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_AUTH_ENABLED: %w", err) }; cfg.Auth.Enabled = b }
     if v, ok := lookup("DEEPSTUDENT_COOKIE_SECURE"); ok { b, err := strconv.ParseBool(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_COOKIE_SECURE: %w", err) }; cfg.Auth.CookieSecure = b }
 	if v, ok := lookup("DEEPSTUDENT_BASE_URL"); ok { if cfg.Providers == nil { cfg.Providers = map[string]ProviderProfile{} }; p := cfg.Providers[cfg.Runtime.DefaultProvider]; p.BaseURL = strings.TrimSpace(v); if p.Name == "" { p.Name = cfg.Runtime.DefaultProvider }; cfg.Providers[cfg.Runtime.DefaultProvider] = p }
@@ -276,30 +261,6 @@ func Validate(cfg Config) error {
     if cfg.Runtime.DefaultTimeout <= 0 { return errors.New("runtime defaultTimeout must be positive") }
     if cfg.Runtime.MaxTokens <= 0 { return errors.New("runtime maxTokens must be positive") }
     if cfg.Runtime.MaxConcurrency <= 0 { return errors.New("runtime maxConcurrency must be positive") }
-	piMode := strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
-	if piMode == "" {
-		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart {
-			piMode = "external"
-		} else {
-			piMode = "deterministic"
-		}
-	}
-	switch piMode {
-	case "deterministic":
-		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { return errors.New("runtime piEndpoint/piSkipStart require piMode external") }
-	case "external":
-		if strings.TrimSpace(cfg.Runtime.PiEndpoint) == "" { return errors.New("runtime piEndpoint is required for external pi mode") }
-		if err := validateURL(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
-	case "managed", "local":
-		if cfg.Runtime.PiSkipStart { return errors.New("runtime piSkipStart cannot be used with managed pi mode") }
-		if strings.TrimSpace(cfg.Runtime.PiCommand) == "" { return fmt.Errorf("runtime piCommand is required for piMode %q", piMode) }
-	default:
-		return fmt.Errorf("runtime piMode %q is invalid", piMode)
-	}
-	if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" && piMode != "external" {
-		if err := validateURL(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
-	}
-	if cfg.Runtime.PiCancelTimeout < 0 { return errors.New("runtime piCancelTimeout must not be negative") }
     if cfg.Auth.SessionTTL <= 0 { return errors.New("auth sessionTTL must be positive") }
     if strings.TrimSpace(cfg.Runtime.DefaultProvider) == "" { return errors.New("runtime defaultProvider must not be empty") }
     if _, ok := cfg.Providers[cfg.Runtime.DefaultProvider]; !ok { return fmt.Errorf("runtime defaultProvider %q is not configured", cfg.Runtime.DefaultProvider) }

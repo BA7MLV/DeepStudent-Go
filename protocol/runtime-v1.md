@@ -20,7 +20,11 @@ The first migration slice uses a versioned request/event envelope so the Go runt
   "version": "deepstudent.runtime.v1",
   "id": "req-123",
   "type": "runtime.health.result",
-  "data": {}
+  "data": {
+    "status": "ok",
+    "runtime": "go",
+    "startedAt": "2026-01-01T00:00:00Z"
+  }
 }
 ```
 
