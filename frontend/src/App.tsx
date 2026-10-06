@@ -545,11 +545,102 @@ function SettingRow({ title, detail, checked }: { title: string; detail: string;
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
 function WorkspacePage({ action, children }: { action?: React.ReactNode; children: React.ReactNode }) { return <section className="ds-workspace-page">{action && <div className="ds-page-actions"><button className="ds-primary-button">{action}</button></div>}{children}</section>; }
 
+type ProviderPreview = {
+  id: string;
+  label: string;
+  model: string;
+  baseURL: string;
+  apiKeyEnv: string;
+};
+
+// These profiles mirror the non-secret defaults in internal/config. The
+// browser intentionally only shows metadata. Credentials stay in the Go
+// process environment and are never read, entered, or persisted here.
+const providerPreviews: ProviderPreview[] = [
+  { id: "deterministic", label: "DeepStudent Local（无密钥）", model: "stub", baseURL: "本地 runtime", apiKeyEnv: "不需要" },
+  { id: "siliconflow", label: "SiliconFlow", model: "Qwen/Qwen2.5-7B-Instruct", baseURL: "https://api.siliconflow.cn/v1", apiKeyEnv: "SILICONFLOW_API_KEY" },
+  { id: "deepseek", label: "DeepSeek", model: "deepseek-chat", baseURL: "https://api.deepseek.com/v1", apiKeyEnv: "DEEPSEEK_API_KEY" },
+  { id: "custom-openai", label: "自定义 OpenAI 兼容服务", model: "未设置", baseURL: "由 DEEPSTUDENT_CUSTOM_BASE_URL 提供", apiKeyEnv: "DEEPSTUDENT_CUSTOM_API_KEY" },
+];
+
+function SettingsModal({ onClose }: { onClose: () => void }) {
+  const [providerId, setProviderId] = useState(providerPreviews[0].id);
+  const provider = providerPreviews.find((item) => item.id === providerId) ?? providerPreviews[0];
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  return <div className="ds-settings-modal" role="dialog" aria-modal="true" aria-labelledby="ds-settings-modal-title" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="ds-settings-modal__card">
+      <header className="ds-settings-modal__header">
+        <div>
+          <p className="ds-settings-modal__eyebrow">DeepStudent</p>
+          <h1 id="ds-settings-modal-title">设置</h1>
+          <p className="ds-settings-modal__subtitle">模型提供商与运行时</p>
+        </div>
+        <button className="ds-icon-button" type="button" onClick={onClose} aria-label="关闭设置"><Icon name="x" size={18} /></button>
+      </header>
+      <main className="ds-settings-modal__body">
+        <div className="ds-settings-empty-state" role="status">
+          <span className="ds-settings-empty-state__icon"><Icon name="settings" size={20} /></span>
+          <div>
+            <b>提供商配置由 Go runtime 管理</b>
+            <p>浏览器没有可编辑的密钥配置。请在启动 runtime 的环境变量或配置文件中设置；密钥不会进入页面，也不会写入浏览器存储。</p>
+          </div>
+        </div>
+        <section className="ds-settings-provider" aria-labelledby="ds-provider-heading">
+          <div className="ds-settings-provider__heading">
+            <div><h2 id="ds-provider-heading">当前配置</h2><p>以下字段只展示 runtime 配置契约，不会改变服务端设置。</p></div>
+            <span className="ds-settings-provider__badge">仅预览</span>
+          </div>
+          <label className="ds-settings-field">
+            <span>提供商 <small>provider</small></span>
+            <select value={providerId} onChange={(event) => setProviderId(event.target.value)} aria-label="提供商 provider">
+              {providerPreviews.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </select>
+          </label>
+          <label className="ds-settings-field">
+            <span>模型 <small>model</small></span>
+            <input value={provider.model} readOnly aria-label="模型 model" />
+          </label>
+          <label className="ds-settings-field">
+            <span>Base URL <small>baseURL / base_url</small></span>
+            <input value={provider.baseURL} readOnly aria-label="Base URL" />
+          </label>
+          <label className="ds-settings-field">
+            <span>API-key environment variable <small>apiKeyEnv</small></span>
+            <input value={provider.apiKeyEnv} readOnly aria-label="API-key environment variable" />
+          </label>
+          <label className="ds-settings-field">
+            <span>运行时 <small>runtime</small></span>
+            <input value="Go runtime · HTTP/SSE · /api/v1" readOnly aria-label="运行时 runtime" />
+          </label>
+        </section>
+      </main>
+      <footer className="ds-settings-modal__footer">
+        <p>要应用变更，请修改 Go runtime 的配置后重启服务。</p>
+        <button type="button" className="ds-secondary-button" onClick={onClose}>完成</button>
+      </footer>
+    </section>
+  </div>;
+}
+
 export function App() {
   const [view, setView] = useState<ViewId>("chat-v2");
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
   const [onboardingOpen, setOnboardingOpen] = useState(() => onboardingConfig === null);
 
@@ -606,7 +697,7 @@ export function App() {
           <section className="ds-sidebar-section"><div className="ds-section-label"><span>对话</span><button className="ds-section-action" onClick={() => selectView("chat-v2")} aria-label="新建对话"><Icon name="plus" size={14} /></button></div><p className="ds-sidebar-empty">暂无对话</p></section>
         </div>
         <div className="ds-sidebar__footer">
-          <button className="ds-nav-row" onClick={() => selectView("settings")} data-active={view === "settings"}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
+          <button className="ds-nav-row" onClick={() => setSettingsOpen(true)} data-active={settingsOpen} aria-haspopup="dialog" aria-expanded={settingsOpen}><span className="ds-nav-icon"><Icon name="settings" size={16} /></span><span>设置</span></button>
         </div>
       </aside>
       <button className="ds-overlay" onClick={() => setSidebarOpen(false)} aria-label="关闭导航"></button>
@@ -627,5 +718,6 @@ export function App() {
       </main>
     </div>
     {onboardingOpen && <Onboarding initial={onboardingConfig} onComplete={completeOnboarding} />}
+    {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
   </div>;
 }

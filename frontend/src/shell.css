@@ -69,3 +69,42 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .ds-thread-viewport { overscroll-behavior:contain; padding-bottom:4px; }
 }
 .ds-chat-empty-state > .ds-chat-center { flex:0 0 auto; }
+
+/* Settings stay in the current workspace. The modal exposes the runtime
+   contract without implying that provider credentials can be edited in the
+   browser. */
+.ds-settings-modal { position:fixed; z-index:90; inset:0; display:grid; place-items:center; padding:24px; background:color-mix(in srgb,var(--ds-bg) 82%,transparent); backdrop-filter:blur(10px); animation:ds-fade-up 220ms var(--ds-ease) both; }
+.ds-settings-modal__card { display:flex; flex-direction:column; width:min(720px,100%); max-height:min(760px,calc(100dvh - 48px)); overflow:hidden; border:1px solid var(--ds-border); border-radius:18px; background:var(--ds-panel); box-shadow:0 24px 80px rgba(0,0,0,.2); }
+.ds-settings-modal__header { display:flex; align-items:flex-start; justify-content:space-between; gap:18px; padding:24px 28px 18px; border-bottom:1px solid var(--ds-border); }
+.ds-settings-modal__header h1 { margin:0; font-size:22px; font-weight:600; letter-spacing:-.03em; }
+.ds-settings-modal__eyebrow { margin:0 0 3px; color:var(--ds-muted); font-size:11px; font-weight:600; letter-spacing:.02em; }
+.ds-settings-modal__subtitle { margin:4px 0 0; color:var(--ds-muted); font-size:12px; }
+.ds-settings-modal__body { overflow:auto; padding:20px 28px 24px; }
+.ds-settings-empty-state { display:flex; align-items:flex-start; gap:12px; padding:14px; border:1px dashed color-mix(in srgb,var(--ds-title-accent) 46%,var(--ds-border)); border-radius:12px; background:color-mix(in srgb,var(--ds-title-accent) 7%,var(--ds-panel)); }
+.ds-settings-empty-state__icon { display:grid; place-items:center; width:34px; height:34px; flex:0 0 34px; border-radius:10px; background:color-mix(in srgb,var(--ds-title-accent) 16%,transparent); color:var(--ds-title-accent); }
+.ds-settings-empty-state b { display:block; font-size:13px; }
+.ds-settings-empty-state p { margin:4px 0 0; color:var(--ds-muted); font-size:12px; line-height:1.5; }
+.ds-settings-provider { margin-top:20px; }
+.ds-settings-provider__heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:12px; }
+.ds-settings-provider__heading h2 { margin:0; font-size:15px; font-weight:600; }
+.ds-settings-provider__heading p { margin:3px 0 0; color:var(--ds-muted); font-size:12px; }
+.ds-settings-provider__badge { flex:0 0 auto; padding:3px 8px; border-radius:999px; background:var(--ds-panel-muted); color:var(--ds-muted); font-size:11px; }
+.ds-settings-field { display:grid; grid-template-columns:minmax(190px,.72fr) minmax(0,1.28fr); align-items:center; gap:14px; min-height:48px; padding:7px 0; border-top:1px solid var(--ds-border); }
+.ds-settings-field > span { font-size:12px; font-weight:550; }
+.ds-settings-field > span small { display:block; margin-top:2px; color:var(--ds-muted); font-size:10px; font-weight:400; }
+.ds-settings-field input,.ds-settings-field select { width:100%; min-height:34px; padding:0 10px; border:1px solid var(--ds-border); border-radius:8px; background:var(--ds-panel-muted); color:var(--ds-fg); font-size:12px; }
+.ds-settings-field input[readonly] { cursor:default; }
+.ds-settings-field select { appearance:auto; background:var(--ds-panel); cursor:pointer; }
+.ds-settings-field input:focus-visible,.ds-settings-field select:focus-visible { border-color:var(--ds-title-accent); }
+.ds-settings-modal__footer { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 28px 20px; border-top:1px solid var(--ds-border); }
+.ds-settings-modal__footer p { margin:0; color:var(--ds-muted); font-size:11px; }
+@media (max-width: 767px) {
+  .ds-settings-modal { align-items:end; padding:0; }
+  .ds-settings-modal__card { width:100%; max-height:calc(100dvh - 10px); border-radius:18px 18px 0 0; }
+  .ds-settings-modal__header { padding:20px 18px 15px; }
+  .ds-settings-modal__body { padding:16px 18px 22px; }
+  .ds-settings-field { grid-template-columns:1fr; gap:5px; padding:11px 0; }
+  .ds-settings-field input,.ds-settings-field select { min-height:40px; }
+  .ds-settings-modal__footer { align-items:flex-start; padding:13px 18px calc(16px + env(safe-area-inset-bottom)); }
+  .ds-settings-modal__footer p { max-width:220px; }
+}
