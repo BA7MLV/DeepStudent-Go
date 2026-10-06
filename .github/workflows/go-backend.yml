@@ -34,7 +34,16 @@ jobs:
       - name: Contract tests (HTTP/SSE, replay, attachments, persistence)
         run: go test -count=1 ./internal/api ./internal/attachments ./internal/storage
       - name: Test
-        run: go test -count=1 ./...
+        run: |
+          set -o pipefail
+          go test -count=1 ./... 2>&1 | tee go-test.log
+      - name: Upload Go test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-log
+          path: go-test.log
+          if-no-files-found: ignore
       - name: Vet
         run: go vet ./...
       - name: Build server
