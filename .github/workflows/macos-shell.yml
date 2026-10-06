@@ -6,6 +6,7 @@ on:
     branches:
       - migration/mygo-shell-poc
       - feature/go-backend-runtime
+      - integration/agent-loop
   pull_request:
     branches:
       - main

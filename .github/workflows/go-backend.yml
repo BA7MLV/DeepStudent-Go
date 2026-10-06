@@ -6,6 +6,7 @@ on:
     branches:
       - feature/go-backend-runtime
       - goal/go-runtime-foundation
+      - integration/agent-loop
   pull_request:
     branches:
       - main
