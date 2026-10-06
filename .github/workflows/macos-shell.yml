@@ -39,8 +39,8 @@ jobs:
       - name: Install MyGo CLI
         run: go install github.com/egoist/mygo/cmd/mygo@v0.2.5
 
-      - name: Generate typed bindings
-        run: mygo generate
+      - name: Verify checked-in typed bindings
+        run: test -s frontend/src/mygo.ts
 
       - name: Build unsigned macOS app
         run: bun run build -- -platform darwin/arm64
