@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -143,13 +144,9 @@ func watchSidecarReady(ctx context.Context, serverAPI *api.Server, sidecar *runt
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		err := sidecar.Health(probeCtx)
 		cancel()
-		if err == nil {
-			serverAPI.SetReady(true)
-			return
-		}
+		if err == nil { serverAPI.SetReady(true); return }
 		select {
-		case <-ctx.Done():
-			return
+		case <-ctx.Done(): return
 		case <-ticker.C:
 		}
 	}
@@ -166,7 +163,7 @@ func startManagedSidecar(command string, args []string, endpoint string) (*manag
 	if command == "" { return nil, errors.New("piCommand is required for managed sidecar") }
 	if endpoint == "" { endpoint = "http://127.0.0.1:8787" }
 	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Host == "" { return nil, errors.New("invalid managed sidecar endpoint") }
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") { return nil, errors.New("invalid managed sidecar endpoint") }
 	host, port := parsed.Hostname(), parsed.Port()
 	if host == "" { host = "127.0.0.1" }
 	if port == "" { port = "8787" }
@@ -200,15 +197,9 @@ func (c *Components) Close() error {
 	if c == nil {
 		return nil
 	}
-	if c.readyStop != nil {
-		c.readyStop()
-	}
-	if closer, ok := c.Runtime.(interface{ Close() }); ok {
-		closer.Close()
-	}
-	if c.process != nil {
-		_ = c.process.Close()
-	}
+	if c.readyStop != nil { c.readyStop() }
+	if closer, ok := c.Runtime.(interface{ Close() }); ok { closer.Close() }
+	if c.process != nil { _ = c.process.Close() }
 	if c.Store != nil {
 		return c.Store.Close()
 	}

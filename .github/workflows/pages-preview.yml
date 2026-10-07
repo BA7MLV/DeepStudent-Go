@@ -27,7 +27,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install --no-audit --no-fund
+          cache: npm
+      - run: npm ci
       - run: npm run contract:test
       - run: VITE_DEPLOY_TARGET=pages npm run build --workspace frontend
       - uses: actions/upload-pages-artifact@v3
