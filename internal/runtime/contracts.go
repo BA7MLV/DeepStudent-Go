@@ -26,17 +26,14 @@ const (
 )
 
 // ToolCall is the provider-neutral representation of one model tool call.
-// Arguments are kept as JSON so the runtime can validate them against the
-// registered tool schema before invoking the handler.
+// Arguments are kept as JSON so a sidecar can preserve the original payload.
 type ToolCall struct {
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
-// ToolResult is the provider-neutral representation of a completed tool
-// invocation. Output is JSON on success; ErrorMessage is populated when the
-// tool failed and should be returned to the model as a toolResult message.
+// ToolResult is the provider-neutral representation of a completed tool call.
 type ToolResult struct {
 	CallID       string          `json:"call_id,omitempty"`
 	Name         string          `json:"name,omitempty"`
@@ -79,11 +76,11 @@ type Message struct {
 	SessionID string    `json:"session_id,omitempty"`
 	RunID     string    `json:"run_id,omitempty"`
 	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	ToolCallID string   `json:"tool_call_id,omitempty"`
-	Name      string    `json:"name,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
+	Content    string    `json:"content"`
+	ToolCallID string    `json:"tool_call_id,omitempty"`
+	Name       string    `json:"name,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	CreatedAt  time.Time `json:"created_at,omitempty"`
 }
 
 // ModelProvider emits provider-neutral events. Implementations must not expose

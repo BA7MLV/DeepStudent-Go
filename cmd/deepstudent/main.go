@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/BA7MLV/DeepStudent-Go/internal/config"
@@ -59,10 +61,11 @@ func run() error {
 	mygo.Bind(runtime.NewHealthService())
 
 	mygo.App.WhenReady(func() {
-		// The native shell is now the default desktop surface. Set
-		// DEEPSTUDENT_NATIVE_SHELL=1 enables the native UI experiment; the
-		// default remains the complete React WebView experience.
-		nativeMode := os.Getenv("DEEPSTUDENT_NATIVE_SHELL") == "1"
+		// The native shell is the default desktop surface on macOS, where the
+		// MyGo window provides the actual app chrome and input controls. Keep an
+		// explicit opt-out for the WebView while retaining the opt-in switch on
+		// other platforms so headless and preview builds stay unchanged.
+		nativeMode := nativeShellEnabled(goruntime.GOOS, os.Getenv("DEEPSTUDENT_NATIVE_SHELL"))
 		// The embedded MyGo document is served from mygo://localhost. Pass the
 		// actual loopback listener to the React shell so its Go adapter can send
 		// POST /runs and follow the SSE stream instead of resolving /api/v1 on the
@@ -73,6 +76,7 @@ func run() error {
 		var chatWindow *mygo.Window
 		if nativeMode {
 			shell = newNativeShell(nativeRuntimeBaseURL(listener))
+			go shell.hydrateSession()
 		}
 		installNativeMenu(func(command string) {
 			if nativeMode && shell != nil {
@@ -127,11 +131,33 @@ func run() error {
 		}
 		window = mygo.NewWindow(opts)
 		if shell != nil {
+			shell.window = window
+			window.OnFileDrop(func(event *mygo.FileDropEvent) {
+				for _, path := range event.Paths {
+					go shell.attachFile(path)
+					break
+				}
+			})
 			shell.invalidate = window.Invalidate
 		}
 	})
 
 	return mygo.App.Run()
+}
+
+// nativeShellEnabled chooses the desktop surface without making a platform
+// build depend on an environment variable being present. macOS uses the
+// native MyGo shell by default; DEEPSTUDENT_NATIVE_SHELL=0 (or false/off/no)
+// opts out. On other platforms, the shell remains opt-in for now.
+func nativeShellEnabled(goos, setting string) bool {
+	switch strings.ToLower(strings.TrimSpace(setting)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return goos == "darwin"
+	}
 }
 
 // resolveDesktopStoragePaths keeps a Finder-launched app from trying to create

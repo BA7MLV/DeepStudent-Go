@@ -107,6 +107,8 @@ func (r *SidecarRuntime) Start(ctx context.Context, request AgentRunRequest) (Ag
 	if runID == "" {
 		runID = newID("run")
 	}
+	// Forward the generated ID so the sidecar can tag every envelope with the
+	// same run identity used by the Go HTTP/SSE contract.
 	request.RunID = runID
 	streamCtx, cancel := context.WithCancel(ctx)
 	state := &sidecarRun{
