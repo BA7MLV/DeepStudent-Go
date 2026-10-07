@@ -271,9 +271,9 @@ function formatRecordingElapsed(elapsed: number) {
 
 /**
  * Small canvas visualizer for the mobile recording surface. The recorder's
- * analyser already publishes a normalized live level; this renderer keeps the
- * bars right-aligned and continuously animates their decay without adding a
- * second audio graph or a heavyweight dependency.
+ * analyser already publishes a normalized live level; this renderer turns it
+ * into layered liquid wave fronts without adding a second audio graph or a
+ * heavyweight dependency.
  */
 function VoiceWaveformCanvas({ level, active }: { level: number; active: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -309,28 +309,39 @@ function VoiceWaveformCanvas({ level, active }: { level: number; active: boolean
       context.clearRect(0, 0, width, height);
       const level = Math.max(0, Math.min(1, levelRef.current));
       const color = getComputedStyle(canvas).getPropertyValue("--ds-voice-color").trim() || "#2563eb";
-      const bars = Math.max(20, Math.min(42, Math.floor(width / 12)));
-      const gap = 4;
-      const barWidth = Math.max(2, Math.min(4, (width - (bars - 1) * gap) / bars));
-      const baseline = Math.max(12, height - 22);
-      const maxHeight = Math.max(24, Math.min(118, height * .42));
-      const startX = width - bars * (barWidth + gap) + gap;
-      context.fillStyle = color;
-      for (let index = 0; index < bars; index += 1) {
-        const wave = (Math.sin(phase + index * .72) + 1) / 2;
-        const contour = .24 + wave * .76;
-        const barHeight = Math.max(3, 3 + level * maxHeight * contour);
-        const x = startX + index * (barWidth + gap);
-        const y = baseline - barHeight;
-        const alpha = .15 + level * (.3 + contour * .36);
-        context.globalAlpha = Math.min(.9, alpha);
-        if (typeof context.roundRect === "function") {
-          context.beginPath();
-          context.roundRect(x, y, barWidth, barHeight, barWidth / 2);
-          context.fill();
-        } else {
-          context.fillRect(x, y, barWidth, barHeight);
+      const baseline = Math.max(22, height - 26);
+      const amplitude = 8 + level * Math.min(88, height * .3);
+      const layers = [
+        { speed: 1, frequency: .012, alpha: .16 + level * .26, offset: 0 },
+        { speed: -.7, frequency: .017, alpha: .1 + level * .2, offset: 10 },
+        { speed: .45, frequency: .008, alpha: .08 + level * .14, offset: 20 },
+      ];
+      for (let layer = 0; layer < layers.length; layer += 1) {
+        const { speed, frequency, alpha, offset } = layers[layer];
+        const localAmplitude = amplitude * (1 - layer * .18);
+        context.beginPath();
+        context.moveTo(0, height);
+        context.lineTo(0, baseline - offset);
+        for (let x = 0; x <= width; x += 6) {
+          const envelope = .68 + .32 * Math.sin(x * .003 + phase * .12 + layer);
+          const y = baseline - offset - Math.sin(x * frequency + phase * speed + layer * 1.6) * localAmplitude * envelope;
+          context.lineTo(x, y);
         }
+        context.lineTo(width, height);
+        context.closePath();
+        context.fillStyle = color;
+        context.globalAlpha = Math.min(.7, alpha);
+        context.fill();
+        context.beginPath();
+        context.moveTo(0, baseline - offset);
+        for (let x = 0; x <= width; x += 6) {
+          const y = baseline - offset - Math.sin(x * frequency + phase * speed + layer * 1.6) * localAmplitude * (.68 + .32 * Math.sin(x * .003 + phase * .12 + layer));
+          context.lineTo(x, y);
+        }
+        context.strokeStyle = color;
+        context.globalAlpha = Math.min(.58, alpha + .12);
+        context.lineWidth = 1 + level * 1.2;
+        context.stroke();
       }
       context.globalAlpha = 1;
       phase += .045 + level * .06;
