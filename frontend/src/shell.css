@@ -163,3 +163,128 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .ds-composer-shell > .ds-voice-wave::after { animation:none; transition:none; }
   .ds-composer-shell[data-voice-recording="true"] > .ds-composer .ds-voice-overlay__ripple { filter:none; }
 }
+
+/* Mobile voice field: the live wave is a viewport-level bottom surface. It
+   starts at the capsule edge, diffuses continuously toward the home-indicator
+   area, and remains below the capsule controls (z-index 1). */
+@media (max-width:767px) {
+  .ds-main[data-view="chat-v2"] .ds-composer-dock {
+    position:fixed;
+    right:0;
+    bottom:0;
+    left:0;
+    z-index:20;
+    width:100%;
+    margin:0;
+    padding:8px 14px calc(8px + env(safe-area-inset-bottom));
+    border-top:1px solid color-mix(in srgb,var(--ds-border) 72%,transparent);
+    background:color-mix(in srgb,var(--ds-bg) 94%,transparent);
+    backdrop-filter:blur(14px);
+  }
+  .ds-main[data-view="chat-v2"] .ds-thread-viewport {
+    padding-bottom:calc(112px + env(safe-area-inset-bottom));
+    scroll-padding-bottom:calc(112px + env(safe-area-inset-bottom));
+  }
+  .ds-composer-shell > .ds-voice-wave {
+    position:fixed;
+    z-index:0;
+    right:0;
+    bottom:0;
+    left:0;
+    height:clamp(190px,42vh,430px);
+    display:block;
+    overflow:hidden;
+    border-radius:0;
+    pointer-events:none;
+    opacity:0;
+    transform:scaleY(.88);
+    transform-origin:bottom center;
+    background:radial-gradient(ellipse at 50% 100%,color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) calc(9% + var(--ds-voice-level) * 18%),transparent) 0%,transparent 72%);
+    transition:opacity 180ms var(--ds-ease),transform 180ms var(--ds-ease),background 180ms var(--ds-ease);
+  }
+  .ds-composer-shell[data-voice-recording="true"] > .ds-voice-wave {
+    opacity:calc(.28 + var(--ds-voice-level) * .56);
+    transform:scaleY(calc(.88 + var(--ds-voice-level) * .14));
+  }
+  .ds-composer-shell[data-voice-cancel="true"] > .ds-voice-wave {
+    opacity:calc(.42 + var(--ds-voice-level) * .42);
+    background:radial-gradient(ellipse at 50% 100%,color-mix(in srgb,#dc2626 calc(14% + var(--ds-voice-level) * 28%),transparent) 0%,transparent 74%);
+  }
+  .ds-composer-shell > .ds-voice-wave::before {
+    position:absolute;
+    right:-22vw;
+    bottom:-58%;
+    left:-22vw;
+    height:130%;
+    border:1px solid color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) calc(28% + var(--ds-voice-level) * 38%),transparent);
+    border-radius:50% 50% 0 0 / 32% 32% 0 0;
+    box-shadow:0 -10px 30px color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) calc(14% + var(--ds-voice-level) * 24%),transparent),0 -42px 96px color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) calc(9% + var(--ds-voice-level) * 18%),transparent);
+    content:"";
+    opacity:.9;
+    transform:scaleX(calc(.84 + var(--ds-voice-level) * .2));
+    transform-origin:bottom center;
+    animation:ds-voice-bottom-pulse 1800ms var(--ds-ease) infinite alternate;
+  }
+  .ds-composer-shell > .ds-voice-wave::after {
+    position:absolute;
+    inset:-20% -20% 0;
+    background:repeating-radial-gradient(ellipse at 50% 100%,transparent 0 24px,color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) calc(10% + var(--ds-voice-level) * 24%),transparent) 25px 27px,transparent 28px 62px);
+    content:"";
+    opacity:calc(.36 + var(--ds-voice-level) * .42);
+    transform:scale(calc(.84 + var(--ds-voice-level) * .13));
+    transform-origin:bottom center;
+    mask-image:linear-gradient(to top,#000 0%,#000 52%,transparent 100%);
+    animation:ds-voice-bottom-diffuse 2600ms var(--ds-ease) infinite;
+  }
+  .ds-composer-shell[data-voice-cancel="true"] > .ds-voice-wave::before {
+    border-color:color-mix(in srgb,#dc2626 calc(48% + var(--ds-voice-level) * 38%),transparent);
+    box-shadow:0 -10px 30px color-mix(in srgb,#dc2626 32%,transparent),0 -42px 96px color-mix(in srgb,#dc2626 22%,transparent);
+  }
+  .ds-composer-shell[data-voice-cancel="true"] > .ds-voice-wave::after {
+    background:repeating-radial-gradient(ellipse at 50% 100%,transparent 0 24px,color-mix(in srgb,#dc2626 calc(16% + var(--ds-voice-level) * 28%),transparent) 25px 27px,transparent 28px 62px);
+  }
+}
+@keyframes ds-voice-bottom-pulse {
+  from { transform:scaleX(calc(.82 + var(--ds-voice-level) * .16)) translateY(2%); }
+  to { transform:scaleX(calc(1 + var(--ds-voice-level) * .2)) translateY(-2%); }
+}
+@keyframes ds-voice-bottom-diffuse {
+  from { transform:scale(calc(.84 + var(--ds-voice-level) * .1)) translateY(2%); opacity:.3; }
+  50% { opacity:.72; }
+  to { transform:scale(calc(1.08 + var(--ds-voice-level) * .15)) translateY(-4%); opacity:.2; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .ds-composer-shell > .ds-voice-wave::before,
+  .ds-composer-shell > .ds-voice-wave::after { animation:none; }
+}
+
+/* The canvas bars are the primary live signal; keep the liquid layer as a
+   low-contrast bottom glow so it never competes with the input controls. */
+@media (max-width:767px) {
+  .ds-composer-shell > .ds-voice-wave {
+    background:radial-gradient(ellipse at 50% 100%,color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) calc(5% + var(--ds-voice-level) * 11%),transparent) 0%,transparent 72%);
+  }
+  .ds-composer-shell > .ds-voice-wave::before,
+  .ds-composer-shell > .ds-voice-wave::after { z-index:0; }
+  .ds-composer-shell > .ds-voice-wave::before {
+    border-color:color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) calc(12% + var(--ds-voice-level) * 22%),transparent);
+    box-shadow:0 -10px 30px color-mix(in srgb,var(--ds-voice-color,var(--ds-title-accent)) calc(7% + var(--ds-voice-level) * 12%),transparent);
+  }
+  .ds-composer-shell > .ds-voice-wave::after { opacity:calc(.1 + var(--ds-voice-level) * .2); }
+  .ds-composer-shell[data-voice-cancel="true"] > .ds-voice-wave {
+    background:radial-gradient(ellipse at 50% 100%,color-mix(in srgb,#dc2626 calc(8% + var(--ds-voice-level) * 16%),transparent) 0%,transparent 74%);
+  }
+  .ds-composer-shell[data-voice-cancel="true"] > .ds-voice-wave::before {
+    border-color:color-mix(in srgb,#dc2626 calc(18% + var(--ds-voice-level) * 28%),transparent);
+    box-shadow:0 -10px 30px color-mix(in srgb,#dc2626 calc(10% + var(--ds-voice-level) * 18%),transparent);
+  }
+  .ds-voice-waveform {
+    position:absolute;
+    z-index:1;
+    inset:0;
+    display:block;
+    width:100%;
+    height:100%;
+    pointer-events:none;
+  }
+}
