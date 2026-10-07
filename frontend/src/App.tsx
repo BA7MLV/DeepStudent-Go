@@ -269,6 +269,87 @@ function formatRecordingElapsed(elapsed: number) {
   return `${minutes}:${seconds}`;
 }
 
+/**
+ * Small canvas visualizer for the mobile recording surface. The recorder's
+ * analyser already publishes a normalized live level; this renderer keeps the
+ * bars right-aligned and continuously animates their decay without adding a
+ * second audio graph or a heavyweight dependency.
+ */
+function VoiceWaveformCanvas({ level, active }: { level: number; active: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const levelRef = useRef(level);
+
+  useEffect(() => {
+    levelRef.current = level;
+  }, [level]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    let frame = 0;
+    let width = 0;
+    let height = 0;
+    let dpr = 1;
+    let phase = 0;
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      width = rect.width;
+      height = rect.height;
+      dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      canvas.width = Math.max(1, Math.round(width * dpr));
+      canvas.height = Math.max(1, Math.round(height * dpr));
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+
+    const draw = () => {
+      if (!width || !height) resize();
+      context.clearRect(0, 0, width, height);
+      const level = Math.max(0, Math.min(1, levelRef.current));
+      const color = getComputedStyle(canvas).getPropertyValue("--ds-voice-color").trim() || "#2563eb";
+      const bars = Math.max(20, Math.min(42, Math.floor(width / 12)));
+      const gap = 4;
+      const barWidth = Math.max(2, Math.min(4, (width - (bars - 1) * gap) / bars));
+      const baseline = Math.max(12, height - 22);
+      const maxHeight = Math.max(24, Math.min(118, height * .42));
+      const startX = width - bars * (barWidth + gap) + gap;
+      context.fillStyle = color;
+      for (let index = 0; index < bars; index += 1) {
+        const wave = (Math.sin(phase + index * .72) + 1) / 2;
+        const contour = .24 + wave * .76;
+        const barHeight = Math.max(3, 3 + level * maxHeight * contour);
+        const x = startX + index * (barWidth + gap);
+        const y = baseline - barHeight;
+        const alpha = .15 + level * (.3 + contour * .36);
+        context.globalAlpha = Math.min(.9, alpha);
+        if (typeof context.roundRect === "function") {
+          context.beginPath();
+          context.roundRect(x, y, barWidth, barHeight, barWidth / 2);
+          context.fill();
+        } else {
+          context.fillRect(x, y, barWidth, barHeight);
+        }
+      }
+      context.globalAlpha = 1;
+      phase += .045 + level * .06;
+      frame = window.requestAnimationFrame(draw);
+    };
+
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
+    observer?.observe(canvas);
+    resize();
+    if (active) frame = window.requestAnimationFrame(draw);
+    return () => {
+      observer?.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [active]);
+
+  return <canvas ref={canvasRef} className="ds-voice-waveform" aria-hidden="true" />;
+}
+
 function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }: { composer: ThreadComposerRuntime; input: ComposerInput; onRegister?: (handlers: ComposerGestureHandlers | null) => void; onVoiceStateChange?: (state: VoiceOverlayState) => void }) {
   const [recording, setRecording] = useState(false);
   const [cancelZone, setCancelZone] = useState(false);
@@ -578,7 +659,7 @@ function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime>
     "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
   } as React.CSSProperties;
   return <div className="ds-composer-shell" data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} style={overlayStyle}>
-    <div className="ds-voice-wave" aria-hidden="true" />
+    <div className="ds-voice-wave" aria-hidden="true"><VoiceWaveformCanvas level={voiceState.level} active={voiceState.recording} /></div>
     <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!hasComposerText} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
       <div className="ds-voice-overlay" aria-hidden="true">
         <div className="ds-voice-overlay__wash" />
