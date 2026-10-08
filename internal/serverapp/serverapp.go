@@ -80,7 +80,9 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 	var agent runtime.AgentRuntime
 	var process *managedSidecar
 	piMode := strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
-	if piMode == "" { piMode = "auto" }
+	if piMode == "" {
+		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { piMode = "external" } else { piMode = "auto" }
+	}
 	if piMode == "managed" || piMode == "local" { piMode = "manual" }
 	piStatus := api.PiRuntimeStatus{ConfiguredMode: piMode, EffectiveMode: "deterministic", State: "fallback", Reason: "Pi sidecar is not configured"}
 	var sidecar *runtime.SidecarRuntime
