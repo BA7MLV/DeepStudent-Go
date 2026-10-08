@@ -74,6 +74,10 @@ type PiRuntimeStatus struct {
 // discovery route. It is safe to call after NewServer while startup completes.
 func (s *Server) SetPiRuntimeStatus(status PiRuntimeStatus) { s.piStatusMu.Lock(); s.piStatus = status; s.piStatusMu.Unlock() }
 
+// SetPiRuntimeState updates only the transient startup state while preserving
+// command, endpoint, and configured mode metadata.
+func (s *Server) SetPiRuntimeState(state, reason string) { s.piStatusMu.Lock(); s.piStatus.State, s.piStatus.Reason = state, reason; s.piStatusMu.Unlock() }
+
 func (s *Server) getPiRuntimeStatus() PiRuntimeStatus { s.piStatusMu.RLock(); defer s.piStatusMu.RUnlock(); status := s.piStatus; status.Args = append([]string(nil), status.Args...); return status }
 
 // NewServer creates an API server. Dependencies may include a
@@ -187,6 +191,8 @@ func (s *Server) getConfig(w http.ResponseWriter, requestID string) {
 	if status.Command == "" { status.Command = cfg.Runtime.PiCommand }
 	if len(status.Args) == 0 { status.Args = append([]string(nil), cfg.Runtime.PiArgs...) }
 	if status.Endpoint == "" { status.Endpoint = cfg.Runtime.PiEndpoint }
+	piCommand, piArgs := cfg.Runtime.PiCommand, cfg.Runtime.PiArgs
+	if piCommand == "" && status.EffectiveMode == "auto" { piCommand = status.Command }
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_provider": cfg.Runtime.DefaultProvider,
 		"default_model":    cfg.Runtime.DefaultModel,
@@ -196,8 +202,8 @@ func (s *Server) getConfig(w http.ResponseWriter, requestID string) {
 			"pi_endpoint":      cfg.Runtime.PiEndpoint,
 			"pi_skip_start":    cfg.Runtime.PiSkipStart,
 			"pi_mode":          cfg.Runtime.PiMode,
-			"pi_command":       cfg.Runtime.PiCommand,
-			"pi_args":          cfg.Runtime.PiArgs,
+			"pi_command":       piCommand,
+			"pi_args":          piArgs,
 			"pi_status":        status,
 		},
 		"providers":        providers,
