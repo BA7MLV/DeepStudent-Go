@@ -107,9 +107,6 @@ func (r *SidecarRuntime) Start(ctx context.Context, request AgentRunRequest) (Ag
 	if runID == "" {
 		runID = newID("run")
 	}
-	// Forward the generated ID so the sidecar can tag every envelope with the
-	// same run identity used by the Go HTTP/SSE contract.
-	request.RunID = runID
 	streamCtx, cancel := context.WithCancel(ctx)
 	state := &sidecarRun{
 		id: runID, sessionID: request.SessionID, cancel: cancel,
@@ -403,18 +400,36 @@ func (r *SidecarRuntime) SubscribeFrom(ctx context.Context, runID, lastEventID s
 	lastSequence, hasSequence := parseEventSequence(lastEventID)
 	state.mu.Lock()
 	channel := make(chan StreamEvent, len(state.history)+16)
-	replay := lastEventID == ""
-	for index, event := range state.history {
-		if replay {
-			channel <- event
-			continue
-		}
-		if event.ID == lastEventID || (hasSequence && index < len(state.sequences) && state.sequences[index] > lastSequence) {
-			if hasSequence {
-				channel <- event
+	start := 0
+	if lastEventID != "" {
+		start = len(state.history)
+		found := false
+		for index, event := range state.history {
+			if event.ID == lastEventID {
+				// Last-Event-ID is inclusive at the transport boundary: resume
+				// strictly after the event the client already received.
+				start, found = index+1, true
+				break
 			}
-			replay = true
 		}
+		if !found && hasSequence {
+			// Numeric IDs are also accepted as durable session sequence
+			// cursors. Prefer the sidecar sequence ID, then fall back to the
+			// persisted sequence captured alongside each in-memory event.
+			for index, event := range state.history {
+				if eventSequence, ok := parseEventSequence(event.ID); ok && eventSequence > lastSequence {
+					start, found = index, true
+					break
+				}
+				if index < len(state.sequences) && state.sequences[index] > lastSequence {
+					start, found = index, true
+					break
+				}
+			}
+		}
+	}
+	for _, event := range state.history[start:] {
+		channel <- event
 	}
 	closed := state.closed
 	if closed {
@@ -453,32 +468,54 @@ func (r *SidecarRuntime) replayPersisted(ctx context.Context, runID, lastEventID
 	if err != nil {
 		return nil, err
 	}
-	lastSequence, hasSequence := parseEventSequence(lastEventID)
-	if lastEventID != "" && !hasSequence {
-		for _, persisted := range events {
-			if persisted.RunID != runID {
-				continue
-			}
-			var event StreamEvent
-			if json.Unmarshal(persisted.Payload, &event) == nil && event.ID == lastEventID {
-				lastSequence = persisted.Sequence
-				hasSequence = true
-				break
-			}
-		}
-		if !hasSequence {
-			return []StreamEvent{}, nil
-		}
+	type persistedEvent struct {
+		record SessionEvent
+		event  StreamEvent
 	}
-	result := make([]StreamEvent, 0, len(events))
+	items := make([]persistedEvent, 0, len(events))
+	hasNumericEventID := false
 	for _, persisted := range events {
-		if persisted.RunID != runID || (lastEventID != "" && persisted.Sequence <= lastSequence) {
+		if persisted.RunID != runID {
 			continue
 		}
 		var event StreamEvent
 		if err := json.Unmarshal(persisted.Payload, &event); err != nil {
 			continue
 		}
+		if _, ok := parseEventSequence(event.ID); ok {
+			hasNumericEventID = true
+		}
+		items = append(items, persistedEvent{record: persisted, event: event})
+	}
+	start := 0
+	if lastEventID != "" {
+		start = len(items)
+		found := false
+		for index, item := range items {
+			if item.event.ID == lastEventID {
+				start, found = index+1, true
+				break
+			}
+		}
+		if !found {
+			if lastSequence, ok := parseEventSequence(lastEventID); ok {
+				for index, item := range items {
+					if hasNumericEventID {
+						if eventSequence, eventOK := parseEventSequence(item.event.ID); eventOK && eventSequence > lastSequence {
+							start, found = index, true
+							break
+						}
+					} else if item.record.Sequence > lastSequence {
+						start, found = index, true
+						break
+					}
+				}
+			}
+		}
+	}
+	result := make([]StreamEvent, 0, len(items)-start)
+	for _, item := range items[start:] {
+		persisted, event := item.record, item.event
 		event.RunID = runID
 		if event.Type == "" {
 			event.Type = StreamEventType(persisted.Type)
@@ -528,6 +565,10 @@ func (r *SidecarRuntime) Cancel(_ context.Context, runID string) error {
 		// The fallback is terminal and closes the local stream; consume will see
 		// terminal=true and will not append a duplicate stream error.
 		r.forceCancel(state, "run canceled")
+		// Cancellation has completed locally even when the sidecar endpoint is
+		// already gone. Report success so the HTTP API does not turn a canceled
+		// run into a misleading 404/error response.
+		return nil
 	} else {
 		// A sidecar normally emits run.canceled on the original stream. Keep a
 		// bounded fallback in case an implementation acknowledges the cancel
@@ -541,7 +582,7 @@ func (r *SidecarRuntime) Cancel(_ context.Context, runID string) error {
 			}
 		}()
 	}
-	return err
+	return nil
 }
 
 func (r *SidecarRuntime) forceCancel(state *sidecarRun, message string) {

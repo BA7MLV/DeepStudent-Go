@@ -12,7 +12,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HealthService } from "./mygo";
 import { createGoRuntimeAdapter } from "./go-runtime";
-import { getRuntimeConfig, updateRuntimeConfig, type RuntimeConfig } from "./runtime-api";
+import { getRuntimeConfig, testRuntimeConfig, updateRuntimeConfig, type RuntimeConfig } from "./runtime-api";
 
 type ViewId =
   | "chat-v2"
@@ -61,8 +61,8 @@ const onboardingModels: Array<{ value: ModelChoice; label: string; description: 
 ];
 
 const onboardingRuntimeOptions: Array<{ value: RuntimeChoice; label: string; description: string }> = [
-  { value: "go", label: "Go runtime", description: "推荐，适合完整功能" },
-  { value: "browser", label: "浏览器运行时", description: "无需本地服务" },
+  { value: "go", label: "Go 运行环境", description: "推荐，适合完整功能" },
+  { value: "browser", label: "浏览器运行环境", description: "无需本地服务" },
 ];
 
 function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null; onComplete: (config: Omit<OnboardingConfig, "completedAt">) => void }) {
@@ -89,7 +89,7 @@ function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null;
 
   const renderRuntime = () => (
     <div key="runtime" className="ds-onboarding__group ds-onboarding__runtime-group">
-      <h2>运行时</h2>
+      <h2>运行环境</h2>
       <div className="ds-onboarding__options">
         {onboardingRuntimeOptions.map((option) => <button key={option.value} type="button" className={`ds-onboarding-option${draft.runtime === option.value ? " is-selected" : ""}`} aria-pressed={draft.runtime === option.value} onClick={() => select("runtime", option.value)}><b>{option.label}</b><small>{option.description}</small></button>)}
       </div>
@@ -111,7 +111,7 @@ function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null;
     <section className="ds-onboarding__card">
       <header className="ds-onboarding__header"><div><span className="ds-onboarding__brand">DeepStudent</span><span className="ds-onboarding__kicker">首次设置</span></div>{isMobile && <span className="ds-onboarding__progress">{step + 1} / {steps.length}</span>}</header>
       <main className="ds-onboarding__body">
-        <h1 id="ds-onboarding-title">设置你的学习方式</h1>
+        <h1 id="ds-onboarding-title">选择你的学习偏好</h1>
         {isMobile ? <div className="ds-onboarding__mobile-step">{steps[step]}</div> : <>{steps}</>}
       </main>
       <footer className="ds-onboarding__footer">
@@ -128,19 +128,19 @@ function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null;
 type IconName = "sparkle" | "book" | "check" | "sparkle-two" | "cards" | "stack" | "settings" | "plus" | "search" | "sidebar" | "menu" | "chevron-down" | "sun" | "home" | "folder" | "send" | "arrow-up" | "microphone" | "x" | "paperclip" | "wand" | "brain";
 
 const navItems: Array<{ id: ViewId; label: string; icon: IconName }> = [
-  { id: "chat-v2", label: "新会话", icon: "sparkle" },
-  { id: "learning-hub", label: "学习资源", icon: "book" },
-  { id: "todo", label: "待办事项", icon: "check" },
-  { id: "skills-management", label: "技能管理", icon: "sparkle-two" },
-  { id: "flashcards", label: "闪卡", icon: "stack" },
+  { id: "chat-v2", label: "对话", icon: "sparkle" },
+  { id: "learning-hub", label: "资料", icon: "book" },
+  { id: "todo", label: "任务", icon: "check" },
+  { id: "skills-management", label: "技能", icon: "sparkle-two" },
+  { id: "flashcards", label: "卡片", icon: "stack" },
 ];
 
 const viewTitles: Record<ViewId, string> = {
   "chat-v2": "",
-  "learning-hub": "学习资源",
-  todo: "待办事项",
-  "skills-management": "技能管理",
-  flashcards: "闪卡",
+  "learning-hub": "资料",
+  todo: "任务",
+  "skills-management": "技能",
+  flashcards: "卡片",
   settings: "设置",
 };
 
@@ -721,8 +721,8 @@ function ChatWorkspace() {
 }
 
 function LearningHub() {
-  return <WorkspacePage action={<><Icon name="plus" size={14} />添加资源</>}>
-    <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资源库</b><button className="ds-icon-button" aria-label="添加资源">＋</button></div><label className="ds-search-field"><Icon name="search" size={14} /><input placeholder="搜索资源…" /></label><p className="ds-sidebar-empty">暂无资源</p></aside><div className="ds-resource-grid"><EmptyState title="还没有学习资源" description="添加 PDF、Markdown、网页或图片，开始整理你的学习资料" /></div></div>
+  return <WorkspacePage action={<><Icon name="plus" size={14} />添加资料</>}>
+    <div className="ds-resource-layout"><aside className="ds-resource-tree"><div className="ds-resource-toolbar"><b>资料库</b><button className="ds-icon-button" aria-label="添加资料">＋</button></div><label className="ds-search-field"><Icon name="search" size={14} /><input placeholder="搜索资料…" /></label><p className="ds-sidebar-empty">暂无资料</p></aside><div className="ds-resource-grid"><EmptyState title="还没有资料" description="添加 PDF、Markdown、网页或图片，开始整理你的资料" /></div></div>
   </WorkspacePage>;
 }
 
@@ -730,10 +730,10 @@ function EmptyState({ title, description }: { title: string; description: string
   return <div className="ds-empty-state"><p><b>{title}</b>，{description}</p></div>;
 }
 
-function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建待办</>}><div className="ds-panel"><EmptyState title="还没有待办事项" description="创建一个待办事项，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
+function Todo() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建任务</>}><div className="ds-panel"><EmptyState title="还没有任务" description="创建一个任务，让下一步学习行动清晰可见" /></div></WorkspacePage>; }
 function Skills() { return <WorkspacePage action={<><Icon name="plus" size={14} />添加技能</>}><EmptyState title="还没有可用技能" description="添加技能后，它们会出现在这里" /></WorkspacePage>; }
-function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡组</>}><EmptyState title="还没有闪卡组" description="创建一个卡组，开始用主动回忆巩固知识" /></WorkspacePage>; }
-function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) { return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新会话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存会话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行时</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
+function Flashcards() { return <WorkspacePage action={<><Icon name="plus" size={14} />新建卡片组</>}><EmptyState title="还没有卡片组" description="创建一个卡片组，开始用主动回忆巩固知识" /></WorkspacePage>; }
+function Settings({ theme, onTheme, onOpenOnboarding }: { theme: Theme; onTheme: () => void; onOpenOnboarding: () => void }) { return <WorkspacePage><div className="ds-settings-layout"><nav className="ds-settings-nav ds-panel"><button className="is-active">常规</button><button>外观</button><button>AI 助手</button><button>快捷键</button><button>关于</button></nav><div className="ds-settings-content"><section className="ds-panel ds-setting-section"><PanelHeading title="常规" meta="管理工作区和学习体验" /><SettingRow title="启动时打开新对话" detail="每次打开应用时回到 DeepStudent" checked /><SettingRow title="自动保存对话" detail="编辑后立即保存更改" checked /><div className="ds-setting-row ds-setting-row--action"><span><b>学习配置向导</b><small>重新选择学习目标、方式、模型和运行环境偏好</small></span><button type="button" className="ds-secondary-button" onClick={onOpenOnboarding}>重新打开</button></div></section><section className="ds-panel ds-setting-section"><PanelHeading title="外观" meta="调整界面的显示方式" /><label className="ds-setting-row"><span><b>深色模式</b><small>让界面更适合长时间学习</small></span><input className="ds-switch" type="checkbox" checked={theme === "dark"} onChange={onTheme} /></label></section></div></div></WorkspacePage>; }
 function SettingRow({ title, detail, checked }: { title: string; detail: string; checked?: boolean }) { return <label className="ds-setting-row"><span><b>{title}</b><small>{detail}</small></span><input className="ds-switch" type="checkbox" defaultChecked={checked} /></label>; }
 function PanelHeading({ title, meta, action }: { title: string; meta?: string; action?: string }) { return <div className="ds-panel-heading"><div><b>{title}</b>{meta && <p>{meta}</p>}</div>{action && <button className="ds-text-button">{action}</button>}</div>; }
 function WorkspacePage({ action, children }: { action?: React.ReactNode; children: React.ReactNode }) { return <section className="ds-workspace-page">{action && <div className="ds-page-actions"><button className="ds-primary-button">{action}</button></div>}{children}</section>; }
@@ -746,9 +746,9 @@ type ProviderPreview = {
   apiKeyEnv: string;
 };
 
-// These profiles mirror the non-secret defaults in internal/config. The
-// browser intentionally only shows metadata. Credentials stay in the Go
-// process environment and are never read, entered, or persisted here.
+// These profiles mirror the non-secret defaults in internal/config. Credentials
+// stay in the Go process environment and are never read, entered, or persisted
+// in the browser.
 const providerPreviews: ProviderPreview[] = [
   { id: "deterministic", label: "DeepStudent Local（无密钥）", model: "stub", baseURL: "本地 runtime", apiKeyEnv: "不需要" },
   { id: "siliconflow", label: "SiliconFlow", model: "Qwen/Qwen2.5-7B-Instruct", baseURL: "https://api.siliconflow.cn/v1", apiKeyEnv: "SILICONFLOW_API_KEY" },
@@ -807,13 +807,23 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const checkConfig = async () => {
+    setStatus("正在测试连接…");
+    try {
+      await testRuntimeConfig({ provider: providerId, model, base_url: baseURL, api_key_env: apiKeyEnv });
+      setStatus("连接成功，可以保存配置。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "连接失败");
+    }
+  };
+
   return <div className="ds-settings-modal" role="dialog" aria-modal="true" aria-labelledby="ds-settings-modal-title" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="ds-settings-modal__card">
       <header className="ds-settings-modal__header">
         <div>
           <p className="ds-settings-modal__eyebrow">DeepStudent</p>
           <h1 id="ds-settings-modal-title">设置</h1>
-          <p className="ds-settings-modal__subtitle">模型提供商与运行时</p>
+          <p className="ds-settings-modal__subtitle">模型服务商与运行环境</p>
         </div>
         <button className="ds-icon-button" type="button" onClick={onClose} aria-label="关闭设置"><Icon name="x" size={18} /></button>
       </header>
@@ -821,18 +831,17 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="ds-settings-empty-state" role="status">
           <span className="ds-settings-empty-state__icon"><Icon name="settings" size={20} /></span>
           <div>
-            <b>{runtimeConfig ? "Go runtime 配置已连接" : "正在读取提供商配置"}</b>
-            <p>{runtimeConfig ? "模型路由可在这里修改并立即用于下一条消息。密钥仍由 Go 进程环境变量管理。" : "请确认本地 Go runtime 已启动；密钥不会进入页面，也不会写入浏览器存储。"}</p>
+            <b>{runtimeConfig ? "Go runtime 配置已连接" : "正在读取服务商配置"}</b>
+            <p>{runtimeConfig ? "修改配置后可保存，下一条消息将立即使用新模型；密钥仍由 Go 进程环境变量管理。" : "请确认本地 Go runtime 已启动；密钥不会进入页面，也不会写入浏览器存储。"}</p>
           </div>
         </div>
         <section className="ds-settings-provider" aria-labelledby="ds-provider-heading">
           <div className="ds-settings-provider__heading">
-            <div><h2 id="ds-provider-heading">配置字段预览</h2><p>选择一个内置 profile 查看字段；这些值不会改变服务端设置。</p></div>
-            <span className="ds-settings-provider__badge">仅预览</span>
+            <div><h2 id="ds-provider-heading">模型配置</h2><p>编辑服务商配置并保存；保存时会检查 Go runtime 连接状态。</p></div>
           </div>
           <label className="ds-settings-field">
-            <span>提供商 <small>provider</small></span>
-            <select value={providerId} onChange={(event) => { const id = event.target.value; const selected = runtimeConfig?.providers[id]; setProviderId(id); if (selected) { setModel(selected.model || ""); setBaseURL(selected.base_url || ""); setAPIKeyEnv(selected.api_key_env || ""); } }} aria-label="提供商 provider">
+            <span>服务商 <small>provider</small></span>
+            <select value={providerId} onChange={(event) => { const id = event.target.value; const selected = runtimeConfig?.providers[id]; setProviderId(id); if (selected) { setModel(selected.model || ""); setBaseURL(selected.base_url || ""); setAPIKeyEnv(selected.api_key_env || ""); } }} aria-label="服务商 provider">
               {(runtimeConfig ? Object.entries(runtimeConfig.providers).map(([id, item]) => ({ id, label: item.name || id })) : providerPreviews).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </label>
@@ -841,22 +850,23 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
             <input value={model} onChange={(event) => setModel(event.target.value)} aria-label="模型 model" />
           </label>
           <label className="ds-settings-field">
-            <span>Base URL <small>baseURL / base_url</small></span>
-            <input value={baseURL} onChange={(event) => setBaseURL(event.target.value)} aria-label="Base URL" />
+            <span>服务地址 <small>baseURL / base_url</small></span>
+            <input value={baseURL} onChange={(event) => setBaseURL(event.target.value)} aria-label="服务地址" />
           </label>
           <label className="ds-settings-field">
-            <span>API-key environment variable <small>apiKeyEnv</small></span>
-            <input value={apiKeyEnv} onChange={(event) => setAPIKeyEnv(event.target.value)} aria-label="API-key environment variable" />
+            <span>密钥变量 <small>apiKeyEnv</small></span>
+            <input value={apiKeyEnv} onChange={(event) => setAPIKeyEnv(event.target.value)} aria-label="密钥变量" />
           </label>
           <label className="ds-settings-field">
-            <span>运行时 <small>runtime</small></span>
-            <input value="Go runtime · HTTP/SSE · /api/v1" readOnly aria-label="运行时 runtime" />
+            <span>运行环境 <small>runtime</small></span>
+            <input value="Go runtime · HTTP/SSE · /api/v1" readOnly aria-label="运行环境 runtime" />
           </label>
         </section>
       </main>
       <footer className="ds-settings-modal__footer">
-        <p>{status || "配置保存在当前 Go runtime 进程中，密钥不会离开本机环境。"}</p>
-        <button type="button" className="ds-primary-button" onClick={() => void saveConfig()} disabled={!runtimeConfig}>{status === "正在保存…" ? "保存中…" : "保存配置"}</button>
+        <p>{status || "配置会保存到本机，密钥只从环境变量读取。先测试连接，再保存模型设置。"}</p>
+        <button type="button" className="ds-secondary-button" onClick={() => void checkConfig()} disabled={!runtimeConfig || status === "正在测试连接…"}>测试连接</button>
+        <button type="button" className="ds-primary-button" onClick={() => void saveConfig()} disabled={!runtimeConfig || status === "正在保存…"}>{status === "正在保存…" ? "保存中…" : "保存配置"}</button>
         <button type="button" className="ds-secondary-button" onClick={onClose}>完成</button>
       </footer>
     </section>
@@ -887,6 +897,22 @@ export function App() {
     window.localStorage.setItem(onboardingStorageKey, JSON.stringify(saved));
     setOnboardingConfig(saved);
     setOnboardingOpen(false);
+    // The first-run choice must affect the same Go runtime used by Chat.
+    // Keep the learning preferences local, but persist the provider route
+    // through the runtime API so the next message uses the selected model.
+    void getRuntimeConfig().then((runtimeConfig) => {
+      const preferred = config.model === "local"
+        ? "deterministic"
+        : (runtimeConfig.providers["custom-openai"] ? "custom-openai" : runtimeConfig.default_provider);
+      const provider = runtimeConfig.providers[preferred];
+      if (!provider) return;
+      return updateRuntimeConfig({
+        provider: preferred,
+        model: provider.model || runtimeConfig.default_model,
+        base_url: provider.base_url,
+        api_key_env: provider.api_key_env,
+      });
+    }).catch(() => undefined);
   };
   const openOnboarding = () => setOnboardingOpen(true);
   const selectView = (next: ViewId) => { setView(next); setSidebarOpen(false); };
@@ -912,7 +938,7 @@ export function App() {
         <div className="ds-sidebar__brand">
           <span className="ds-sidebar__brand-name">DeepStudent</span>
           <div className="ds-sidebar__brand-actions">
-            <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索学习资源"><Icon name="search" size={15} /></button>
+            <button className="ds-icon-button" type="button" onClick={() => selectView("learning-hub")} aria-label="搜索资料"><Icon name="search" size={15} /></button>
             <button className="ds-sidebar-toggle" type="button" onClick={toggleSidebar} aria-label="收起侧边栏"><Icon name="sidebar" size={16} /></button>
           </div>
         </div>

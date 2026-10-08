@@ -119,3 +119,47 @@ func TestSidecarRuntimeMalformedStreamProducesTerminalError(t *testing.T) {
 		t.Fatalf("failed run status = %+v, err=%v", record, err)
 	}
 }
+
+func TestSidecarRuntimeReplaySkipsLastEventID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		for sequence, eventType := range []string{SidecarRunStarted, SidecarMessageDelta, SidecarRunCompleted} {
+			payload := json.RawMessage(`{}`)
+			if eventType == SidecarMessageDelta {
+				payload = json.RawMessage(`{"delta":"hello"}`)
+			}
+			if err := WriteSidecarEnvelope(w, SidecarEnvelope{Protocol: SidecarProtocol, RunID: "replay", Sequence: int64(sequence + 1), Type: eventType, Payload: payload}); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	runtime, err := NewSidecarRuntime(server.URL, NewMemorySessionStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.Close()
+	run, err := runtime.Start(context.Background(), AgentRunRequest{RunID: "replay", SessionID: "replay-session", Prompt: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original []StreamEvent
+	for event := range run.Events {
+		original = append(original, event)
+	}
+	if len(original) != 3 {
+		t.Fatalf("original events = %+v", original)
+	}
+	replayed, err := runtime.SubscribeFrom(context.Background(), run.ID, original[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []StreamEvent
+	for event := range replayed {
+		got = append(got, event)
+	}
+	if len(got) != 2 || got[0].ID != original[1].ID || got[len(got)-1].ID == original[0].ID {
+		t.Fatalf("replayed events = %+v, original = %+v", got, original)
+	}
+}

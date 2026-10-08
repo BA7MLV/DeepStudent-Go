@@ -46,6 +46,14 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 			_ = store.Close()
 		}
 	}()
+	// Native settings updates are durable. Overlay the persisted routing and
+	// sidecar choices before constructing providers so a restart uses the same
+	// model/endpoint selected by the previous process.
+	if restored, restoreErr := store.LoadConfig(ctx, cfg); restoreErr != nil {
+		return nil, restoreErr
+	} else {
+		cfg = restored
+	}
 	attachmentStore, err := storage.NewAttachmentStore(store, cfg.Storage.BlobRoot, attachments.Policy{MaxBytes: cfg.Storage.AttachmentMaxBytes, AllowedMIMEs: cfg.Storage.AttachmentAllowedMIMEs})
 	if err != nil {
 		return nil, err

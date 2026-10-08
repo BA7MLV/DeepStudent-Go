@@ -165,7 +165,6 @@ Provider profile 只保存 endpoint、模型、能力、重试和**环境变量�
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
 | `DEEPSTUDENT_HTTP_ADDR` | `127.0.0.1:8080` | API 监听地址 |
-| `DEEPSTUDENT_HEALTHCHECK_URL` | `http://127.0.0.1:8080/readyz` | Docker 镜像健康检查 URL；桌面/本地运行通常无需设置 |
 | `DEEPSTUDENT_DB_PATH` | `data/deepstudent.db` | SQLite 路径 |
 | `DEEPSTUDENT_BLOB_ROOT` | `data/blobs` | 内容寻址 blob 根目录 |
 | `DEEPSTUDENT_ATTACHMENT_MAX_BYTES` | `33554432` | 单个附件最大字节数；`0` 取消上限 |
@@ -175,11 +174,6 @@ Provider profile 只保存 endpoint、模型、能力、重试和**环境变量�
 | `DEEPSTUDENT_DEFAULT_TIMEOUT` | `45s` | 单次 runtime 超时 |
 | `DEEPSTUDENT_MAX_TOKENS` | `2048` | runtime token 上限 |
 | `DEEPSTUDENT_MAX_CONCURRENCY` | `2` | 同时运行上限 |
-| `DEEPSTUDENT_SIDECAR_MODE` | `deterministic` | `external` 转发到外部 Pi；`managed/local` 使用显式 `DEEPSTUDENT_PI_COMMAND` 启动本地 sidecar |
-| `DEEPSTUDENT_SIDECAR_URL` | 空 | 外部 sidecar 的绝对 HTTP(S) 地址（例如 `http://127.0.0.1:8787`）；仅 external 模式使用 |
-| `DEEPSTUDENT_PI_CANCEL_TIMEOUT` | `2s`（sidecar 默认） | 外部 sidecar 取消请求的超时 |
-| `DEEPSTUDENT_PI_COMMAND` | 空 | managed/local 模式的可执行文件（不经过 shell） |
-| `DEEPSTUDENT_PI_ARGS` | 空 | managed/local 模式参数，逗号分隔 |
 | `DEEPSTUDENT_AUTH_ENABLED` | `false` | 预留的会话边界；登录尚未实现 |
 
 JSON 中的 `server.readTimeout`、`server.writeTimeout`、`server.idleTimeout` 和 provider/model 细节没有对应的全部环境变量；需要更细配置时使用 `DEEPSTUDENT_CONFIG`。默认 provider 是 `deterministic`，可显式选择 `siliconflow`、`deepseek` 或 `custom-openai`。若选择远程 provider，先配置相应 endpoint 和 API key 环境变量。
@@ -206,31 +200,20 @@ bun install
 bun run dev:web
 ```
 
-Vite 会提供响应式 Web 壳，并把 `/api`、`/healthz`、`/readyz` 代理到本机 Go 服务的 8080 端口，因此 MyGo 开发窗口无需额外设置 `VITE_GO_RUNTIME_URL`。聊天通过 Go HTTP/SSE runtime 运行；runtime 不可用时才使用本地 fallback，附件和学习资源导入走 v1 HTTP API。
+Vite 会提供响应式 Web 壳。聊天通过 Go HTTP/SSE runtime 运行；runtime 不可用时才使用本地 fallback，附件和学习资源导入走 v1 HTTP API。
 
 ### MyGo 桌面壳
 
 ```sh
 bun install
-go install github.com/egoist/mygo/cmd/mygo@v0.1.22
+go install github.com/egoist/mygo/cmd/mygo@v0.2.11
 mygo generate
 bun run build -- -platform darwin/arm64
 ```
 
 当前产物是未签名 macOS 12+ arm64 构建；Linux 配置存在，但发布打包和签名不在本原型范围内。MyGo 生成的桥接可以覆盖 `frontend/src/mygo.ts`，源码中保留了可在普通 Web 环境构建的类型化兼容实现。
 
-桌面进程会先完成 SQLite/blob 初始化，再绑定 `DEEPSTUDENT_HTTP_ADDR`，最后启动 MyGo 窗口；绑定失败会直接退出而不会打开一个无法聊天的窗口。窗口退出时先停止 HTTP 接受新请求、等待最多 5 秒，再取消运行中的任务并关闭 SQLite。默认使用 WebView 壳；设置 `DEEPSTUDENT_NATIVE_SHELL=1` 可选择原生实验壳。两者都复用同一个本地 Go runtime。
-
-本地 MyGo 默认不启动或探测 Pi，使用离线 deterministic runtime。设置
-`DEEPSTUDENT_SIDECAR_MODE=external` 和
-`DEEPSTUDENT_SIDECAR_URL=http://127.0.0.1:8787` 后，`serverapp` 才构造
-sidecar client；`DEEPSTUDENT_PI_ENDPOINT` 是 Docker 部署的同义环境变量，
-`DEEPSTUDENT_PI_SKIP_START=1` 用于明确声明 sidecar 由另一个 supervisor
-管理。Go 不进行 shell 展开；`managed/local` 只接受显式的
-`runtime.piCommand`。提供该命令后，`managed/local`
-模式会由 `serverapp` 以无 shell 参数方式启动该命令，并在关闭时发送中断信号。
-配置 sidecar 时 Go `/healthz` 仍表示进程存活，`/readyz` 会在 sidecar
-`/healthz` 探测成功前保持 503，并在稍后可用时自动转为 ready。
+当前锁定 MyGo v0.2.11。该版本的 macOS GPU bursts 和按每个尺寸重绘的 zoom 属渲染器自动优化，原生聊天壳无需额外代码即可受益。terminal/translucent headless 终端与 Liquid Glass glass plugin 暂不接入：聊天壳没有终端场景，玻璃效果会扩大平台与视觉回归范围，避免为特性而特性。
 
 ## Docker 本地 profile
 
@@ -241,24 +224,6 @@ docker compose down
 ```
 
 容器内监听 `0.0.0.0:8080`，Compose 只发布到宿主机 `127.0.0.1:8080`。SQLite、事件和内容寻址附件共同保存在 `deepstudent-data` named volume 的 `/data` 下。镜像以 distroless non-root UID 65532 运行，并预先创建可写的 `/data`；若切换 volume driver 或使用已有 bind mount，请重新核对权限。provider 凭据不会写入 Compose。备份时必须一起保存 `/data/deepstudent.db` 和 `/data/blobs`。
-
-镜像内置 `/app/deepstudent-healthcheck`，每 10 秒请求一次 `/readyz`；服务只有在存储迁移和 Go runtime 初始化完成后才会变为 healthy。Docker 默认监听 `0.0.0.0:8080`，这样直接 `docker run -p 8080:8080` 也能访问；Compose 仍只把端口发布到本机回环地址。收到 SIGTERM 后服务最多等待 5 秒完成 HTTP 优雅关闭，Compose 的 `stop_grace_period` 为 10 秒以留出写入 SQLite WAL 的时间。
-
-Docker 默认仍是确定性 Go provider；部署方提供版本锁定的 sidecar 后，可设置
-`DEEPSTUDENT_PI_ENDPOINT=http://pi-sidecar:8787`、
-`DEEPSTUDENT_PI_SKIP_START=1`，Go API 会把 `/run` NDJSON 事件映射到 SSE。
-仓库自带的 `packages/agent-sidecar` Compose profile 可用于协议验收：
-
-```sh
-DEEPSTUDENT_SIDECAR_MODE=external \
-DEEPSTUDENT_SIDECAR_URL=http://sidecar:8787 \
-docker compose --profile agent up --build
-```
-
-该 profile 的 Node runner 默认 fake 模式（deterministic tool），设置
-`PI_SIDECAR_MODE=pi` 并在 sidecar 服务环境中提供 `PI_BASE_URL`、`PI_MODEL`、
-`PI_API_KEY` 后使用真实 `@mariozechner/pi-agent-core`。provider key 只注入
-sidecar，不会进入 Go 请求、SQLite 或 SSE。
 
 ## 验证与 CI 现状
 

@@ -145,6 +145,15 @@ export async function updateRuntimeConfig(update: { provider?: string; model?: s
   }, options);
 }
 
+export type RuntimeConfigTestResult = { ok: boolean; provider: string; model: string };
+
+export async function testRuntimeConfig(update: { provider?: string; model?: string; base_url?: string; api_key_env?: string }, options: RuntimeApiOptions = {}): Promise<RuntimeConfigTestResult> {
+  return requestJSON<RuntimeConfigTestResult>("/config/test", {
+    method: "POST",
+    body: JSON.stringify(update),
+  }, options);
+}
+
 /** Upload an immutable blob to the Go attachment boundary before a message is sent. */
 export async function uploadRuntimeAttachment(file: File, options: RuntimeApiOptions = {}): Promise<RuntimeAttachment> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);

@@ -26,14 +26,17 @@ const (
 )
 
 // ToolCall is the provider-neutral representation of one model tool call.
-// Arguments are kept as JSON so a sidecar can preserve the original payload.
+// Arguments are kept as JSON so the runtime can validate them against the
+// registered tool schema before invoking the handler.
 type ToolCall struct {
 	ID        string          `json:"id,omitempty"`
 	Name      string          `json:"name"`
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
-// ToolResult is the provider-neutral representation of a completed tool call.
+// ToolResult is the provider-neutral representation of a completed tool
+// invocation. Output is JSON on success; ErrorMessage is populated when the
+// tool failed and should be returned to the model as a toolResult message.
 type ToolResult struct {
 	CallID       string          `json:"call_id,omitempty"`
 	Name         string          `json:"name,omitempty"`
@@ -60,11 +63,6 @@ type StreamEvent struct {
 type ModelRequest struct {
 	Provider          string         `json:"provider,omitempty"`
 	Model             string         `json:"model,omitempty"`
-	// BaseURL and APIKeyEnv are optional, non-secret per-run provider
-	// overrides. APIKeyEnv is only an environment-variable name; the key
-	// value is always resolved inside the provider process.
-	BaseURL           string         `json:"base_url,omitempty"`
-	APIKeyEnv         string         `json:"api_key_env,omitempty"`
 	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
 	Messages          []Message      `json:"messages,omitempty"`
 	Prompt            string         `json:"prompt,omitempty"`
@@ -81,11 +79,11 @@ type Message struct {
 	SessionID string    `json:"session_id,omitempty"`
 	RunID     string    `json:"run_id,omitempty"`
 	Role      string    `json:"role"`
-	Content    string    `json:"content"`
-	ToolCallID string    `json:"tool_call_id,omitempty"`
-	Name       string    `json:"name,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
-	CreatedAt  time.Time `json:"created_at,omitempty"`
+	Content   string    `json:"content"`
+	ToolCallID string   `json:"tool_call_id,omitempty"`
+	Name      string    `json:"name,omitempty"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 
 // ModelProvider emits provider-neutral events. Implementations must not expose
@@ -216,6 +214,9 @@ type AgentRunRequest struct {
 	Prompt            string   `json:"prompt"`
 	Provider          string   `json:"provider,omitempty"`
 	Model             string   `json:"model,omitempty"`
+	// BaseURL and APIKeyEnv are credential-free routing metadata. They are
+	// forwarded only to runtimes that explicitly support per-run overrides;
+	// API keys themselves never cross this boundary.
 	BaseURL           string   `json:"base_url,omitempty"`
 	APIKeyEnv         string   `json:"api_key_env,omitempty"`
 	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`

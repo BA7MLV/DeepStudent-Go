@@ -32,9 +32,17 @@ type Server struct {
 	cfgMu       sync.RWMutex
 	runs        runtime.AgentRuntime
 	store       runtime.SessionStore
+	configStore ConfigStore
 	attachments AttachmentStore
 	ready       atomic.Bool
 	now         func() time.Time
+}
+
+// ConfigStore is the durable, credential-free configuration boundary. It is
+// intentionally separate from runtime.SessionStore so lightweight API tests
+// and embedders can continue using an in-memory store.
+type ConfigStore interface {
+	SaveConfig(context.Context, config.Config) error
 }
 
 // AttachmentStore is the HTTP-facing subset of storage.AttachmentStore. The
@@ -61,8 +69,11 @@ func NewServer(cfg config.Config, runs runtime.AgentRuntime, dependencies ...any
 		case AttachmentStore:
 			attachmentStore = value
 		}
+		if value, ok := dependency.(ConfigStore); ok {
+			configStore = value
+		}
 	}
-	s := &Server{cfg: cfg, runs: runs, store: store, attachments: attachmentStore, now: time.Now}
+	s := &Server{cfg: cfg, runs: runs, store: store, configStore: configStore, attachments: attachmentStore, now: time.Now}
 	s.ready.Store(runs != nil)
 	return s
 }
@@ -103,6 +114,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"version": apiVersion, "service": "deepstudent-api", "request_id": requestID})
 	case r.URL.Path == "/api/v1/config" && r.Method == http.MethodGet:
 		s.getConfig(w, requestID)
+	case r.URL.Path == "/api/v1/config/test" && r.Method == http.MethodPost:
+		s.testConfig(w, r, requestID)
 	case r.URL.Path == "/api/v1/config" && (r.Method == http.MethodPatch || r.Method == http.MethodPut):
 		s.updateConfig(w, r, requestID)
 	case r.URL.Path == "/api/v1/runs" && r.Method == http.MethodPost:
@@ -144,6 +157,13 @@ func (s *Server) getConfig(w http.ResponseWriter, requestID string) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_provider": cfg.Runtime.DefaultProvider,
 		"default_model":    cfg.Runtime.DefaultModel,
+		"runtime": map[string]any{
+			"default_provider": cfg.Runtime.DefaultProvider,
+			"default_model": cfg.Runtime.DefaultModel,
+			"pi_endpoint": cfg.Runtime.PiEndpoint,
+			"pi_skip_start": cfg.Runtime.PiSkipStart,
+			"pi_mode": cfg.Runtime.PiMode,
+		},
 		"providers":        providers,
 		"request_id":       requestID,
 	})
@@ -157,6 +177,11 @@ type configUpdateRequest struct {
 	Model    *string `json:"model"`
 	BaseURL  *string `json:"base_url"`
 	APIKeyEnv *string `json:"api_key_env"`
+	PiEndpoint *string `json:"pi_endpoint"`
+	PiSkipStart *bool `json:"pi_skip_start"`
+	PiMode *string `json:"pi_mode"`
+	PiCommand *string `json:"pi_command"`
+	PiArgs *[]string `json:"pi_args"`
 }
 
 func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID string) {
@@ -178,7 +203,16 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID 
 		writeError(w, requestID, http.StatusBadRequest, "invalid_config", "default provider is required", nil)
 		return
 	}
-	if _, err := cfg.ResolveModel(provider, model); err != nil {
+	if provider != "deterministic" && strings.TrimSpace(model) == "" {
+		if configured := strings.TrimSpace(cfg.Providers[provider].Model); configured != "" {
+			model = configured
+		} else {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", "model is required for non-deterministic providers", nil)
+			return
+		}
+	}
+	selection, err := cfg.ResolveModel(provider, model)
+	if err != nil {
 		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
 		return
 	}
@@ -189,11 +223,11 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID 
 			writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
 			return
 		}
-		profile.BaseURL = baseURL
 		// An explicit endpoint should win over an environment-backed endpoint.
 		// An empty UI field means “keep the configured environment endpoint” so
 		// simply saving model metadata cannot accidentally disable a provider.
 		if baseURL != "" {
+			profile.BaseURL = baseURL
 			profile.BaseURLEnv = ""
 		}
 	}
@@ -208,13 +242,101 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID 
 	if input.Model != nil || input.DefaultModel != nil {
 		profile.Model = model
 	}
+	// Re-resolve after applying overrides so endpoint/model validation and the
+	// persisted snapshot use the effective final route rather than stale config.
 	cfg.Providers[provider] = profile
+	selection, err = cfg.ResolveModel(provider, model)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
+		return
+	}
+	if provider != "deterministic" {
+		endpoint := strings.TrimSpace(profile.BaseURL)
+		if endpoint == "" {
+			// ResolveModel may obtain an environment-backed endpoint; use the
+			// selected value to validate the effective route before persisting.
+			endpoint = strings.TrimSpace(selection.BaseURL)
+		}
+		if endpoint == "" {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", "base_url is required for non-deterministic providers", nil)
+			return
+		}
+		if strings.TrimSpace(profile.APIKeyEnv) == "" {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", "api_key_env is required for non-deterministic providers", nil)
+			return
+		}
+	}
 	cfg.Runtime.DefaultProvider = provider
 	cfg.Runtime.DefaultModel = model
+	if input.PiEndpoint != nil { cfg.Runtime.PiEndpoint = strings.TrimSpace(*input.PiEndpoint) }
+	if input.PiSkipStart != nil { cfg.Runtime.PiSkipStart = *input.PiSkipStart }
+	if input.PiMode != nil { cfg.Runtime.PiMode = strings.TrimSpace(*input.PiMode) }
+	if input.PiCommand != nil { cfg.Runtime.PiCommand = strings.TrimSpace(*input.PiCommand) }
+	if input.PiArgs != nil { cfg.Runtime.PiArgs = append([]string(nil), (*input.PiArgs)...)}
+	if s.configStore != nil {
+		if err := s.configStore.SaveConfig(r.Context(), cfg); err != nil {
+			writeError(w, requestID, http.StatusInternalServerError, "config_persist_failed", "could not persist configuration", nil)
+			return
+		}
+	}
 	s.cfgMu.Lock()
 	s.cfg = cfg
 	s.cfgMu.Unlock()
 	s.getConfig(w, requestID)
+}
+
+type configTestRequest struct {
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	BaseURL   string `json:"base_url,omitempty"`
+	APIKeyEnv string `json:"api_key_env,omitempty"`
+}
+
+// testConfig verifies only endpoint and credential availability. It never
+// sends a prompt and never includes credential values in the response.
+func (s *Server) testConfig(w http.ResponseWriter, r *http.Request, requestID string) {
+	var input configTestRequest
+	if err := decodeJSON(http.MaxBytesReader(w, r.Body, 64<<10), &input); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_json", "request body must be valid JSON", nil)
+		return
+	}
+	cfg := s.configSnapshot()
+	provider := strings.TrimSpace(input.Provider)
+	model := strings.TrimSpace(input.Model)
+	selection, err := cfg.ResolveModel(provider, model)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
+		return
+	}
+	if provider == "" {
+		provider = selection.Provider
+	}
+	if model == "" {
+		model = selection.Model
+	}
+	baseURL := strings.TrimSpace(input.BaseURL)
+	if baseURL == "" {
+		baseURL = selection.BaseURL
+	}
+	apiKeyEnv := strings.TrimSpace(input.APIKeyEnv)
+	if apiKeyEnv == "" {
+		apiKeyEnv = selection.APIKeyEnv
+	}
+	if provider == "deterministic" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "provider": provider, "model": model, "request_id": requestID})
+		return
+	}
+	if err := config.ValidateProviderOverride(baseURL, apiKeyEnv); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
+		return
+	}
+	if err := runtime.TestOpenAICompatible(r.Context(), baseURL, apiKeyEnv, nil, selection.Timeout); err != nil {
+		// The error text intentionally contains only endpoint/HTTP status and
+		// the environment variable name, never the credential value or body.
+		writeError(w, requestID, http.StatusBadGateway, "connection_failed", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "provider": provider, "model": model, "request_id": requestID})
 }
 
 func (s *Server) configSnapshot() config.Config {
@@ -597,6 +719,14 @@ func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID
 	}
 	if strings.TrimSpace(input.APIKeyEnv) == "" {
 		input.APIKeyEnv = selection.APIKeyEnv
+	}
+	if selection.Provider != "deterministic" && strings.TrimSpace(input.BaseURL) == "" {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", "provider endpoint is not configured", nil)
+		return
+	}
+	if selection.Provider != "deterministic" && strings.TrimSpace(input.APIKeyEnv) == "" {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", "provider credential environment variable is not configured", nil)
+		return
 	}
 	if err := config.ValidateProviderOverride(input.BaseURL, input.APIKeyEnv); err != nil {
 		writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)

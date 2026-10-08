@@ -51,6 +51,8 @@ type nativeShell struct {
 	configModel    string
 	configBaseURL  string
 	configAPIKeyEnv string
+	configReady     bool
+	configHydrateErr string
 	configBusy     bool
 	configNote     string
 	onboardingOpen bool
@@ -136,7 +138,8 @@ func (s *nativeShell) hydrateSession() {
 	defer cancel()
 	base := strings.TrimRight(s.apiBaseURL, "/")
 	var runtimeConfig nativeRuntimeConfig
-	if err := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/config", nil, &runtimeConfig); err == nil {
+	configErr := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/config", nil, &runtimeConfig)
+	if configErr == nil {
 		s.mu.Lock()
 		if strings.TrimSpace(runtimeConfig.DefaultProvider) != "" { s.configProvider = runtimeConfig.DefaultProvider }
 		s.configModel = runtimeConfig.DefaultModel
@@ -145,8 +148,14 @@ func (s *nativeShell) hydrateSession() {
 			s.configBaseURL = provider.BaseURL
 			s.configAPIKeyEnv = provider.APIKeyEnv
 		}
+		s.configReady = true
+		s.configHydrateErr = ""
 		s.mu.Unlock()
 		if s.invalidate != nil { s.invalidate() }
+	} else {
+		s.mu.Lock()
+		s.configHydrateErr = configErr.Error()
+		s.mu.Unlock()
 	}
 	var list struct {
 		Sessions []nativeSession `json:"sessions"`
@@ -199,8 +208,10 @@ func (s *nativeShell) hydrateSession() {
 
 func (s *nativeShell) saveRuntimeConfig() {
 	s.mu.Lock()
-	if s.configBusy {
+	if s.configBusy || !s.configReady {
+		if !s.configReady { s.configNote = "正在读取模型配置…" }
 		s.mu.Unlock()
+		if s.invalidate != nil { s.invalidate() }
 		return
 	}
 	provider := strings.TrimSpace(s.configProvider)
@@ -208,7 +219,7 @@ func (s *nativeShell) saveRuntimeConfig() {
 	baseURL := strings.TrimSpace(s.configBaseURL)
 	apiKeyEnv := strings.TrimSpace(s.configAPIKeyEnv)
 	if provider == "" {
-		s.configNote = "提供商不能为空"
+		s.configNote = "服务商不能为空"
 		s.mu.Unlock()
 		if s.invalidate != nil { s.invalidate() }
 		return
@@ -353,8 +364,10 @@ func (s *nativeShell) finishSend(index int, text string, err error) {
 func (s *nativeShell) submitDraft() {
 	prompt := strings.TrimSpace(s.draft)
 	s.mu.Lock()
-	if s.sending {
+	if s.sending || !s.configReady {
+		if !s.configReady { s.attachmentNote = "正在读取模型配置…" }
 		s.mu.Unlock()
+		if s.invalidate != nil { s.invalidate() }
 		return
 	}
 	attachmentRef := strings.TrimSpace(s.pendingInput)
@@ -648,7 +661,7 @@ func (s *nativeShell) view(c *ui.Context) {
 				ui.Text(c, "  Go runtime").FontSize(12).TextColor(t.TextMuted).SingleLine()
 				ui.Spacer(c).DragWindow()
 				ui.Toolbar(c, func() {
-					if ui.Button(c, "新会话").Clicked() {
+					if ui.Button(c, "对话").Clicked() {
 						s.selected = "chat"
 					}
 					if ui.Button(c, "设置").Clicked() {
@@ -674,11 +687,11 @@ func (s *nativeShell) sidebar(c *ui.Context) {
 	t := c.Theme()
 	ui.Sidebar(c, &s.selected, func() {
 		ui.SidebarSection(c, "工作区", nil, func() {
-			ui.SidebarItem(c, "chat", nil, "聊天")
-			ui.SidebarItem(c, "resources", nil, "学习资源")
+			ui.SidebarItem(c, "chat", nil, "对话")
+			ui.SidebarItem(c, "resources", nil, "资料")
 			ui.SidebarItem(c, "tasks", nil, "任务")
-			ui.SidebarItem(c, "skills", nil, "技能管理")
-			ui.SidebarItem(c, "flashcards", nil, "闪卡")
+			ui.SidebarItem(c, "skills", nil, "技能")
+			ui.SidebarItem(c, "flashcards", nil, "卡片")
 		})
 		ui.SidebarSection(c, "管理", nil, func() {
 			ui.SidebarItem(c, "settings", nil, "设置")
@@ -722,26 +735,26 @@ func (s *nativeShell) page(c *ui.Context) {
 func (s *nativeShell) pageTitle() string {
 	switch s.selected {
 	case "resources":
-		return "学习资源"
+		return "资料"
 	case "tasks":
 		return "任务"
 	case "skills":
-		return "技能管理"
+		return "技能"
 	case "flashcards":
-		return "闪卡"
+		return "卡片"
 	case "settings":
 		return "设置"
 	default:
-		return "聊天工作区"
+		return "对话"
 	}
 }
 
 func (s *nativeShell) pageSubtitle() string {
 	switch s.selected {
 	case "settings":
-		return "原生导航已就绪，服务配置继续由 Go runtime 管理。"
+		return "原生导航已就绪，模型配置继续由 Go runtime 管理。"
 	case "chat":
-		return "原生聊天骨架已连接 serverapp HTTP/SSE 契约。"
+		return "原生对话骨架已连接 serverapp HTTP/SSE 契约。"
 	default:
 		return "原生页面边界继续复用现有 HTTP/SSE runtime。"
 	}
@@ -752,13 +765,13 @@ func (s *nativeShell) pageBody(c *ui.Context) {
 	case "settings":
 		s.settingsPage(c)
 	case "resources":
-		s.placeholderPage(c, "学习资源", "资源导入和预览仍沿用 WebView，原生编辑器将在后续迁移。")
+		s.placeholderPage(c, "资料", "资料导入和预览仍沿用 WebView，原生编辑器将在后续迁移。")
 	case "tasks":
 		s.placeholderPage(c, "任务", "任务数据继续由 serverapp 提供，这里是未来原生列表视图的迁移接缝。")
 	case "skills":
-		s.placeholderPage(c, "技能管理", "技能数据仍由 Go runtime 管理，原生列表视图将在后续迁移。")
+		s.placeholderPage(c, "技能", "技能数据仍由 Go runtime 管理，原生列表视图将在后续迁移。")
 	case "flashcards":
-		s.placeholderPage(c, "闪卡", "闪卡组和复习计划将在资源 API 稳定后迁移到原生页面。")
+		s.placeholderPage(c, "卡片", "卡片组和复习计划将在资料 API 稳定后迁移到原生页面。")
 	default:
 		s.chatPage(c)
 	}
@@ -818,7 +831,7 @@ func (s *nativeShell) chatPage(c *ui.Context) {
 				s.submitDraft()
 			}
 		})
-		ui.Text(c, "原生聊天骨架复用 serverapp 的 /api/v1/runs + SSE；附件与富文本编辑器仍留在 WebView 边界。").FontSize(11).TextColor(t.TextMuted)
+		ui.Text(c, "原生对话骨架复用 serverapp 的 /api/v1/runs + SSE；附件与富文本编辑器仍留在 WebView 边界。").FontSize(11).TextColor(t.TextMuted)
 	})
 }
 
@@ -943,7 +956,7 @@ func (s *nativeShell) settingsPage(c *ui.Context) {
 			}{
 				{id: "general", label: "常规"},
 				{id: "appearance", label: "外观"},
-				{id: "runtime", label: "运行时"},
+				{id: "runtime", label: "运行环境"},
 			} {
 				button := ui.Button(c, tab.label)
 				button.FillWidth().TextAlign(ui.Start)
@@ -963,12 +976,12 @@ func (s *nativeShell) settingsPage(c *ui.Context) {
 
 func (s *nativeShell) onboardingPage(c *ui.Context) {
 	t := c.Theme()
-	labels := []string{"学习目标", "学习方式", "模型", "运行时"}
+	labels := []string{"学习目标", "学习方式", "模型", "运行环境"}
 	options := [][]string{
 		{"备考与考试", "跟上课程", "长期掌握技能"},
 		{"练习优先", "整理优先", "计划优先"},
 		{"DeepStudent Local", "OpenAI", "兼容 OpenAI 的服务"},
-		{"Go runtime", "浏览器运行时"},
+		{"Go 运行环境", "浏览器运行环境"},
 	}
 	ui.Column(c).MaxWidth(760).Gap(t.Space(4)).Children(func() {
 		ui.Text(c, "首次设置").FontSize(12).TextColor(t.TextMuted).SingleLine()
@@ -1026,20 +1039,21 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 		})
 		ui.Text(c, "主题选择使用原生控件，并应用到完整桌面壳。").FontSize(12).TextColor(t.TextMuted)
 	case "runtime":
-		ui.Text(c, "运行时").FontSize(16).Bold()
+		ui.Text(c, "运行环境").FontSize(16).Bold()
 		ui.Text(c, "原生壳与 WebView 页面共享同一个 serverapp 进程。").TextColor(t.TextMuted)
 		ui.Column(c).Gap(t.Space(2)).Children(func() {
-			ui.Text(c, "默认提供商").FontSize(12).Bold()
+			ui.Text(c, "默认服务商").FontSize(12).Bold()
 			ui.TextInput(c, &s.configProvider).Placeholder("例如 deterministic 或 deepseek")
 			ui.Text(c, "模型").FontSize(12).Bold()
 			ui.TextInput(c, &s.configModel).Placeholder("例如 stub 或 deepseek-chat")
-			ui.Text(c, "Base URL（可选）").FontSize(12).Bold()
+			ui.Text(c, "服务地址（可选）").FontSize(12).Bold()
 			ui.TextInput(c, &s.configBaseURL).Placeholder("例如 https://api.example.com/v1")
-			ui.Text(c, "API key environment variable（只填变量名）").FontSize(12).Bold()
+			ui.Text(c, "密钥变量（只填变量名）").FontSize(12).Bold()
 			ui.TextInput(c, &s.configAPIKeyEnv).Placeholder("例如 DEEPSEEK_API_KEY")
 			if ui.PrimaryButton(c, "保存模型配置").Clicked() {
 				go s.saveRuntimeConfig()
 			}
+			ui.Text(c, "保存后可刷新状态，检查运行环境连接。").FontSize(12).TextColor(t.TextMuted)
 			if s.configNote != "" {
 				ui.Text(c, s.configNote).FontSize(12).TextColor(t.TextMuted)
 			}
@@ -1064,15 +1078,15 @@ func (s *nativeShell) statusBar(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Height(30).Padding(0, t.Space(4)).Gap(t.Space(2)).Background(t.Surface).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).AlignItems(ui.Center).Children(func() {
 		color := t.Success
-		label := "运行时健康"
+		label := "运行环境健康"
 		if !s.runtimeHealthy {
 			color = t.Warning
-			label = "运行时重连中"
+			label = "运行环境重连中"
 		}
 		statusDot(c, color)
 		ui.Text(c, label).FontSize(11).TextColor(t.TextMuted).SingleLine()
 		ui.Spacer(c)
-		ui.Text(c, "原生壳 · WebView 聊天边界 · MyGo v0.2.11").FontSize(11).TextColor(t.TextMuted).SingleLine()
+		ui.Text(c, "原生壳 · WebView 对话边界 · MyGo v0.2.11").FontSize(11).TextColor(t.TextMuted).SingleLine()
 	})
 }
 

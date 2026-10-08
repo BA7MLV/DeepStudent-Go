@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+func TestNativeShellEnabledDefaultsAndOverrides(t *testing.T) {
+	tests := []struct {
+		name, goos, setting string
+		want                bool
+	}{
+		{name: "macOS defaults to native", goos: "darwin", want: true},
+		{name: "other platforms stay webview by default", goos: "linux", want: false},
+		{name: "explicit opt in", goos: "linux", setting: "1", want: true},
+		{name: "explicit opt out", goos: "darwin", setting: "0", want: false},
+		{name: "text opt out", goos: "darwin", setting: " off ", want: false},
+		{name: "text opt in", goos: "linux", setting: "TRUE", want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := nativeShellEnabled(test.goos, test.setting); got != test.want {
+				t.Fatalf("nativeShellEnabled(%q, %q) = %t, want %t", test.goos, test.setting, got, test.want)
+			}
+		})
+	}
+}
+
 func TestDesktopWebURLCarriesRuntimeAPI(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil { t.Fatal(err) }

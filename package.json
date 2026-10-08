@@ -11,6 +11,6 @@
     "build": "mygo build"
   },
   "devDependencies": {
-    "mygo-cli": "0.2.5"
+    "mygo-cli": "0.2.11"
   }
 }

@@ -54,7 +54,7 @@ export function ResourceLibrary({ onAsk, className = "" }: ResourceLibraryProps)
       setResources(rows);
       setSelectedId((current) => current && rows.some((row) => row.id === current) ? current : rows[0]?.id);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "无法读取本地资源");
+      setNotice(error instanceof Error ? error.message : "无法读取本地资料");
     }
   };
 
@@ -96,20 +96,20 @@ export function ResourceLibrary({ onAsk, className = "" }: ResourceLibraryProps)
   };
 
   return (
-    <section className={`ds-learning-resources ${className}`} aria-label="学习资源">
+    <section className={`ds-learning-resources ${className}`} aria-label="资料">
       <input ref={inputRef} hidden type="file" multiple accept=".md,.markdown,.txt,text/markdown,text/plain" onChange={onInput} />
       <header className="ds-learning-resources__header">
-        <div><span className="ds-learning-resources__eyebrow">本地优先</span><h2>学习资源</h2><p>导入 Markdown / TXT，保存到本机后即可带上下文提问。</p></div>
-        <button className="ds-learning-resources__primary" type="button" onClick={() => inputRef.current?.click()} disabled={busy}>{busy ? "导入中…" : "＋ 添加资源"}</button>
+        <div><span className="ds-learning-resources__eyebrow">本地优先</span><h2>资料</h2><p>导入 Markdown / TXT，保存到本机后即可带上下文提问。</p></div>
+        <button className="ds-learning-resources__primary" type="button" onClick={() => inputRef.current?.click()} disabled={busy}>{busy ? "导入中…" : "＋ 添加资料"}</button>
       </header>
       {notice && <p className="ds-learning-resources__notice" role="status">{notice}</p>}
       <div className="ds-learning-resources__layout">
         <aside className="ds-learning-resources__list">
-          <label className="ds-learning-resources__search">⌕ <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索资源…" /></label>
+          <label className="ds-learning-resources__search">⌕ <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索资料…" /></label>
           <div className="ds-learning-resources__drop" data-dragging={dragging} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragging(false)} onDrop={onDrop}>
             <b>拖入 Markdown / TXT</b><span>内容只保存在浏览器本机</span>
           </div>
-          {visible.length === 0 ? <p className="ds-learning-resources__empty">还没有匹配的资源</p> : visible.map((resource) => (
+          {visible.length === 0 ? <p className="ds-learning-resources__empty">还没有匹配的资料</p> : visible.map((resource) => (
             <button key={resource.id} type="button" className="ds-learning-resources__row" data-active={resource.id === selected?.id} onClick={() => { setSelectedId(resource.id); setExcerpt(""); }}>
               <span className="ds-learning-resources__icon">{resource.name.toLowerCase().endsWith(".md") || resource.name.toLowerCase().endsWith(".markdown") ? "MD" : "TXT"}</span>
               <span><b>{resource.name}</b><small>{formatBytes(resource.size)} · {new Date(resource.updatedAt).toLocaleDateString()}</small></span>

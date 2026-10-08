@@ -12,11 +12,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BA7MLV/DeepStudent-Go/internal/config"
 	"github.com/BA7MLV/DeepStudent-Go/internal/runtime"
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
+
+// configSettingKey is intentionally a single, versioned settings row. The
+// persisted representation contains only routing metadata and runtime
+// choices; provider credentials are always resolved from environment
+// variables at request time and are never written to SQLite.
+const configSettingKey = "deepstudent.config.v1"
 
 // SQLiteStore keeps one database writer and puts every append through a short
 // transaction. WAL mode enables concurrent readers while preserving a simple
@@ -55,6 +62,63 @@ func OpenSQLite(ctx context.Context, path string) (*SQLiteStore, error) {
 func (s *SQLiteStore) DB() *sql.DB { return s.db }
 func (s *SQLiteStore) Close() error { return s.db.Close() }
 
+// SaveConfig persists the credential-free portion of the application
+// configuration. API key values are deliberately not part of this payload;
+// ProviderProfile.APIKeyEnv is only the name of an environment variable.
+func (s *SQLiteStore) SaveConfig(ctx context.Context, cfg config.Config) error {
+	if err := config.Validate(cfg); err != nil {
+		return fmt.Errorf("validate config: %w", err)
+	}
+	payload := persistedConfig{Runtime: cfg.Runtime, Providers: cfg.Providers, Models: cfg.Models}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, configSettingKey, string(data), time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return fmt.Errorf("persist config: %w", err)
+	}
+	return nil
+}
+
+// LoadConfig overlays the persisted routing/runtime choices on top of the
+// boot-time config (which may come from a file or environment). A missing row
+// is normal for a fresh installation and returns base unchanged.
+func (s *SQLiteStore) LoadConfig(ctx context.Context, base config.Config) (config.Config, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, configSettingKey).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return base, nil
+	}
+	if err != nil {
+		return base, fmt.Errorf("load config: %w", err)
+	}
+	var payload persistedConfig
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return base, fmt.Errorf("decode persisted config: %w", err)
+	}
+	// Runtime is persisted as a complete value, so zero-valued choices are
+	// restored intentionally. Maps are replaced only when they were present in
+	// the persisted payload, retaining file/env defaults for older rows.
+	base.Runtime = payload.Runtime
+	if payload.Providers != nil {
+		base.Providers = payload.Providers
+	}
+	if payload.Models != nil {
+		base.Models = payload.Models
+	}
+	if err := config.ValidateWithEnv(base, os.LookupEnv); err != nil {
+		return base, fmt.Errorf("validate persisted config: %w", err)
+	}
+	return base, nil
+}
+
+type persistedConfig struct {
+	Runtime   config.RuntimeConfig              `json:"runtime"`
+	Providers map[string]config.ProviderProfile `json:"providers"`
+	Models    map[string]config.ModelProfile    `json:"models,omitempty"`
+}
+
 func (s *SQLiteStore) migrate(ctx context.Context) error {
 	// journal_mode changes must run outside an explicit transaction in SQLite.
 	for _, pragma := range []string{`PRAGMA journal_mode = WAL`, `PRAGMA foreign_keys = ON`} {
@@ -89,6 +153,11 @@ func (s *SQLiteStore) migrate(ctx context.Context) error {
 		3: {
 			`CREATE TABLE IF NOT EXISTS attachments (sha256 TEXT PRIMARY KEY CHECK(length(sha256) = 64), size INTEGER NOT NULL CHECK(size >= 0), mime TEXT NOT NULL, filename TEXT NOT NULL DEFAULT '', workspace_ref TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)`,
 			`CREATE INDEX IF NOT EXISTS idx_attachments_created_at ON attachments(created_at)`,
+		},
+		4: {
+			// Settings already exists in migration 1. This no-op keeps the
+			// migration history explicit for databases created by older builds.
+			`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 		},
 	}
 	for version := current + 1; version <= schemaVersion; version++ {

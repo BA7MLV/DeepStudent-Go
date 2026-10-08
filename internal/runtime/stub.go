@@ -193,20 +193,36 @@ func (r *DeterministicRuntime) SubscribeFrom(ctx context.Context, runID, lastEve
 	lastSequence, hasSequence := parseEventSequence(lastEventID)
 	state.mu.Lock()
 	channel := make(chan StreamEvent, len(state.history)+16)
-	replay := lastEventID == ""
-	for index, event := range state.history {
-		if replay {
-			channel <- event
-			continue
-		}
-		if event.ID == lastEventID || (hasSequence && index < len(state.sequences) && state.sequences[index] > lastSequence) {
-			if hasSequence {
-				// A numeric Last-Event-ID is a session sequence, so the first
-				// event after the sequence is part of the replay.
-				channel <- event
+	start := 0
+	if lastEventID != "" {
+		start = len(state.history)
+		found := false
+		for index, event := range state.history {
+			if event.ID == lastEventID {
+				// Last-Event-ID is inclusive at the transport boundary: resume
+				// strictly after the event the client already received.
+				start, found = index+1, true
+				break
 			}
-			replay = true
 		}
+		if !found && hasSequence {
+			// Numeric IDs are also accepted as durable session sequence
+			// cursors. Prefer the runtime event ID, then the persisted sequence
+			// captured alongside each in-memory event.
+			for index, event := range state.history {
+				if eventSequence, ok := parseEventSequence(event.ID); ok && eventSequence > lastSequence {
+					start, found = index, true
+					break
+				}
+				if index < len(state.sequences) && state.sequences[index] > lastSequence {
+					start, found = index, true
+					break
+				}
+			}
+		}
+	}
+	for _, event := range state.history[start:] {
+		channel <- event
 	}
 	if state.closed {
 		close(channel)
@@ -335,9 +351,8 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 	err := r.provider.Stream(ctx, ModelRequest{
 		Provider:          request.Provider,
 		Model:             request.Model,
-		BaseURL:           request.BaseURL,
-		APIKeyEnv:         request.APIKeyEnv,
 		ReasoningEffort:   request.ReasoningEffort,
+		Messages:          append([]Message(nil), request.Messages...),
 		Prompt:            request.Prompt,
 		MaxTokens:         request.MaxTokens,
 		InputCapabilities: append([]string(nil), capabilities...),
