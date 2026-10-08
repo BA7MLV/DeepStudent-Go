@@ -30,6 +30,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm install --include=optional --no-audit --no-fund
 
+      - name: Install Rollup native binary
+        run: npm install --no-save --include=optional @rollup/rollup-darwin-arm64
+
       - name: Resolve Go module checksums
         run: go mod tidy
 
