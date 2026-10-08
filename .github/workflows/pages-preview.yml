@@ -33,7 +33,9 @@ jobs:
           path: frontend/dist
 
   deploy:
-    if: github.event_name == 'push'
+    # Feature branches validate the Pages build but do not publish a preview;
+    # only the integrated migration branches own the Pages environment.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/migration/mygo-shell-poc' || github.ref == 'refs/heads/integration/agent-loop')
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
