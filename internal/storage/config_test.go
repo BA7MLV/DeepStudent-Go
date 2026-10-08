@@ -18,8 +18,10 @@ func TestSQLiteConfigRoundTripPersistsCredentialFreeRouting(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Runtime.DefaultProvider = "deepseek"
 	cfg.Runtime.DefaultModel = "deepseek-test"
-	cfg.Providers["deepseek"].BaseURL = "https://gateway.example/v1"
-	cfg.Providers["deepseek"].APIKeyEnv = "DEEPSEEK_TEST_KEY"
+	profile := cfg.Providers["deepseek"]
+	profile.BaseURL = "https://gateway.example/v1"
+	profile.APIKeyEnv = "DEEPSEEK_TEST_KEY"
+	cfg.Providers["deepseek"] = profile
 	if err := store.SaveConfig(ctx, cfg); err != nil { t.Fatal(err) }
 	if err := store.Close(); err != nil { t.Fatal(err) }
 

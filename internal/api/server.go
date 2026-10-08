@@ -62,6 +62,7 @@ type AttachmentStore interface {
 func NewServer(cfg config.Config, runs runtime.AgentRuntime, dependencies ...any) *Server {
 	var store runtime.SessionStore
 	var attachmentStore AttachmentStore
+	var configStore ConfigStore
 	for _, dependency := range dependencies {
 		switch value := dependency.(type) {
 		case runtime.SessionStore:
