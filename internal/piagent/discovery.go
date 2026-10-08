@@ -6,6 +6,7 @@ import (
     "context"
     "os/exec"
     "path/filepath"
+    "regexp"
     "strings"
     "time"
 )
@@ -56,11 +57,25 @@ func probe(parent context.Context, path, name string) (string, bool) {
         if text == "" { text = strings.TrimSpace(help) }
         capable = containsSidecarHint(help)
     }
-    if text != "" {
-        text = strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")[0]
-        if len(text) > 256 { text = text[:256] }
-    }
+    text = sanitizeVersion(text)
     return text, capable
+}
+
+var versionToken = regexp.MustCompile(`^(?:v|version\s*)?\d+\.\d+(?:\.\d+)?$`)
+
+// sanitizeVersion keeps only a conventional version prefix. Command output is
+// untrusted and may contain environment values; never expose arbitrary probe
+// output through the discovery API.
+func sanitizeVersion(value string) string {
+    line := strings.TrimSpace(strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")[0])
+    if line == "" { return "" }
+    fields := strings.Fields(line)
+    for i, field := range fields {
+        normalized := strings.TrimPrefix(strings.ToLower(field), "v")
+        if strings.HasPrefix(normalized, "version") { normalized = strings.TrimSpace(strings.TrimPrefix(normalized, "version")) }
+        if versionToken.MatchString(normalized) { return strings.Join(fields[:i+1], " ") }
+    }
+    return ""
 }
 
 func runProbe(parent context.Context, path string, arg string) string {
@@ -75,7 +90,7 @@ func runProbe(parent context.Context, path string, arg string) string {
 
 func containsSidecarHint(value string) bool {
     lower := strings.ToLower(value)
-    hints := []string{"sidecar", "http server", "http-service", "--port", "--host", "pi-agent/v1"}
+    hints := []string{"sidecar", "http server", "http-service", "pi-agent/v1"}
     for _, hint := range hints {
         if strings.Contains(lower, hint) { return true }
     }
