@@ -237,9 +237,9 @@ func isTableSeparator(s string) bool {
 	if len(cells) == 0 { return false }
 	for _, cell := range cells {
 		cell = strings.TrimSpace(cell)
-		if len(cell) < 3 { return false }
 		if strings.HasPrefix(cell, ":") { cell = cell[1:] }
 		if strings.HasSuffix(cell, ":") { cell = cell[:len(cell)-1] }
+		if len(cell) < 1 { return false }
 		if strings.Trim(cell, "-") != "" { return false }
 	}
 	return true
