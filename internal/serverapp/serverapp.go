@@ -146,6 +146,7 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 		probeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		ready = waitSidecarReady(probeCtx, sidecar)
 		cancel()
+		if ready { serverAPI.SetPiRuntimeState("ready", "Pi sidecar is ready") }
 		if !ready {
 			watchCtx, stop := context.WithCancel(context.Background())
 			readyStop = stop
@@ -174,7 +175,7 @@ func watchSidecarReady(ctx context.Context, serverAPI *api.Server, sidecar *runt
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		err := sidecar.Health(probeCtx)
 		cancel()
-		if err == nil { serverAPI.SetReady(true); return }
+		if err == nil { serverAPI.SetPiRuntimeState("ready", "Pi sidecar is ready"); serverAPI.SetReady(true); return }
 		select {
 		case <-ctx.Done(): return
 		case <-ticker.C:
