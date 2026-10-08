@@ -5,6 +5,7 @@ on:
     branches:
       - migration/mygo-shell-poc
       - integration/agent-loop
+      - feature/agent-loop-config-closure
   workflow_dispatch:
 
 permissions:
