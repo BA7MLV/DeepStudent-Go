@@ -58,6 +58,21 @@ export type RuntimeReadiness = {
   request_id?: string;
 };
 
+export type RuntimeProviderConfig = {
+  id: string;
+  name?: string;
+  model?: string;
+  base_url?: string;
+  api_key_env?: string;
+  streaming?: boolean;
+};
+
+export type RuntimeConfig = {
+  default_provider: string;
+  default_model?: string;
+  providers: Record<string, RuntimeProviderConfig>;
+};
+
 export type RuntimeAttachment = {
   sha256: string;
   size: number;
@@ -80,6 +95,10 @@ const defaultBaseUrl = (): string => {
   const env = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env;
   const configured = typeof env?.VITE_GO_RUNTIME_URL === "string" ? env.VITE_GO_RUNTIME_URL.trim() : "";
   if (configured) return configured;
+  if (typeof window !== "undefined") {
+    const shellRuntime = new URLSearchParams(window.location.search).get("runtime");
+    if (shellRuntime?.trim()) return shellRuntime.trim();
+  }
   const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
   return protocol !== "http:" && protocol !== "https:" ? "http://127.0.0.1:8080/api/v1" : "/api/v1";
 };
@@ -113,6 +132,17 @@ export async function getRuntimeReadiness(options: RuntimeApiOptions = {}): Prom
   if (!response.ok) throw await parseError(response);
   try { return await response.json() as RuntimeReadiness; }
   catch { throw new RuntimeApiError("Runtime API returned an invalid readiness response", { code: "invalid_response" }); }
+}
+
+export async function getRuntimeConfig(options: RuntimeApiOptions = {}): Promise<RuntimeConfig> {
+  return requestJSON<RuntimeConfig>("/config", { method: "GET" }, options);
+}
+
+export async function updateRuntimeConfig(update: { provider?: string; model?: string; base_url?: string; api_key_env?: string }, options: RuntimeApiOptions = {}): Promise<RuntimeConfig> {
+  return requestJSON<RuntimeConfig>("/config", {
+    method: "PATCH",
+    body: JSON.stringify(update),
+  }, options);
 }
 
 /** Upload an immutable blob to the Go attachment boundary before a message is sent. */

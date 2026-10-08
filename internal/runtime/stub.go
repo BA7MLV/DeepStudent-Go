@@ -335,6 +335,8 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 	err := r.provider.Stream(ctx, ModelRequest{
 		Provider:          request.Provider,
 		Model:             request.Model,
+		BaseURL:           request.BaseURL,
+		APIKeyEnv:         request.APIKeyEnv,
 		ReasoningEffort:   request.ReasoningEffort,
 		Prompt:            request.Prompt,
 		MaxTokens:         request.MaxTokens,

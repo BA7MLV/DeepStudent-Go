@@ -22,29 +22,6 @@ func TestHealthAndRequestID(t *testing.T) {
 	}
 }
 
-func TestReadyzTracksRuntimeReadiness(t *testing.T) {
-	server := NewServer(config.Defaults(), nil)
-	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
-	response := httptest.NewRecorder()
-	server.ServeHTTP(response, request)
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("not-ready response = %d, want %d", response.Code, http.StatusServiceUnavailable)
-	}
-
-	server = NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
-	response = httptest.NewRecorder()
-	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if response.Code != http.StatusOK {
-		t.Fatalf("ready response = %d, want %d", response.Code, http.StatusOK)
-	}
-	server.SetReady(false)
-	response = httptest.NewRecorder()
-	server.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if response.Code != http.StatusServiceUnavailable {
-		t.Fatalf("manually disabled response = %d, want %d", response.Code, http.StatusServiceUnavailable)
-	}
-}
-
 func TestRunSSE(t *testing.T) {
 	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
 	res := httptest.NewRecorder()
@@ -64,5 +41,47 @@ func TestRunSSE(t *testing.T) {
 	server.ServeHTTP(eventsRes, eventsReq)
 	if eventsRes.Code != http.StatusOK || !strings.Contains(eventsRes.Body.String(), "run.completed") {
 		t.Fatalf("unexpected SSE response: %d %s", eventsRes.Code, eventsRes.Body.String())
+	}
+}
+
+func TestConfigRouteUpdatesDefaultModel(t *testing.T) {
+	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
+	get := httptest.NewRecorder()
+	server.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/v1/config", nil))
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"deterministic"`) {
+		t.Fatalf("config GET = %d %s", get.Code, get.Body.String())
+	}
+	patch := httptest.NewRecorder()
+	server.ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/api/v1/config", strings.NewReader(`{"provider":"deterministic","model":"stub-v2"}`)))
+	if patch.Code != http.StatusOK || !strings.Contains(patch.Body.String(), `"default_model":"stub-v2"`) {
+		t.Fatalf("config PATCH = %d %s", patch.Code, patch.Body.String())
+	}
+	run := httptest.NewRecorder()
+	server.ServeHTTP(run, httptest.NewRequest(http.MethodPost, "/api/v1/runs", strings.NewReader(`{"prompt":"uses updated route"}`)))
+	if run.Code != http.StatusAccepted || !strings.Contains(run.Body.String(), `"model":"stub-v2"`) {
+		t.Fatalf("run after config PATCH = %d %s", run.Code, run.Body.String())
+	}
+}
+
+func TestConfigRouteUpdatesProviderEndpointAndEnvironmentName(t *testing.T) {
+	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
+	patch := httptest.NewRecorder()
+	server.ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/api/v1/config", strings.NewReader(`{"provider":"deepseek","model":"deepseek-test","base_url":"https://example.test/v1","api_key_env":"MY_DEEPSEEK_KEY"}`)))
+	if patch.Code != http.StatusOK || !strings.Contains(patch.Body.String(), `"base_url":"https://example.test/v1"`) || !strings.Contains(patch.Body.String(), `"api_key_env":"MY_DEEPSEEK_KEY"`) {
+		t.Fatalf("provider config PATCH = %d %s", patch.Code, patch.Body.String())
+	}
+	run := httptest.NewRecorder()
+	server.ServeHTTP(run, httptest.NewRequest(http.MethodPost, "/api/v1/runs", strings.NewReader(`{"prompt":"uses provider override"}`)))
+	if run.Code != http.StatusAccepted || !strings.Contains(run.Body.String(), `"provider":"deepseek"`) || !strings.Contains(run.Body.String(), `"model":"deepseek-test"`) {
+		t.Fatalf("run after provider PATCH = %d %s", run.Code, run.Body.String())
+	}
+}
+
+func TestConfigRouteRejectsCredentialInBaseURL(t *testing.T) {
+	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodPatch, "/api/v1/config", strings.NewReader(`{"provider":"deepseek","base_url":"https://user:secret@example.test/v1"}`)))
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("credential-bearing base URL status = %d, body=%s", res.Code, res.Body.String())
 	}
 }

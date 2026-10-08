@@ -62,3 +62,22 @@ func TestSiliconFlowDoesNotRequireCredentialUntilStream(t *testing.T) {
 		t.Fatalf("expected missing environment error, got %v", err)
 	}
 }
+
+func TestSiliconFlowUsesPerRunEndpointAndEnvironmentName(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+	provider := NewSiliconFlowProvider(SiliconFlowConfig{
+		BaseURL: server.URL + "/old", APIKeyEnv: "OLD_KEY", Model: "old",
+		LookupEnv: func(name string) (string, bool) { return "override-key", name == "OVERRIDE_KEY" },
+	})
+	var text strings.Builder
+	err := provider.Stream(context.Background(), ModelRequest{Prompt: "hi", BaseURL: server.URL, APIKeyEnv: "OVERRIDE_KEY", Model: "override-model"}, func(event StreamEvent) error { text.WriteString(event.Delta); return nil })
+	if err != nil || gotAuth != "Bearer override-key" || text.String() != "ok" {
+		t.Fatalf("per-run provider override failed: err=%v auth=%q text=%q", err, gotAuth, text.String())
+	}
+}

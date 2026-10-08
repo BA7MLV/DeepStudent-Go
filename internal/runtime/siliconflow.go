@@ -113,9 +113,13 @@ func (p *SiliconFlowProvider) Stream(ctx context.Context, request ModelRequest, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	key, ok := p.lookup(p.apiKeyEnv)
+	keyEnv := strings.TrimSpace(request.APIKeyEnv)
+	if keyEnv == "" {
+		keyEnv = p.apiKeyEnv
+	}
+	key, ok := p.lookup(keyEnv)
 	if !ok || strings.TrimSpace(key) == "" {
-		return fmt.Errorf("provider %s is not configured: credential environment variable %s is empty", p.Name(), p.apiKeyEnv)
+		return fmt.Errorf("provider %s is not configured: credential environment variable %s is empty", p.Name(), keyEnv)
 	}
 	model := strings.TrimSpace(request.Model)
 	if model == "" {
@@ -143,7 +147,11 @@ func (p *SiliconFlowProvider) Stream(ctx context.Context, request ModelRequest, 
 	if err != nil {
 		return fmt.Errorf("encode provider request: %w", err)
 	}
-	endpoint := p.baseURL + "/chat/completions"
+	baseURL := strings.TrimRight(strings.TrimSpace(request.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = p.baseURL
+	}
+	endpoint := baseURL + "/chat/completions"
 	for attempt := 0; attempt <= p.maxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err

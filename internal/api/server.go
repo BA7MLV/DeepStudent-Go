@@ -16,6 +16,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +29,7 @@ const apiVersion = "v1"
 
 type Server struct {
 	cfg         config.Config
+	cfgMu       sync.RWMutex
 	runs        runtime.AgentRuntime
 	store       runtime.SessionStore
 	attachments AttachmentStore
@@ -99,6 +101,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"version": apiVersion, "service": "deepstudent-api", "request_id": requestID})
+	case r.URL.Path == "/api/v1/config" && r.Method == http.MethodGet:
+		s.getConfig(w, requestID)
+	case r.URL.Path == "/api/v1/config" && (r.Method == http.MethodPatch || r.Method == http.MethodPut):
+		s.updateConfig(w, r, requestID)
 	case r.URL.Path == "/api/v1/runs" && r.Method == http.MethodPost:
 		s.startRun(w, r, requestID)
 	case r.URL.Path == "/api/v1/sessions" && r.Method == http.MethodGet:
@@ -118,6 +124,103 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, requestID, http.StatusNotFound, "not_found", "route not found", nil)
 	}
+}
+
+// configView deliberately exposes only credential-free routing metadata. API
+// keys remain environment variables owned by the Go process and are never
+// returned to a browser or native client.
+func (s *Server) getConfig(w http.ResponseWriter, requestID string) {
+	s.cfgMu.RLock()
+	cfg := config.Clone(s.cfg)
+	s.cfgMu.RUnlock()
+	providers := make(map[string]map[string]any, len(cfg.Providers))
+	for id, provider := range cfg.Providers {
+		providers[id] = map[string]any{
+			"id": id, "name": provider.Name, "model": provider.Model,
+			"base_url": provider.EffectiveBaseURL(nil), "api_key_env": provider.APIKeyEnv,
+			"streaming": provider.Streaming,
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"default_provider": cfg.Runtime.DefaultProvider,
+		"default_model":    cfg.Runtime.DefaultModel,
+		"providers":        providers,
+		"request_id":       requestID,
+	})
+}
+
+type configUpdateRequest struct {
+	DefaultProvider *string `json:"default_provider"`
+	DefaultModel    *string `json:"default_model"`
+	// provider/model are accepted as concise aliases for native clients.
+	Provider *string `json:"provider"`
+	Model    *string `json:"model"`
+	BaseURL  *string `json:"base_url"`
+	APIKeyEnv *string `json:"api_key_env"`
+}
+
+func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID string) {
+	var input configUpdateRequest
+	if err := decodeJSON(http.MaxBytesReader(w, r.Body, 64<<10), &input); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_json", "request body must be valid JSON", nil)
+		return
+	}
+	s.cfgMu.RLock()
+	cfg := config.Clone(s.cfg)
+	s.cfgMu.RUnlock()
+	provider := cfg.Runtime.DefaultProvider
+	model := cfg.Runtime.DefaultModel
+	if input.DefaultProvider != nil { provider = strings.TrimSpace(*input.DefaultProvider) }
+	if input.Provider != nil { provider = strings.TrimSpace(*input.Provider) }
+	if input.DefaultModel != nil { model = strings.TrimSpace(*input.DefaultModel) }
+	if input.Model != nil { model = strings.TrimSpace(*input.Model) }
+	if provider == "" {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", "default provider is required", nil)
+		return
+	}
+	if _, err := cfg.ResolveModel(provider, model); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
+		return
+	}
+	profile := cfg.Providers[provider]
+	if input.BaseURL != nil {
+		baseURL := strings.TrimSpace(*input.BaseURL)
+		if err := config.ValidateProviderOverride(baseURL, ""); err != nil {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
+			return
+		}
+		profile.BaseURL = baseURL
+		// An explicit endpoint should win over an environment-backed endpoint.
+		// An empty UI field means “keep the configured environment endpoint” so
+		// simply saving model metadata cannot accidentally disable a provider.
+		if baseURL != "" {
+			profile.BaseURLEnv = ""
+		}
+	}
+	if input.APIKeyEnv != nil {
+		apiKeyEnv := strings.TrimSpace(*input.APIKeyEnv)
+		if err := config.ValidateProviderOverride("", apiKeyEnv); err != nil {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
+			return
+		}
+		profile.APIKeyEnv = apiKeyEnv
+	}
+	if input.Model != nil || input.DefaultModel != nil {
+		profile.Model = model
+	}
+	cfg.Providers[provider] = profile
+	cfg.Runtime.DefaultProvider = provider
+	cfg.Runtime.DefaultModel = model
+	s.cfgMu.Lock()
+	s.cfg = cfg
+	s.cfgMu.Unlock()
+	s.getConfig(w, requestID)
+}
+
+func (s *Server) configSnapshot() config.Config {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return config.Clone(s.cfg)
 }
 
 func (s *Server) health(w http.ResponseWriter, requestID string) {
@@ -242,7 +345,7 @@ func (s *Server) uploadAttachment(w http.ResponseWriter, r *http.Request, reques
 		return
 	}
 	maxBody := int64(64 << 20)
-	if max := s.cfg.Storage.AttachmentMaxBytes; max > 0 {
+	if max := s.configSnapshot().Storage.AttachmentMaxBytes; max > 0 {
 		maxBody = max + attachmentMultipartOverhead
 		if maxBody < max { // overflow guard for malformed configuration.
 			maxBody = max
@@ -439,6 +542,8 @@ type runRequest struct {
 	ClientMessageID   string   `json:"client_message_id,omitempty"`
 	Provider          string   `json:"provider,omitempty"`
 	Model             string   `json:"model,omitempty"`
+	BaseURL           string   `json:"base_url,omitempty"`
+	APIKeyEnv         string   `json:"api_key_env,omitempty"`
 	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
 	MaxTokens         int      `json:"max_tokens,omitempty"`
 	InputCapabilities []string `json:"input_capabilities,omitempty"`
@@ -461,6 +566,7 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request, requestID stri
 }
 
 func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID string, input runRequest) {
+	cfg := s.configSnapshot()
 	if strings.TrimSpace(input.Prompt) == "" {
 		input.Prompt = input.Content
 	}
@@ -475,7 +581,7 @@ func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID
 		writeError(w, requestID, http.StatusBadRequest, "invalid_request", "max_tokens must not be negative", nil)
 		return
 	}
-	selection, err := s.cfg.ResolveModel(input.Provider, input.Model)
+	selection, err := cfg.ResolveModel(input.Provider, input.Model)
 	if err != nil {
 		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
 		return
@@ -485,6 +591,16 @@ func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID
 	}
 	if strings.TrimSpace(input.Model) == "" {
 		input.Model = selection.Model
+	}
+	if strings.TrimSpace(input.BaseURL) == "" {
+		input.BaseURL = selection.BaseURL
+	}
+	if strings.TrimSpace(input.APIKeyEnv) == "" {
+		input.APIKeyEnv = selection.APIKeyEnv
+	}
+	if err := config.ValidateProviderOverride(input.BaseURL, input.APIKeyEnv); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
+		return
 	}
 	if strings.TrimSpace(input.ReasoningEffort) == "" {
 		input.ReasoningEffort = selection.ReasoningEffort
@@ -498,8 +614,8 @@ func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID
 	if input.InputCapabilities == nil {
 		input.InputCapabilities = selection.InputCapabilities
 	}
-	if s.cfg.Runtime.MaxTokens > 0 && input.MaxTokens > s.cfg.Runtime.MaxTokens {
-		writeError(w, requestID, http.StatusBadRequest, "token_limit_exceeded", "max_tokens exceeds the configured limit", map[string]any{"max_tokens": s.cfg.Runtime.MaxTokens})
+	if cfg.Runtime.MaxTokens > 0 && input.MaxTokens > cfg.Runtime.MaxTokens {
+		writeError(w, requestID, http.StatusBadRequest, "token_limit_exceeded", "max_tokens exceeds the configured limit", map[string]any{"max_tokens": cfg.Runtime.MaxTokens})
 		return
 	}
 	var requestedRunID string
@@ -559,6 +675,8 @@ func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID
 		Prompt:            input.Prompt,
 		Provider:          input.Provider,
 		Model:             input.Model,
+		BaseURL:           input.BaseURL,
+		APIKeyEnv:         input.APIKeyEnv,
 		ReasoningEffort:   input.ReasoningEffort,
 		MaxTokens:         input.MaxTokens,
 		InputCapabilities: input.InputCapabilities,
@@ -624,7 +742,7 @@ func (s *Server) streamRun(w http.ResponseWriter, r *http.Request, requestID str
 	// behavior used to recover any events produced during the disconnect.
 	fmt.Fprint(w, "retry: 3000\n\n")
 	flusher.Flush()
-	heartbeatInterval := s.cfg.Server.SSEHeartbeat
+	heartbeatInterval := s.configSnapshot().Server.SSEHeartbeat
 	if heartbeatInterval <= 0 {
 		heartbeatInterval = 15 * time.Second
 	}
@@ -926,11 +1044,11 @@ func (s *Server) cors(w http.ResponseWriter, r *http.Request) bool {
 	if origin == "" {
 		return true
 	}
-	for _, allowed := range s.cfg.Server.CORSAllowlist {
+	for _, allowed := range s.configSnapshot().Server.CORSAllowlist {
 		if origin == allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
-			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Request-ID, Last-Event-ID")
 			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
 			return true
