@@ -7,10 +7,6 @@ on:
       - migration/mygo-shell-poc
       - feature/go-backend-runtime
       - integration/agent-loop
-  pull_request:
-    branches:
-      - main
-
 permissions:
   contents: read
 
@@ -37,7 +33,7 @@ jobs:
         run: go mod tidy
 
       - name: Install MyGo CLI
-        run: go install github.com/egoist/mygo/cmd/mygo@v0.2.5
+        run: go install github.com/egoist/mygo/cmd/mygo@v0.2.11
 
       - name: Verify checked-in typed bindings
         run: test -s frontend/src/mygo.ts

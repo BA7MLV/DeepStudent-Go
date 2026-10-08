@@ -47,6 +47,12 @@ type nativeShell struct {
 	pendingInput   string
 	attachmentBusy bool
 	attachmentNote string
+	configProvider string
+	configModel    string
+	configBaseURL  string
+	configAPIKeyEnv string
+	configBusy     bool
+	configNote     string
 	onboardingOpen bool
 	onboardingStep int
 	onboarding      [4]string
@@ -87,6 +93,18 @@ type nativeMessageRecord struct {
 	Content string `json:"content"`
 }
 
+type nativeRuntimeConfig struct {
+	DefaultProvider string `json:"default_provider"`
+	DefaultModel    string `json:"default_model"`
+	Providers       map[string]nativeProviderConfig `json:"providers"`
+}
+
+type nativeProviderConfig struct {
+	Model     string `json:"model"`
+	BaseURL   string `json:"base_url"`
+	APIKeyEnv string `json:"api_key_env"`
+}
+
 func newNativeShell(apiBaseURL string) *nativeShell {
 	welcome := newNativeMessage("assistant", "你好，我是 DeepStudent。你可以直接在这里开始一个学习对话。")
 	return &nativeShell{
@@ -97,6 +115,8 @@ func newNativeShell(apiBaseURL string) *nativeShell {
 		runtimeHealthy: true,
 		apiBaseURL:     strings.TrimRight(apiBaseURL, "/"),
 		sessionID:      "native-session",
+		configProvider: "deterministic",
+		configModel:    "stub",
 		messagesList:   ui.ListState{FollowEnd: true},
 		messages: []nativeMessage{welcome},
 	}
@@ -115,6 +135,19 @@ func (s *nativeShell) hydrateSession() {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	base := strings.TrimRight(s.apiBaseURL, "/")
+	var runtimeConfig nativeRuntimeConfig
+	if err := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/config", nil, &runtimeConfig); err == nil {
+		s.mu.Lock()
+		if strings.TrimSpace(runtimeConfig.DefaultProvider) != "" { s.configProvider = runtimeConfig.DefaultProvider }
+		s.configModel = runtimeConfig.DefaultModel
+		if provider, ok := runtimeConfig.Providers[s.configProvider]; ok {
+			s.configModel = provider.Model
+			s.configBaseURL = provider.BaseURL
+			s.configAPIKeyEnv = provider.APIKeyEnv
+		}
+		s.mu.Unlock()
+		if s.invalidate != nil { s.invalidate() }
+	}
 	var list struct {
 		Sessions []nativeSession `json:"sessions"`
 	}
@@ -162,6 +195,48 @@ func (s *nativeShell) hydrateSession() {
 	if s.invalidate != nil {
 		s.invalidate()
 	}
+}
+
+func (s *nativeShell) saveRuntimeConfig() {
+	s.mu.Lock()
+	if s.configBusy {
+		s.mu.Unlock()
+		return
+	}
+	provider := strings.TrimSpace(s.configProvider)
+	model := strings.TrimSpace(s.configModel)
+	baseURL := strings.TrimSpace(s.configBaseURL)
+	apiKeyEnv := strings.TrimSpace(s.configAPIKeyEnv)
+	if provider == "" {
+		s.configNote = "提供商不能为空"
+		s.mu.Unlock()
+		if s.invalidate != nil { s.invalidate() }
+		return
+	}
+	s.configBusy = true
+	s.configNote = "正在保存…"
+	s.mu.Unlock()
+	if s.invalidate != nil { s.invalidate() }
+	payload, _ := json.Marshal(map[string]string{"provider": provider, "model": model, "base_url": baseURL, "api_key_env": apiKeyEnv})
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	var updated nativeRuntimeConfig
+	err := nativeJSONRequest(ctx, http.MethodPatch, strings.TrimRight(s.apiBaseURL, "/")+"/api/v1/config", payload, &updated)
+	s.mu.Lock()
+	s.configBusy = false
+	if err != nil {
+		s.configNote = "保存失败：" + err.Error()
+	} else {
+		s.configProvider = updated.DefaultProvider
+		s.configModel = updated.DefaultModel
+		if saved, ok := updated.Providers[provider]; ok {
+			s.configBaseURL = saved.BaseURL
+			s.configAPIKeyEnv = saved.APIKeyEnv
+		}
+		s.configNote = "已保存，下一条消息将使用此模型。"
+	}
+	s.mu.Unlock()
+	if s.invalidate != nil { s.invalidate() }
 }
 
 func nativeJSONRequest(ctx context.Context, method, endpoint string, body []byte, result any) error {
@@ -424,12 +499,20 @@ func (s *nativeShell) uploadAttachment(path string) (string, error) {
 func (s *nativeShell) runPrompt(ctx context.Context, prompt, attachmentRef, messageID string, assistantIndex int) (string, error) {
 	s.mu.Lock()
 	sessionID := s.sessionID
+	provider := strings.TrimSpace(s.configProvider)
+	model := strings.TrimSpace(s.configModel)
+	baseURL := strings.TrimSpace(s.configBaseURL)
+	apiKeyEnv := strings.TrimSpace(s.configAPIKeyEnv)
 	s.mu.Unlock()
 	input := []string(nil)
 	if attachmentRef != "" {
 		input = []string{attachmentRef}
 	}
-	body, err := json.Marshal(map[string]any{"prompt": prompt, "session_id": sessionID, "message_id": messageID, "input": input, "streaming_mode": "events"})
+	body, err := json.Marshal(map[string]any{
+		"prompt": prompt, "session_id": sessionID, "message_id": messageID,
+		"provider": provider, "model": model, "base_url": baseURL,
+		"api_key_env": apiKeyEnv, "input": input, "streaming_mode": "events",
+	})
 	if err != nil {
 		return "", err
 	}
@@ -945,6 +1028,22 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 	case "runtime":
 		ui.Text(c, "运行时").FontSize(16).Bold()
 		ui.Text(c, "原生壳与 WebView 页面共享同一个 serverapp 进程。").TextColor(t.TextMuted)
+		ui.Column(c).Gap(t.Space(2)).Children(func() {
+			ui.Text(c, "默认提供商").FontSize(12).Bold()
+			ui.TextInput(c, &s.configProvider).Placeholder("例如 deterministic 或 deepseek")
+			ui.Text(c, "模型").FontSize(12).Bold()
+			ui.TextInput(c, &s.configModel).Placeholder("例如 stub 或 deepseek-chat")
+			ui.Text(c, "Base URL（可选）").FontSize(12).Bold()
+			ui.TextInput(c, &s.configBaseURL).Placeholder("例如 https://api.example.com/v1")
+			ui.Text(c, "API key environment variable（只填变量名）").FontSize(12).Bold()
+			ui.TextInput(c, &s.configAPIKeyEnv).Placeholder("例如 DEEPSEEK_API_KEY")
+			if ui.PrimaryButton(c, "保存模型配置").Clicked() {
+				go s.saveRuntimeConfig()
+			}
+			if s.configNote != "" {
+				ui.Text(c, s.configNote).FontSize(12).TextColor(t.TextMuted)
+			}
+		})
 		ui.Box(c).Padding(t.Space(4)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
 			ui.Text(c, "HTTP/SSE 状态").Bold()
 			ui.Row(c).Gap(t.Space(2)).Children(func() {

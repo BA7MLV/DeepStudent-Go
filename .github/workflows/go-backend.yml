@@ -7,11 +7,6 @@ on:
       - feature/go-backend-runtime
       - goal/go-runtime-foundation
       - integration/agent-loop
-  pull_request:
-    branches:
-      - main
-      - feature/go-backend-runtime
-      - goal/go-runtime-foundation
 
 permissions:
   contents: read

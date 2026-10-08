@@ -321,6 +321,28 @@ func ValidateWithEnv(cfg Config, lookup func(string) (string, bool)) error {
 	return nil
 }
 
+// ValidateProviderOverride validates the credential-free fields accepted by
+// the native settings surface. APIKeyEnv is an environment-variable name,
+// never a secret value; callers must resolve the value only inside the
+// provider process at run time.
+func ValidateProviderOverride(baseURL, apiKeyEnv string) error {
+	baseURL = strings.TrimSpace(baseURL)
+	if err := validateURL(baseURL, "provider baseURL"); err != nil {
+		return err
+	}
+	if baseURL != "" {
+		parsed, _ := url.Parse(baseURL)
+		if parsed.User != nil {
+			return errors.New("provider baseURL must not contain credentials")
+		}
+	}
+	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
+	if apiKeyEnv != "" && !envNamePattern.MatchString(apiKeyEnv) {
+		return errors.New("provider apiKeyEnv is invalid")
+	}
+	return nil
+}
+
 func validateProvider(name string, p ProviderProfile) error {
     if strings.TrimSpace(name) != name || name == "" { return fmt.Errorf("provider name %q is invalid", name) }
     if p.Name != "" && p.Name != name { return fmt.Errorf("provider %q name must match map key", name) }
@@ -369,4 +391,8 @@ func NewManager(path string) (*Manager, error) { lookup := os.LookupEnv; cfg, er
 func (m *Manager) Config() Config { m.mu.RLock(); defer m.mu.RUnlock(); return cloneConfig(m.cfg) }
 func (m *Manager) Reload() error { cfg, err := load(m.path, m.lookup); if err != nil { return err }; m.mu.Lock(); m.cfg = cloneConfig(cfg); m.mu.Unlock(); return nil }
 func cloneConfig(cfg Config) Config { out := cfg; out.Server.CORSAllowlist = append([]string(nil), cfg.Server.CORSAllowlist...); out.Storage.AttachmentAllowedMIMEs = append([]string(nil), cfg.Storage.AttachmentAllowedMIMEs...); out.Models = map[string]ModelProfile{}; for id, m := range cfg.Models { out.Models[id] = cloneModel(m) }; out.Providers = map[string]ProviderProfile{}; for name, p := range cfg.Providers { p.Input = append([]string(nil), p.Input...); p.InputCapabilities = append([]string(nil), p.InputCapabilities...); p.Models = map[string]ModelProfile{}; for id, m := range p.Models { p.Models[id] = cloneModel(m) }; out.Providers[name] = p }; return out }
+
+// Clone returns an independent configuration snapshot for callers that need
+// to inspect or edit configuration outside this package's manager.
+func Clone(cfg Config) Config { return cloneConfig(cfg) }
 func cloneModel(m ModelProfile) ModelProfile { m.Input = append([]string(nil), m.Input...); m.InputCapabilities = append([]string(nil), m.InputCapabilities...); return m }

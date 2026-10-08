@@ -60,6 +60,11 @@ type StreamEvent struct {
 type ModelRequest struct {
 	Provider          string         `json:"provider,omitempty"`
 	Model             string         `json:"model,omitempty"`
+	// BaseURL and APIKeyEnv are optional, non-secret per-run provider
+	// overrides. APIKeyEnv is only an environment-variable name; the key
+	// value is always resolved inside the provider process.
+	BaseURL           string         `json:"base_url,omitempty"`
+	APIKeyEnv         string         `json:"api_key_env,omitempty"`
 	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
 	Messages          []Message      `json:"messages,omitempty"`
 	Prompt            string         `json:"prompt,omitempty"`
@@ -211,6 +216,8 @@ type AgentRunRequest struct {
 	Prompt            string   `json:"prompt"`
 	Provider          string   `json:"provider,omitempty"`
 	Model             string   `json:"model,omitempty"`
+	BaseURL           string   `json:"base_url,omitempty"`
+	APIKeyEnv         string   `json:"api_key_env,omitempty"`
 	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
 	MaxTokens         int      `json:"max_tokens,omitempty"`
 	InputCapabilities []string `json:"input_capabilities,omitempty"`

@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HealthService } from "./mygo";
 import { createGoRuntimeAdapter } from "./go-runtime";
+import { getRuntimeConfig, updateRuntimeConfig, type RuntimeConfig } from "./runtime-api";
 
 type ViewId =
   | "chat-v2"
@@ -260,12 +261,120 @@ type ComposerGestureHandlers = {
   onPointerCancel: (event: React.PointerEvent<HTMLElement>) => void;
 };
 
-function VoiceComposerButton({ composer, input, onRegister }: { composer: ThreadComposerRuntime; input: ComposerInput; onRegister?: (handlers: ComposerGestureHandlers | null) => void }) {
+type VoiceOverlayState = { recording: boolean; cancelZone: boolean; level: number; elapsed: number };
+
+function formatRecordingElapsed(elapsed: number) {
+  const totalSeconds = Math.max(0, Math.floor(elapsed / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+/**
+ * Small canvas visualizer for the mobile recording surface. The recorder's
+ * analyser already publishes a normalized live level; this renderer turns it
+ * into layered liquid wave fronts without adding a second audio graph or a
+ * heavyweight dependency.
+ */
+function VoiceWaveformCanvas({ level, active }: { level: number; active: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const levelRef = useRef(level);
+
+  useEffect(() => {
+    levelRef.current = level;
+  }, [level]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    let frame = 0;
+    let width = 0;
+    let height = 0;
+    let dpr = 1;
+    let phase = 0;
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      width = rect.width;
+      height = rect.height;
+      dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      canvas.width = Math.max(1, Math.round(width * dpr));
+      canvas.height = Math.max(1, Math.round(height * dpr));
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+
+    const draw = () => {
+      if (!width || !height) resize();
+      context.clearRect(0, 0, width, height);
+      const level = Math.max(0, Math.min(1, levelRef.current));
+      const color = getComputedStyle(canvas).getPropertyValue("--ds-voice-color").trim() || "#2563eb";
+      const baseline = Math.max(22, height - 26);
+      const amplitude = 8 + level * Math.min(88, height * .3);
+      const layers = [
+        { speed: 1, frequency: .012, alpha: .16 + level * .26, offset: 0 },
+        { speed: -.7, frequency: .017, alpha: .1 + level * .2, offset: 10 },
+        { speed: .45, frequency: .008, alpha: .08 + level * .14, offset: 20 },
+      ];
+      for (let layer = 0; layer < layers.length; layer += 1) {
+        const { speed, frequency, alpha, offset } = layers[layer];
+        const localAmplitude = amplitude * (1 - layer * .18);
+        context.beginPath();
+        context.moveTo(0, height);
+        context.lineTo(0, baseline - offset);
+        for (let x = 0; x <= width; x += 6) {
+          const envelope = .68 + .32 * Math.sin(x * .003 + phase * .12 + layer);
+          const y = baseline - offset - Math.sin(x * frequency + phase * speed + layer * 1.6) * localAmplitude * envelope;
+          context.lineTo(x, y);
+        }
+        context.lineTo(width, height);
+        context.closePath();
+        context.fillStyle = color;
+        context.globalAlpha = Math.min(.7, alpha);
+        context.fill();
+        context.beginPath();
+        context.moveTo(0, baseline - offset);
+        for (let x = 0; x <= width; x += 6) {
+          const y = baseline - offset - Math.sin(x * frequency + phase * speed + layer * 1.6) * localAmplitude * (.68 + .32 * Math.sin(x * .003 + phase * .12 + layer));
+          context.lineTo(x, y);
+        }
+        context.strokeStyle = color;
+        context.globalAlpha = Math.min(.58, alpha + .12);
+        context.lineWidth = 1 + level * 1.2;
+        context.stroke();
+      }
+      context.globalAlpha = 1;
+      phase += .045 + level * .06;
+      frame = window.requestAnimationFrame(draw);
+    };
+
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(resize);
+    observer?.observe(canvas);
+    resize();
+    if (active) frame = window.requestAnimationFrame(draw);
+    return () => {
+      observer?.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
+  }, [active]);
+
+  return <canvas ref={canvasRef} className="ds-voice-waveform" aria-hidden="true" />;
+}
+
+function VoiceComposerButton({ composer, input, onRegister, onVoiceStateChange }: { composer: ThreadComposerRuntime; input: ComposerInput; onRegister?: (handlers: ComposerGestureHandlers | null) => void; onVoiceStateChange?: (state: VoiceOverlayState) => void }) {
   const [recording, setRecording] = useState(false);
   const [cancelZone, setCancelZone] = useState(false);
+  const [voiceLevel, setVoiceLevel] = useState(0);
+  const [recordingElapsed, setRecordingElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const meterFrameRef = useRef<number | null>(null);
+  const recordingStartedAtRef = useRef(0);
   const chunksRef = useRef<Blob[]>([]);
   const pressingRef = useRef(false);
   const cancelZoneRef = useRef(false);
@@ -274,6 +383,10 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
   const longPressTimerRef = useRef<number | null>(null);
   const hasText = input.value.trim().length > 0;
 
+  useEffect(() => {
+    onVoiceStateChange?.({ recording, cancelZone, level: voiceLevel, elapsed: recordingElapsed });
+  }, [cancelZone, onVoiceStateChange, recording, recordingElapsed, voiceLevel]);
+
   const clearLongPressTimer = () => {
     if (longPressTimerRef.current !== null) {
       window.clearTimeout(longPressTimerRef.current);
@@ -281,7 +394,22 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
     }
   };
 
+  const stopMeter = () => {
+    if (meterFrameRef.current !== null) {
+      window.cancelAnimationFrame(meterFrameRef.current);
+      meterFrameRef.current = null;
+    }
+    audioSourceRef.current?.disconnect();
+    audioSourceRef.current = null;
+    analyserRef.current = null;
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    if (audioContext) void audioContext.close().catch(() => undefined);
+    recordingStartedAtRef.current = 0;
+  };
+
   const resetRecording = () => {
+    stopMeter();
     recorderRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -291,6 +419,8 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
     clearLongPressTimer();
     setRecording(false);
     setCancelZone(false);
+    setVoiceLevel(0);
+    setRecordingElapsed(0);
   };
 
   const sendRecording = async (blob: Blob) => {
@@ -356,8 +486,47 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
       recorderRef.current = recorder;
       streamRef.current = stream;
       recorder.start();
+      recordingStartedAtRef.current = performance.now();
       setRecording(true);
       suppressClickRef.current = true;
+
+      // Keep the recording surface expressive even when Web Audio is not
+      // available. The CSS overlay falls back to elapsed-time animation.
+      try {
+        const audioContext = new AudioContext();
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 64;
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+        audioSourceRef.current = source;
+      } catch {
+        audioContextRef.current = null;
+        analyserRef.current = null;
+        audioSourceRef.current = null;
+      }
+
+      const meterData = analyserRef.current ? new Uint8Array(analyserRef.current.fftSize) : null;
+      const updateMeter = () => {
+        if (!recorderRef.current) return;
+        const elapsed = performance.now() - recordingStartedAtRef.current;
+        setRecordingElapsed(elapsed);
+        const analyser = analyserRef.current;
+        if (analyser && meterData) {
+          analyser.getByteTimeDomainData(meterData);
+          let sum = 0;
+          for (const sample of meterData) {
+            const normalized = (sample - 128) / 128;
+            sum += normalized * normalized;
+          }
+          setVoiceLevel(Math.min(1, Math.sqrt(sum / meterData.length) * 3.5));
+        } else {
+          setVoiceLevel(0.2 + (Math.sin(elapsed / 130) + 1) * 0.08);
+        }
+        meterFrameRef.current = window.requestAnimationFrame(updateMeter);
+      };
+      meterFrameRef.current = window.requestAnimationFrame(updateMeter);
     } catch {
       pressingRef.current = false;
       setError("无法访问麦克风");
@@ -398,9 +567,10 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
 
   const isGestureArea = (event: React.PointerEvent<HTMLElement>) => {
     if (!(event.target instanceof Element)) return true;
-    // Keep regular controls clickable. The textarea and the empty composer
-    // surface are the intentional long-press recording targets.
-    return !event.target.closest("button, input, select, a");
+    // The whole empty composer is the long-press surface, including the
+    // textarea itself. Keep only actionable controls out of the gesture so
+    // attachment/send buttons retain their normal click behavior.
+    return !event.target.closest("button, select, a, [role=button], [data-voice-control]");
   };
 
   const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => {
@@ -457,7 +627,10 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
     return () => onRegister?.(null);
   });
 
-  useEffect(() => () => clearLongPressTimer(), []);
+  useEffect(() => () => {
+    clearLongPressTimer();
+    stopMeter();
+  }, []);
 
   const handleClick = () => {
     if (suppressClickRef.current) {
@@ -485,19 +658,39 @@ function VoiceComposerButton({ composer, input, onRegister }: { composer: Thread
 
 function ChatComposer({ runtime }: { runtime: ReturnType<typeof useLocalRuntime> }) {
   const composer = unstable_useComposerInput();
+  const hasComposerText = composer.value.trim().length > 0;
+  const [voiceState, setVoiceState] = useState<VoiceOverlayState>({ recording: false, cancelZone: false, level: 0, elapsed: 0 });
   const gestureRef = useRef<ComposerGestureHandlers | null>(null);
   const registerGesture = (handlers: ComposerGestureHandlers | null) => { gestureRef.current = handlers; };
   const handleAreaPointerDown = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerDown(event);
   const handleAreaPointerMove = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerMove(event);
   const handleAreaPointerUp = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerUp(event);
   const handleAreaPointerCancel = (event: React.PointerEvent<HTMLElement>) => gestureRef.current?.onPointerCancel(event);
-  return <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!composer.value.trim()} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
-    <ComposerPrimitive.AddAttachment className="ds-composer-tool ds-composer-attachment" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
-    <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
-    <div className="ds-composer__toolbar">
-      <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} />
+  const overlayStyle = {
+    "--ds-voice-level": voiceState.level.toFixed(3),
+    "--ds-voice-elapsed": `${voiceState.elapsed}ms`,
+  } as React.CSSProperties;
+  return <div className="ds-composer-shell" data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} style={overlayStyle}>
+    <div className="ds-voice-wave" aria-hidden="true"><VoiceWaveformCanvas level={voiceState.level} active={voiceState.recording} /></div>
+    <ComposerPrimitive.Root className="ds-composer" compact data-composer-empty={!hasComposerText} data-voice-recording={voiceState.recording} data-voice-cancel={voiceState.cancelZone} onPointerDown={handleAreaPointerDown} onPointerMove={handleAreaPointerMove} onPointerUp={handleAreaPointerUp} onPointerCancel={handleAreaPointerCancel}>
+      <div className="ds-voice-overlay" aria-hidden="true">
+        <div className="ds-voice-overlay__wash" />
+        <div className="ds-voice-overlay__aurora" />
+        <div className="ds-voice-overlay__ripple" />
+        <div className="ds-voice-overlay__ripple ds-voice-overlay__ripple--two" />
+        <div className="ds-voice-overlay__ripple ds-voice-overlay__ripple--three" />
+      </div>
+      <ComposerPrimitive.AddAttachment className="ds-composer-tool ds-composer-attachment" aria-label="添加附件"><Icon name="plus" size={16} /></ComposerPrimitive.AddAttachment>
+      <ComposerPrimitive.Input rows={1} placeholder="问问 DeepStudent…" aria-label="输入消息" />
+      <div className="ds-composer__toolbar">
+        <VoiceComposerButton composer={runtime.thread.composer} input={composer} onRegister={registerGesture} onVoiceStateChange={setVoiceState} />
+      </div>
+    </ComposerPrimitive.Root>
+    <div className="ds-voice-recording-status" role="status" aria-live="polite" aria-hidden={!voiceState.recording}>
+      <time>{formatRecordingElapsed(voiceState.elapsed)}</time>
+      <span>{voiceState.cancelZone ? "松开取消" : "上滑取消"}</span>
     </div>
-  </ComposerPrimitive.Root>;
+  </div>;
 }
 
 function ChatWorkspace() {
@@ -565,7 +758,11 @@ const providerPreviews: ProviderPreview[] = [
 
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const [providerId, setProviderId] = useState(providerPreviews[0].id);
-  const provider = providerPreviews.find((item) => item.id === providerId) ?? providerPreviews[0];
+  const [model, setModel] = useState(providerPreviews[0].model);
+  const [baseURL, setBaseURL] = useState(providerPreviews[0].baseURL);
+  const [apiKeyEnv, setAPIKeyEnv] = useState(providerPreviews[0].apiKeyEnv);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
+  const [status, setStatus] = useState("");
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -579,6 +776,36 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [onClose]);
+
+  useEffect(() => {
+    let active = true;
+    void getRuntimeConfig().then((config) => {
+      if (!active) return;
+      setRuntimeConfig(config);
+      const selected = config.default_provider || Object.keys(config.providers)[0] || providerPreviews[0].id;
+      setProviderId(selected);
+      setModel(config.default_model || config.providers[selected]?.model || "");
+      setBaseURL(config.providers[selected]?.base_url || "");
+      setAPIKeyEnv(config.providers[selected]?.api_key_env || "");
+    }).catch((error) => {
+      if (active) setStatus(error instanceof Error ? error.message : "无法读取 Go runtime 配置");
+    });
+    return () => { active = false; };
+  }, []);
+
+  const saveConfig = async () => {
+    setStatus("正在保存…");
+    try {
+      const config = await updateRuntimeConfig({ provider: providerId, model, base_url: baseURL, api_key_env: apiKeyEnv });
+      setRuntimeConfig(config);
+      setModel(config.default_model || config.providers[config.default_provider]?.model || "");
+      setBaseURL(config.providers[config.default_provider]?.base_url || "");
+      setAPIKeyEnv(config.providers[config.default_provider]?.api_key_env || "");
+      setStatus("已保存，下一条消息将使用此模型。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "保存失败");
+    }
+  };
 
   return <div className="ds-settings-modal" role="dialog" aria-modal="true" aria-labelledby="ds-settings-modal-title" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="ds-settings-modal__card">
@@ -594,8 +821,8 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="ds-settings-empty-state" role="status">
           <span className="ds-settings-empty-state__icon"><Icon name="settings" size={20} /></span>
           <div>
-            <b>尚未读取提供商配置</b>
-            <p>Go runtime 当前没有配置读写端点。请在启动 runtime 的环境变量或配置文件中设置；密钥不会进入页面，也不会写入浏览器存储。</p>
+            <b>{runtimeConfig ? "Go runtime 配置已连接" : "正在读取提供商配置"}</b>
+            <p>{runtimeConfig ? "模型路由可在这里修改并立即用于下一条消息。密钥仍由 Go 进程环境变量管理。" : "请确认本地 Go runtime 已启动；密钥不会进入页面，也不会写入浏览器存储。"}</p>
           </div>
         </div>
         <section className="ds-settings-provider" aria-labelledby="ds-provider-heading">
@@ -605,21 +832,21 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
           <label className="ds-settings-field">
             <span>提供商 <small>provider</small></span>
-            <select value={providerId} onChange={(event) => setProviderId(event.target.value)} aria-label="提供商 provider">
-              {providerPreviews.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            <select value={providerId} onChange={(event) => { const id = event.target.value; const selected = runtimeConfig?.providers[id]; setProviderId(id); if (selected) { setModel(selected.model || ""); setBaseURL(selected.base_url || ""); setAPIKeyEnv(selected.api_key_env || ""); } }} aria-label="提供商 provider">
+              {(runtimeConfig ? Object.entries(runtimeConfig.providers).map(([id, item]) => ({ id, label: item.name || id })) : providerPreviews).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </label>
           <label className="ds-settings-field">
             <span>模型 <small>model</small></span>
-            <input value={provider.model} readOnly aria-label="模型 model" />
+            <input value={model} onChange={(event) => setModel(event.target.value)} aria-label="模型 model" />
           </label>
           <label className="ds-settings-field">
             <span>Base URL <small>baseURL / base_url</small></span>
-            <input value={provider.baseURL} readOnly aria-label="Base URL" />
+            <input value={baseURL} onChange={(event) => setBaseURL(event.target.value)} aria-label="Base URL" />
           </label>
           <label className="ds-settings-field">
             <span>API-key environment variable <small>apiKeyEnv</small></span>
-            <input value={provider.apiKeyEnv} readOnly aria-label="API-key environment variable" />
+            <input value={apiKeyEnv} onChange={(event) => setAPIKeyEnv(event.target.value)} aria-label="API-key environment variable" />
           </label>
           <label className="ds-settings-field">
             <span>运行时 <small>runtime</small></span>
@@ -628,7 +855,8 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         </section>
       </main>
       <footer className="ds-settings-modal__footer">
-        <p>要应用变更，请修改 Go runtime 的配置后重启服务。</p>
+        <p>{status || "配置保存在当前 Go runtime 进程中，密钥不会离开本机环境。"}</p>
+        <button type="button" className="ds-primary-button" onClick={() => void saveConfig()} disabled={!runtimeConfig}>{status === "正在保存…" ? "保存中…" : "保存配置"}</button>
         <button type="button" className="ds-secondary-button" onClick={onClose}>完成</button>
       </footer>
     </section>
