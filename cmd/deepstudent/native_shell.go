@@ -188,8 +188,7 @@ func (s *nativeShell) hydrateSession() {
 			s.configAPIKeyEnv = provider.APIKeyEnv
 		}
 		runtime := runtimeConfig.Runtime
-		s.configAgentMode = runtime.PiMode
-		if s.configAgentMode == "" { s.configAgentMode = "auto" }
+		s.configAgentMode = normalizeNativeAgentMode(runtime.PiMode, runtime.PiStatus.ConfiguredMode)
 		s.configPiEndpoint = runtime.PiEndpoint
 		s.configPiSkipStart = runtime.PiSkipStart
 		s.configPiCommand = runtime.PiCommand
@@ -212,6 +211,7 @@ func (s *nativeShell) hydrateSession() {
 		if discovery.Status.State != "" { s.configPiStatus = discovery.Status }
 		s.piDiscoveryNote = "已读取本机 Pi Agent 发现结果"
 		s.mu.Unlock()
+		if s.invalidate != nil { s.invalidate() }
 	}
 	var list struct {
 		Sessions []nativeSession `json:"sessions"`
@@ -280,9 +280,11 @@ func (s *nativeShell) saveRuntimeConfig() {
 	piCommand := strings.TrimSpace(s.configPiCommand)
 	piArgs := splitNativeArgs(s.configPiArgs)
 	if agentMode == "auto" {
-		piEndpoint, piCommand, piArgs, piSkipStart = "", "", nil, false
+		piEndpoint, piCommand, piArgs, piSkipStart = "", "", []string{}, false
 	} else if agentMode == "external" {
-		piCommand, piArgs = "", nil
+		piCommand, piArgs = "", []string{}
+	} else {
+		piSkipStart = false
 	}
 	piCancelTimeout := strings.TrimSpace(s.configPiCancelTimeout)
 	if provider == "" {
@@ -337,6 +339,22 @@ func firstNativeNonEmpty(values ...string) string {
 		if strings.TrimSpace(value) != "" { return value }
 	}
 	return "未知"
+}
+
+func normalizeNativeAgentMode(values ...string) string {
+	for _, value := range values {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "auto", "":
+			if strings.TrimSpace(value) == "auto" { return "auto" }
+		case "manual", "managed", "local":
+			return "manual"
+		case "external":
+			return "external"
+		case "deterministic":
+			return "auto"
+		}
+	}
+	return "auto"
 }
 
 func nativeJSONRequest(ctx context.Context, method, endpoint string, body []byte, result any) error {
