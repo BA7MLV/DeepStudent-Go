@@ -28,7 +28,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install JavaScript dependencies
-        run: bun install
+        run: bun install --force
 
       - name: Resolve Go module checksums
         run: go mod tidy
