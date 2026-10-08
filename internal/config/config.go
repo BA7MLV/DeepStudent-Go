@@ -304,9 +304,12 @@ func Validate(cfg Config) error {
 		if strings.TrimSpace(cfg.Runtime.PiCommand) == "" { return errors.New("runtime piCommand is required for manual pi mode") }
 	case "external":
 		if strings.TrimSpace(cfg.Runtime.PiEndpoint) == "" { return errors.New("runtime piEndpoint is required for external pi mode") }
-		if err := validateURL(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
+		if err := validatePiEndpoint(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
 	default:
 		return fmt.Errorf("runtime piMode %q is invalid", piMode)
+	}
+	if piMode == "manual" && strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" {
+		if err := validatePiEndpoint(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
 	}
 	if cfg.Runtime.PiCancelTimeout < 0 { return errors.New("runtime piCancelTimeout must not be negative") }
     if cfg.Auth.SessionTTL <= 0 { return errors.New("auth sessionTTL must be positive") }
@@ -371,6 +374,13 @@ func validateModel(id string, m ModelProfile) error {
 }
 func validateCapabilities(values []string, field string) error { seen := map[string]struct{}{}; for _, value := range values { value = strings.ToLower(strings.TrimSpace(value)); if value == "" { return fmt.Errorf("%s contains empty capability", field) }; if _, ok := validInputs[value]; !ok { return fmt.Errorf("%s contains unsupported capability %q", field, value) }; if _, ok := seen[value]; ok { return fmt.Errorf("%s contains duplicate capability %q", field, value) }; seen[value] = struct{}{} }; return nil }
 func validateEffort(value, field string) error { if value != strings.TrimSpace(value) || strings.ContainsAny(value, "\r\n") { if value != "" { return fmt.Errorf("%s is invalid", field) } }; return nil }
+func validatePiEndpoint(value, field string) error {
+	if err := validateURL(value, field); err != nil { return err }
+	parsed, _ := url.Parse(strings.TrimSpace(value))
+	if parsed.User != nil { return fmt.Errorf("%s must not contain credentials", field) }
+	if parsed.RawQuery != "" || parsed.Fragment != "" { return fmt.Errorf("%s must not contain query or fragment", field) }
+	return nil
+}
 func validateURL(value, field string) error { if strings.TrimSpace(value) == "" { return nil }; parsed, err := url.Parse(value); if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") { return fmt.Errorf("%s must be an absolute http(s) URL", field) }; return nil }
 func validateProviderBaseURL(value, field string) error { if err := validateURL(value, field); err != nil { return err }; if strings.TrimSpace(value) == "" { return nil }; parsed, _ := url.Parse(value); if parsed.User != nil { return fmt.Errorf("%s must not contain credentials", field) }; if parsed.RawQuery != "" || parsed.Fragment != "" { return fmt.Errorf("%s must not contain query or fragment", field) }; return nil }
 
