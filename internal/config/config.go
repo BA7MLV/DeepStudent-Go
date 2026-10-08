@@ -134,7 +134,7 @@ func Defaults() Config {
         Version: DefaultVersion,
         Server: ServerConfig{Addr: "127.0.0.1:8080", ReadTimeout: 15*time.Second, WriteTimeout: 0, IdleTimeout: 60*time.Second, SSEHeartbeat: 15*time.Second, CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173"}},
         Storage: StorageConfig{SQLitePath: "data/deepstudent.db", BlobRoot: "data/blobs", AttachmentMaxBytes: 32 << 20, AttachmentAllowedMIMEs: []string{"text/*", "application/json", "application/pdf", "application/octet-stream", "image/*", "audio/*", "video/*"}},
-        Runtime: RuntimeConfig{DefaultProvider: "deterministic", DefaultTimeout: 45*time.Second, MaxTokens: 2048, MaxConcurrency: 2},
+        Runtime: RuntimeConfig{DefaultProvider: "deterministic", DefaultTimeout: 45*time.Second, MaxTokens: 2048, MaxConcurrency: 2, PiMode: "auto"},
         Auth: AuthConfig{CookieName: "deepstudent_session", SessionTTL: 24*time.Hour},
         Providers: map[string]ProviderProfile{
             "deterministic": {Name: "deterministic", Model: "stub", Timeout: 45*time.Second, InputCapabilities: []string{InputText}, Streaming: true},
@@ -232,6 +232,7 @@ func applyEnv(cfg *Config, lookup lookupEnv) error {
 	if v, ok := lookup("DEEPSTUDENT_PI_ENDPOINT"); ok { cfg.Runtime.PiEndpoint = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_SIDECAR_URL"); ok { cfg.Runtime.PiEndpoint = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_PI_SKIP_START"); ok { b, err := strconv.ParseBool(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_PI_SKIP_START: %w", err) }; cfg.Runtime.PiSkipStart = b }
+	if v, ok := lookup("DEEPSTUDENT_PI_MODE"); ok { cfg.Runtime.PiMode = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_SIDECAR_MODE"); ok { cfg.Runtime.PiMode = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_PI_COMMAND"); ok { cfg.Runtime.PiCommand = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_PI_ARGS"); ok { cfg.Runtime.PiArgs = splitList(v) }
@@ -289,26 +290,23 @@ func Validate(cfg Config) error {
     if cfg.Runtime.MaxConcurrency <= 0 { return errors.New("runtime maxConcurrency must be positive") }
 	piMode := strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
 	if piMode == "" {
-		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart {
-			piMode = "external"
-		} else {
-			piMode = "deterministic"
-		}
+		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { piMode = "external" } else { piMode = "auto" }
 	}
+	// Legacy managed/local names remain accepted for config files written by
+	// earlier releases; the public API uses manual for an explicitly managed
+	// CLI process.
+	if piMode == "managed" || piMode == "local" { piMode = "manual" }
 	switch piMode {
-	case "deterministic":
+	case "auto", "deterministic":
 		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { return errors.New("runtime piEndpoint/piSkipStart require piMode external") }
+	case "manual":
+		if cfg.Runtime.PiSkipStart { return errors.New("runtime piSkipStart cannot be used with manual pi mode") }
+		if strings.TrimSpace(cfg.Runtime.PiCommand) == "" { return errors.New("runtime piCommand is required for manual pi mode") }
 	case "external":
 		if strings.TrimSpace(cfg.Runtime.PiEndpoint) == "" { return errors.New("runtime piEndpoint is required for external pi mode") }
 		if err := validateURL(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
-	case "managed", "local":
-		if cfg.Runtime.PiSkipStart { return errors.New("runtime piSkipStart cannot be used with managed pi mode") }
-		if strings.TrimSpace(cfg.Runtime.PiCommand) == "" { return fmt.Errorf("runtime piCommand is required for piMode %q", piMode) }
 	default:
 		return fmt.Errorf("runtime piMode %q is invalid", piMode)
-	}
-	if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" && piMode != "external" {
-		if err := validateURL(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
 	}
 	if cfg.Runtime.PiCancelTimeout < 0 { return errors.New("runtime piCancelTimeout must not be negative") }
     if cfg.Auth.SessionTTL <= 0 { return errors.New("auth sessionTTL must be positive") }
@@ -396,7 +394,7 @@ type Manager struct { mu sync.RWMutex; path string; lookup lookupEnv; cfg Config
 func NewManager(path string) (*Manager, error) { lookup := os.LookupEnv; cfg, err := load(path, lookup); if err != nil { return nil, err }; if path == "" { path, _ = lookup("DEEPSTUDENT_CONFIG") }; return &Manager{path: path, lookup: lookup, cfg: cloneConfig(cfg)}, nil }
 func (m *Manager) Config() Config { m.mu.RLock(); defer m.mu.RUnlock(); return cloneConfig(m.cfg) }
 func (m *Manager) Reload() error { cfg, err := load(m.path, m.lookup); if err != nil { return err }; m.mu.Lock(); m.cfg = cloneConfig(cfg); m.mu.Unlock(); return nil }
-func cloneConfig(cfg Config) Config { out := cfg; out.Server.CORSAllowlist = append([]string(nil), cfg.Server.CORSAllowlist...); out.Storage.AttachmentAllowedMIMEs = append([]string(nil), cfg.Storage.AttachmentAllowedMIMEs...); out.Models = map[string]ModelProfile{}; for id, m := range cfg.Models { out.Models[id] = cloneModel(m) }; out.Providers = map[string]ProviderProfile{}; for name, p := range cfg.Providers { p.Input = append([]string(nil), p.Input...); p.InputCapabilities = append([]string(nil), p.InputCapabilities...); p.Models = map[string]ModelProfile{}; for id, m := range p.Models { p.Models[id] = cloneModel(m) }; out.Providers[name] = p }; return out }
+func cloneConfig(cfg Config) Config { out := cfg; out.Server.CORSAllowlist = append([]string(nil), cfg.Server.CORSAllowlist...); out.Runtime.PiArgs = append([]string(nil), cfg.Runtime.PiArgs...); out.Storage.AttachmentAllowedMIMEs = append([]string(nil), cfg.Storage.AttachmentAllowedMIMEs...); out.Models = map[string]ModelProfile{}; for id, m := range cfg.Models { out.Models[id] = cloneModel(m) }; out.Providers = map[string]ProviderProfile{}; for name, p := range cfg.Providers { p.Input = append([]string(nil), p.Input...); p.InputCapabilities = append([]string(nil), p.InputCapabilities...); p.Models = map[string]ModelProfile{}; for id, m := range p.Models { p.Models[id] = cloneModel(m) }; out.Providers[name] = p }; return out }
 
 // Clone returns an independent configuration snapshot for callers that need
 // to inspect or edit configuration outside this package's manager.

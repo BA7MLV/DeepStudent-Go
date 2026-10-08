@@ -23,6 +23,7 @@ import (
 	"github.com/BA7MLV/DeepStudent-Go/internal/attachments"
 	"github.com/BA7MLV/DeepStudent-Go/internal/config"
 	"github.com/BA7MLV/DeepStudent-Go/internal/runtime"
+	"github.com/BA7MLV/DeepStudent-Go/internal/piagent"
 )
 
 const apiVersion = "v1"
@@ -36,6 +37,8 @@ type Server struct {
 	attachments AttachmentStore
 	ready       atomic.Bool
 	now         func() time.Time
+	piStatusMu  sync.RWMutex
+	piStatus    PiRuntimeStatus
 }
 
 // ConfigStore is the durable, credential-free configuration boundary. It is
@@ -54,6 +57,24 @@ type AttachmentStore interface {
 	Open(context.Context, string) (io.ReadCloser, attachments.Metadata, error)
 	List(context.Context, int) ([]attachments.Metadata, error)
 }
+
+// PiRuntimeStatus is the effective, credential-free Pi agent state exposed
+// to settings clients. It deliberately contains no API key or secret value.
+type PiRuntimeStatus struct {
+	ConfiguredMode string `json:"configured_mode,omitempty"`
+	EffectiveMode string `json:"effective_mode,omitempty"`
+	State string `json:"state,omitempty"`
+	Command string `json:"command,omitempty"`
+	Args []string `json:"args,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// SetPiRuntimeStatus updates the startup outcome reported by /config and the
+// discovery route. It is safe to call after NewServer while startup completes.
+func (s *Server) SetPiRuntimeStatus(status PiRuntimeStatus) { s.piStatusMu.Lock(); s.piStatus = status; s.piStatusMu.Unlock() }
+
+func (s *Server) getPiRuntimeStatus() PiRuntimeStatus { s.piStatusMu.RLock(); defer s.piStatusMu.RUnlock(); status := s.piStatus; status.Args = append([]string(nil), status.Args...); return status }
 
 // NewServer creates an API server. Dependencies may include a
 // runtime.SessionStore and/or an AttachmentStore. The variadic any form keeps
@@ -113,6 +134,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"version": apiVersion, "service": "deepstudent-api", "request_id": requestID})
+	case (r.URL.Path == "/api/v1/pi/discovery" || r.URL.Path == "/api/v1/pi" || r.URL.Path == "/api/v1/discovery" || r.URL.Path == "/api/v1/config/discovery") && r.Method == http.MethodGet:
+		s.piDiscovery(w, r, requestID)
 	case r.URL.Path == "/api/v1/config" && r.Method == http.MethodGet:
 		s.getConfig(w, requestID)
 	case r.URL.Path == "/api/v1/config/test" && r.Method == http.MethodPost:
@@ -155,19 +178,46 @@ func (s *Server) getConfig(w http.ResponseWriter, requestID string) {
 			"streaming": provider.Streaming,
 		}
 	}
+	status := s.getPiRuntimeStatus()
+	configuredMode := strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
+	if configuredMode == "" { if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { configuredMode = "external" } else { configuredMode = "auto" } }
+	if configuredMode == "managed" || configuredMode == "local" { configuredMode = "manual" }
+	if status.ConfiguredMode == "" { status.ConfiguredMode = configuredMode }
+	if status.EffectiveMode == "" { status.EffectiveMode = configuredMode }
+	if status.Command == "" { status.Command = cfg.Runtime.PiCommand }
+	if len(status.Args) == 0 { status.Args = append([]string(nil), cfg.Runtime.PiArgs...) }
+	if status.Endpoint == "" { status.Endpoint = cfg.Runtime.PiEndpoint }
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_provider": cfg.Runtime.DefaultProvider,
 		"default_model":    cfg.Runtime.DefaultModel,
 		"runtime": map[string]any{
 			"default_provider": cfg.Runtime.DefaultProvider,
-			"default_model": cfg.Runtime.DefaultModel,
-			"pi_endpoint": cfg.Runtime.PiEndpoint,
-			"pi_skip_start": cfg.Runtime.PiSkipStart,
-			"pi_mode": cfg.Runtime.PiMode,
+			"default_model":    cfg.Runtime.DefaultModel,
+			"pi_endpoint":      cfg.Runtime.PiEndpoint,
+			"pi_skip_start":    cfg.Runtime.PiSkipStart,
+			"pi_mode":          cfg.Runtime.PiMode,
+			"pi_command":       cfg.Runtime.PiCommand,
+			"pi_args":          cfg.Runtime.PiArgs,
+			"pi_status":        status,
 		},
 		"providers":        providers,
 		"request_id":       requestID,
 	})
+}
+
+func (s *Server) piDiscovery(w http.ResponseWriter, r *http.Request, requestID string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	candidates := piagent.Discover(ctx)
+	status := s.getPiRuntimeStatus()
+	if status.ConfiguredMode == "" {
+		cfg := s.configSnapshot()
+		status.ConfiguredMode = strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
+		if status.ConfiguredMode == "" { if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { status.ConfiguredMode = "external" } else { status.ConfiguredMode = "auto" } }
+		if status.ConfiguredMode == "managed" || status.ConfiguredMode == "local" { status.ConfiguredMode = "manual" }
+	}
+	if status.EffectiveMode == "" { status.EffectiveMode = status.ConfiguredMode }
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates, "current_mode": status.ConfiguredMode, "configured_mode": status.ConfiguredMode, "effective_mode": status.EffectiveMode, "status": status, "request_id": requestID})
 }
 
 type configUpdateRequest struct {
@@ -271,9 +321,16 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID 
 	cfg.Runtime.DefaultModel = model
 	if input.PiEndpoint != nil { cfg.Runtime.PiEndpoint = strings.TrimSpace(*input.PiEndpoint) }
 	if input.PiSkipStart != nil { cfg.Runtime.PiSkipStart = *input.PiSkipStart }
-	if input.PiMode != nil { cfg.Runtime.PiMode = strings.TrimSpace(*input.PiMode) }
+	if input.PiMode != nil { cfg.Runtime.PiMode = strings.ToLower(strings.TrimSpace(*input.PiMode)) }
 	if input.PiCommand != nil { cfg.Runtime.PiCommand = strings.TrimSpace(*input.PiCommand) }
-	if input.PiArgs != nil { cfg.Runtime.PiArgs = append([]string(nil), (*input.PiArgs)...)}
+	if input.PiArgs != nil {
+		cfg.Runtime.PiArgs = make([]string, 0, len(*input.PiArgs))
+		for _, arg := range *input.PiArgs { arg = strings.TrimSpace(arg); if arg != "" { cfg.Runtime.PiArgs = append(cfg.Runtime.PiArgs, arg) } }
+	}
+	if err := config.Validate(cfg); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
+		return
+	}
 	if s.configStore != nil {
 		if err := s.configStore.SaveConfig(r.Context(), cfg); err != nil {
 			writeError(w, requestID, http.StatusInternalServerError, "config_persist_failed", "could not persist configuration", nil)

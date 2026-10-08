@@ -98,3 +98,12 @@ func TestLoadAttachmentStorageOverrides(t *testing.T) {
 		t.Fatalf("unexpected MIME policy: %+v", cfg.Storage.AttachmentAllowedMIMEs)
 	}
 }
+
+func TestPiModesValidateCanonicalConfiguration(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Runtime.PiMode != "auto" || Validate(cfg) != nil { t.Fatalf("defaults should use auto Pi mode: %+v", cfg.Runtime) }
+	cfg.Runtime.PiMode, cfg.Runtime.PiCommand = "manual", "pi-sidecar"
+	if err := Validate(cfg); err != nil { t.Fatalf("manual mode rejected: %v", err) }
+	cfg.Runtime.PiMode, cfg.Runtime.PiCommand, cfg.Runtime.PiEndpoint = "external", "", "http://127.0.0.1:8787"
+	if err := Validate(cfg); err != nil { t.Fatalf("external mode rejected: %v", err) }
+}

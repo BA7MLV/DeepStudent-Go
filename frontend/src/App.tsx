@@ -12,7 +12,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HealthService } from "./mygo";
 import { createGoRuntimeAdapter } from "./go-runtime";
-import { getRuntimeConfig, testRuntimeConfig, updateRuntimeConfig, type RuntimeConfig } from "./runtime-api";
+import { getRuntimeConfig, testRuntimeConfig, updateRuntimeConfig, type RuntimeAgentMode, type RuntimeConfig } from "./runtime-api";
 
 type ViewId =
   | "chat-v2"
@@ -756,11 +756,37 @@ const providerPreviews: ProviderPreview[] = [
   { id: "custom-openai", label: "自定义 OpenAI 兼容服务", model: "未设置", baseURL: "由 DEEPSTUDENT_CUSTOM_BASE_URL 提供", apiKeyEnv: "DEEPSTUDENT_CUSTOM_API_KEY" },
 ];
 
+const agentModeOptions: Array<{ value: RuntimeAgentMode; label: string; description: string }> = [
+  { value: "auto", label: "自动发现", description: "自动查找本地 Pi CLI；找不到时使用内置 Go Agent" },
+  { value: "manual", label: "手动托管 CLI", description: "由 Go runtime 按命令和参数启动 Pi Agent" },
+  { value: "external", label: "外部 Pi Agent", description: "连接已由其他进程启动的 Pi sidecar" },
+];
+
+const isAgentMode = (value: unknown): value is RuntimeAgentMode => agentModeOptions.some((option) => option.value === value);
+
+const normalizeAgentMode = (value: unknown, fallback: RuntimeAgentMode): RuntimeAgentMode => {
+  if (isAgentMode(value)) return value;
+  // Accept settings written by older shells while only writing the canonical
+  // auto/manual/external values understood by the current runtime.
+  if (value === "managed" || value === "local") return "manual";
+  if (value === "deterministic") return "auto";
+  return fallback;
+};
+
+const parseAgentArgs = (value: string): string[] => value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+
+const formatAgentArgs = (args: string[] | undefined): string => (args ?? []).join("\n");
+
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const [providerId, setProviderId] = useState(providerPreviews[0].id);
   const [model, setModel] = useState(providerPreviews[0].model);
   const [baseURL, setBaseURL] = useState(providerPreviews[0].baseURL);
   const [apiKeyEnv, setAPIKeyEnv] = useState(providerPreviews[0].apiKeyEnv);
+  const [agentMode, setAgentMode] = useState<RuntimeAgentMode>("auto");
+  const [piEndpoint, setPiEndpoint] = useState("");
+  const [piSkipStart, setPiSkipStart] = useState(false);
+  const [piCommand, setPiCommand] = useState("");
+  const [piArgs, setPiArgs] = useState("");
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [status, setStatus] = useState("");
 
@@ -777,16 +803,28 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
     };
   }, [onClose]);
 
+  const applyRuntimeConfig = (config: RuntimeConfig, fallback?: { mode?: RuntimeAgentMode; endpoint?: string; skipStart?: boolean; command?: string; args?: string }) => {
+    setRuntimeConfig(config);
+    const selected = config.runtime?.default_provider || config.default_provider || Object.keys(config.providers)[0] || providerPreviews[0].id;
+    setProviderId(selected);
+    setModel(config.runtime?.default_model || config.default_model || config.providers[selected]?.model || "");
+    setBaseURL(config.providers[selected]?.base_url || "");
+    setAPIKeyEnv(config.providers[selected]?.api_key_env || "");
+
+    const runtime = config.runtime;
+    const mode = normalizeAgentMode(runtime?.pi_mode, fallback?.mode ?? (runtime?.pi_endpoint ? "external" : "auto"));
+    setAgentMode(mode);
+    setPiEndpoint(runtime?.pi_endpoint ?? fallback?.endpoint ?? "");
+    setPiSkipStart(runtime?.pi_skip_start ?? fallback?.skipStart ?? false);
+    setPiCommand(runtime?.pi_command ?? fallback?.command ?? "");
+    setPiArgs(formatAgentArgs(runtime?.pi_args) || fallback?.args || "");
+  };
+
   useEffect(() => {
     let active = true;
     void getRuntimeConfig().then((config) => {
       if (!active) return;
-      setRuntimeConfig(config);
-      const selected = config.default_provider || Object.keys(config.providers)[0] || providerPreviews[0].id;
-      setProviderId(selected);
-      setModel(config.default_model || config.providers[selected]?.model || "");
-      setBaseURL(config.providers[selected]?.base_url || "");
-      setAPIKeyEnv(config.providers[selected]?.api_key_env || "");
+      applyRuntimeConfig(config);
     }).catch((error) => {
       if (active) setStatus(error instanceof Error ? error.message : "无法读取 Go runtime 配置");
     });
@@ -796,11 +834,24 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const saveConfig = async () => {
     setStatus("正在保存…");
     try {
-      const config = await updateRuntimeConfig({ provider: providerId, model, base_url: baseURL, api_key_env: apiKeyEnv });
-      setRuntimeConfig(config);
-      setModel(config.default_model || config.providers[config.default_provider]?.model || "");
-      setBaseURL(config.providers[config.default_provider]?.base_url || "");
-      setAPIKeyEnv(config.providers[config.default_provider]?.api_key_env || "");
+      const savedAgent = {
+        mode: agentMode,
+        endpoint: agentMode === "auto" ? "" : piEndpoint.trim(),
+        skipStart: agentMode === "external" ? piSkipStart : false,
+        command: agentMode === "manual" ? piCommand.trim() : "",
+        args: agentMode === "manual" ? piArgs : "",
+      };
+      const config = await updateRuntimeConfig({
+        provider: providerId,
+        model,
+        base_url: baseURL,
+        pi_mode: savedAgent.mode,
+        pi_endpoint: savedAgent.endpoint,
+        pi_skip_start: savedAgent.skipStart,
+        pi_command: savedAgent.command,
+        pi_args: parseAgentArgs(savedAgent.args),
+      });
+      applyRuntimeConfig(config, savedAgent);
       setStatus("已保存，下一条消息将使用此模型。");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "保存失败");
@@ -810,7 +861,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const checkConfig = async () => {
     setStatus("正在测试连接…");
     try {
-      await testRuntimeConfig({ provider: providerId, model, base_url: baseURL, api_key_env: apiKeyEnv });
+      await testRuntimeConfig({ provider: providerId, model, base_url: baseURL });
       setStatus("连接成功，可以保存配置。");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "连接失败");
@@ -854,17 +905,42 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
             <input value={baseURL} onChange={(event) => setBaseURL(event.target.value)} aria-label="服务地址" />
           </label>
           <label className="ds-settings-field">
-            <span>密钥变量 <small>apiKeyEnv</small></span>
-            <input value={apiKeyEnv} onChange={(event) => setAPIKeyEnv(event.target.value)} aria-label="密钥变量" />
+            <span>密钥变量 <small>api_key_env（只读）</small></span>
+            <input value={apiKeyEnv} readOnly aria-label="密钥变量" />
           </label>
+        </section>
+        <section className="ds-settings-provider" aria-labelledby="ds-agent-heading">
+          <div className="ds-settings-provider__heading">
+            <div><h2 id="ds-agent-heading">Agent 运行模式</h2><p>选择消息由哪个 Agent 处理；CLI 参数每行填写一个参数。</p></div>
+          </div>
           <label className="ds-settings-field">
-            <span>运行环境 <small>runtime</small></span>
-            <input value="Go runtime · HTTP/SSE · /api/v1" readOnly aria-label="运行环境 runtime" />
+            <span>运行模式 <small>pi_mode</small></span>
+            <select value={agentMode} onChange={(event) => setAgentMode(event.target.value as RuntimeAgentMode)} aria-label="Agent 运行模式">
+              {agentModeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
           </label>
+          {agentMode !== "auto" && <label className="ds-settings-field">
+            <span>Agent 地址 <small>pi_endpoint</small></span>
+            <input value={piEndpoint} onChange={(event) => setPiEndpoint(event.target.value)} placeholder="http://127.0.0.1:8787" aria-label="Agent 地址" />
+          </label>}
+          {agentMode === "external" && <label className="ds-settings-field ds-settings-field--checkbox">
+            <span>跳过启动 <small>pi_skip_start</small></span>
+            <input type="checkbox" checked={piSkipStart} onChange={(event) => setPiSkipStart(event.target.checked)} aria-label="跳过 Pi Agent 启动" />
+          </label>}
+          {agentMode === "manual" && <>
+            <label className="ds-settings-field">
+              <span>CLI 命令 <small>pi_command</small></span>
+              <input value={piCommand} onChange={(event) => setPiCommand(event.target.value)} placeholder="pi" aria-label="Pi CLI 命令" />
+            </label>
+            <label className="ds-settings-field ds-settings-field--textarea">
+              <span>CLI 参数 <small>pi_args · 每行一个</small></span>
+              <textarea value={piArgs} onChange={(event) => setPiArgs(event.target.value)} rows={4} placeholder="--port\n8787" aria-label="Pi CLI 参数" />
+            </label>
+          </>}
         </section>
       </main>
       <footer className="ds-settings-modal__footer">
-        <p>{status || "配置会保存到本机，密钥只从环境变量读取。先测试连接，再保存模型设置。"}</p>
+        <p>{status || "配置会保存到本机；API key 不会进入页面或保存，api_key_env 仅用于显示。先测试连接，再保存模型设置。"}</p>
         <button type="button" className="ds-secondary-button" onClick={() => void checkConfig()} disabled={!runtimeConfig || status === "正在测试连接…"}>测试连接</button>
         <button type="button" className="ds-primary-button" onClick={() => void saveConfig()} disabled={!runtimeConfig || status === "正在保存…"}>{status === "正在保存…" ? "保存中…" : "保存配置"}</button>
         <button type="button" className="ds-secondary-button" onClick={onClose}>完成</button>
@@ -910,7 +986,6 @@ export function App() {
         provider: preferred,
         model: provider.model || runtimeConfig.default_model,
         base_url: provider.base_url,
-        api_key_env: provider.api_key_env,
       });
     }).catch(() => undefined);
   };

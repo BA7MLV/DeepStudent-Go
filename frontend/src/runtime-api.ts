@@ -67,10 +67,64 @@ export type RuntimeProviderConfig = {
   streaming?: boolean;
 };
 
+/** Agent execution mode exposed by the Go runtime configuration surface. */
+export type RuntimeAgentMode = "auto" | "manual" | "external";
+
+/** Credential-free agent process metadata returned by GET /config. */
+export type RuntimeAgentConfig = {
+  default_provider?: string;
+  default_model?: string;
+  pi_endpoint?: string;
+  pi_skip_start?: boolean;
+  pi_mode?: RuntimeAgentMode | string;
+  pi_command?: string;
+  pi_args?: string[];
+  pi_status?: RuntimePiStatus;
+};
+
 export type RuntimeConfig = {
   default_provider: string;
   default_model?: string;
+  runtime?: RuntimeAgentConfig;
   providers: Record<string, RuntimeProviderConfig>;
+};
+
+/** Fields accepted by PATCH /config. Secrets are intentionally absent. */
+export type RuntimeConfigUpdate = {
+  provider?: string;
+  model?: string;
+  base_url?: string;
+  pi_endpoint?: string;
+  pi_skip_start?: boolean;
+  pi_mode?: RuntimeAgentMode | string;
+  pi_command?: string;
+  pi_args?: string[];
+};
+
+export type RuntimePiCandidate = {
+  name: string;
+  command: string;
+  path: string;
+  version?: string;
+  sidecar_capable: boolean;
+};
+
+export type RuntimePiStatus = {
+  configured_mode?: string;
+  effective_mode?: string;
+  state?: string;
+  command?: string;
+  args?: string[];
+  endpoint?: string;
+  reason?: string;
+};
+
+export type RuntimePiDiscovery = {
+  candidates: RuntimePiCandidate[];
+  current_mode?: string;
+  configured_mode?: string;
+  status?: RuntimePiStatus;
+  request_id?: string;
 };
 
 export type RuntimeAttachment = {
@@ -138,7 +192,16 @@ export async function getRuntimeConfig(options: RuntimeApiOptions = {}): Promise
   return requestJSON<RuntimeConfig>("/config", { method: "GET" }, options);
 }
 
-export async function updateRuntimeConfig(update: { provider?: string; model?: string; base_url?: string; api_key_env?: string }, options: RuntimeApiOptions = {}): Promise<RuntimeConfig> {
+/** Discover optional local Pi CLI sidecars without inspecting credentials. */
+export async function getRuntimePiDiscovery(options: RuntimeApiOptions = {}): Promise<RuntimePiDiscovery> {
+  const payload = await requestJSON<RuntimePiDiscovery>("/pi/discovery", { method: "GET" }, options);
+  return {
+    ...payload,
+    candidates: Array.isArray(payload.candidates) ? payload.candidates : [],
+  };
+}
+
+export async function updateRuntimeConfig(update: RuntimeConfigUpdate, options: RuntimeApiOptions = {}): Promise<RuntimeConfig> {
   return requestJSON<RuntimeConfig>("/config", {
     method: "PATCH",
     body: JSON.stringify(update),
@@ -147,7 +210,7 @@ export async function updateRuntimeConfig(update: { provider?: string; model?: s
 
 export type RuntimeConfigTestResult = { ok: boolean; provider: string; model: string };
 
-export async function testRuntimeConfig(update: { provider?: string; model?: string; base_url?: string; api_key_env?: string }, options: RuntimeApiOptions = {}): Promise<RuntimeConfigTestResult> {
+export async function testRuntimeConfig(update: Pick<RuntimeConfigUpdate, "provider" | "model" | "base_url">, options: RuntimeApiOptions = {}): Promise<RuntimeConfigTestResult> {
   return requestJSON<RuntimeConfigTestResult>("/config/test", {
     method: "POST",
     body: JSON.stringify(update),

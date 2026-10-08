@@ -20,6 +20,7 @@ import (
 	"github.com/BA7MLV/DeepStudent-Go/internal/attachments"
 	"github.com/BA7MLV/DeepStudent-Go/internal/config"
 	"github.com/BA7MLV/DeepStudent-Go/internal/runtime"
+	"github.com/BA7MLV/DeepStudent-Go/internal/piagent"
 	"github.com/BA7MLV/DeepStudent-Go/internal/storage"
 )
 
@@ -79,34 +80,54 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 	var agent runtime.AgentRuntime
 	var process *managedSidecar
 	piMode := strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
-	if piMode == "managed" || piMode == "local" {
-		var processErr error
-		process, processErr = startManagedSidecar(cfg.Runtime.PiCommand, cfg.Runtime.PiArgs, cfg.Runtime.PiEndpoint)
-		if processErr != nil {
-			return nil, processErr
-		}
-		if strings.TrimSpace(cfg.Runtime.PiEndpoint) == "" {
-			cfg.Runtime.PiEndpoint = "http://127.0.0.1:8787"
+	if piMode == "" { piMode = "auto" }
+	if piMode == "managed" || piMode == "local" { piMode = "manual" }
+	piStatus := api.PiRuntimeStatus{ConfiguredMode: piMode, EffectiveMode: "deterministic", State: "fallback", Reason: "Pi sidecar is not configured"}
+	var sidecar *runtime.SidecarRuntime
+	endpoint := strings.TrimSpace(cfg.Runtime.PiEndpoint)
+	command := strings.TrimSpace(cfg.Runtime.PiCommand)
+	args := append([]string(nil), cfg.Runtime.PiArgs...)
+	startManaged := piMode == "manual"
+	if piMode == "auto" {
+		if candidate, ok := piagent.FirstSidecar(ctx); ok {
+			command, startManaged = candidate.Path, true
+			piStatus.Command, piStatus.State, piStatus.Reason = candidate.Path, "starting", "discovered sidecar command"
+		} else {
+			piStatus.Reason = "no sidecar-capable pi command found on PATH; using deterministic runtime"
 		}
 	}
-	if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart || piMode == "external" || piMode == "managed" || piMode == "local" {
-		if strings.TrimSpace(cfg.Runtime.PiEndpoint) == "" {
-			if process != nil { _ = process.Close() }
-			return nil, fmt.Errorf("pi sidecar endpoint is required when external mode is enabled")
+	if startManaged {
+		if endpoint == "" { endpoint = "http://127.0.0.1:8787" }
+		process, err = startManagedSidecar(command, args, endpoint)
+		if err != nil {
+			if piMode != "auto" { return nil, err }
+			process = nil
+			piStatus.State, piStatus.EffectiveMode, piStatus.Reason = "fallback", "deterministic", "discovered sidecar could not be started: " + err.Error()
+		} else {
+			piStatus.Command, piStatus.Args, piStatus.Endpoint = command, append([]string(nil), args...), endpoint
+			piStatus.EffectiveMode = piMode
+			sidecar, err = runtime.NewSidecarRuntimeWithConfig(runtime.SidecarRuntimeConfig{Endpoint: endpoint, Store: store, CancelTimeout: cfg.Runtime.PiCancelTimeout})
+			if err != nil {
+				_ = process.Close(); process = nil
+				if piMode != "auto" { return nil, err }
+				piStatus.State, piStatus.EffectiveMode, piStatus.Reason = "fallback", "deterministic", "discovered sidecar endpoint is invalid; using deterministic runtime"
+			} else { agent = sidecar }
 		}
-		sidecar, sidecarErr := runtime.NewSidecarRuntimeWithConfig(runtime.SidecarRuntimeConfig{
-			Endpoint: cfg.Runtime.PiEndpoint, Store: store, CancelTimeout: cfg.Runtime.PiCancelTimeout,
-		})
-		if sidecarErr != nil {
-			if process != nil { _ = process.Close() }
-			return nil, sidecarErr
-		}
+	}
+	if piMode == "external" {
+		if endpoint == "" { return nil, fmt.Errorf("pi sidecar endpoint is required for external mode") }
+		sidecar, err = runtime.NewSidecarRuntimeWithConfig(runtime.SidecarRuntimeConfig{Endpoint: endpoint, Store: store, CancelTimeout: cfg.Runtime.PiCancelTimeout})
+		if err != nil { return nil, err }
+		piStatus.EffectiveMode, piStatus.State, piStatus.Endpoint, piStatus.Reason = "external", "configured", endpoint, "using externally managed sidecar"
 		agent = sidecar
-	} else {
+	}
+	if agent == nil {
 		provider := runtime.NewProviderRouter(cfg.Runtime.DefaultProvider, providers)
 		agent = runtime.NewDeterministicRuntimeWithTimeout(provider, store, cfg.Runtime.MaxConcurrency, cfg.Runtime.DefaultTimeout)
+		piStatus.EffectiveMode = "deterministic"
 	}
 	serverAPI := api.NewServer(cfg, agent, store, attachmentStore)
+	serverAPI.SetPiRuntimeStatus(piStatus)
 	server := &http.Server{
 		Addr:         cfg.Server.Addr,
 		Handler:      serverAPI,

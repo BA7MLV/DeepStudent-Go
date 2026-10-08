@@ -137,3 +137,12 @@ func TestConfigConnectionTestDeterministicAndOpenAICompatible(t *testing.T) {
 	server.ServeHTTP(deterministic, httptest.NewRequest(http.MethodPost, "/api/v1/config/test", strings.NewReader(`{"provider":"deterministic"}`)))
 	if deterministic.Code != http.StatusOK || !strings.Contains(deterministic.Body.String(), `"ok":true`) { t.Fatalf("deterministic connection test = %d %s", deterministic.Code, deterministic.Body.String()) }
 }
+
+func TestPiDiscoveryRouteIsCredentialFree(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/pi/discovery", nil))
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"current_mode":"auto"`) { t.Fatalf("discovery = %d %s", res.Code, res.Body.String()) }
+	if strings.Contains(strings.ToLower(res.Body.String()), "api_key") { t.Fatalf("discovery leaked credential metadata: %s", res.Body.String()) }
+}
