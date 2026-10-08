@@ -63,6 +63,10 @@ type StreamEvent struct {
 type ModelRequest struct {
 	Provider          string         `json:"provider,omitempty"`
 	Model             string         `json:"model,omitempty"`
+	// BaseURL and APIKeyEnv are non-secret per-run routing overrides. The
+	// provider resolves the actual credential value from its environment.
+	BaseURL           string         `json:"base_url,omitempty"`
+	APIKeyEnv         string         `json:"api_key_env,omitempty"`
 	ReasoningEffort   string         `json:"reasoning_effort,omitempty"`
 	Messages          []Message      `json:"messages,omitempty"`
 	Prompt            string         `json:"prompt,omitempty"`
