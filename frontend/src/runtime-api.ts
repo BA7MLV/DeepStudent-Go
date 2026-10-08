@@ -79,6 +79,7 @@ export type RuntimeAgentConfig = {
   pi_mode?: RuntimeAgentMode | string;
   pi_command?: string;
   pi_args?: string[];
+  pi_cancel_timeout?: string;
   pi_status?: RuntimePiStatus;
 };
 
@@ -99,6 +100,7 @@ export type RuntimeConfigUpdate = {
   pi_mode?: RuntimeAgentMode | string;
   pi_command?: string;
   pi_args?: string[];
+  pi_cancel_timeout?: string;
 };
 
 export type RuntimePiCandidate = {

@@ -204,6 +204,7 @@ func (s *Server) getConfig(w http.ResponseWriter, requestID string) {
 			"pi_mode":          cfg.Runtime.PiMode,
 			"pi_command":       piCommand,
 			"pi_args":          piArgs,
+			"pi_cancel_timeout": func() string { if cfg.Runtime.PiCancelTimeout > 0 { return cfg.Runtime.PiCancelTimeout.String() }; return "" }(),
 			"pi_status":        status,
 		},
 		"providers":        providers,
@@ -239,6 +240,7 @@ type configUpdateRequest struct {
 	PiMode *string `json:"pi_mode"`
 	PiCommand *string `json:"pi_command"`
 	PiArgs *[]string `json:"pi_args"`
+	PiCancelTimeout *string `json:"pi_cancel_timeout"`
 }
 
 func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID string) {
@@ -332,6 +334,17 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID 
 	if input.PiArgs != nil {
 		cfg.Runtime.PiArgs = make([]string, 0, len(*input.PiArgs))
 		for _, arg := range *input.PiArgs { arg = strings.TrimSpace(arg); if arg != "" { cfg.Runtime.PiArgs = append(cfg.Runtime.PiArgs, arg) } }
+	}
+	if input.PiCancelTimeout != nil {
+		timeout := strings.TrimSpace(*input.PiCancelTimeout)
+		if timeout == "" {
+			cfg.Runtime.PiCancelTimeout = 0
+		} else if parsed, err := time.ParseDuration(timeout); err != nil || parsed < 0 {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", "pi_cancel_timeout must be a non-negative duration", nil)
+			return
+		} else {
+			cfg.Runtime.PiCancelTimeout = parsed
+		}
 	}
 	if err := config.Validate(cfg); err != nil {
 		writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)

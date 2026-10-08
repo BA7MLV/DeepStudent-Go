@@ -51,6 +51,15 @@ type nativeShell struct {
 	configModel    string
 	configBaseURL  string
 	configAPIKeyEnv string
+	configAgentMode string
+	configPiEndpoint string
+	configPiSkipStart bool
+	configPiCommand string
+	configPiArgs string
+	configPiCancelTimeout string
+	configPiStatus nativePiStatus
+	piCandidates []nativePiCandidate
+	piDiscoveryNote string
 	configReady     bool
 	configHydrateErr string
 	configBusy     bool
@@ -99,6 +108,35 @@ type nativeRuntimeConfig struct {
 	DefaultProvider string `json:"default_provider"`
 	DefaultModel    string `json:"default_model"`
 	Providers       map[string]nativeProviderConfig `json:"providers"`
+	Runtime         nativeAgentRuntime `json:"runtime"`
+}
+
+type nativeAgentRuntime struct {
+	PiEndpoint string `json:"pi_endpoint"`
+	PiSkipStart bool `json:"pi_skip_start"`
+	PiMode string `json:"pi_mode"`
+	PiCommand string `json:"pi_command"`
+	PiArgs []string `json:"pi_args"`
+	PiCancelTimeout string `json:"pi_cancel_timeout"`
+	PiStatus nativePiStatus `json:"pi_status"`
+}
+
+type nativePiStatus struct {
+	ConfiguredMode string `json:"configured_mode"`
+	EffectiveMode string `json:"effective_mode"`
+	State string `json:"state"`
+	Command string `json:"command"`
+	Args []string `json:"args"`
+	Endpoint string `json:"endpoint"`
+	Reason string `json:"reason"`
+}
+
+type nativePiCandidate struct {
+	Name string `json:"name"`
+	Command string `json:"command"`
+	Path string `json:"path"`
+	Version string `json:"version"`
+	SidecarCapable bool `json:"sidecar_capable"`
 }
 
 type nativeProviderConfig struct {
@@ -119,6 +157,7 @@ func newNativeShell(apiBaseURL string) *nativeShell {
 		sessionID:      "native-session",
 		configProvider: "deterministic",
 		configModel:    "stub",
+		configAgentMode: "auto",
 		messagesList:   ui.ListState{FollowEnd: true},
 		messages: []nativeMessage{welcome},
 	}
@@ -148,6 +187,15 @@ func (s *nativeShell) hydrateSession() {
 			s.configBaseURL = provider.BaseURL
 			s.configAPIKeyEnv = provider.APIKeyEnv
 		}
+		runtime := runtimeConfig.Runtime
+		s.configAgentMode = runtime.PiMode
+		if s.configAgentMode == "" { s.configAgentMode = "auto" }
+		s.configPiEndpoint = runtime.PiEndpoint
+		s.configPiSkipStart = runtime.PiSkipStart
+		s.configPiCommand = runtime.PiCommand
+		s.configPiArgs = strings.Join(runtime.PiArgs, "\n")
+		s.configPiCancelTimeout = runtime.PiCancelTimeout
+		s.configPiStatus = runtime.PiStatus
 		s.configReady = true
 		s.configHydrateErr = ""
 		s.mu.Unlock()
@@ -155,6 +203,14 @@ func (s *nativeShell) hydrateSession() {
 	} else {
 		s.mu.Lock()
 		s.configHydrateErr = configErr.Error()
+		s.mu.Unlock()
+	}
+	var discovery struct { Candidates []nativePiCandidate `json:"candidates"`; Status nativePiStatus `json:"status"` }
+	if err := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/pi/discovery", nil, &discovery); err == nil {
+		s.mu.Lock()
+		s.piCandidates = discovery.Candidates
+		if discovery.Status.State != "" { s.configPiStatus = discovery.Status }
+		s.piDiscoveryNote = "已读取本机 Pi Agent 发现结果"
 		s.mu.Unlock()
 	}
 	var list struct {
@@ -218,6 +274,17 @@ func (s *nativeShell) saveRuntimeConfig() {
 	model := strings.TrimSpace(s.configModel)
 	baseURL := strings.TrimSpace(s.configBaseURL)
 	apiKeyEnv := strings.TrimSpace(s.configAPIKeyEnv)
+	agentMode := strings.TrimSpace(s.configAgentMode)
+	piEndpoint := strings.TrimSpace(s.configPiEndpoint)
+	piSkipStart := s.configPiSkipStart
+	piCommand := strings.TrimSpace(s.configPiCommand)
+	piArgs := splitNativeArgs(s.configPiArgs)
+	if agentMode == "auto" {
+		piEndpoint, piCommand, piArgs, piSkipStart = "", "", nil, false
+	} else if agentMode == "external" {
+		piCommand, piArgs = "", nil
+	}
+	piCancelTimeout := strings.TrimSpace(s.configPiCancelTimeout)
 	if provider == "" {
 		s.configNote = "服务商不能为空"
 		s.mu.Unlock()
@@ -228,7 +295,7 @@ func (s *nativeShell) saveRuntimeConfig() {
 	s.configNote = "正在保存…"
 	s.mu.Unlock()
 	if s.invalidate != nil { s.invalidate() }
-	payload, _ := json.Marshal(map[string]string{"provider": provider, "model": model, "base_url": baseURL, "api_key_env": apiKeyEnv})
+	payload, _ := json.Marshal(map[string]any{"provider": provider, "model": model, "base_url": baseURL, "api_key_env": apiKeyEnv, "pi_mode": agentMode, "pi_endpoint": piEndpoint, "pi_skip_start": piSkipStart, "pi_command": piCommand, "pi_args": piArgs, "pi_cancel_timeout": piCancelTimeout})
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	var updated nativeRuntimeConfig
@@ -244,10 +311,32 @@ func (s *nativeShell) saveRuntimeConfig() {
 			s.configBaseURL = saved.BaseURL
 			s.configAPIKeyEnv = saved.APIKeyEnv
 		}
+		s.configAgentMode = updated.Runtime.PiMode
+		if s.configAgentMode == "" { s.configAgentMode = agentMode }
+		s.configPiEndpoint = updated.Runtime.PiEndpoint
+		s.configPiSkipStart = updated.Runtime.PiSkipStart
+		s.configPiCommand = updated.Runtime.PiCommand
+		s.configPiArgs = strings.Join(updated.Runtime.PiArgs, "\n")
+		s.configPiCancelTimeout = updated.Runtime.PiCancelTimeout
+		s.configPiStatus = updated.Runtime.PiStatus
 		s.configNote = "已保存，下一条消息将使用此模型。"
 	}
 	s.mu.Unlock()
 	if s.invalidate != nil { s.invalidate() }
+}
+
+func splitNativeArgs(value string) []string {
+	lines := strings.Split(value, "\n")
+	args := make([]string, 0, len(lines))
+	for _, line := range lines { if item := strings.TrimSpace(line); item != "" { args = append(args, item) } }
+	return args
+}
+
+func firstNativeNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" { return value }
+	}
+	return "未知"
 }
 
 func nativeJSONRequest(ctx context.Context, method, endpoint string, body []byte, result any) error {
@@ -787,9 +876,6 @@ func (s *nativeShell) chatPage(c *ui.Context) {
 			statusDot(c, t.Success)
 			ui.Text(c, "Go runtime 已连接 · HTTP/SSE").FontSize(12).TextColor(t.TextMuted)
 			ui.Spacer(c)
-			if ui.PrimaryButton(c, "切换到 WebView Chat").Clicked() && s.openChat != nil {
-				s.openChat()
-			}
 		})
 		ui.List(c, &s.messagesList, len(messages), func(i int) {
 			message := messages[i]
@@ -1040,7 +1126,7 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 		ui.Text(c, "主题选择使用原生控件，并应用到完整桌面壳。").FontSize(12).TextColor(t.TextMuted)
 	case "runtime":
 		ui.Text(c, "运行环境").FontSize(16).Bold()
-		ui.Text(c, "原生壳与 WebView 页面共享同一个 serverapp 进程。").TextColor(t.TextMuted)
+		ui.Text(c, "原生壳与 WebView 页面共享同一个 serverapp 进程；这里读取并保存 Pi Agent 的完整配置。").TextColor(t.TextMuted)
 		ui.Column(c).Gap(t.Space(2)).Children(func() {
 			ui.Text(c, "默认服务商").FontSize(12).Bold()
 			ui.TextInput(c, &s.configProvider).Placeholder("例如 deterministic 或 deepseek")
@@ -1050,10 +1136,63 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 			ui.TextInput(c, &s.configBaseURL).Placeholder("例如 https://api.example.com/v1")
 			ui.Text(c, "密钥变量（只填变量名）").FontSize(12).Bold()
 			ui.TextInput(c, &s.configAPIKeyEnv).Placeholder("例如 DEEPSEEK_API_KEY")
+			ui.Divider(c)
+			ui.Text(c, "Pi Agent").FontSize(14).Bold()
+			ui.Text(c, "运行模式").FontSize(12).Bold()
+			ui.Row(c).Gap(t.Space(2)).Children(func() {
+				for _, mode := range []struct{ id, label string }{{"auto", "自动发现"}, {"manual", "手动托管"}, {"external", "外部连接"}} {
+					button := ui.Button(c, mode.label)
+					if s.configAgentMode == mode.id { button.Background(t.SurfacePressed).TextColor(t.Text) }
+					if button.Clicked() { s.configAgentMode = mode.id }
+				}
+			})
+			if s.configAgentMode != "auto" {
+				ui.Text(c, "Agent 地址").FontSize(12).Bold()
+				ui.TextInput(c, &s.configPiEndpoint).Placeholder("例如 http://127.0.0.1:8787")
+			}
+			if s.configAgentMode == "manual" {
+				ui.Text(c, "CLI 命令").FontSize(12).Bold()
+				ui.TextInput(c, &s.configPiCommand).Placeholder("例如 pi-agent-sidecar")
+				ui.Text(c, "CLI 参数（每行一个）").FontSize(12).Bold()
+				ui.TextInput(c, &s.configPiArgs).Placeholder("例如 --port\n8787")
+			}
+			ui.Text(c, "取消超时").FontSize(12).Bold()
+			ui.TextInput(c, &s.configPiCancelTimeout).Placeholder("例如 5s")
+			if s.configAgentMode == "external" {
+				ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "跳过启动外部进程").FontSize(12).Bold()
+					if ui.Button(c, map[bool]string{true: "已开启", false: "未开启"}[s.configPiSkipStart]).Clicked() { s.configPiSkipStart = !s.configPiSkipStart }
+				})
+			}
+			status := s.configPiStatus
+			ui.Box(c).Padding(t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+				ui.Text(c, "Pi Agent 状态").Bold()
+				state := status.State
+				if state == "" { state = "未启动" }
+				ui.Text(c, fmt.Sprintf("%s · 配置 %s · 生效 %s", state, firstNativeNonEmpty(status.ConfiguredMode, s.configAgentMode), firstNativeNonEmpty(status.EffectiveMode, s.configAgentMode))).FontSize(12).TextColor(t.TextMuted)
+				if status.Command != "" { ui.Text(c, "命令："+status.Command).FontSize(12).TextColor(t.TextMuted) }
+				if len(status.Args) > 0 { ui.Text(c, "参数："+strings.Join(status.Args, " ")).FontSize(12).TextColor(t.TextMuted) }
+				if status.Endpoint != "" { ui.Text(c, "地址："+status.Endpoint).FontSize(12).TextColor(t.TextMuted) }
+				ui.Text(c, fmt.Sprintf("跳过启动：%s · 取消超时：%s", map[bool]string{true: "是", false: "否"}[s.configPiSkipStart], firstNativeNonEmpty(s.configPiCancelTimeout, "默认"))).FontSize(12).TextColor(t.TextMuted)
+				if status.Reason != "" { ui.Text(c, status.Reason).FontSize(12).TextColor(t.TextMuted) }
+				if len(s.piCandidates) > 0 {
+					ui.Text(c, "本机发现").FontSize(12).Bold()
+					for _, candidate := range s.piCandidates {
+						label := candidate.Command + " · " + firstNativeNonEmpty(candidate.Path, "路径未知")
+						if candidate.Version != "" { label += " · " + candidate.Version }
+						if candidate.SidecarCapable { label += " · sidecar" } else { label += " · 需手动配置" }
+						ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
+					}
+				}
+			})
 			if ui.PrimaryButton(c, "保存模型配置").Clicked() {
 				go s.saveRuntimeConfig()
 			}
+			if s.openChat != nil && ui.Button(c, "打开 WebView 对话").Clicked() {
+				s.openChat()
+			}
 			ui.Text(c, "保存后可刷新状态，检查运行环境连接。").FontSize(12).TextColor(t.TextMuted)
+			if s.piDiscoveryNote != "" { ui.Text(c, s.piDiscoveryNote).FontSize(12).TextColor(t.TextMuted) }
 			if s.configNote != "" {
 				ui.Text(c, s.configNote).FontSize(12).TextColor(t.TextMuted)
 			}

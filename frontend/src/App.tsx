@@ -787,6 +787,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const [piSkipStart, setPiSkipStart] = useState(false);
   const [piCommand, setPiCommand] = useState("");
   const [piArgs, setPiArgs] = useState("");
+  const [piCancelTimeout, setPiCancelTimeout] = useState("");
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [status, setStatus] = useState("");
 
@@ -818,6 +819,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
     setPiSkipStart(runtime?.pi_skip_start ?? fallback?.skipStart ?? false);
     setPiCommand(runtime?.pi_command ?? fallback?.command ?? "");
     setPiArgs(formatAgentArgs(runtime?.pi_args) || fallback?.args || "");
+    setPiCancelTimeout(runtime?.pi_cancel_timeout ?? "");
   };
 
   useEffect(() => {
@@ -850,6 +852,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         pi_skip_start: savedAgent.skipStart,
         pi_command: savedAgent.command,
         pi_args: parseAgentArgs(savedAgent.args),
+        pi_cancel_timeout: piCancelTimeout.trim(),
       });
       applyRuntimeConfig(config, savedAgent);
       setStatus("已保存，下一条消息将使用此模型。");
@@ -937,6 +940,10 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               <textarea value={piArgs} onChange={(event) => setPiArgs(event.target.value)} rows={4} placeholder="--port\n8787" aria-label="Pi CLI 参数" />
             </label>
           </>}
+          <label className="ds-settings-field">
+            <span>取消超时 <small>pi_cancel_timeout</small></span>
+            <input value={piCancelTimeout} onChange={(event) => setPiCancelTimeout(event.target.value)} placeholder="例如 5s" aria-label="Pi Agent 取消超时" />
+          </label>
         </section>
       </main>
       <footer className="ds-settings-modal__footer">
