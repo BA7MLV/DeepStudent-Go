@@ -25,7 +25,7 @@ import (
 // runtime is intentionally kept outside this type: chat and resource pages
 // can move behind this boundary one at a time without changing serverapp.
 //
-// In v0.2.11 the native shell is the window's content. It now owns a small
+// In v0.3.0 the native shell is the window's content. It now owns a small
 // native chat composer and streamed message list while richer editing,
 // attachments, and resource previews remain on the WebView migration seam.
 type nativeShell struct {
@@ -183,7 +183,7 @@ func (s *nativeShell) hydrateSession() {
 		if strings.TrimSpace(runtimeConfig.DefaultProvider) != "" { s.configProvider = runtimeConfig.DefaultProvider }
 		s.configModel = runtimeConfig.DefaultModel
 		if provider, ok := runtimeConfig.Providers[s.configProvider]; ok {
-			s.configModel = provider.Model
+			if strings.TrimSpace(s.configModel) == "" { s.configModel = provider.Model }
 			s.configBaseURL = provider.BaseURL
 			s.configAPIKeyEnv = provider.APIKeyEnv
 		}
@@ -310,6 +310,7 @@ func (s *nativeShell) saveRuntimeConfig() {
 		s.configProvider = updated.DefaultProvider
 		s.configModel = updated.DefaultModel
 		if saved, ok := updated.Providers[provider]; ok {
+			if strings.TrimSpace(s.configModel) == "" { s.configModel = saved.Model }
 			s.configBaseURL = saved.BaseURL
 			s.configAPIKeyEnv = saved.APIKeyEnv
 		}
@@ -940,7 +941,7 @@ func (s *nativeShell) chatPage(c *ui.Context) {
 }
 
 // renderMarkdown maps the dependency-free Markdown AST to MyGo primitives.
-// MyGo v0.2.11 RichText/Span is used for syntax-highlighted code. Blocks,
+// MyGo v0.3.0 RichText/Span is used for syntax-highlighted code. Blocks,
 // tables, headings and lists remain fully native and update as SSE snapshots
 // arrive.
 func (s *nativeShell) renderMarkdown(c *ui.Context, message nativeMessage) {
@@ -1243,7 +1244,7 @@ func (s *nativeShell) statusBar(c *ui.Context) {
 		statusDot(c, color)
 		ui.Text(c, label).FontSize(11).TextColor(t.TextMuted).SingleLine()
 		ui.Spacer(c)
-		ui.Text(c, "原生壳 · WebView 对话边界 · MyGo v0.2.11").FontSize(11).TextColor(t.TextMuted).SingleLine()
+		ui.Text(c, "原生壳 · WebView 对话边界 · MyGo v0.3.0").FontSize(11).TextColor(t.TextMuted).SingleLine()
 	})
 }
 

@@ -2,7 +2,9 @@
   "name": "deepstudent-go",
   "private": true,
   "type": "module",
-  "workspaces": ["frontend"],
+  "workspaces": [
+    "frontend"
+  ],
   "scripts": {
     "dev:web": "cd frontend && bun run dev",
     "build:web": "cd frontend && bun run build",
@@ -11,6 +13,6 @@
     "build": "mygo build"
   },
   "devDependencies": {
-    "mygo-cli": "0.2.11"
+    "mygo-cli": "0.3.0"
   }
 }

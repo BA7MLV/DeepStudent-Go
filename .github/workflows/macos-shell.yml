@@ -37,7 +37,7 @@ jobs:
         run: go mod tidy
 
       - name: Install MyGo CLI
-        run: go install github.com/egoist/mygo/cmd/mygo@v0.2.11
+        run: go install github.com/egoist/mygo/cmd/mygo@v0.3.0
 
       - name: Verify checked-in typed bindings
         run: test -s frontend/src/mygo.ts

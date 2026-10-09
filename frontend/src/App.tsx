@@ -957,13 +957,17 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
 }
 
 export function App() {
-  const [view, setView] = useState<ViewId>("chat-v2");
+  const [view, setView] = useState<ViewId>(() => {
+    const requested = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("view") : null;
+    const valid: ViewId[] = ["chat-v2", "learning-hub", "todo", "skills-management", "flashcards", "settings"];
+    return requested && valid.includes(requested as ViewId) ? requested as ViewId : "chat-v2";
+  });
   const [theme, setTheme] = useState<Theme>(() => readTheme());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [onboardingConfig, setOnboardingConfig] = useState<OnboardingConfig | null>(() => readOnboardingConfig());
-  const [onboardingOpen, setOnboardingOpen] = useState(() => onboardingConfig === null);
+  const [onboardingOpen, setOnboardingOpen] = useState(() => onboardingConfig === null && new URLSearchParams(window.location.search).get("onboarding") !== "skip");
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
