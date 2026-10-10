@@ -33,11 +33,11 @@ func (DeterministicProvider) Stream(ctx context.Context, request ModelRequest, e
 }
 
 type deterministicRun struct {
-	id          string
-	sessionID   string
-	cancel      context.CancelFunc
-	mu          sync.Mutex
-	history     []StreamEvent
+	id        string
+	sessionID string
+	cancel    context.CancelFunc
+	mu        sync.Mutex
+	history   []StreamEvent
 	// sequences mirrors history for stores that assign a durable session
 	// sequence to each event. It lets a reconnect use either the public event
 	// id or the session sequence as Last-Event-ID.
@@ -45,6 +45,7 @@ type deterministicRun struct {
 	subscribers map[chan StreamEvent]struct{}
 	closed      bool
 	record      RunRecord
+	persistErr  error
 }
 
 // DeterministicRuntime wires a provider to a small in-memory event broker.
@@ -76,10 +77,10 @@ func NewDeterministicRuntimeWithTimeout(provider ModelProvider, store SessionSto
 		maxConcurrency = 1
 	}
 	return &DeterministicRuntime{
-		provider:  provider,
-		store:     store,
-		sem:       make(chan struct{}, maxConcurrency),
-		timeout:   timeout,
+		provider: provider,
+		store:    store,
+		sem:      make(chan struct{}, maxConcurrency),
+		timeout:  timeout,
 		// Keep completed runs briefly so a client can attach after POST returns,
 		// then release the history and channels instead of retaining every run.
 		retention: 5 * time.Minute,
@@ -139,18 +140,26 @@ func (r *DeterministicRuntime) Start(ctx context.Context, request AgentRunReques
 	return AgentRun{ID: runID, SessionID: request.SessionID, Events: first}, nil
 }
 
-// Run returns the latest in-memory status for a run.
-func (r *DeterministicRuntime) Run(_ context.Context, runID string) (RunRecord, error) {
+// Run returns the latest in-memory status for a run. After a process restart,
+// fall back to the durable run table so GET /runs/:id remains useful even
+// though no provider goroutine was recreated in this process.
+func (r *DeterministicRuntime) Run(ctx context.Context, runID string) (RunRecord, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	r.mu.RLock()
 	state, ok := r.runs[runID]
 	r.mu.RUnlock()
-	if !ok {
-		return RunRecord{}, fmt.Errorf("run %q not found", runID)
+	if ok {
+		state.mu.Lock()
+		record := state.record
+		state.mu.Unlock()
+		return record, nil
 	}
-	state.mu.Lock()
-	record := state.record
-	state.mu.Unlock()
-	return record, nil
+	if reader, ok := r.store.(RunReader); ok {
+		return reader.Run(ctx, runID)
+	}
+	return RunRecord{}, fmt.Errorf("run %q not found", runID)
 }
 
 // Cancel requests cancellation. A terminal run is idempotently left alone.
@@ -324,7 +333,10 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 	defer state.cancel()
 	defer r.close(state)
 	if ctx.Err() != nil {
-		r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()})
+		if !r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()}) && r.persistenceError(state) != nil {
+			r.failPersistence(state)
+			return
+		}
 		r.setStatus(state, RunCanceled)
 		return
 	}
@@ -335,13 +347,23 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 		// Even a run canceled while waiting for a concurrency slot has a
 		// terminal event. Without this, an SSE subscriber sees a clean EOF and
 		// cannot distinguish cancellation from a broken connection.
-		r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()})
+		if !r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()}) && r.persistenceError(state) != nil {
+			r.failPersistence(state)
+			return
+		}
 		r.setStatus(state, RunCanceled)
 		return
 	}
 	defer func() { <-r.sem }()
 	started := StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunStarted, CreatedAt: time.Now().UTC()}
 	if !r.emit(ctx, state, started) {
+		if r.persistenceError(state) != nil {
+			r.failPersistence(state)
+		}
+		return
+	}
+	if r.persistenceError(state) != nil {
+		r.failPersistence(state)
 		return
 	}
 	capabilities := request.InputCapabilities
@@ -362,15 +384,28 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 		event.RunID = state.id
 		event.CreatedAt = time.Now().UTC()
 		if !r.emit(ctx, state, event) {
+			if err := r.persistenceError(state); err != nil {
+				return err
+			}
 			return ctx.Err()
+		}
+		if err := r.persistenceError(state); err != nil {
+			return err
 		}
 		return nil
 	})
 	if err == nil && ctx.Err() != nil {
 		err = ctx.Err()
 	}
+	if persistenceErr := r.persistenceError(state); persistenceErr != nil {
+		r.failPersistence(state)
+		return
+	}
 	if err != nil && errors.Is(err, context.Canceled) {
-		r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()})
+		if !r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: "run canceled", Done: true, CreatedAt: time.Now().UTC()}) && r.persistenceError(state) != nil {
+			r.failPersistence(state)
+			return
+		}
 		r.setStatus(state, RunCanceled)
 	} else if err != nil {
 		errorCode := "provider_error"
@@ -379,10 +414,18 @@ func (r *DeterministicRuntime) execute(ctx context.Context, state *deterministic
 			errorCode = "timeout"
 			errorMessage = "run timed out"
 		}
-		r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunError, ErrorCode: errorCode, ErrorMessage: errorMessage, Done: true, CreatedAt: time.Now().UTC()})
+		if !r.emit(context.Background(), state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunError, ErrorCode: errorCode, ErrorMessage: errorMessage, Done: true, CreatedAt: time.Now().UTC()}) && r.persistenceError(state) != nil {
+			r.failPersistence(state)
+			return
+		}
 		r.setStatus(state, RunFailed)
 	} else if err == nil {
-		r.emit(ctx, state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCompleted, Done: true, CreatedAt: time.Now().UTC()})
+		if !r.emit(ctx, state, StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunCompleted, Done: true, CreatedAt: time.Now().UTC()}) {
+			if r.persistenceError(state) != nil {
+				r.failPersistence(state)
+			}
+			return
+		}
 		r.setStatus(state, RunCompleted)
 	}
 }
@@ -415,9 +458,11 @@ func (r *DeterministicRuntime) emit(ctx context.Context, state *deterministicRun
 	if r.store != nil && state.sessionID != "" {
 		payload, _ := json.Marshal(event)
 		persisted, err := r.store.AppendEvent(ctx, SessionEvent{SessionID: state.sessionID, RunID: state.id, Type: string(event.Type), Payload: payload, CreatedAt: event.CreatedAt})
-		if err == nil {
-			sequence = persisted.Sequence
+		if err != nil {
+			r.recordPersistenceError(state, err)
+			return false
 		}
+		sequence = persisted.Sequence
 		if event.Type == EventTextDelta {
 			content := event.Text
 			if content == "" {
@@ -442,6 +487,45 @@ func (r *DeterministicRuntime) emit(ctx context.Context, state *deterministicRun
 		}
 	}
 	return true
+}
+
+func (r *DeterministicRuntime) persistenceError(state *deterministicRun) error {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.persistErr
+}
+
+func (r *DeterministicRuntime) recordPersistenceError(state *deterministicRun, err error) {
+	if err == nil {
+		return
+	}
+	state.mu.Lock()
+	if state.persistErr == nil {
+		state.persistErr = fmt.Errorf("persist runtime event: %w", err)
+	}
+	state.mu.Unlock()
+}
+
+// failPersistence keeps the stream terminal even when the durable event log
+// is unavailable. The error event is intentionally memory-only because a
+// failed store cannot persist it; clients still receive an actionable result.
+func (r *DeterministicRuntime) failPersistence(state *deterministicRun) {
+	r.setStatus(state, RunFailed)
+	event := StreamEvent{ID: newID("evt"), RunID: state.id, Type: EventRunError, ErrorCode: "event_persistence", ErrorMessage: "runtime event persistence failed", Done: true, CreatedAt: time.Now().UTC()}
+	state.mu.Lock()
+	if state.closed {
+		state.mu.Unlock()
+		return
+	}
+	state.history = append(state.history, event)
+	state.sequences = append(state.sequences, 0)
+	for subscriber := range state.subscribers {
+		select {
+		case subscriber <- event:
+		default:
+		}
+	}
+	state.mu.Unlock()
 }
 
 func (r *DeterministicRuntime) close(state *deterministicRun) {
