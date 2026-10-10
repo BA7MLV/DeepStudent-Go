@@ -19,21 +19,21 @@ import (
 	"github.com/BA7MLV/DeepStudent-Go/internal/api"
 	"github.com/BA7MLV/DeepStudent-Go/internal/attachments"
 	"github.com/BA7MLV/DeepStudent-Go/internal/config"
-	"github.com/BA7MLV/DeepStudent-Go/internal/runtime"
 	"github.com/BA7MLV/DeepStudent-Go/internal/piagent"
+	"github.com/BA7MLV/DeepStudent-Go/internal/runtime"
 	"github.com/BA7MLV/DeepStudent-Go/internal/storage"
 )
 
 // Components contains the resources that must live at least as long as the
 // HTTP server. Call Close after the listener has stopped accepting requests.
 type Components struct {
-	Store      *storage.SQLiteStore
+	Store       *storage.SQLiteStore
 	Attachments *storage.AttachmentStore
-	Runtime    runtime.AgentRuntime
-	API        *api.Server
-	HTTP       *http.Server
-	process    *managedSidecar
-	readyStop  context.CancelFunc
+	Runtime     runtime.AgentRuntime
+	API         *api.Server
+	HTTP        *http.Server
+	process     *managedSidecar
+	readyStop   context.CancelFunc
 }
 
 func New(ctx context.Context, cfg config.Config) (*Components, error) {
@@ -54,6 +54,11 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 		return nil, restoreErr
 	} else {
 		cfg = restored
+	}
+	if recovery, ok := any(store).(runtime.RunRecoveryStore); ok {
+		if err := recovery.RecoverOrphanRuns(ctx, time.Now().UTC()); err != nil {
+			return nil, fmt.Errorf("recover orphan runs: %w", err)
+		}
 	}
 	attachmentStore, err := storage.NewAttachmentStore(store, cfg.Storage.BlobRoot, attachments.Policy{MaxBytes: cfg.Storage.AttachmentMaxBytes, AllowedMIMEs: cfg.Storage.AttachmentAllowedMIMEs})
 	if err != nil {
@@ -81,9 +86,15 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 	var process *managedSidecar
 	piMode := strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
 	if piMode == "" {
-		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { piMode = "external" } else { piMode = "auto" }
+		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart {
+			piMode = "external"
+		} else {
+			piMode = "auto"
+		}
 	}
-	if piMode == "managed" || piMode == "local" { piMode = "manual" }
+	if piMode == "managed" || piMode == "local" {
+		piMode = "manual"
+	}
 	piStatus := api.PiRuntimeStatus{ConfiguredMode: piMode, EffectiveMode: "deterministic", State: "fallback", Reason: "Pi sidecar is not configured"}
 	var sidecar *runtime.SidecarRuntime
 	endpoint := strings.TrimSpace(cfg.Runtime.PiEndpoint)
@@ -99,27 +110,40 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 		}
 	}
 	if startManaged {
-		if endpoint == "" { endpoint = "http://127.0.0.1:8787" }
+		if endpoint == "" {
+			endpoint = "http://127.0.0.1:8787"
+		}
 		process, err = startManagedSidecar(command, args, endpoint)
 		if err != nil {
-			if piMode != "auto" { return nil, err }
+			if piMode != "auto" {
+				return nil, err
+			}
 			process = nil
-			piStatus.State, piStatus.EffectiveMode, piStatus.Reason = "fallback", "deterministic", "discovered sidecar could not be started: " + err.Error()
+			piStatus.State, piStatus.EffectiveMode, piStatus.Reason = "fallback", "deterministic", "discovered sidecar could not be started: "+err.Error()
 		} else {
 			piStatus.Command, piStatus.Args, piStatus.Endpoint = command, append([]string(nil), args...), endpoint
 			piStatus.EffectiveMode = piMode
 			sidecar, err = runtime.NewSidecarRuntimeWithConfig(runtime.SidecarRuntimeConfig{Endpoint: endpoint, Store: store, CancelTimeout: cfg.Runtime.PiCancelTimeout})
 			if err != nil {
-				_ = process.Close(); process = nil
-				if piMode != "auto" { return nil, err }
+				_ = process.Close()
+				process = nil
+				if piMode != "auto" {
+					return nil, err
+				}
 				piStatus.State, piStatus.EffectiveMode, piStatus.Reason = "fallback", "deterministic", "discovered sidecar endpoint is invalid; using deterministic runtime"
-			} else { agent = sidecar }
+			} else {
+				agent = sidecar
+			}
 		}
 	}
 	if piMode == "external" {
-		if endpoint == "" { return nil, fmt.Errorf("pi sidecar endpoint is required for external mode") }
+		if endpoint == "" {
+			return nil, fmt.Errorf("pi sidecar endpoint is required for external mode")
+		}
 		sidecar, err = runtime.NewSidecarRuntimeWithConfig(runtime.SidecarRuntimeConfig{Endpoint: endpoint, Store: store, CancelTimeout: cfg.Runtime.PiCancelTimeout})
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		piStatus.EffectiveMode, piStatus.State, piStatus.Endpoint, piStatus.Reason = "external", "configured", endpoint, "using externally managed sidecar"
 		agent = sidecar
 	}
@@ -146,7 +170,9 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 		probeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		ready = waitSidecarReady(probeCtx, sidecar)
 		cancel()
-		if ready { serverAPI.SetPiRuntimeState("ready", "Pi sidecar is ready") }
+		if ready {
+			serverAPI.SetPiRuntimeState("ready", "Pi sidecar is ready")
+		}
 		if !ready {
 			watchCtx, stop := context.WithCancel(context.Background())
 			readyStop = stop
@@ -160,9 +186,12 @@ func New(ctx context.Context, cfg config.Config) (*Components, error) {
 
 func waitSidecarReady(ctx context.Context, sidecar *runtime.SidecarRuntime) bool {
 	for {
-		if sidecar.Health(ctx) == nil { return true }
+		if sidecar.Health(ctx) == nil {
+			return true
+		}
 		select {
-		case <-ctx.Done(): return false
+		case <-ctx.Done():
+			return false
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
@@ -175,9 +204,14 @@ func watchSidecarReady(ctx context.Context, serverAPI *api.Server, sidecar *runt
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		err := sidecar.Health(probeCtx)
 		cancel()
-		if err == nil { serverAPI.SetPiRuntimeState("ready", "Pi sidecar is ready"); serverAPI.SetReady(true); return }
+		if err == nil {
+			serverAPI.SetPiRuntimeState("ready", "Pi sidecar is ready")
+			serverAPI.SetReady(true)
+			return
+		}
 		select {
-		case <-ctx.Done(): return
+		case <-ctx.Done():
+			return
 		case <-ticker.C:
 		}
 	}
@@ -191,26 +225,40 @@ type managedSidecar struct {
 
 func startManagedSidecar(command string, args []string, endpoint string) (*managedSidecar, error) {
 	command = strings.TrimSpace(command)
-	if command == "" { return nil, errors.New("piCommand is required for managed sidecar") }
-	if endpoint == "" { endpoint = "http://127.0.0.1:8787" }
+	if command == "" {
+		return nil, errors.New("piCommand is required for managed sidecar")
+	}
+	if endpoint == "" {
+		endpoint = "http://127.0.0.1:8787"
+	}
 	parsed, err := url.Parse(endpoint)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") { return nil, errors.New("invalid managed sidecar endpoint") }
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return nil, errors.New("invalid managed sidecar endpoint")
+	}
 	host, port := parsed.Hostname(), parsed.Port()
-	if host == "" { host = "127.0.0.1" }
-	if port == "" { port = "8787" }
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		port = "8787"
+	}
 	cmd := exec.Command(command, args...)
 	cmd.Env = append(os.Environ(), "PI_SIDECAR_HOST="+host, "PI_SIDECAR_PORT="+port)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil { return nil, fmt.Errorf("start pi sidecar: %w", err) }
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start pi sidecar: %w", err)
+	}
 	managed := &managedSidecar{cmd: cmd, done: make(chan struct{})}
 	go func() { _ = cmd.Wait(); close(managed.done) }()
 	return managed, nil
 }
 
 func (p *managedSidecar) Close() error {
-	if p == nil || p.cmd == nil || p.cmd.Process == nil { return nil }
+	if p == nil || p.cmd == nil || p.cmd.Process == nil {
+		return nil
+	}
 	var result error
 	p.once.Do(func() {
 		_ = p.cmd.Process.Signal(os.Interrupt)
@@ -228,9 +276,15 @@ func (c *Components) Close() error {
 	if c == nil {
 		return nil
 	}
-	if c.readyStop != nil { c.readyStop() }
-	if closer, ok := c.Runtime.(interface{ Close() }); ok { closer.Close() }
-	if c.process != nil { _ = c.process.Close() }
+	if c.readyStop != nil {
+		c.readyStop()
+	}
+	if closer, ok := c.Runtime.(interface{ Close() }); ok {
+		closer.Close()
+	}
+	if c.process != nil {
+		_ = c.process.Close()
+	}
 	if c.Store != nil {
 		return c.Store.Close()
 	}
