@@ -83,7 +83,9 @@ PI_PID=$!
 
 wait_for() {
   local url=$1
-  local deadline=$((SECONDS + 15))
+  # macOS hosted runners can be cold after installing Go/Bun; allow the
+  # freshly started sidecar and server enough time to bind their ports.
+  local deadline=$((SECONDS + 45))
   while (( SECONDS < deadline )); do
     if curl --fail --silent --show-error --max-time 2 "$url" >/dev/null 2>&1; then return 0; fi
     sleep 0.2
