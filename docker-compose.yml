@@ -5,10 +5,25 @@ services:
       DEEPSTUDENT_DB_PATH: /data/deepstudent.db
       DEEPSTUDENT_BLOB_ROOT: /data/blobs
       DEEPSTUDENT_HTTP_ADDR: 0.0.0.0:8080
+      DEEPSTUDENT_PI_MODE: external
+      DEEPSTUDENT_PI_ENDPOINT: http://sidecar:8787
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
       - deepstudent-data:/data
+    restart: unless-stopped
+    depends_on:
+      sidecar:
+        condition: service_healthy
+
+  sidecar:
+    build: ./packages/agent-sidecar
+    environment:
+      PI_SIDECAR_HOST: 0.0.0.0
+      PI_SIDECAR_PORT: 8787
+      PI_SIDECAR_MODE: fake
+    expose:
+      - "8787"
     restart: unless-stopped
 
 volumes:
