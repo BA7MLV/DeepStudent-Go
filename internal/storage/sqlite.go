@@ -59,7 +59,7 @@ func OpenSQLite(ctx context.Context, path string) (*SQLiteStore, error) {
 	return store, nil
 }
 
-func (s *SQLiteStore) DB() *sql.DB { return s.db }
+func (s *SQLiteStore) DB() *sql.DB  { return s.db }
 func (s *SQLiteStore) Close() error { return s.db.Close() }
 
 // SaveConfig persists the credential-free portion of the application
@@ -544,6 +544,13 @@ func (s *SQLiteStore) CreateRun(ctx context.Context, run runtime.RunRecord) erro
 
 func (s *SQLiteStore) FinishRun(ctx context.Context, runID string, status runtime.RunStatus, finishedAt time.Time) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE runs SET status = ?, finished_at = ? WHERE id = ?`, string(status), finishedAt.UTC().Format(time.RFC3339Nano), runID)
+	return err
+}
+
+// RecoverOrphanRuns closes runs left queued/running by a crashed process. The
+// sidecar stream is process-local, so resuming those records would be unsafe.
+func (s *SQLiteStore) RecoverOrphanRuns(ctx context.Context, finishedAt time.Time) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE runs SET status = ?, finished_at = ? WHERE status IN (?, ?)`, string(runtime.RunFailed), finishedAt.UTC().Format(time.RFC3339Nano), string(runtime.RunQueued), string(runtime.RunRunning))
 	return err
 }
 
