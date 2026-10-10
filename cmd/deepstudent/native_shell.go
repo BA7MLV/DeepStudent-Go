@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/BA7MLV/DeepStudent-Go/internal/markdown"
@@ -25,52 +26,54 @@ import (
 // runtime is intentionally kept outside this type: chat and resource pages
 // can move behind this boundary one at a time without changing serverapp.
 //
-// In v0.3.0 the native shell is the window's content. It now owns a small
+// In v0.3.7 the native shell is the window's content. It now owns a small
 // native chat composer and streamed message list while richer editing,
 // attachments, and resource previews remain on the WebView migration seam.
 type nativeShell struct {
-	selected       string
-	settingsTab    string
-	sidebarWidth   float32
-	dark           bool
-	lastRefresh    time.Time
-	runtimeHealthy bool
-	openChat       func()
-	window         *mygo.Window
-	apiBaseURL     string
-	sessionID      string
-	invalidate     func()
-	draft          string
-	sending        bool
-	activeRunID    string
-	activeCancel   context.CancelFunc
-	pendingInput   string
-	attachmentBusy bool
-	attachmentNote string
-	configProvider string
-	configModel    string
-	configBaseURL  string
-	configAPIKeyEnv string
-	configAgentMode string
-	configPiEndpoint string
-	configPiSkipStart bool
-	configPiCommand string
-	configPiArgs string
+	selected              string
+	settingsTab           string
+	sidebarWidth          float32
+	dark                  bool
+	lastRefresh           time.Time
+	runtimeHealthy        bool
+	openChat              func()
+	window                *mygo.Window
+	apiBaseURL            string
+	sessionID             string
+	invalidate            func()
+	draft                 string
+	sending               bool
+	activeRunID           string
+	activeCancel          context.CancelFunc
+	pendingInput          string
+	attachmentBusy        bool
+	attachmentNote        string
+	configProvider        string
+	configModel           string
+	configBaseURL         string
+	configAPIKeyEnv       string
+	configAgentMode       string
+	configPiEndpoint      string
+	configPiSkipStart     bool
+	configPiCommand       string
+	configPiArgs          string
 	configPiCancelTimeout string
-	configPiStatus nativePiStatus
-	piCandidates []nativePiCandidate
-	piDiscoveryNote string
-	configReady     bool
-	configHydrateErr string
-	configBusy     bool
-	configNote     string
-	onboardingOpen bool
-	onboardingStep int
-	onboarding      [4]string
-	messages       []nativeMessage
-	messagesList   ui.ListState
-	mu             sync.Mutex
+	configPiStatus        nativePiStatus
+	piCandidates          []nativePiCandidate
+	piDiscoveryNote       string
+	configReady           bool
+	configHydrateErr      string
+	configBusy            bool
+	configNote            string
+	onboardingOpen        bool
+	onboardingStep        int
+	onboarding            [4]string
+	messages              []nativeMessage
+	messagesList          ui.ListState
+	mu                    sync.Mutex
 }
+
+var nativeMessageSeq atomic.Uint64
 
 type nativeMessage struct {
 	role    string
@@ -105,38 +108,38 @@ type nativeMessageRecord struct {
 }
 
 type nativeRuntimeConfig struct {
-	DefaultProvider string `json:"default_provider"`
-	DefaultModel    string `json:"default_model"`
+	DefaultProvider string                          `json:"default_provider"`
+	DefaultModel    string                          `json:"default_model"`
 	Providers       map[string]nativeProviderConfig `json:"providers"`
-	Runtime         nativeAgentRuntime `json:"runtime"`
+	Runtime         nativeAgentRuntime              `json:"runtime"`
 }
 
 type nativeAgentRuntime struct {
-	PiEndpoint string `json:"pi_endpoint"`
-	PiSkipStart bool `json:"pi_skip_start"`
-	PiMode string `json:"pi_mode"`
-	PiCommand string `json:"pi_command"`
-	PiArgs []string `json:"pi_args"`
-	PiCancelTimeout string `json:"pi_cancel_timeout"`
-	PiStatus nativePiStatus `json:"pi_status"`
+	PiEndpoint      string         `json:"pi_endpoint"`
+	PiSkipStart     bool           `json:"pi_skip_start"`
+	PiMode          string         `json:"pi_mode"`
+	PiCommand       string         `json:"pi_command"`
+	PiArgs          []string       `json:"pi_args"`
+	PiCancelTimeout string         `json:"pi_cancel_timeout"`
+	PiStatus        nativePiStatus `json:"pi_status"`
 }
 
 type nativePiStatus struct {
-	ConfiguredMode string `json:"configured_mode"`
-	EffectiveMode string `json:"effective_mode"`
-	State string `json:"state"`
-	Command string `json:"command"`
-	Args []string `json:"args"`
-	Endpoint string `json:"endpoint"`
-	Reason string `json:"reason"`
+	ConfiguredMode string   `json:"configured_mode"`
+	EffectiveMode  string   `json:"effective_mode"`
+	State          string   `json:"state"`
+	Command        string   `json:"command"`
+	Args           []string `json:"args"`
+	Endpoint       string   `json:"endpoint"`
+	Reason         string   `json:"reason"`
 }
 
 type nativePiCandidate struct {
-	Name string `json:"name"`
-	Command string `json:"command"`
-	Path string `json:"path"`
-	Version string `json:"version"`
-	SidecarCapable bool `json:"sidecar_capable"`
+	Name           string `json:"name"`
+	Command        string `json:"command"`
+	Path           string `json:"path"`
+	Version        string `json:"version"`
+	SidecarCapable bool   `json:"sidecar_capable"`
 }
 
 type nativeProviderConfig struct {
@@ -148,25 +151,27 @@ type nativeProviderConfig struct {
 func newNativeShell(apiBaseURL string) *nativeShell {
 	welcome := newNativeMessage("assistant", "你好，我是 DeepStudent。你可以直接在这里开始一个学习对话。")
 	return &nativeShell{
-		selected:       "chat",
-		settingsTab:    "general",
-		sidebarWidth:   232,
-		lastRefresh:    time.Now(),
-		runtimeHealthy: true,
-		apiBaseURL:     strings.TrimRight(apiBaseURL, "/"),
-		sessionID:      "native-session",
-		configProvider: "deterministic",
-		configModel:    "stub",
+		selected:        "chat",
+		settingsTab:     "general",
+		sidebarWidth:    232,
+		lastRefresh:     time.Now(),
+		runtimeHealthy:  true,
+		apiBaseURL:      strings.TrimRight(apiBaseURL, "/"),
+		sessionID:       "native-session",
+		configProvider:  "deterministic",
+		configModel:     "stub",
 		configAgentMode: "auto",
-		messagesList:   ui.ListState{FollowEnd: true},
-		messages: []nativeMessage{welcome},
+		messagesList:    ui.ListState{FollowEnd: true},
+		messages:        []nativeMessage{welcome},
 	}
 }
 
 func newNativeMessage(role, content string) nativeMessage {
 	parser := markdown.NewParser()
 	completed := parser.Feed([]byte(content))
-	return nativeMessage{role: role, content: content, nodes: completed, pending: parser.Snapshot(), parser: parser}
+	// Local messages need a persistent identity for MyGo's keyed List. Server
+	// messages replace this with their durable ID during hydration.
+	return nativeMessage{role: role, content: content, id: fmt.Sprintf("native-local-%d", nativeMessageSeq.Add(1)), nodes: completed, pending: parser.Snapshot(), parser: parser}
 }
 
 // hydrateSession reuses the server's durable session/message contract. A
@@ -180,10 +185,14 @@ func (s *nativeShell) hydrateSession() {
 	configErr := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/config", nil, &runtimeConfig)
 	if configErr == nil {
 		s.mu.Lock()
-		if strings.TrimSpace(runtimeConfig.DefaultProvider) != "" { s.configProvider = runtimeConfig.DefaultProvider }
+		if strings.TrimSpace(runtimeConfig.DefaultProvider) != "" {
+			s.configProvider = runtimeConfig.DefaultProvider
+		}
 		s.configModel = runtimeConfig.DefaultModel
 		if provider, ok := runtimeConfig.Providers[s.configProvider]; ok {
-			if strings.TrimSpace(s.configModel) == "" { s.configModel = provider.Model }
+			if strings.TrimSpace(s.configModel) == "" {
+				s.configModel = provider.Model
+			}
 			s.configBaseURL = provider.BaseURL
 			s.configAPIKeyEnv = provider.APIKeyEnv
 		}
@@ -198,20 +207,29 @@ func (s *nativeShell) hydrateSession() {
 		s.configReady = true
 		s.configHydrateErr = ""
 		s.mu.Unlock()
-		if s.invalidate != nil { s.invalidate() }
+		if s.invalidate != nil {
+			s.invalidate()
+		}
 	} else {
 		s.mu.Lock()
 		s.configHydrateErr = configErr.Error()
 		s.mu.Unlock()
 	}
-	var discovery struct { Candidates []nativePiCandidate `json:"candidates"`; Status nativePiStatus `json:"status"` }
+	var discovery struct {
+		Candidates []nativePiCandidate `json:"candidates"`
+		Status     nativePiStatus      `json:"status"`
+	}
 	if err := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/pi/discovery", nil, &discovery); err == nil {
 		s.mu.Lock()
 		s.piCandidates = discovery.Candidates
-		if discovery.Status.State != "" { s.configPiStatus = discovery.Status }
+		if discovery.Status.State != "" {
+			s.configPiStatus = discovery.Status
+		}
 		s.piDiscoveryNote = "已读取本机 Pi Agent 发现结果"
 		s.mu.Unlock()
-		if s.invalidate != nil { s.invalidate() }
+		if s.invalidate != nil {
+			s.invalidate()
+		}
 	}
 	var list struct {
 		Sessions []nativeSession `json:"sessions"`
@@ -225,7 +243,9 @@ func (s *nativeShell) hydrateSession() {
 		s.mu.Unlock()
 	} else {
 		payload, _ := json.Marshal(map[string]string{"id": s.sessionID, "title": "DeepStudent 原生会话"})
-		var created struct{ Session nativeSession `json:"session"` }
+		var created struct {
+			Session nativeSession `json:"session"`
+		}
 		if err := nativeJSONRequest(ctx, http.MethodPost, base+"/api/v1/sessions", payload, &created); err == nil && created.Session.ID != "" {
 			s.mu.Lock()
 			s.sessionID = created.Session.ID
@@ -248,7 +268,9 @@ func (s *nativeShell) hydrateSession() {
 			continue
 		}
 		loadedMessage := newNativeMessage(message.Role, message.Content)
-		loadedMessage.id = message.ID
+		if strings.TrimSpace(message.ID) != "" {
+			loadedMessage.id = message.ID
+		}
 		loaded = append(loaded, loadedMessage)
 	}
 	if len(loaded) == 0 {
@@ -265,9 +287,13 @@ func (s *nativeShell) hydrateSession() {
 func (s *nativeShell) saveRuntimeConfig() {
 	s.mu.Lock()
 	if s.configBusy || !s.configReady {
-		if !s.configReady { s.configNote = "正在读取模型配置…" }
+		if !s.configReady {
+			s.configNote = "正在读取模型配置…"
+		}
 		s.mu.Unlock()
-		if s.invalidate != nil { s.invalidate() }
+		if s.invalidate != nil {
+			s.invalidate()
+		}
 		return
 	}
 	provider := strings.TrimSpace(s.configProvider)
@@ -290,13 +316,17 @@ func (s *nativeShell) saveRuntimeConfig() {
 	if provider == "" {
 		s.configNote = "服务商不能为空"
 		s.mu.Unlock()
-		if s.invalidate != nil { s.invalidate() }
+		if s.invalidate != nil {
+			s.invalidate()
+		}
 		return
 	}
 	s.configBusy = true
 	s.configNote = "正在保存…"
 	s.mu.Unlock()
-	if s.invalidate != nil { s.invalidate() }
+	if s.invalidate != nil {
+		s.invalidate()
+	}
 	payload, _ := json.Marshal(map[string]any{"provider": provider, "model": model, "base_url": baseURL, "api_key_env": apiKeyEnv, "pi_mode": agentMode, "pi_endpoint": piEndpoint, "pi_skip_start": piSkipStart, "pi_command": piCommand, "pi_args": piArgs, "pi_cancel_timeout": piCancelTimeout})
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -310,12 +340,16 @@ func (s *nativeShell) saveRuntimeConfig() {
 		s.configProvider = updated.DefaultProvider
 		s.configModel = updated.DefaultModel
 		if saved, ok := updated.Providers[provider]; ok {
-			if strings.TrimSpace(s.configModel) == "" { s.configModel = saved.Model }
+			if strings.TrimSpace(s.configModel) == "" {
+				s.configModel = saved.Model
+			}
 			s.configBaseURL = saved.BaseURL
 			s.configAPIKeyEnv = saved.APIKeyEnv
 		}
 		s.configAgentMode = updated.Runtime.PiMode
-		if s.configAgentMode == "" { s.configAgentMode = agentMode }
+		if s.configAgentMode == "" {
+			s.configAgentMode = agentMode
+		}
 		s.configPiEndpoint = updated.Runtime.PiEndpoint
 		s.configPiSkipStart = updated.Runtime.PiSkipStart
 		s.configPiCommand = updated.Runtime.PiCommand
@@ -325,19 +359,27 @@ func (s *nativeShell) saveRuntimeConfig() {
 		s.configNote = "已保存，下一条消息将使用此模型。"
 	}
 	s.mu.Unlock()
-	if s.invalidate != nil { s.invalidate() }
+	if s.invalidate != nil {
+		s.invalidate()
+	}
 }
 
 func splitNativeArgs(value string) []string {
 	lines := strings.Split(value, "\n")
 	args := make([]string, 0, len(lines))
-	for _, line := range lines { if item := strings.TrimSpace(line); item != "" { args = append(args, item) } }
+	for _, line := range lines {
+		if item := strings.TrimSpace(line); item != "" {
+			args = append(args, item)
+		}
+	}
 	return args
 }
 
 func firstNativeNonEmpty(values ...string) string {
 	for _, value := range values {
-		if strings.TrimSpace(value) != "" { return value }
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
 	}
 	return "未知"
 }
@@ -346,7 +388,9 @@ func normalizeNativeAgentMode(values ...string) string {
 	for _, value := range values {
 		switch strings.ToLower(strings.TrimSpace(value)) {
 		case "auto", "":
-			if strings.TrimSpace(value) == "auto" { return "auto" }
+			if strings.TrimSpace(value) == "auto" {
+				return "auto"
+			}
 		case "manual", "managed", "local":
 			return "manual"
 		case "external":
@@ -473,9 +517,13 @@ func (s *nativeShell) submitDraft() {
 	prompt := strings.TrimSpace(s.draft)
 	s.mu.Lock()
 	if s.sending || !s.configReady {
-		if !s.configReady { s.attachmentNote = "正在读取模型配置…" }
+		if !s.configReady {
+			s.attachmentNote = "正在读取模型配置…"
+		}
 		s.mu.Unlock()
-		if s.invalidate != nil { s.invalidate() }
+		if s.invalidate != nil {
+			s.invalidate()
+		}
 		return
 	}
 	attachmentRef := strings.TrimSpace(s.pendingInput)
@@ -688,12 +736,16 @@ func (s *nativeShell) runPrompt(ctx context.Context, prompt, attachmentRef, mess
 		}
 		events, requestErr := http.DefaultClient.Do(request)
 		if requestErr != nil {
-			if ctx.Err() != nil { return text, ctx.Err() }
+			if ctx.Err() != nil {
+				return text, ctx.Err()
+			}
 			continue
 		}
 		if events.StatusCode < http.StatusOK || events.StatusCode >= http.StatusMultipleChoices {
 			events.Body.Close()
-			if attempt == 3 { return text, fmt.Errorf("SSE stream returned HTTP %d", events.StatusCode) }
+			if attempt == 3 {
+				return text, fmt.Errorf("SSE stream returned HTTP %d", events.StatusCode)
+			}
 			continue
 		}
 		scanner := bufio.NewScanner(events.Body)
@@ -704,17 +756,25 @@ func (s *nativeShell) runPrompt(ctx context.Context, prompt, attachmentRef, mess
 				lastEventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
 				continue
 			}
-			if !strings.HasPrefix(line, "data:") { continue }
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
 			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-			if data == "" { continue }
+			if data == "" {
+				continue
+			}
 			var event nativeRunEvent
-			if json.Unmarshal([]byte(data), &event) != nil { continue }
+			if json.Unmarshal([]byte(data), &event) != nil {
+				continue
+			}
 			if event.ErrorMessage != "" {
 				events.Body.Close()
 				return text, fmt.Errorf("%s", event.ErrorMessage)
 			}
 			next := event.Delta
-			if next == "" { next = event.Text }
+			if next == "" {
+				next = event.Text
+			}
 			if next != "" {
 				if event.Delta != "" {
 					text += next
@@ -727,16 +787,23 @@ func (s *nativeShell) runPrompt(ctx context.Context, prompt, attachmentRef, mess
 					s.appendAssistantDelta(assistantIndex, next)
 				}
 			}
-			if event.Done || event.Type == "run.completed" || event.Type == "run.error" || event.Type == "run.canceled" { completed = true; break }
+			if event.Done || event.Type == "run.completed" || event.Type == "run.error" || event.Type == "run.canceled" {
+				completed = true
+				break
+			}
 		}
 		scanErr := scanner.Err()
 		events.Body.Close()
-		if scanErr != nil && ctx.Err() != nil { return text, ctx.Err() }
+		if scanErr != nil && ctx.Err() != nil {
+			return text, ctx.Err()
+		}
 	}
 	s.mu.Lock()
 	s.activeRunID, s.activeCancel = "", nil
 	s.mu.Unlock()
-	if !completed { return text, fmt.Errorf("SSE stream ended before completion") }
+	if !completed {
+		return text, fmt.Errorf("SSE stream ended before completion")
+	}
 	if text == "" {
 		text = "Go runtime 已完成，但没有返回文本。"
 	}
@@ -768,20 +835,20 @@ func (s *nativeShell) view(c *ui.Context) {
 				ui.Text(c, "DeepStudent").FontSize(16).Bold().SingleLine()
 				ui.Text(c, "  Go runtime").FontSize(12).TextColor(t.TextMuted).SingleLine()
 				ui.Spacer(c).DragWindow()
-				ui.Toolbar(c, func() {
-					if ui.Button(c, "对话").Clicked() {
+				ui.Toolbar(c.Key("titlebar-toolbar"), func() {
+					if ui.Button(c.Key("titlebar-chat"), "对话").Clicked() {
 						s.selected = "chat"
 					}
-					if ui.Button(c, "设置").Clicked() {
+					if ui.Button(c.Key("titlebar-settings"), "设置").Clicked() {
 						s.selected = "settings"
 					}
-					if ui.Button(c, "切换主题").Clicked() {
+					if ui.Button(c.Key("titlebar-theme"), "切换主题").Clicked() {
 						s.dark = !s.dark
 					}
 				})
 			})
 
-		ui.Split(c, &s.sidebarWidth, func() {
+		ui.Split(c.Key("main-split"), &s.sidebarWidth, func() {
 			s.sidebar(c)
 		}, func() {
 			s.page(c)
@@ -793,7 +860,7 @@ func (s *nativeShell) view(c *ui.Context) {
 
 func (s *nativeShell) sidebar(c *ui.Context) {
 	t := c.Theme()
-	ui.Sidebar(c, &s.selected, func() {
+	ui.Sidebar(c.Key("sidebar"), &s.selected, func() {
 		ui.SidebarSection(c, "工作区", nil, func() {
 			ui.SidebarItem(c, "chat", nil, "对话")
 			ui.SidebarItem(c, "resources", nil, "资料")
@@ -816,7 +883,7 @@ func (s *nativeShell) page(c *ui.Context) {
 				ui.Text(c, s.pageTitle()).FontSize(22).Bold().SingleLine()
 				ui.Text(c, s.pageSubtitle()).FontSize(12).TextColor(t.TextMuted).SingleLine()
 			})
-			if ui.Button(c, "刷新状态").Clicked() {
+			if ui.Button(c.Key("refresh-status"), "刷新状态").Clicked() {
 				s.lastRefresh = time.Now()
 				s.runtimeHealthy = true
 			}
@@ -896,27 +963,29 @@ func (s *nativeShell) chatPage(c *ui.Context) {
 			ui.Text(c, "Go runtime 已连接 · HTTP/SSE").FontSize(12).TextColor(t.TextMuted)
 			ui.Spacer(c)
 		})
-		ui.List(c, &s.messagesList, len(messages), func(i int) {
-			message := messages[i]
-			row := ui.Box(c).MaxWidth(820).Padding(t.Space(3), t.Space(4)).Gap(t.Space(1)).Border(1, t.Border).Radius(t.Radius)
-			if message.role == "user" {
-				row.Background(t.SurfacePressed)
-			}
-			row.Children(func() {
-				label := "DeepStudent"
+		ui.List(c.Key("messages-list"), &s.messagesList, len(messages)).
+			ItemKey(func(i int) any { return messages[i].id }).
+			Rows(func(row ui.ListRow) {
+				message := messages[row.Index]
+				box := ui.Box(row.Context).MaxWidth(820).Padding(t.Space(3), t.Space(4)).Gap(t.Space(1)).Border(1, t.Border).Radius(t.Radius)
 				if message.role == "user" {
-					label = "你"
+					box.Background(t.SurfacePressed)
 				}
-				ui.Text(c, label).FontSize(12).Bold().TextColor(t.TextMuted).SingleLine()
-				s.renderMarkdown(c, message)
-			})
-		}).Grow(1).MinHeight(0).Gap(t.Space(3))
+				box.Children(func() {
+					label := "DeepStudent"
+					if message.role == "user" {
+						label = "你"
+					}
+					ui.Text(row.Context, label).FontSize(12).Bold().TextColor(t.TextMuted).SingleLine()
+					s.renderMarkdown(row.Context, message)
+				})
+			}).Grow(1).MinHeight(0).Gap(t.Space(3))
 		composer := ui.Row(c).Gap(t.Space(2)).AlignItems(ui.End)
 		composer.Children(func() {
-			if ui.Button(c, "附件").Clicked() {
+			if ui.Button(c.Key("chat-attachment"), "附件").Clicked() {
 				go s.pickAttachment()
 			}
-			input := ui.TextInput(c, &s.draft).Grow(1).Placeholder("输入消息，按 Enter 发送")
+			input := ui.TextInput(c.Key("chat-draft"), &s.draft).Grow(1).Placeholder("输入消息，按 Enter 发送")
 			if attachmentBusy {
 				ui.Text(c, "上传中…").FontSize(11).TextColor(t.TextMuted).SingleLine()
 			}
@@ -927,7 +996,7 @@ func (s *nativeShell) chatPage(c *ui.Context) {
 			if sending {
 				buttonLabel = "取消"
 			}
-			button := ui.PrimaryButton(c, buttonLabel)
+			button := ui.PrimaryButton(c.Key("chat-send"), buttonLabel)
 			if sending {
 				if button.Clicked() {
 					s.cancelRun()
@@ -941,7 +1010,7 @@ func (s *nativeShell) chatPage(c *ui.Context) {
 }
 
 // renderMarkdown maps the dependency-free Markdown AST to MyGo primitives.
-// MyGo v0.3.0 RichText/Span is used for syntax-highlighted code. Blocks,
+// MyGo v0.3.7 RichText/Span is used for syntax-highlighted code. Blocks,
 // tables, headings and lists remain fully native and update as SSE snapshots
 // arrive.
 func (s *nativeShell) renderMarkdown(c *ui.Context, message nativeMessage) {
@@ -957,7 +1026,9 @@ func (s *nativeShell) renderMarkdown(c *ui.Context, message nativeMessage) {
 		switch node.Kind {
 		case markdown.Heading:
 			size := float32(22 - (node.Level-1)*2)
-			if size < 14 { size = 14 }
+			if size < 14 {
+				size = 14
+			}
 			ui.Text(c, node.Text).FontSize(size).Bold().Selectable()
 		case markdown.Code:
 			ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.SurfacePressed).Border(1, t.Border).Radius(t.Radius).Children(func() {
@@ -1063,7 +1134,7 @@ func (s *nativeShell) settingsPage(c *ui.Context) {
 				{id: "appearance", label: "外观"},
 				{id: "runtime", label: "运行环境"},
 			} {
-				button := ui.Button(c, tab.label)
+				button := ui.Button(c.Key("settings-tab-"+tab.id), tab.label)
 				button.FillWidth().TextAlign(ui.Start)
 				if s.settingsTab == tab.id {
 					button.Background(t.SurfacePressed).TextColor(t.Text)
@@ -1094,7 +1165,7 @@ func (s *nativeShell) onboardingPage(c *ui.Context) {
 		ui.Text(c, fmt.Sprintf("第 %d / %d 步 · %s", s.onboardingStep+1, len(labels), labels[s.onboardingStep])).TextColor(t.TextMuted)
 		ui.Column(c).Gap(t.Space(2)).Children(func() {
 			for index, option := range options[s.onboardingStep] {
-				button := ui.Button(c, option)
+				button := ui.Button(c.Key(fmt.Sprintf("onboarding-option-%d-%d", s.onboardingStep, index)), option)
 				button.FillWidth().TextAlign(ui.Start)
 				if s.onboarding[s.onboardingStep] == option {
 					button.Background(t.SurfacePressed).TextColor(t.Text)
@@ -1106,10 +1177,10 @@ func (s *nativeShell) onboardingPage(c *ui.Context) {
 			}
 		})
 		ui.Row(c).Gap(t.Space(2)).Children(func() {
-			if ui.Button(c, "退出向导").Clicked() {
+			if ui.Button(c.Key("onboarding-exit"), "退出向导").Clicked() {
 				s.onboardingOpen = false
 			}
-			if s.onboardingStep > 0 && ui.Button(c, "上一步").Clicked() {
+			if s.onboardingStep > 0 && ui.Button(c.Key("onboarding-back"), "上一步").Clicked() {
 				s.onboardingStep--
 			}
 			ui.Spacer(c)
@@ -1117,7 +1188,7 @@ func (s *nativeShell) onboardingPage(c *ui.Context) {
 			if s.onboardingStep == len(labels)-1 {
 				label = "完成设置"
 			}
-			if ui.PrimaryButton(c, label).Clicked() {
+			if ui.PrimaryButton(c.Key("onboarding-next"), label).Clicked() {
 				if s.onboardingStep == len(labels)-1 {
 					s.onboardingOpen = false
 					s.onboardingStep = 0
@@ -1135,10 +1206,10 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 	case "appearance":
 		ui.Text(c, "外观").FontSize(16).Bold()
 		ui.Row(c).Gap(t.Space(3)).Children(func() {
-			if ui.Button(c, "浅色主题").Clicked() {
+			if ui.Button(c.Key("theme-light"), "浅色主题").Clicked() {
 				s.dark = false
 			}
-			if ui.Button(c, "深色主题").Clicked() {
+			if ui.Button(c.Key("theme-dark"), "深色主题").Clicked() {
 				s.dark = true
 			}
 		})
@@ -1148,70 +1219,94 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 		ui.Text(c, "原生壳与 WebView 页面共享同一个 serverapp 进程；这里读取并保存 Pi Agent 的完整配置。").TextColor(t.TextMuted)
 		ui.Column(c).Gap(t.Space(2)).Children(func() {
 			ui.Text(c, "默认服务商").FontSize(12).Bold()
-			ui.TextInput(c, &s.configProvider).Placeholder("例如 deterministic 或 deepseek")
+			ui.TextInput(c.Key("config-provider"), &s.configProvider).Placeholder("例如 deterministic 或 deepseek")
 			ui.Text(c, "模型").FontSize(12).Bold()
-			ui.TextInput(c, &s.configModel).Placeholder("例如 stub 或 deepseek-chat")
+			ui.TextInput(c.Key("config-model"), &s.configModel).Placeholder("例如 stub 或 deepseek-chat")
 			ui.Text(c, "服务地址（可选）").FontSize(12).Bold()
-			ui.TextInput(c, &s.configBaseURL).Placeholder("例如 https://api.example.com/v1")
+			ui.TextInput(c.Key("config-base-url"), &s.configBaseURL).Placeholder("例如 https://api.example.com/v1")
 			ui.Text(c, "密钥变量（只填变量名）").FontSize(12).Bold()
-			ui.TextInput(c, &s.configAPIKeyEnv).Placeholder("例如 DEEPSEEK_API_KEY")
+			ui.TextInput(c.Key("config-api-key-env"), &s.configAPIKeyEnv).Placeholder("例如 DEEPSEEK_API_KEY")
 			ui.Divider(c)
 			ui.Text(c, "Pi Agent").FontSize(14).Bold()
 			ui.Text(c, "运行模式").FontSize(12).Bold()
 			ui.Row(c).Gap(t.Space(2)).Children(func() {
 				for _, mode := range []struct{ id, label string }{{"auto", "自动发现"}, {"manual", "手动托管"}, {"external", "外部连接"}} {
-					button := ui.Button(c, mode.label)
-					if s.configAgentMode == mode.id { button.Background(t.SurfacePressed).TextColor(t.Text) }
-					if button.Clicked() { s.configAgentMode = mode.id }
+					button := ui.Button(c.Key("agent-mode-"+mode.id), mode.label)
+					if s.configAgentMode == mode.id {
+						button.Background(t.SurfacePressed).TextColor(t.Text)
+					}
+					if button.Clicked() {
+						s.configAgentMode = mode.id
+					}
 				}
 			})
 			if s.configAgentMode != "auto" {
 				ui.Text(c, "Agent 地址").FontSize(12).Bold()
-				ui.TextInput(c, &s.configPiEndpoint).Placeholder("例如 http://127.0.0.1:8787")
+				ui.TextInput(c.Key("config-pi-endpoint"), &s.configPiEndpoint).Placeholder("例如 http://127.0.0.1:8787")
 			}
 			if s.configAgentMode == "manual" {
 				ui.Text(c, "CLI 命令").FontSize(12).Bold()
-				ui.TextInput(c, &s.configPiCommand).Placeholder("例如 pi-agent-sidecar")
+				ui.TextInput(c.Key("config-pi-command"), &s.configPiCommand).Placeholder("例如 pi-agent-sidecar")
 				ui.Text(c, "CLI 参数（每行一个）").FontSize(12).Bold()
-				ui.TextInput(c, &s.configPiArgs).Placeholder("例如 --port\n8787")
+				ui.TextInput(c.Key("config-pi-args"), &s.configPiArgs).Placeholder("例如 --port\n8787")
 			}
 			ui.Text(c, "取消超时").FontSize(12).Bold()
-			ui.TextInput(c, &s.configPiCancelTimeout).Placeholder("例如 5s")
+			ui.TextInput(c.Key("config-pi-cancel-timeout"), &s.configPiCancelTimeout).Placeholder("例如 5s")
 			if s.configAgentMode == "external" {
 				ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "跳过启动外部进程").FontSize(12).Bold()
-					if ui.Button(c, map[bool]string{true: "已开启", false: "未开启"}[s.configPiSkipStart]).Clicked() { s.configPiSkipStart = !s.configPiSkipStart }
+					if ui.Button(c.Key("config-pi-skip-start"), map[bool]string{true: "已开启", false: "未开启"}[s.configPiSkipStart]).Clicked() {
+						s.configPiSkipStart = !s.configPiSkipStart
+					}
 				})
 			}
 			status := s.configPiStatus
 			ui.Box(c).Padding(t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
 				ui.Text(c, "Pi Agent 状态").Bold()
 				state := status.State
-				if state == "" { state = "未启动" }
+				if state == "" {
+					state = "未启动"
+				}
 				ui.Text(c, fmt.Sprintf("%s · 配置 %s · 生效 %s", state, firstNativeNonEmpty(status.ConfiguredMode, s.configAgentMode), firstNativeNonEmpty(status.EffectiveMode, s.configAgentMode))).FontSize(12).TextColor(t.TextMuted)
-				if status.Command != "" { ui.Text(c, "命令："+status.Command).FontSize(12).TextColor(t.TextMuted) }
-				if len(status.Args) > 0 { ui.Text(c, "参数："+strings.Join(status.Args, " ")).FontSize(12).TextColor(t.TextMuted) }
-				if status.Endpoint != "" { ui.Text(c, "地址："+status.Endpoint).FontSize(12).TextColor(t.TextMuted) }
+				if status.Command != "" {
+					ui.Text(c, "命令："+status.Command).FontSize(12).TextColor(t.TextMuted)
+				}
+				if len(status.Args) > 0 {
+					ui.Text(c, "参数："+strings.Join(status.Args, " ")).FontSize(12).TextColor(t.TextMuted)
+				}
+				if status.Endpoint != "" {
+					ui.Text(c, "地址："+status.Endpoint).FontSize(12).TextColor(t.TextMuted)
+				}
 				ui.Text(c, fmt.Sprintf("跳过启动：%s · 取消超时：%s", map[bool]string{true: "是", false: "否"}[s.configPiSkipStart], firstNativeNonEmpty(s.configPiCancelTimeout, "默认"))).FontSize(12).TextColor(t.TextMuted)
-				if status.Reason != "" { ui.Text(c, status.Reason).FontSize(12).TextColor(t.TextMuted) }
+				if status.Reason != "" {
+					ui.Text(c, status.Reason).FontSize(12).TextColor(t.TextMuted)
+				}
 				if len(s.piCandidates) > 0 {
 					ui.Text(c, "本机发现").FontSize(12).Bold()
 					for _, candidate := range s.piCandidates {
 						label := candidate.Command + " · " + firstNativeNonEmpty(candidate.Path, "路径未知")
-						if candidate.Version != "" { label += " · " + candidate.Version }
-						if candidate.SidecarCapable { label += " · sidecar" } else { label += " · 需手动配置" }
+						if candidate.Version != "" {
+							label += " · " + candidate.Version
+						}
+						if candidate.SidecarCapable {
+							label += " · sidecar"
+						} else {
+							label += " · 需手动配置"
+						}
 						ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
 					}
 				}
 			})
-			if ui.PrimaryButton(c, "保存模型配置").Clicked() {
+			if ui.PrimaryButton(c.Key("save-model-config"), "保存模型配置").Clicked() {
 				go s.saveRuntimeConfig()
 			}
-			if s.openChat != nil && ui.Button(c, "打开 WebView 对话").Clicked() {
+			if s.openChat != nil && ui.Button(c.Key("open-webview-chat"), "打开 WebView 对话").Clicked() {
 				s.openChat()
 			}
 			ui.Text(c, "保存后可刷新状态，检查运行环境连接。").FontSize(12).TextColor(t.TextMuted)
-			if s.piDiscoveryNote != "" { ui.Text(c, s.piDiscoveryNote).FontSize(12).TextColor(t.TextMuted) }
+			if s.piDiscoveryNote != "" {
+				ui.Text(c, s.piDiscoveryNote).FontSize(12).TextColor(t.TextMuted)
+			}
 			if s.configNote != "" {
 				ui.Text(c, s.configNote).FontSize(12).TextColor(t.TextMuted)
 			}
@@ -1226,7 +1321,7 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 	default:
 		ui.Text(c, "常规").FontSize(16).Bold()
 		ui.Text(c, "桌面壳偏好和导航已使用原生控件，账号与模型配置继续由 Go API 提供。").TextColor(t.TextMuted)
-		if ui.PrimaryButton(c, "打开首次设置向导").Clicked() {
+		if ui.PrimaryButton(c.Key("open-onboarding"), "打开首次设置向导").Clicked() {
 			s.onboardingOpen = true
 		}
 	}
@@ -1244,7 +1339,7 @@ func (s *nativeShell) statusBar(c *ui.Context) {
 		statusDot(c, color)
 		ui.Text(c, label).FontSize(11).TextColor(t.TextMuted).SingleLine()
 		ui.Spacer(c)
-		ui.Text(c, "原生壳 · WebView 对话边界 · MyGo v0.3.0").FontSize(11).TextColor(t.TextMuted).SingleLine()
+		ui.Text(c, "原生壳 · WebView 对话边界 · MyGo v0.3.7").FontSize(11).TextColor(t.TextMuted).SingleLine()
 	})
 }
 
