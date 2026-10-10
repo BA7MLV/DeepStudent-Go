@@ -39,7 +39,7 @@ func run() error {
 	}
 	// MyGo serves the embedded React document from this custom origin. Keep
 	// the origin desktop-only so the shared server defaults remain strict.
-	// MyGo 0.3.0 uses a custom origin on macOS/Linux and maps it to
+	// MyGo 0.3.7 uses a custom origin on macOS/Linux and maps it to
 	// http://mygo.localhost on Windows WebView2. Allow both so the same
 	// embedded frontend can reach the Go runtime on every desktop target.
 	cfg.Server.CORSAllowlist = append(cfg.Server.CORSAllowlist, "mygo://localhost", "http://mygo.localhost")
@@ -113,7 +113,11 @@ func run() error {
 				Title: "DeepStudent Chat", URL: webURL + "&view=chat-v2&onboarding=skip", Parent: window, Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 44, BackgroundColor: "#f7f7f5", StateKey: "chat-web",
 			})
 			child := chatWindow
-			child.OnClosed(func() { if chatWindow == child { chatWindow = nil } })
+			child.OnClosed(func() {
+				if chatWindow == child {
+					chatWindow = nil
+				}
+			})
 		}
 		if shell != nil {
 			shell.openChat = openChat
