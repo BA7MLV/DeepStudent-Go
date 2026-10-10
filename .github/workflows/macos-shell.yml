@@ -54,7 +54,7 @@ jobs:
           go build -trimpath -o build/smoke/deepstudent-server ./cmd/server
 
       - name: Run headless runtime smoke (health, ready, SSE, fake Pi tool)
-        run: ./scripts/macos-shell-smoke.sh
+        run: bash ./scripts/macos-shell-smoke.sh
         env:
           DEEPSTUDENT_SERVER_BIN: ${{ github.workspace }}/build/smoke/deepstudent-server
           DEEPSTUDENT_SMOKE_TMPDIR: ${{ runner.temp }}/deepstudent-macos-shell-smoke
