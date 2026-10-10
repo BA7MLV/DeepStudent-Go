@@ -43,7 +43,7 @@ jobs:
         run: test -s frontend/src/mygo.ts
 
       - name: Build unsigned macOS app
-        run: bun run build -- -platform darwin/arm64
+        run: bun run build -- -platform darwin/arm64 -skip-dmg
 
       # macos-latest does not provide a stable user GUI session. Build and
       # exercise the same serverapp/runtime path headlessly instead of trying
