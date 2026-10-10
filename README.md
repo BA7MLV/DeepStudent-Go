@@ -206,14 +206,14 @@ Vite 会提供响应式 Web 壳。聊天通过 Go HTTP/SSE runtime 运行；runt
 
 ```sh
 bun install
-go install github.com/egoist/mygo/cmd/mygo@v0.3.0
+go install github.com/egoist/mygo/cmd/mygo@v0.3.7
 mygo generate
 bun run build -- -platform darwin/arm64
 ```
 
 当前产物是未签名 macOS 12+ arm64 构建；Linux 配置存在，但发布打包和签名不在本原型范围内。MyGo 生成的桥接可以覆盖 `frontend/src/mygo.ts`，源码中保留了可在普通 Web 环境构建的类型化兼容实现。
 
-当前锁定 MyGo v0.3.0。该版本的 macOS GPU bursts 和按每个尺寸重绘的 zoom 属渲染器自动优化，原生聊天壳无需额外代码即可受益。terminal/translucent headless 终端与 Liquid Glass glass plugin 暂不接入：聊天壳没有终端场景，玻璃效果会扩大平台与视觉回归范围，避免为特性而特性。
+当前锁定 MyGo v0.3.7。该版本的 macOS GPU bursts 和按每个尺寸重绘的 zoom 属渲染器自动优化，原生聊天壳无需额外代码即可受益。terminal/translucent headless 终端与 Liquid Glass glass plugin 暂不接入：聊天壳没有终端场景，玻璃效果会扩大平台与视觉回归范围，避免为特性而特性。
 
 ## Docker 本地 profile
 
