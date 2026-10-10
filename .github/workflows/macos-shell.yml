@@ -37,13 +37,42 @@ jobs:
         run: go mod tidy
 
       - name: Install MyGo CLI
-        run: go install github.com/egoist/mygo/cmd/mygo@v0.3.0
+        run: go install github.com/egoist/mygo/cmd/mygo@v0.3.7
 
       - name: Verify checked-in typed bindings
         run: test -s frontend/src/mygo.ts
 
       - name: Build unsigned macOS app
         run: bun run build -- -platform darwin/arm64
+
+      # macos-latest does not provide a stable user GUI session. Build and
+      # exercise the same serverapp/runtime path headlessly instead of trying
+      # to open the .app bundle in CI.
+      - name: Build headless smoke binary
+        run: |
+          mkdir -p build/smoke
+          go build -trimpath -o build/smoke/deepstudent-server ./cmd/server
+
+      - name: Run headless runtime smoke (health, ready, SSE, fake Pi tool)
+        run: ./scripts/macos-shell-smoke.sh
+        env:
+          DEEPSTUDENT_SERVER_BIN: ${{ github.workspace }}/build/smoke/deepstudent-server
+          DEEPSTUDENT_SMOKE_TMPDIR: ${{ runner.temp }}/deepstudent-macos-shell-smoke
+          KEEP_SMOKE_LOGS: "1"
+
+      - name: Upload headless smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepstudent-go-macos-smoke-logs
+          path: ${{ runner.temp }}/deepstudent-macos-shell-smoke
+          if-no-files-found: ignore
+
+      - name: Record GUI acceptance boundary
+        if: always()
+        run: |
+          echo "::notice::Headless CI verified healthz, readyz, Pi discovery, SSE, and fake-tool events."
+          echo "::notice::Window/menu/WebView UI acceptance still requires manual verification on a real macOS desktop."
 
       - name: Upload app artifacts
         uses: actions/upload-artifact@v4
