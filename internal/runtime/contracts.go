@@ -61,8 +61,8 @@ type StreamEvent struct {
 }
 
 type ModelRequest struct {
-	Provider          string         `json:"provider,omitempty"`
-	Model             string         `json:"model,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
 	// BaseURL and APIKeyEnv are non-secret per-run routing overrides. The
 	// provider resolves the actual credential value from its environment.
 	BaseURL           string         `json:"base_url,omitempty"`
@@ -79,15 +79,15 @@ type ModelRequest struct {
 }
 
 type Message struct {
-	ID        string    `json:"id,omitempty"`
-	SessionID string    `json:"session_id,omitempty"`
-	RunID     string    `json:"run_id,omitempty"`
-	Role      string    `json:"role"`
-	Content   string    `json:"content"`
-	ToolCallID string   `json:"tool_call_id,omitempty"`
-	Name      string    `json:"name,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
+	ID         string     `json:"id,omitempty"`
+	SessionID  string     `json:"session_id,omitempty"`
+	RunID      string     `json:"run_id,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	CreatedAt  time.Time  `json:"created_at,omitempty"`
 }
 
 // ModelProvider emits provider-neutral events. Implementations must not expose
@@ -185,12 +185,12 @@ const (
 )
 
 type RunRecord struct {
-	ID        string     `json:"id"`
-	SessionID string     `json:"session_id,omitempty"`
-	Provider  string     `json:"provider,omitempty"`
-	Model     string     `json:"model,omitempty"`
-	Status    RunStatus  `json:"status"`
-	CreatedAt time.Time  `json:"created_at"`
+	ID         string     `json:"id"`
+	SessionID  string     `json:"session_id,omitempty"`
+	Provider   string     `json:"provider,omitempty"`
+	Model      string     `json:"model,omitempty"`
+	Status     RunStatus  `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
@@ -212,21 +212,27 @@ type RunStore interface {
 	FinishRun(ctx context.Context, runID string, status RunStatus, finishedAt time.Time) error
 }
 
+// RunRecoveryStore marks non-terminal runs from a previous process as failed
+// during startup. A process cannot safely resume an in-flight provider stream.
+type RunRecoveryStore interface {
+	RecoverOrphanRuns(ctx context.Context, finishedAt time.Time) error
+}
+
 type AgentRunRequest struct {
-	RunID             string   `json:"run_id,omitempty"`
-	SessionID         string   `json:"session_id,omitempty"`
-	Prompt            string   `json:"prompt"`
-	Provider          string   `json:"provider,omitempty"`
-	Model             string   `json:"model,omitempty"`
+	RunID     string `json:"run_id,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Prompt    string `json:"prompt"`
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
 	// BaseURL and APIKeyEnv are credential-free routing metadata. They are
 	// forwarded only to runtimes that explicitly support per-run overrides;
 	// API keys themselves never cross this boundary.
-	BaseURL           string   `json:"base_url,omitempty"`
-	APIKeyEnv         string   `json:"api_key_env,omitempty"`
-	ReasoningEffort   string   `json:"reasoning_effort,omitempty"`
-	MaxTokens         int      `json:"max_tokens,omitempty"`
-	InputCapabilities []string `json:"input_capabilities,omitempty"`
-	Input             []string `json:"input,omitempty"`
+	BaseURL           string    `json:"base_url,omitempty"`
+	APIKeyEnv         string    `json:"api_key_env,omitempty"`
+	ReasoningEffort   string    `json:"reasoning_effort,omitempty"`
+	MaxTokens         int       `json:"max_tokens,omitempty"`
+	InputCapabilities []string  `json:"input_capabilities,omitempty"`
+	Input             []string  `json:"input,omitempty"`
 	Messages          []Message `json:"messages,omitempty"`
 	Tools             []Tool    `json:"tools,omitempty"`
 }
