@@ -89,6 +89,7 @@ type sidecarRun struct {
 	subscribers map[chan StreamEvent]struct{}
 	closed      bool
 	terminal    bool
+	persistErr  error
 	record      RunRecord
 }
 
@@ -111,7 +112,7 @@ func (r *SidecarRuntime) Start(ctx context.Context, request AgentRunRequest) (Ag
 	state := &sidecarRun{
 		id: runID, sessionID: request.SessionID, cancel: cancel,
 		subscribers: make(map[chan StreamEvent]struct{}),
-		record: RunRecord{ID: runID, SessionID: request.SessionID, Provider: request.Provider, Model: request.Model, Status: RunQueued, CreatedAt: time.Now().UTC()},
+		record:      RunRecord{ID: runID, SessionID: request.SessionID, Provider: request.Provider, Model: request.Model, Status: RunQueued, CreatedAt: time.Now().UTC()},
 	}
 	first := make(chan StreamEvent, 32)
 	state.subscribers[first] = struct{}{}
@@ -131,12 +132,14 @@ func (r *SidecarRuntime) Start(ctx context.Context, request AgentRunRequest) (Ag
 
 	body, err := json.Marshal(request)
 	if err != nil {
+		r.failStartRecord(runID)
 		r.removeRun(runID, state)
 		cancel()
 		return AgentRun{}, fmt.Errorf("encode sidecar request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, r.runURL(), bytes.NewReader(body))
 	if err != nil {
+		r.failStartRecord(runID)
 		r.removeRun(runID, state)
 		cancel()
 		return AgentRun{}, fmt.Errorf("create sidecar request: %w", err)
@@ -144,6 +147,7 @@ func (r *SidecarRuntime) Start(ctx context.Context, request AgentRunRequest) (Ag
 	req.Header.Set("Content-Type", "application/json")
 	response, err := r.client.Do(req)
 	if err != nil {
+		r.failStartRecord(runID)
 		r.removeRun(runID, state)
 		cancel()
 		return AgentRun{}, fmt.Errorf("start sidecar run: %w", err)
@@ -151,6 +155,7 @@ func (r *SidecarRuntime) Start(ctx context.Context, request AgentRunRequest) (Ag
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		defer response.Body.Close()
 		message, _ := io.ReadAll(io.LimitReader(response.Body, 8<<10))
+		r.failStartRecord(runID)
 		r.removeRun(runID, state)
 		cancel()
 		if len(bytes.TrimSpace(message)) == 0 {
@@ -228,13 +233,22 @@ func (r *SidecarRuntime) consume(ctx context.Context, state *sidecarRun, body io
 			return err
 		}
 		if event.Done {
-			state.mu.Lock()
-			state.terminal = true
-			state.mu.Unlock()
+			// Mark terminal only after the event has been accepted into the
+			// in-memory history. If persistence fails, a local terminal error
+			// must still be delivered to the subscriber.
 		}
 		r.setStatusForEvent(state, event)
 		if !r.emit(ctx, state, event) {
+			if err := r.persistenceError(state); err != nil {
+				r.failPersistence(state)
+				return err
+			}
 			return context.Canceled
+		}
+		if event.Done {
+			state.mu.Lock()
+			state.terminal = true
+			state.mu.Unlock()
 		}
 		return nil
 	})
@@ -302,9 +316,11 @@ func (r *SidecarRuntime) emit(ctx context.Context, state *sidecarRun, event Stre
 	if r.store != nil && state.sessionID != "" {
 		payload, _ := json.Marshal(event)
 		persisted, err := r.store.AppendEvent(context.Background(), SessionEvent{SessionID: state.sessionID, RunID: state.id, Type: string(event.Type), Payload: payload, CreatedAt: event.CreatedAt})
-		if err == nil {
-			sequence = persisted.Sequence
+		if err != nil {
+			r.recordPersistenceError(state, err)
+			return false
 		}
+		sequence = persisted.Sequence
 		if event.Type == EventTextDelta {
 			content := event.Text
 			if content == "" {
@@ -329,6 +345,53 @@ func (r *SidecarRuntime) emit(ctx context.Context, state *sidecarRun, event Stre
 		}
 	}
 	return true
+}
+
+func (r *SidecarRuntime) persistenceError(state *sidecarRun) error {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return state.persistErr
+}
+
+func (r *SidecarRuntime) recordPersistenceError(state *sidecarRun, err error) {
+	if err == nil {
+		return
+	}
+	state.mu.Lock()
+	if state.persistErr == nil {
+		state.persistErr = fmt.Errorf("persist runtime event: %w", err)
+	}
+	state.mu.Unlock()
+}
+
+func (r *SidecarRuntime) failStartRecord(runID string) {
+	if runs, ok := r.store.(RunStore); ok {
+		finished := time.Now().UTC()
+		_ = runs.FinishRun(context.Background(), runID, RunFailed, finished)
+	}
+}
+
+// failPersistence keeps the stream terminal even when the durable event log
+// is unavailable. The error event is intentionally memory-only because a
+// failed store cannot persist it; clients still receive an actionable result.
+func (r *SidecarRuntime) failPersistence(state *sidecarRun) {
+	r.setStatus(state, RunFailed)
+	event := StreamEvent{ID: nextLocalEventID(state), RunID: state.id, Type: EventRunError, ErrorCode: "event_persistence", ErrorMessage: "runtime event persistence failed", Done: true, CreatedAt: time.Now().UTC()}
+	state.mu.Lock()
+	if state.closed {
+		state.mu.Unlock()
+		return
+	}
+	state.terminal = true
+	state.history = append(state.history, event)
+	state.sequences = append(state.sequences, 0)
+	for subscriber := range state.subscribers {
+		select {
+		case subscriber <- event:
+		default:
+		}
+	}
+	state.mu.Unlock()
 }
 
 func (r *SidecarRuntime) isTerminal(state *sidecarRun) bool {
@@ -532,13 +595,32 @@ func (r *SidecarRuntime) replayPersisted(ctx context.Context, runID, lastEventID
 // run.canceled record on the original stream. If the endpoint is unavailable,
 // a local cancellation event is emitted after the bounded cancel request so
 // clients never observe a clean EOF without a terminal event.
-func (r *SidecarRuntime) Cancel(_ context.Context, runID string) error {
+func (r *SidecarRuntime) Cancel(parent context.Context, runID string) error {
 	r.mu.RLock()
 	state, ok := r.runs[runID]
 	r.mu.RUnlock()
 	if !ok {
-		if _, err := r.Run(context.Background(), runID); err != nil {
+		if _, err := r.Run(parent, runID); err != nil {
 			return err
+		}
+		// The run may have been created by another Go process. Cancel it at
+		// the sidecar instead of treating the local cache miss as success.
+		ctx, cancel := context.WithTimeout(parent, r.cancelTimeout)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.cancelURL(runID), nil)
+		if err != nil {
+			return err
+		}
+		response, err := r.client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			return fmt.Errorf("sidecar cancel returned HTTP %d", response.StatusCode)
+		}
+		if runs, ok := r.store.(RunStore); ok {
+			_ = runs.FinishRun(context.Background(), runID, RunCanceled, time.Now().UTC())
 		}
 		return nil
 	}
@@ -594,7 +676,9 @@ func (r *SidecarRuntime) forceCancel(state *sidecarRun, message string) {
 	state.terminal = true
 	state.mu.Unlock()
 	r.setStatus(state, RunCanceled)
-	r.emit(context.Background(), state, StreamEvent{ID: nextLocalEventID(state), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: message, Done: true, CreatedAt: time.Now().UTC()})
+	if !r.emit(context.Background(), state, StreamEvent{ID: nextLocalEventID(state), RunID: state.id, Type: EventRunCanceled, ErrorCode: "canceled", ErrorMessage: message, Done: true, CreatedAt: time.Now().UTC()}) && r.persistenceError(state) != nil {
+		r.failPersistence(state)
+	}
 	r.close(state)
 	state.cancel()
 }
@@ -608,7 +692,9 @@ func (r *SidecarRuntime) finishTerminal(state *sidecarRun, status RunStatus, eve
 	state.terminal = true
 	state.mu.Unlock()
 	r.setStatus(state, status)
-	r.emit(context.Background(), state, event)
+	if !r.emit(context.Background(), state, event) && r.persistenceError(state) != nil {
+		r.failPersistence(state)
+	}
 }
 
 func nextLocalEventID(state *sidecarRun) string {
