@@ -47,6 +47,79 @@ func TestRunSSE(t *testing.T) {
 	}
 }
 
+func TestDurableRunReplayAfterSQLiteReopen(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "runtime.db")
+	store, err := storage.OpenSQLite(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := runtime.NewDeterministicRuntime(nil, store, 1)
+	server := NewServer(config.Defaults(), rt, store)
+
+	start := httptest.NewRecorder()
+	server.ServeHTTP(start, httptest.NewRequest(http.MethodPost, "/api/v1/runs", strings.NewReader(`{"prompt":"durable"}`)))
+	if start.Code != http.StatusAccepted {
+		t.Fatalf("start status %d: %s", start.Code, start.Body.String())
+	}
+	var started struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil || started.RunID == "" {
+		t.Fatalf("invalid start response: %s (%v)", start.Body.String(), err)
+	}
+
+	firstStream := httptest.NewRecorder()
+	server.ServeHTTP(firstStream, httptest.NewRequest(http.MethodGet, "/api/v1/runs/"+started.RunID+"/events", nil))
+	if firstStream.Code != http.StatusOK {
+		t.Fatalf("stream status %d: %s", firstStream.Code, firstStream.Body.String())
+	}
+	firstID := ""
+	for _, line := range strings.Split(firstStream.Body.String(), "\n") {
+		if strings.HasPrefix(line, "id: ") {
+			firstID = strings.TrimSpace(strings.TrimPrefix(line, "id: "))
+			break
+		}
+	}
+	if firstID == "" || !strings.Contains(firstStream.Body.String(), "run.completed") {
+		t.Fatalf("missing durable stream events: %s", firstStream.Body.String())
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := storage.OpenSQLite(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	restarted := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, reopened, 1), reopened)
+	status := httptest.NewRecorder()
+	restarted.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/v1/runs/"+started.RunID, nil))
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"status":"completed"`) {
+		t.Fatalf("durable status %d: %s", status.Code, status.Body.String())
+	}
+
+	replay := httptest.NewRecorder()
+	replayReq := httptest.NewRequest(http.MethodGet, "/api/v1/runs/"+started.RunID+"/events", nil)
+	replayReq.Header.Set("Last-Event-ID", firstID)
+	restarted.ServeHTTP(replay, replayReq)
+	if replay.Code != http.StatusOK || strings.Contains(replay.Body.String(), "id: "+firstID+"\n") || !strings.Contains(replay.Body.String(), "run.completed") {
+		t.Fatalf("invalid Last-Event-ID replay %d: %s", replay.Code, replay.Body.String())
+	}
+}
+
+func TestStreamRejectsInvalidLastEventID(t *testing.T) {
+	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/runs/run-1/events", nil)
+	req.Header.Set("Last-Event-ID", strings.Repeat("x", 257))
+	res := httptest.NewRecorder()
+	server.ServeHTTP(res, req)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "invalid_last_event_id") {
+		t.Fatalf("unexpected invalid cursor response: %d %s", res.Code, res.Body.String())
+	}
+}
+
 func TestConfigRouteUpdatesDefaultModel(t *testing.T) {
 	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
 	get := httptest.NewRecorder()
@@ -94,32 +167,47 @@ func TestConfigRoutePersistsAcrossRestartAndRunUsesSelection(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Storage.SQLitePath = dbPath
 	store, err := storage.OpenSQLite(context.Background(), dbPath)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	runs := runtime.NewDeterministicRuntime(nil, store, 1)
 	server := NewServer(cfg, runs, store)
 	patch := httptest.NewRecorder()
 	server.ServeHTTP(patch, httptest.NewRequest(http.MethodPatch, "/api/v1/config", strings.NewReader(`{"provider":"deterministic","model":"persisted-stub"}`)))
-	if patch.Code != http.StatusOK { t.Fatalf("config PATCH = %d %s", patch.Code, patch.Body.String()) }
+	if patch.Code != http.StatusOK {
+		t.Fatalf("config PATCH = %d %s", patch.Code, patch.Body.String())
+	}
 	_ = store.Close()
 
 	reopened, err := storage.OpenSQLite(context.Background(), dbPath)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer reopened.Close()
 	restored, err := reopened.LoadConfig(context.Background(), cfg)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	second := NewServer(restored, runtime.NewDeterministicRuntime(nil, reopened, 1), reopened)
 	get := httptest.NewRecorder()
 	second.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/v1/config", nil))
-	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"default_model":"persisted-stub"`) { t.Fatalf("restored config = %d %s", get.Code, get.Body.String()) }
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"default_model":"persisted-stub"`) {
+		t.Fatalf("restored config = %d %s", get.Code, get.Body.String())
+	}
 	run := httptest.NewRecorder()
 	second.ServeHTTP(run, httptest.NewRequest(http.MethodPost, "/api/v1/runs", strings.NewReader(`{"prompt":"after restart"}`)))
-	if run.Code != http.StatusAccepted || !strings.Contains(run.Body.String(), `"model":"persisted-stub"`) { t.Fatalf("restored run = %d %s", run.Code, run.Body.String()) }
+	if run.Code != http.StatusAccepted || !strings.Contains(run.Body.String(), `"model":"persisted-stub"`) {
+		t.Fatalf("restored run = %d %s", run.Code, run.Body.String())
+	}
 }
 
 func TestConfigConnectionTestDeterministicAndOpenAICompatible(t *testing.T) {
 	called := make(chan struct{}, 1)
 	providerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer test-secret" { w.WriteHeader(http.StatusUnauthorized); return }
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" || r.Header.Get("Authorization") != "Bearer test-secret" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
 		called <- struct{}{}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":[]}`))
@@ -131,11 +219,19 @@ func TestConfigConnectionTestDeterministicAndOpenAICompatible(t *testing.T) {
 	server := NewServer(cfg, runtime.NewDeterministicRuntime(nil, nil, 1))
 	remote := httptest.NewRecorder()
 	server.ServeHTTP(remote, httptest.NewRequest(http.MethodPost, "/api/v1/config/test", strings.NewReader(`{"provider":"deepseek"}`)))
-	if remote.Code != http.StatusOK || strings.Contains(remote.Body.String(), "test-secret") { t.Fatalf("remote connection test = %d %s", remote.Code, remote.Body.String()) }
-	select { case <-called: default: t.Fatal("provider endpoint was not probed") }
+	if remote.Code != http.StatusOK || strings.Contains(remote.Body.String(), "test-secret") {
+		t.Fatalf("remote connection test = %d %s", remote.Code, remote.Body.String())
+	}
+	select {
+	case <-called:
+	default:
+		t.Fatal("provider endpoint was not probed")
+	}
 	deterministic := httptest.NewRecorder()
 	server.ServeHTTP(deterministic, httptest.NewRequest(http.MethodPost, "/api/v1/config/test", strings.NewReader(`{"provider":"deterministic"}`)))
-	if deterministic.Code != http.StatusOK || !strings.Contains(deterministic.Body.String(), `"ok":true`) { t.Fatalf("deterministic connection test = %d %s", deterministic.Code, deterministic.Body.String()) }
+	if deterministic.Code != http.StatusOK || !strings.Contains(deterministic.Body.String(), `"ok":true`) {
+		t.Fatalf("deterministic connection test = %d %s", deterministic.Code, deterministic.Body.String())
+	}
 }
 
 func TestPiDiscoveryRouteIsCredentialFree(t *testing.T) {
@@ -143,6 +239,10 @@ func TestPiDiscoveryRouteIsCredentialFree(t *testing.T) {
 	server := NewServer(config.Defaults(), runtime.NewDeterministicRuntime(nil, nil, 1))
 	res := httptest.NewRecorder()
 	server.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/pi/discovery", nil))
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"current_mode":"auto"`) { t.Fatalf("discovery = %d %s", res.Code, res.Body.String()) }
-	if strings.Contains(strings.ToLower(res.Body.String()), "api_key") { t.Fatalf("discovery leaked credential metadata: %s", res.Body.String()) }
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"current_mode":"auto"`) {
+		t.Fatalf("discovery = %d %s", res.Code, res.Body.String())
+	}
+	if strings.Contains(strings.ToLower(res.Body.String()), "api_key") {
+		t.Fatalf("discovery leaked credential metadata: %s", res.Body.String())
+	}
 }
