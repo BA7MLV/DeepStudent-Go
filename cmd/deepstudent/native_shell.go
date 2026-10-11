@@ -18,6 +18,7 @@ import (
 
 	"github.com/BA7MLV/DeepStudent-Go/internal/markdown"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -1115,6 +1116,8 @@ func (s *nativeShell) runPrompt(ctx context.Context, prompt, attachmentRef, mess
 func (s *nativeShell) view(c *ui.Context) {
 	if s.dark {
 		c.SetTheme(ui.DarkTheme())
+	} else {
+		c.SetTheme(ui.LightTheme())
 	}
 	t := c.Theme()
 	bar := c.TitleBar()
@@ -1122,14 +1125,40 @@ func (s *nativeShell) view(c *ui.Context) {
 	if barHeight < 44 {
 		barHeight = 44
 	}
+	const statusHeight float32 = 30
 
-	ui.Column(c).Fill().Background(t.Background).Children(func() {
+	// Keep the base content below the custom titlebar and status bar. The
+	// progressive blur strips are painted after this content, so the native
+	// renderer can sample the scrolling page and sidebar behind them. The
+	// controls are painted last and remain crisp and interactive.
+	ui.Box(c).Fill().Background(t.Background).Children(func() {
+		ui.Column(c).Fill().Padding(barHeight, 0, statusHeight, 0).Children(func() {
+			ui.Split(c, &s.sidebarWidth, func() {
+				s.sidebar(c)
+			}, func() {
+				s.page(c)
+			}).Grow(1)
+		})
+
+		// MyGo 0.3.0's glass.Blur is a real native backdrop effect. The
+		// gradient mask makes its strength fade toward the content, matching
+		// the CSS fallback used by the debug WebView on platforms without
+		// GPU/native backdrop support.
+		ui.Box(c).Absolute().Top(barHeight).Left(0).Right(0).Height(58).PassThrough().Material(nativeProgressiveBlur(t, true))
+		ui.Box(c).Absolute().Bottom(statusHeight).Left(0).Right(0).Height(58).PassThrough().Material(nativeProgressiveBlur(t, false))
+
 		// The titlebar is native UI too. Keep the middle region draggable while
-		// leaving Toolbar controls available to the pointer and keyboard.
+		// leaving Toolbar controls available to the pointer and keyboard. Glass
+		// is used instead of an opaque fill so the page transition remains
+		// visible on macOS, Windows 11, and Linux's MyGo renderer.
 		ui.Row(c).
+			Absolute().
+			Top(0).
+			Left(0).
+			Right(0).
 			Height(barHeight).
 			Padding(0, bar.Right, 0, bar.Left).
-			Background(t.Surface).
+			Material(glass.Glass{Style: glass.Regular}).
 			BorderWidth(0, 0, 1, 0).
 			BorderColor(t.Border).
 			AlignItems(ui.Center).
@@ -1150,18 +1179,33 @@ func (s *nativeShell) view(c *ui.Context) {
 				})
 			})
 
-		ui.Split(c, &s.sidebarWidth, func() {
-			s.sidebar(c)
-		}, func() {
-			s.page(c)
-		}).Grow(1)
-
-		s.statusBar(c)
+		ui.Box(c).Absolute().Bottom(0).Left(0).Right(0).Height(statusHeight).Children(func() {
+			s.statusBar(c)
+		})
 	})
 }
 
+// nativeProgressiveBlur describes the fade used by the titlebar and bottom
+// scroll transition. It is intentionally kept as a pure helper so tests can
+// verify both light/dark radii and the direction of the gradient without
+// starting a desktop window.
+func nativeProgressiveBlur(theme *ui.Theme, top bool) glass.Blur {
+	radius := float32(14)
+	if theme != nil && theme.Dark {
+		radius = 16
+	}
+	strong := ui.RGBA(0, 0, 0, 0.92)
+	soft := ui.RGBA(0, 0, 0, 0.08)
+	if !top {
+		strong, soft = soft, strong
+	}
+	return glass.Blur{
+		Radius: radius,
+		Mask:   &ui.LinearGradient{From: strong, To: soft, Angle: 180, Start: 0, End: 1},
+	}
+}
+
 func (s *nativeShell) sidebar(c *ui.Context) {
-	t := c.Theme()
 	ui.Sidebar(c, &s.selected, func() {
 		ui.SidebarSection(c, "工作区", nil, func() {
 			ui.SidebarItem(c, "chat", nil, "对话")
@@ -1173,7 +1217,7 @@ func (s *nativeShell) sidebar(c *ui.Context) {
 		ui.SidebarSection(c, "管理", nil, func() {
 			ui.SidebarItem(c, "settings", nil, "设置")
 		})
-	}).Fill().Background(t.Surface)
+	}).Fill().Material(glass.Glass{Style: glass.Regular})
 }
 
 func (s *nativeShell) page(c *ui.Context) {
@@ -1288,7 +1332,7 @@ func (s *nativeShell) chatPage(c *ui.Context) {
 				s.renderMarkdown(c, message)
 			})
 		}).Grow(1).MinHeight(0).Gap(t.Space(3))
-		composer := ui.Row(c).Gap(t.Space(2)).AlignItems(ui.End)
+		composer := ui.Row(c).Gap(t.Space(2)).AlignItems(ui.End).Padding(t.Space(2), t.Space(2)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular})
 		composer.Children(func() {
 			if ui.Button(c, "附件").Clicked() {
 				go s.pickAttachment()
@@ -1382,7 +1426,7 @@ func (s *nativeShell) renderMarkdown(c *ui.Context, message nativeMessage) {
 				ui.Text(c, "• "+line).Selectable()
 			}
 		case markdown.Quote:
-			ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+			ui.Box(c).Padding(t.Space(2), t.Space(3)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
 				if len(node.Inlines) > 0 {
 					s.renderInlines(c, node.Inlines, t)
 				} else {
@@ -1445,7 +1489,7 @@ func (s *nativeShell) renderMath(c *ui.Context, formula *markdown.MathFormula, d
 	}
 	image := ui.Image(c, vector)
 	if display {
-		ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+		ui.Box(c).Padding(t.Space(2), t.Space(3)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
 			image.MaxWidth(820).MaxHeight(220)
 		})
 	} else {
@@ -1464,13 +1508,13 @@ func (s *nativeShell) renderSVG(c *ui.Context, node markdown.Node, t *ui.Theme) 
 		return
 	}
 	ui.Text(c, "SVG 预览 · 原生实时渲染").FontSize(11).TextColor(t.Success).SingleLine()
-	ui.Box(c).Padding(t.Space(2)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+	ui.Box(c).Padding(t.Space(2)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
 		ui.Image(c, vector).MaxWidth(820).MaxHeight(180)
 	})
 }
 
 func (s *nativeShell) renderToolCall(c *ui.Context, node markdown.Node, t *ui.Theme) {
-	ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+	ui.Box(c).Padding(t.Space(2), t.Space(3)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
 		ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "工具调用").FontSize(11).Bold().TextColor(t.Warning).SingleLine()
 			if node.ToolName != "" {
@@ -1489,7 +1533,7 @@ func (s *nativeShell) renderToolCall(c *ui.Context, node markdown.Node, t *ui.Th
 }
 
 func (s *nativeShell) renderToolResult(c *ui.Context, node markdown.Node, t *ui.Theme) {
-	ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+	ui.Box(c).Padding(t.Space(2), t.Space(3)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
 		ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
 			label := "工具结果"
 			color := t.Success
@@ -1580,7 +1624,7 @@ func (s *nativeShell) placeholderPage(c *ui.Context, title, description string) 
 	ui.Column(c).MaxWidth(820).Gap(t.Space(4)).Children(func() {
 		ui.Text(c, title).FontSize(18).Bold()
 		ui.Text(c, description).TextColor(t.TextMuted)
-		ui.Box(c).Padding(t.Space(4)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+		ui.Box(c).Padding(t.Space(4)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Children(func() {
 			ui.Text(c, "原生页面边界").Bold()
 			ui.Text(c, "原生壳提供可用导航和数据接缝，完整编辑体验正在完善。").FontSize(12).TextColor(t.TextMuted)
 		})
@@ -1594,7 +1638,7 @@ func (s *nativeShell) settingsPage(c *ui.Context) {
 		return
 	}
 	ui.Row(c).AlignItems(ui.Start).Gap(t.Space(5)).Children(func() {
-		ui.Column(c).Width(176).Padding(t.Space(2)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Gap(t.Space(1)).Children(func() {
+		ui.Column(c).Width(176).Padding(t.Space(2)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Gap(t.Space(1)).Children(func() {
 			for _, tab := range []struct {
 				id, label string
 			}{
@@ -1729,7 +1773,7 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 				})
 			}
 			status := s.configPiStatus
-			ui.Box(c).Padding(t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+			ui.Box(c).Padding(t.Space(3)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Children(func() {
 				ui.Text(c, "Pi Agent 状态").Bold()
 				state := status.State
 				if state == "" {
@@ -1776,7 +1820,7 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 				ui.Text(c, s.configNote).FontSize(12).TextColor(t.TextMuted)
 			}
 		})
-		ui.Box(c).Padding(t.Space(4)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+		ui.Box(c).Padding(t.Space(4)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Children(func() {
 			ui.Text(c, "HTTP/SSE 状态").Bold()
 			ui.Row(c).Gap(t.Space(2)).Children(func() {
 				statusDot(c, t.Success)
@@ -1794,7 +1838,7 @@ func (s *nativeShell) settingsContent(c *ui.Context) {
 
 func (s *nativeShell) statusBar(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).Height(30).Padding(0, t.Space(4)).Gap(t.Space(2)).Background(t.Surface).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Height(30).Padding(0, t.Space(4)).Gap(t.Space(2)).Material(glass.Glass{Style: glass.Regular}).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).AlignItems(ui.Center).Children(func() {
 		color := t.Success
 		label := "运行环境健康"
 		if !s.runtimeHealthy {
