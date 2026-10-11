@@ -1,0 +1,1857 @@
+package main
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/BA7MLV/DeepStudent-Go/internal/markdown"
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
+	"github.com/egoist/mygo/ui"
+)
+
+// nativeShell owns the production desktop surface. The HTTP/SSE runtime stays
+// in serverapp; this type renders its streamed conversation, tool events,
+// attachments, settings, and Agent status with native MyGo controls.
+type nativeShell struct {
+	selected              string
+	settingsTab           string
+	sidebarWidth          float32
+	dark                  bool
+	lastRefresh           time.Time
+	runtimeHealthy        bool
+	window                *mygo.Window
+	apiBaseURL            string
+	sessionID             string
+	invalidate            func()
+	draft                 string
+	sending               bool
+	demoRunning           bool
+	activeRunID           string
+	activeCancel          context.CancelFunc
+	pendingInput          string
+	attachmentBusy        bool
+	attachmentNote        string
+	configProvider        string
+	configModel           string
+	configBaseURL         string
+	configAPIKeyEnv       string
+	configAgentMode       string
+	configPiEndpoint      string
+	configPiSkipStart     bool
+	configPiCommand       string
+	configPiArgs          string
+	configPiCancelTimeout string
+	configPiStatus        nativePiStatus
+	piCandidates          []nativePiCandidate
+	piDiscoveryNote       string
+	configReady           bool
+	configHydrateErr      string
+	configBusy            bool
+	configNote            string
+	onboardingOpen        bool
+	onboardingStep        int
+	onboarding            [4]string
+	messages              []nativeMessage
+	messagesList          ui.ListState
+	mu                    sync.Mutex
+}
+
+type nativeMessage struct {
+	role    string
+	content string
+	id      string
+	nodes   []markdown.Node
+	pending []markdown.Node
+	parser  *markdown.Parser
+}
+
+type nativeRunStart struct {
+	RunID     string `json:"run_id"`
+	EventsURL string `json:"events_url"`
+}
+
+type nativeRunEvent struct {
+	Type         string                   `json:"type"`
+	Delta        string                   `json:"delta"`
+	Text         string                   `json:"text"`
+	ErrorMessage string                   `json:"error_message"`
+	Done         bool                     `json:"done"`
+	ToolCall     *nativeToolCallPayload   `json:"tool_call,omitempty"`
+	ToolResult   *nativeToolResultPayload `json:"tool_result,omitempty"`
+	Metadata     map[string]any           `json:"metadata,omitempty"`
+	// Older runtime adapters may emit flat aliases. Keep these fields for
+	// compatibility and normalize them through toolCall/toolResult below.
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	ToolName   string          `json:"tool_name,omitempty"`
+	Arguments  json.RawMessage `json:"arguments,omitempty"`
+	Args       json.RawMessage `json:"args,omitempty"`
+	Output     json.RawMessage `json:"output,omitempty"`
+	Result     json.RawMessage `json:"result,omitempty"`
+	Error      bool            `json:"error,omitempty"`
+}
+
+type nativeToolCallPayload struct {
+	ID        string          `json:"id,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	ToolName  string          `json:"tool_name,omitempty"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Args      json.RawMessage `json:"args,omitempty"`
+}
+
+type nativeToolResultPayload struct {
+	CallID       string          `json:"call_id,omitempty"`
+	ToolCallID   string          `json:"tool_call_id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	ToolName     string          `json:"tool_name,omitempty"`
+	Output       json.RawMessage `json:"output,omitempty"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	Text         string          `json:"text,omitempty"`
+	Error        bool            `json:"error,omitempty"`
+	ErrorMessage string          `json:"error_message,omitempty"`
+}
+
+// toolCall normalizes the typed event shape and the flat metadata aliases
+// emitted by older runtime adapters. It intentionally returns the raw JSON
+// argument text so the native view can display it without evaluating it.
+func (e nativeRunEvent) toolCall() (id, name, arguments string, ok bool) {
+	if e.ToolCall != nil {
+		id = firstNativeValue(e.ToolCall.ID, e.ToolCall.CallID)
+		name = firstNativeValue(e.ToolCall.Name, e.ToolCall.ToolName)
+		arguments = nativeRawText(e.ToolCall.Arguments)
+		if arguments == "" {
+			arguments = nativeRawText(e.ToolCall.Args)
+		}
+	}
+	id = firstNativeValue(id, e.ToolCallID, nativeMetadataString(e.Metadata, "tool_call_id", "call_id"))
+	name = firstNativeValue(name, e.ToolName, nativeMetadataString(e.Metadata, "tool_name", "name"))
+	if arguments == "" {
+		arguments = nativeRawText(e.Args)
+	}
+	if arguments == "" {
+		arguments = nativeMetadataRawText(e.Metadata, "arguments", "args", "input")
+	}
+	if arguments == "" {
+		arguments = "{}"
+	}
+	if e.Type == "tool.call" || e.ToolCall != nil || name != "" || e.ToolCallID != "" {
+		return id, name, arguments, true
+	}
+	return "", "", "", false
+}
+
+// toolResult mirrors toolCall for completed invocations and also preserves
+// explicit error metadata for a readable failure card in the native timeline.
+func (e nativeRunEvent) toolResult() (id, name, output string, failed bool, errorMessage string, ok bool) {
+	if e.ToolResult != nil {
+		id = firstNativeValue(e.ToolResult.CallID, e.ToolResult.ToolCallID)
+		name = firstNativeValue(e.ToolResult.Name, e.ToolResult.ToolName)
+		output = nativeRawText(e.ToolResult.Output)
+		if output == "" {
+			output = nativeRawText(e.ToolResult.Result)
+		}
+		if output == "" {
+			output = e.ToolResult.Text
+		}
+		failed = e.ToolResult.Error
+		errorMessage = e.ToolResult.ErrorMessage
+	}
+	id = firstNativeValue(id, e.ToolCallID, nativeMetadataString(e.Metadata, "tool_call_id", "call_id"))
+	name = firstNativeValue(name, e.ToolName, nativeMetadataString(e.Metadata, "tool_name", "name"))
+	if output == "" {
+		output = firstNativeValue(nativeRawText(e.Output), nativeRawText(e.Result), e.Text, nativeMetadataRawText(e.Metadata, "output", "result", "text"))
+	}
+	if !failed {
+		failed = e.Error || nativeMetadataBool(e.Metadata, "error")
+	}
+	if errorMessage == "" {
+		errorMessage = firstNativeValue(e.ErrorMessage, nativeMetadataString(e.Metadata, "error_message"))
+	}
+	if e.Type == "tool.result" || e.ToolResult != nil || id != "" || name != "" {
+		return id, name, output, failed, errorMessage, true
+	}
+	return "", "", "", false, "", false
+}
+
+func nativeRawText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+func nativeMetadataValue(metadata map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, ok := metadata[key]; ok && value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func nativeMetadataString(metadata map[string]any, keys ...string) string {
+	value := nativeMetadataValue(metadata, keys...)
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(nativeValueJSON(value))
+}
+
+func nativeMetadataRawText(metadata map[string]any, keys ...string) string {
+	value := nativeMetadataValue(metadata, keys...)
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(nativeValueJSON(value))
+}
+
+func nativeMetadataBool(metadata map[string]any, key string) bool {
+	value, ok := nativeMetadataValue(metadata, key).(bool)
+	return ok && value
+}
+
+func nativeValueJSON(value any) string {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprint(value)
+	}
+	return string(encoded)
+}
+
+func firstNativeValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+type nativeSession struct {
+	ID string `json:"id"`
+}
+
+type nativeMessageRecord struct {
+	ID      string `json:"id"`
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type nativeRuntimeConfig struct {
+	DefaultProvider string                          `json:"default_provider"`
+	DefaultModel    string                          `json:"default_model"`
+	Providers       map[string]nativeProviderConfig `json:"providers"`
+	Runtime         nativeAgentRuntime              `json:"runtime"`
+}
+
+type nativeAgentRuntime struct {
+	PiEndpoint      string         `json:"pi_endpoint"`
+	PiSkipStart     bool           `json:"pi_skip_start"`
+	PiMode          string         `json:"pi_mode"`
+	PiCommand       string         `json:"pi_command"`
+	PiArgs          []string       `json:"pi_args"`
+	PiCancelTimeout string         `json:"pi_cancel_timeout"`
+	PiStatus        nativePiStatus `json:"pi_status"`
+}
+
+type nativePiStatus struct {
+	ConfiguredMode string   `json:"configured_mode"`
+	EffectiveMode  string   `json:"effective_mode"`
+	State          string   `json:"state"`
+	Command        string   `json:"command"`
+	Args           []string `json:"args"`
+	Endpoint       string   `json:"endpoint"`
+	Reason         string   `json:"reason"`
+}
+
+type nativePiCandidate struct {
+	Name           string `json:"name"`
+	Command        string `json:"command"`
+	Path           string `json:"path"`
+	Version        string `json:"version"`
+	SidecarCapable bool   `json:"sidecar_capable"`
+}
+
+type nativeProviderConfig struct {
+	Model     string `json:"model"`
+	BaseURL   string `json:"base_url"`
+	APIKeyEnv string `json:"api_key_env"`
+}
+
+func newNativeShell(apiBaseURL string) *nativeShell {
+	welcome := newNativeMessage("assistant", "你好，我是 DeepStudent。你可以直接在这里开始一个学习对话。")
+	return &nativeShell{
+		selected:        "chat",
+		settingsTab:     "general",
+		sidebarWidth:    232,
+		lastRefresh:     time.Now(),
+		runtimeHealthy:  true,
+		apiBaseURL:      strings.TrimRight(apiBaseURL, "/"),
+		sessionID:       "native-session",
+		configProvider:  "deterministic",
+		configModel:     "stub",
+		configAgentMode: "auto",
+		messagesList:    ui.ListState{FollowEnd: true},
+		messages:        []nativeMessage{welcome},
+	}
+}
+
+func newNativeMessage(role, content string) nativeMessage {
+	parser := markdown.NewParser()
+	completed := parser.Feed([]byte(content))
+	return nativeMessage{role: role, content: content, nodes: completed, pending: parser.Snapshot(), parser: parser}
+}
+
+// hydrateSession reuses the server's durable session/message contract. A
+// failed hydration is deliberately non-fatal: the native shell remains useful
+// with its local welcome message while the runtime reconnects.
+func (s *nativeShell) hydrateSession() {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	base := strings.TrimRight(s.apiBaseURL, "/")
+	var runtimeConfig nativeRuntimeConfig
+	configErr := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/config", nil, &runtimeConfig)
+	if configErr == nil {
+		s.mu.Lock()
+		if strings.TrimSpace(runtimeConfig.DefaultProvider) != "" {
+			s.configProvider = runtimeConfig.DefaultProvider
+		}
+		s.configModel = runtimeConfig.DefaultModel
+		if provider, ok := runtimeConfig.Providers[s.configProvider]; ok {
+			if strings.TrimSpace(s.configModel) == "" {
+				s.configModel = provider.Model
+			}
+			s.configBaseURL = provider.BaseURL
+			s.configAPIKeyEnv = provider.APIKeyEnv
+		}
+		runtime := runtimeConfig.Runtime
+		s.configAgentMode = normalizeNativeAgentMode(runtime.PiMode, runtime.PiStatus.ConfiguredMode)
+		s.configPiEndpoint = runtime.PiEndpoint
+		s.configPiSkipStart = runtime.PiSkipStart
+		s.configPiCommand = runtime.PiCommand
+		s.configPiArgs = strings.Join(runtime.PiArgs, "\n")
+		s.configPiCancelTimeout = runtime.PiCancelTimeout
+		s.configPiStatus = runtime.PiStatus
+		s.configReady = true
+		s.configHydrateErr = ""
+		s.mu.Unlock()
+		if s.invalidate != nil {
+			s.invalidate()
+		}
+	} else {
+		s.mu.Lock()
+		s.configHydrateErr = configErr.Error()
+		s.mu.Unlock()
+	}
+	var discovery struct {
+		Candidates []nativePiCandidate `json:"candidates"`
+		Status     nativePiStatus      `json:"status"`
+	}
+	if err := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/pi/discovery", nil, &discovery); err == nil {
+		s.mu.Lock()
+		s.piCandidates = discovery.Candidates
+		if discovery.Status.State != "" {
+			s.configPiStatus = discovery.Status
+		}
+		s.piDiscoveryNote = "已读取本机 Pi Agent 发现结果"
+		s.mu.Unlock()
+		if s.invalidate != nil {
+			s.invalidate()
+		}
+	}
+	var list struct {
+		Sessions []nativeSession `json:"sessions"`
+	}
+	if err := nativeJSONRequest(ctx, http.MethodGet, base+"/api/v1/sessions?limit=1", nil, &list); err != nil {
+		return
+	}
+	if len(list.Sessions) > 0 && strings.TrimSpace(list.Sessions[0].ID) != "" {
+		s.mu.Lock()
+		s.sessionID = list.Sessions[0].ID
+		s.mu.Unlock()
+	} else {
+		payload, _ := json.Marshal(map[string]string{"id": s.sessionID, "title": "DeepStudent 原生会话"})
+		var created struct {
+			Session nativeSession `json:"session"`
+		}
+		if err := nativeJSONRequest(ctx, http.MethodPost, base+"/api/v1/sessions", payload, &created); err == nil && created.Session.ID != "" {
+			s.mu.Lock()
+			s.sessionID = created.Session.ID
+			s.mu.Unlock()
+		}
+	}
+	s.mu.Lock()
+	sessionID := s.sessionID
+	s.mu.Unlock()
+	var messages struct {
+		Messages []nativeMessageRecord `json:"messages"`
+	}
+	messageURL := base + "/api/v1/sessions/" + url.PathEscape(sessionID) + "/messages?limit=200"
+	if err := nativeJSONRequest(ctx, http.MethodGet, messageURL, nil, &messages); err != nil || len(messages.Messages) == 0 {
+		return
+	}
+	loaded := make([]nativeMessage, 0, len(messages.Messages))
+	for _, message := range messages.Messages {
+		if message.Role != "user" && message.Role != "assistant" {
+			continue
+		}
+		loadedMessage := newNativeMessage(message.Role, message.Content)
+		loadedMessage.id = message.ID
+		loaded = append(loaded, loadedMessage)
+	}
+	if len(loaded) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.messages = loaded
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+}
+
+func (s *nativeShell) saveRuntimeConfig() {
+	s.mu.Lock()
+	if s.configBusy || !s.configReady {
+		if !s.configReady {
+			s.configNote = "正在读取模型配置…"
+		}
+		s.mu.Unlock()
+		if s.invalidate != nil {
+			s.invalidate()
+		}
+		return
+	}
+	provider := strings.TrimSpace(s.configProvider)
+	model := strings.TrimSpace(s.configModel)
+	baseURL := strings.TrimSpace(s.configBaseURL)
+	apiKeyEnv := strings.TrimSpace(s.configAPIKeyEnv)
+	agentMode := strings.TrimSpace(s.configAgentMode)
+	piEndpoint := strings.TrimSpace(s.configPiEndpoint)
+	piSkipStart := s.configPiSkipStart
+	piCommand := strings.TrimSpace(s.configPiCommand)
+	piArgs := splitNativeArgs(s.configPiArgs)
+	if agentMode == "auto" {
+		piEndpoint, piCommand, piArgs, piSkipStart = "", "", []string{}, false
+	} else if agentMode == "external" {
+		piCommand, piArgs = "", []string{}
+	} else {
+		piSkipStart = false
+	}
+	piCancelTimeout := strings.TrimSpace(s.configPiCancelTimeout)
+	if provider == "" {
+		s.configNote = "服务商不能为空"
+		s.mu.Unlock()
+		if s.invalidate != nil {
+			s.invalidate()
+		}
+		return
+	}
+	s.configBusy = true
+	s.configNote = "正在保存…"
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+	payload, _ := json.Marshal(map[string]any{"provider": provider, "model": model, "base_url": baseURL, "api_key_env": apiKeyEnv, "pi_mode": agentMode, "pi_endpoint": piEndpoint, "pi_skip_start": piSkipStart, "pi_command": piCommand, "pi_args": piArgs, "pi_cancel_timeout": piCancelTimeout})
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	var updated nativeRuntimeConfig
+	err := nativeJSONRequest(ctx, http.MethodPatch, strings.TrimRight(s.apiBaseURL, "/")+"/api/v1/config", payload, &updated)
+	s.mu.Lock()
+	s.configBusy = false
+	if err != nil {
+		s.configNote = "保存失败：" + err.Error()
+	} else {
+		s.configProvider = updated.DefaultProvider
+		s.configModel = updated.DefaultModel
+		if saved, ok := updated.Providers[provider]; ok {
+			if strings.TrimSpace(s.configModel) == "" {
+				s.configModel = saved.Model
+			}
+			s.configBaseURL = saved.BaseURL
+			s.configAPIKeyEnv = saved.APIKeyEnv
+		}
+		s.configAgentMode = updated.Runtime.PiMode
+		if s.configAgentMode == "" {
+			s.configAgentMode = agentMode
+		}
+		s.configPiEndpoint = updated.Runtime.PiEndpoint
+		s.configPiSkipStart = updated.Runtime.PiSkipStart
+		s.configPiCommand = updated.Runtime.PiCommand
+		s.configPiArgs = strings.Join(updated.Runtime.PiArgs, "\n")
+		s.configPiCancelTimeout = updated.Runtime.PiCancelTimeout
+		s.configPiStatus = updated.Runtime.PiStatus
+		s.configNote = "已保存，下一条消息将使用此模型。"
+	}
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+}
+
+func splitNativeArgs(value string) []string {
+	lines := strings.Split(value, "\n")
+	args := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if item := strings.TrimSpace(line); item != "" {
+			args = append(args, item)
+		}
+	}
+	return args
+}
+
+func firstNativeNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return "未知"
+}
+
+func normalizeNativeAgentMode(values ...string) string {
+	for _, value := range values {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "auto", "":
+			if strings.TrimSpace(value) == "auto" {
+				return "auto"
+			}
+		case "manual", "managed", "local":
+			return "manual"
+		case "external":
+			return "external"
+		case "deterministic":
+			return "auto"
+		}
+	}
+	return "auto"
+}
+
+func nativeJSONRequest(ctx context.Context, method, endpoint string, body []byte, result any) error {
+	var reader *bytes.Reader
+	if body == nil {
+		reader = bytes.NewReader(nil)
+	} else {
+		reader = bytes.NewReader(body)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, reader)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Accept", "application/json")
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("runtime returned HTTP %d", response.StatusCode)
+	}
+	return json.NewDecoder(response.Body).Decode(result)
+}
+
+func (s *nativeShell) messageSnapshot() []nativeMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	copyMessages := make([]nativeMessage, len(s.messages))
+	copy(copyMessages, s.messages)
+	return copyMessages
+}
+
+func (s *nativeShell) sendingState() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sending
+}
+
+func (s *nativeShell) demoState() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.demoRunning
+}
+
+func (s *nativeShell) attachmentState() (busy bool, note string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.attachmentBusy, s.attachmentNote
+}
+
+func (s *nativeShell) setAssistant(index int, text string) {
+	s.mu.Lock()
+	if index >= 0 && index < len(s.messages) {
+		message := &s.messages[index]
+		message.content = text
+		message.parser = markdown.NewParser()
+		message.nodes = message.parser.Feed([]byte(text))
+		message.pending = message.parser.Snapshot()
+	}
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+}
+
+func (s *nativeShell) appendAssistantDelta(index int, delta string) {
+	if delta == "" {
+		return
+	}
+	s.mu.Lock()
+	if index >= 0 && index < len(s.messages) {
+		message := &s.messages[index]
+		// The placeholder is only useful while POST /runs is connecting. Drop
+		// it before the first streamed payload so it never becomes part of the
+		// assistant's durable Markdown transcript.
+		if message.content == "正在连接 Go runtime…" {
+			message.content = ""
+			message.nodes = nil
+			message.pending = nil
+			message.parser = markdown.NewParser()
+		}
+		if message.parser == nil {
+			message.parser = markdown.NewParser()
+		}
+		message.content += delta
+		message.nodes = append(message.nodes, message.parser.Feed([]byte(delta))...)
+		message.pending = message.parser.Snapshot()
+	}
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+}
+
+// appendAssistantNode inserts a non-text runtime event (tool.call or
+// tool.result) into the same ordered stream as Markdown blocks. Any open
+// paragraph/fence is flushed first, which prevents text arriving after a tool
+// event from being merged into the block that preceded it.
+func (s *nativeShell) appendAssistantNode(index int, node markdown.Node) {
+	s.mu.Lock()
+	if index >= 0 && index < len(s.messages) {
+		message := &s.messages[index]
+		if message.content == "正在连接 Go runtime…" {
+			message.content = ""
+			message.nodes = nil
+			message.pending = nil
+			message.parser = markdown.NewParser()
+		}
+		if message.parser != nil {
+			message.nodes = append(message.nodes, message.parser.Flush()...)
+			message.parser = markdown.NewParser()
+		}
+		message.pending = nil
+		message.nodes = append(message.nodes, node)
+	}
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+}
+
+func (s *nativeShell) assistantHasToolNodes(index int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if index < 0 || index >= len(s.messages) {
+		return false
+	}
+	for _, node := range s.messages[index].nodes {
+		if node.Kind == markdown.ToolCall || node.Kind == markdown.ToolResult {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *nativeShell) finishSend(index int, text string, err error) {
+	if err != nil {
+		if err == context.Canceled {
+			text = "已取消"
+		} else {
+			text = "请求失败：" + err.Error()
+		}
+	}
+	s.mu.Lock()
+	if index >= 0 && index < len(s.messages) {
+		message := &s.messages[index]
+		message.content = text
+		if message.parser != nil {
+			message.nodes = append(message.nodes, message.parser.Flush()...)
+			message.pending = nil
+		} else {
+			message.nodes = markdown.Parse(text)
+		}
+	}
+	s.sending = false
+	s.activeRunID, s.activeCancel = "", nil
+	if err != nil {
+		s.runtimeHealthy = false
+	}
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+}
+
+func (s *nativeShell) submitDraft() {
+	prompt := strings.TrimSpace(s.draft)
+	s.mu.Lock()
+	if s.sending || !s.configReady {
+		if !s.configReady {
+			s.attachmentNote = "正在读取模型配置…"
+		}
+		s.mu.Unlock()
+		if s.invalidate != nil {
+			s.invalidate()
+		}
+		return
+	}
+	attachmentRef := strings.TrimSpace(s.pendingInput)
+	if prompt == "" && attachmentRef == "" {
+		s.mu.Unlock()
+		return
+	}
+	if prompt == "" {
+		prompt = "请查看这个附件。"
+	}
+	s.draft = ""
+	s.pendingInput = ""
+	s.attachmentNote = ""
+	messageID := fmt.Sprintf("native-msg-%d", time.Now().UnixNano())
+	userMessage := newNativeMessage("user", prompt)
+	userMessage.id = messageID
+	s.messages = append(s.messages, userMessage)
+	assistantIndex := len(s.messages)
+	s.messages = append(s.messages, newNativeMessage("assistant", "正在连接 Go runtime…"))
+	s.sending = true
+	s.runtimeHealthy = true
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.activeCancel = cancel
+	s.mu.Unlock()
+	go func() {
+		text, err := s.runPrompt(ctx, prompt, attachmentRef, messageID, assistantIndex)
+		s.finishSend(assistantIndex, text, err)
+	}()
+}
+
+// startNativeDemo feeds the same incremental append paths used by SSE into a
+// fresh assistant message. It gives the native shell a deterministic demo
+// even when no provider is configured, including Markdown, code, SVG markup,
+// and tool.call/tool.result cards.
+func (s *nativeShell) startNativeDemo() {
+	s.mu.Lock()
+	if s.sending || s.demoRunning {
+		s.mu.Unlock()
+		return
+	}
+	s.demoRunning = true
+	s.messages = append(s.messages, newNativeMessage("user", "原生流式渲染 Demo"))
+	assistantIndex := len(s.messages)
+	s.messages = append(s.messages, newNativeMessage("assistant", ""))
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+
+	go func() {
+		type demoStep struct {
+			kind string
+			text string
+			node markdown.Node
+		}
+		steps := []demoStep{
+			{kind: "delta", text: "这是一个原生 SSE 增量 Demo。"},
+			{kind: "delta", text: " 行内公式：$E=mc^2$，分数 $\\frac{a_1+b}{\\sqrt{x}}$。\n\n"},
+			{kind: "delta", text: "$$\n\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix} \\times \\begin{pmatrix}x\\\\y\\end{pmatrix} = \\begin{pmatrix}5\\\\6\\end{pmatrix}\n$$\n\n"},
+			{kind: "delta", text: "\n\n先调用工具读取当前时间："},
+			{kind: "call", node: markdown.NewToolCallNode("demo-call-1", "clock", `{"timezone":"UTC"}`)},
+			{kind: "result", node: markdown.NewToolResultNode("demo-call-1", "clock", `{"time":"2026-10-11T02:00:00Z"}`, false, "")},
+			{kind: "delta", text: "\n\n工具返回后继续输出 Markdown。\n\n"},
+			{kind: "delta", text: "```go\n"},
+			{kind: "delta", text: "package main\n\n"},
+			{kind: "delta", text: "func main() { println(\"hello\") }\n"},
+			{kind: "delta", text: "```\n\n"},
+			{kind: "delta", text: "| 节点 | 状态 |\n| --- | --- |\n| Markdown / Code / Tool | ready |\n\n"},
+			{kind: "delta", text: "下面是 SVG 标记的实时原生占位：\n\n```svg\n<svg viewBox=\"0 0 120 32\">\n"},
+			{kind: "delta", text: "<path d=\"M4 24 L28 8 L52 20 L76 4 L108 16\" fill=\"none\" stroke=\"#4f46e5\"/>\n"},
+			{kind: "delta", text: "</svg>\n```\n"},
+		}
+		for _, step := range steps {
+			time.Sleep(180 * time.Millisecond)
+			s.mu.Lock()
+			running := s.demoRunning
+			s.mu.Unlock()
+			if !running {
+				return
+			}
+			switch step.kind {
+			case "call", "result":
+				s.appendAssistantNode(assistantIndex, step.node)
+			default:
+				s.appendAssistantDelta(assistantIndex, step.text)
+			}
+		}
+		s.mu.Lock()
+		if assistantIndex >= 0 && assistantIndex < len(s.messages) {
+			message := &s.messages[assistantIndex]
+			if message.parser != nil {
+				message.nodes = append(message.nodes, message.parser.Flush()...)
+				message.pending = nil
+			}
+		}
+		s.demoRunning = false
+		s.mu.Unlock()
+		if s.invalidate != nil {
+			s.invalidate()
+		}
+	}()
+}
+
+func (s *nativeShell) cancelRun() {
+	s.mu.Lock()
+	runID, cancel := s.activeRunID, s.activeCancel
+	s.activeRunID, s.activeCancel = "", nil
+	s.mu.Unlock()
+	if runID != "" {
+		go func() {
+			request, err := http.NewRequest(http.MethodPost, s.apiBaseURL+"/api/v1/runs/"+url.PathEscape(runID)+"/cancel", nil)
+			if err == nil {
+				_, _ = http.DefaultClient.Do(request)
+			}
+		}()
+	}
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// pickAttachment uses MyGo's native file dialog; the same upload path is used
+// by the window's file-drop callback below. The Go API stores immutable blobs
+// and returns a workspace reference that is sent with the next run.
+func (s *nativeShell) pickAttachment() {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: s.window, Title: "添加附件", Multiple: false, Filters: []mygo.FileFilter{{Name: "学习资料", Extensions: []string{"md", "markdown", "txt", "pdf", "png", "jpg", "jpeg", "webp", "mp3", "wav", "m4a"}}}})
+	if err != nil || len(paths) == 0 {
+		return
+	}
+	go s.attachFile(paths[0])
+}
+
+func (s *nativeShell) attachFile(path string) {
+	s.mu.Lock()
+	if s.attachmentBusy {
+		s.mu.Unlock()
+		return
+	}
+	s.attachmentBusy = true
+	s.attachmentNote = "正在上传附件…"
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+	ref, err := s.uploadAttachment(path)
+	s.mu.Lock()
+	s.attachmentBusy = false
+	if err != nil {
+		s.attachmentNote = "附件上传失败：" + err.Error()
+	} else {
+		s.pendingInput = ref
+		s.attachmentNote = "附件已就绪：" + filepath.Base(path)
+	}
+	s.mu.Unlock()
+	if s.invalidate != nil {
+		s.invalidate()
+	}
+}
+
+func (s *nativeShell) uploadAttachment(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	requestReader, writer := io.Pipe()
+	multipartWriter := multipart.NewWriter(writer)
+	go func() {
+		defer writer.Close()
+		defer multipartWriter.Close()
+		part, partErr := multipartWriter.CreateFormFile("file", filepath.Base(path))
+		if partErr != nil {
+			_ = writer.CloseWithError(partErr)
+			return
+		}
+		if _, copyErr := io.Copy(part, file); copyErr != nil {
+			_ = writer.CloseWithError(copyErr)
+		}
+	}()
+	request, err := http.NewRequest(http.MethodPost, s.apiBaseURL+"/api/v1/attachments", requestReader)
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Content-Type", multipartWriter.FormDataContentType())
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("runtime returned HTTP %d", response.StatusCode)
+	}
+	var payload struct {
+		Attachment struct {
+			WorkspaceRef string `json:"workspace_ref"`
+		} `json:"attachment"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(payload.Attachment.WorkspaceRef) == "" {
+		return "", fmt.Errorf("runtime returned no workspace reference")
+	}
+	return payload.Attachment.WorkspaceRef, nil
+}
+
+// runPrompt uses the same POST /runs + SSE /runs/{id}/events contract as the
+// React adapter. This keeps the native composer a thin client of serverapp;
+// provider selection and persistence remain owned by the Go runtime.
+func (s *nativeShell) runPrompt(ctx context.Context, prompt, attachmentRef, messageID string, assistantIndex int) (string, error) {
+	s.mu.Lock()
+	sessionID := s.sessionID
+	provider := strings.TrimSpace(s.configProvider)
+	model := strings.TrimSpace(s.configModel)
+	baseURL := strings.TrimSpace(s.configBaseURL)
+	apiKeyEnv := strings.TrimSpace(s.configAPIKeyEnv)
+	s.mu.Unlock()
+	input := []string(nil)
+	if attachmentRef != "" {
+		input = []string{attachmentRef}
+	}
+	body, err := json.Marshal(map[string]any{
+		"prompt": prompt, "session_id": sessionID, "message_id": messageID,
+		"provider": provider, "model": model, "base_url": baseURL,
+		"api_key_env": apiKeyEnv, "input": input, "streaming_mode": "events",
+	})
+	if err != nil {
+		return "", err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiBaseURL+"/api/v1/runs", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("runtime returned HTTP %d", response.StatusCode)
+	}
+	var start nativeRunStart
+	if err := json.NewDecoder(response.Body).Decode(&start); err != nil {
+		return "", err
+	}
+	if start.RunID == "" {
+		return "", fmt.Errorf("runtime response did not include a run id")
+	}
+	s.mu.Lock()
+	s.activeRunID = start.RunID
+	s.mu.Unlock()
+	eventsURL := start.EventsURL
+	if strings.HasPrefix(eventsURL, "/") {
+		eventsURL = s.apiBaseURL + eventsURL
+	}
+	if eventsURL == "" {
+		eventsURL = s.apiBaseURL + "/api/v1/runs/" + start.RunID + "/events"
+	}
+	var text string
+	lastEventID := ""
+	completed := false
+	for attempt := 0; attempt < 4 && !completed; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return text, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 250 * time.Millisecond):
+			}
+		}
+		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, eventsURL, nil)
+		if requestErr != nil {
+			return text, requestErr
+		}
+		request.Header.Set("Accept", "text/event-stream")
+		if lastEventID != "" {
+			request.Header.Set("Last-Event-ID", lastEventID)
+		}
+		events, requestErr := http.DefaultClient.Do(request)
+		if requestErr != nil {
+			if ctx.Err() != nil {
+				return text, ctx.Err()
+			}
+			continue
+		}
+		if events.StatusCode < http.StatusOK || events.StatusCode >= http.StatusMultipleChoices {
+			events.Body.Close()
+			if attempt == 3 {
+				return text, fmt.Errorf("SSE stream returned HTTP %d", events.StatusCode)
+			}
+			continue
+		}
+		scanner := bufio.NewScanner(events.Body)
+		scanner.Buffer(make([]byte, 4<<10), 1<<20)
+		sseEventType := ""
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "id:") {
+				lastEventID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+				continue
+			}
+			if strings.HasPrefix(line, "event:") {
+				sseEventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+				continue
+			}
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if data == "" {
+				continue
+			}
+			var event nativeRunEvent
+			if json.Unmarshal([]byte(data), &event) != nil {
+				continue
+			}
+			if event.Type == "" {
+				event.Type = sseEventType
+			}
+			sseEventType = ""
+			if event.ErrorMessage != "" && event.Type != "tool.result" {
+				events.Body.Close()
+				return text, fmt.Errorf("%s", event.ErrorMessage)
+			}
+			// Tool events are first-class timeline nodes. Handle them before text
+			// deltas so a provider can emit a call/result between two Markdown
+			// chunks without losing ordering in the native list.
+			isToolEvent := event.Type == "tool.call" || event.Type == "tool.result" || event.ToolCall != nil || event.ToolResult != nil
+			if event.Type == "tool.call" || event.ToolCall != nil {
+				if id, name, arguments, ok := event.toolCall(); ok {
+					s.appendAssistantNode(assistantIndex, markdown.NewToolCallNode(id, name, arguments))
+				}
+			}
+			if event.Type == "tool.result" || event.ToolResult != nil {
+				if id, name, output, failed, errorMessage, ok := event.toolResult(); ok {
+					s.appendAssistantNode(assistantIndex, markdown.NewToolResultNode(id, name, output, failed, errorMessage))
+				}
+			}
+			next := event.Delta
+			if next == "" && !isToolEvent {
+				next = event.Text
+			}
+			if next != "" {
+				if event.Delta != "" {
+					text += next
+					s.appendAssistantDelta(assistantIndex, next)
+				} else if strings.HasPrefix(next, text) {
+					if s.assistantHasToolNodes(assistantIndex) {
+						suffix := strings.TrimPrefix(next, text)
+						text = next
+						s.appendAssistantDelta(assistantIndex, suffix)
+					} else {
+						text = next
+						s.setAssistant(assistantIndex, text)
+					}
+				} else {
+					text += next
+					s.appendAssistantDelta(assistantIndex, next)
+				}
+			}
+			if event.Done || event.Type == "run.completed" || event.Type == "run.error" || event.Type == "run.canceled" {
+				completed = true
+				break
+			}
+		}
+		scanErr := scanner.Err()
+		events.Body.Close()
+		if scanErr != nil && ctx.Err() != nil {
+			return text, ctx.Err()
+		}
+	}
+	s.mu.Lock()
+	s.activeRunID, s.activeCancel = "", nil
+	s.mu.Unlock()
+	if !completed {
+		return text, fmt.Errorf("SSE stream ended before completion")
+	}
+	if text == "" {
+		text = "Go runtime 已完成，但没有返回文本。"
+	}
+	return text, nil
+}
+
+func (s *nativeShell) view(c *ui.Context) {
+	if s.dark {
+		c.SetTheme(ui.DarkTheme())
+	} else {
+		c.SetTheme(ui.LightTheme())
+	}
+	t := c.Theme()
+	bar := c.TitleBar()
+	barHeight := bar.Height
+	if barHeight < 44 {
+		barHeight = 44
+	}
+	const statusHeight float32 = 30
+
+	// Keep the base content below the custom titlebar and status bar. The
+	// progressive blur strips are painted after this content, so the native
+	// renderer can sample the scrolling page and sidebar behind them. The
+	// controls are painted last and remain crisp and interactive.
+	ui.Box(c).Fill().Background(t.Background).Children(func() {
+		ui.Column(c).Fill().Padding(barHeight, 0, statusHeight, 0).Children(func() {
+			ui.Split(c, &s.sidebarWidth, func() {
+				s.sidebar(c)
+			}, func() {
+				s.page(c)
+			}).Grow(1)
+		})
+
+		// MyGo 0.3.0's glass.Blur is a real native backdrop effect. The
+		// gradient mask makes its strength fade toward the content, matching
+		// the CSS fallback used by the debug WebView on platforms without
+		// GPU/native backdrop support.
+		ui.Box(c).Absolute().Top(barHeight).Left(0).Right(0).Height(58).PassThrough().Material(nativeProgressiveBlur(t, true))
+		ui.Box(c).Absolute().Bottom(statusHeight).Left(0).Right(0).Height(58).PassThrough().Material(nativeProgressiveBlur(t, false))
+
+		// The titlebar is native UI too. Keep the middle region draggable while
+		// leaving Toolbar controls available to the pointer and keyboard. Glass
+		// is used instead of an opaque fill so the page transition remains
+		// visible on macOS, Windows 11, and Linux's MyGo renderer.
+		ui.Row(c).
+			Absolute().
+			Top(0).
+			Left(0).
+			Right(0).
+			Height(barHeight).
+			Padding(0, bar.Right, 0, bar.Left).
+			Material(glass.Glass{Style: glass.Regular}).
+			BorderWidth(0, 0, 1, 0).
+			BorderColor(t.Border).
+			AlignItems(ui.Center).
+			Children(func() {
+				ui.Text(c, "DeepStudent").FontSize(16).Bold().SingleLine()
+				ui.Text(c, "  Go runtime").FontSize(12).TextColor(t.TextMuted).SingleLine()
+				ui.Spacer(c).DragWindow()
+				ui.Toolbar(c, func() {
+					if ui.Button(c, "对话").Clicked() {
+						s.selected = "chat"
+					}
+					if ui.Button(c, "设置").Clicked() {
+						s.selected = "settings"
+					}
+					if ui.Button(c, "切换主题").Clicked() {
+						s.dark = !s.dark
+					}
+				})
+			})
+
+		ui.Box(c).Absolute().Bottom(0).Left(0).Right(0).Height(statusHeight).Children(func() {
+			s.statusBar(c)
+		})
+	})
+}
+
+// nativeProgressiveBlur describes the fade used by the titlebar and bottom
+// scroll transition. It is intentionally kept as a pure helper so tests can
+// verify both light/dark radii and the direction of the gradient without
+// starting a desktop window.
+func nativeProgressiveBlur(theme *ui.Theme, top bool) glass.Blur {
+	radius := float32(14)
+	if theme != nil && theme.Dark {
+		radius = 16
+	}
+	strong := ui.RGBA(0, 0, 0, 0.92)
+	soft := ui.RGBA(0, 0, 0, 0.08)
+	if !top {
+		strong, soft = soft, strong
+	}
+	return glass.Blur{
+		Radius: radius,
+		Mask:   &ui.LinearGradient{From: strong, To: soft, Angle: 180, Start: 0, End: 1},
+	}
+}
+
+func (s *nativeShell) sidebar(c *ui.Context) {
+	ui.Sidebar(c, &s.selected, func() {
+		ui.SidebarSection(c, "工作区", nil, func() {
+			ui.SidebarItem(c, "chat", nil, "对话")
+			ui.SidebarItem(c, "resources", nil, "资料")
+			ui.SidebarItem(c, "tasks", nil, "任务")
+			ui.SidebarItem(c, "skills", nil, "技能")
+			ui.SidebarItem(c, "flashcards", nil, "卡片")
+		})
+		ui.SidebarSection(c, "管理", nil, func() {
+			ui.SidebarItem(c, "settings", nil, "设置")
+		})
+	}).Fill().Material(glass.Glass{Style: glass.Regular})
+}
+
+func (s *nativeShell) page(c *ui.Context) {
+	t := c.Theme()
+	ui.Column(c).Fill().Background(t.Background).Children(func() {
+		header := ui.Row(c).Padding(t.Space(5), t.Space(6), t.Space(3), t.Space(6)).AlignItems(ui.Center)
+		header.Children(func() {
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, s.pageTitle()).FontSize(22).Bold().SingleLine()
+				ui.Text(c, s.pageSubtitle()).FontSize(12).TextColor(t.TextMuted).SingleLine()
+			})
+			if ui.Button(c, "刷新状态").Clicked() {
+				s.lastRefresh = time.Now()
+				s.runtimeHealthy = true
+			}
+		})
+		ui.Divider(c)
+		// Chat owns a fixed composer below its growing timeline. A vertical
+		// Scroll measures its children with an unbounded height, which moves a
+		// composer nested inside it below the viewport on the native shell.
+		// Keep chat in a finite-height body so the message list grows into the
+		// available space and the input row stays visible and focusable. The
+		// other pages remain scrollable as before.
+		if s.selected == "chat" {
+			ui.Column(c).Grow(1).Padding(t.Space(6)).Children(func() {
+				s.chatPage(c)
+			})
+		} else {
+			ui.Scroll(c).Grow(1).Padding(t.Space(6)).Children(func() {
+				s.pageBody(c)
+			})
+		}
+	})
+}
+
+func (s *nativeShell) pageTitle() string {
+	switch s.selected {
+	case "resources":
+		return "资料"
+	case "tasks":
+		return "任务"
+	case "skills":
+		return "技能"
+	case "flashcards":
+		return "卡片"
+	case "settings":
+		return "设置"
+	default:
+		return "对话"
+	}
+}
+
+func (s *nativeShell) pageSubtitle() string {
+	switch s.selected {
+	case "settings":
+		return "原生导航已就绪，模型配置继续由 Go runtime 管理。"
+	case "chat":
+		return "原生对话骨架已连接 serverapp HTTP/SSE 契约。"
+	default:
+		return "原生页面继续复用现有 HTTP/SSE runtime。"
+	}
+}
+
+func (s *nativeShell) pageBody(c *ui.Context) {
+	switch s.selected {
+	case "settings":
+		s.settingsPage(c)
+	case "resources":
+		s.placeholderPage(c, "资料", "资料导入和预览继续复用 Go runtime API，原生编辑器正在完善。")
+	case "tasks":
+		s.placeholderPage(c, "任务", "任务数据继续由 serverapp 提供，页面由原生 MyGo 控件承接。")
+	case "skills":
+		s.placeholderPage(c, "技能", "技能数据仍由 Go runtime 管理，页面由原生 MyGo 控件承接。")
+	case "flashcards":
+		s.placeholderPage(c, "卡片", "卡片组和复习计划由原生 MyGo 页面承接。")
+	default:
+		s.chatPage(c)
+	}
+}
+
+func (s *nativeShell) chatPage(c *ui.Context) {
+	t := c.Theme()
+	messages := s.messageSnapshot()
+	sending := s.sendingState()
+	demoRunning := s.demoState()
+	attachmentBusy, attachmentNote := s.attachmentState()
+	ui.Column(c).Fill().Gap(t.Space(3)).Children(func() {
+		ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+			statusDot(c, t.Success)
+			ui.Text(c, "Go runtime 已连接 · HTTP/SSE").FontSize(12).TextColor(t.TextMuted)
+			ui.Spacer(c)
+			demoButton := ui.Button(c, "演示流式")
+			if demoRunning {
+				demoButton.TextColor(t.TextMuted)
+			}
+			if !demoRunning && demoButton.Clicked() {
+				s.startNativeDemo()
+			}
+		})
+		ui.List(c, &s.messagesList, len(messages), func(i int) {
+			message := messages[i]
+			row := ui.Box(c).MaxWidth(820).Padding(t.Space(3), t.Space(4)).Gap(t.Space(1)).Border(1, t.Border).Radius(t.Radius)
+			if message.role == "user" {
+				row.Background(t.SurfacePressed)
+			}
+			row.Children(func() {
+				label := "DeepStudent"
+				if message.role == "user" {
+					label = "你"
+				}
+				ui.Text(c, label).FontSize(12).Bold().TextColor(t.TextMuted).SingleLine()
+				s.renderMarkdown(c, message)
+			})
+		}).Grow(1).MinHeight(0).Gap(t.Space(3))
+		composer := ui.Row(c).Gap(t.Space(2)).AlignItems(ui.End).Padding(t.Space(2), t.Space(2)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular})
+		composer.Children(func() {
+			if ui.Button(c, "附件").Clicked() {
+				go s.pickAttachment()
+			}
+			input := ui.TextInput(c, &s.draft).Grow(1).Placeholder("输入消息，按 Enter 发送")
+			if attachmentBusy {
+				ui.Text(c, "上传中…").FontSize(11).TextColor(t.TextMuted).SingleLine()
+			}
+			if attachmentNote != "" && !attachmentBusy {
+				ui.Text(c, attachmentNote).FontSize(11).TextColor(t.TextMuted).SingleLine()
+			}
+			buttonLabel := "发送"
+			if sending {
+				buttonLabel = "取消"
+			}
+			button := ui.PrimaryButton(c, buttonLabel)
+			if sending {
+				if button.Clicked() {
+					s.cancelRun()
+				}
+			} else if input.Submitted() || button.Clicked() {
+				s.submitDraft()
+			}
+		})
+		ui.Text(c, "原生对话复用 serverapp 的 /api/v1/runs + SSE；Markdown、代码、SVG 和工具节点实时渲染。点击“演示流式”可离线查看 Demo。").FontSize(11).TextColor(t.TextMuted)
+	})
+}
+
+// renderMarkdown maps the dependency-free Markdown AST to MyGo primitives.
+// MyGo v0.3.0 RichText/Span is used for syntax-highlighted code. Blocks,
+// tables, headings and lists remain fully native and update as SSE snapshots
+// arrive.
+func (s *nativeShell) renderMarkdown(c *ui.Context, message nativeMessage) {
+	t := c.Theme()
+	nodes := message.nodes
+	if len(message.pending) > 0 {
+		nodes = append(append([]markdown.Node(nil), nodes...), message.pending...)
+	}
+	if len(nodes) == 0 && message.content != "" {
+		nodes = markdown.Parse(message.content)
+	}
+	for _, node := range nodes {
+		switch node.Kind {
+		case markdown.MathBlock:
+			s.renderMath(c, node.Math, true, t)
+		case markdown.Heading:
+			size := float32(22 - (node.Level-1)*2)
+			if size < 14 {
+				size = 14
+			}
+			if len(node.Inlines) == 0 {
+				ui.Text(c, node.Text).FontSize(size).Bold().Selectable()
+			} else {
+				ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+					for _, inline := range node.Inlines {
+						if inline.Math != nil {
+							s.renderMath(c, inline.Math, false, t)
+						} else if inline.Text != "" {
+							ui.Text(c, inline.Text).FontSize(size).Bold().Selectable()
+						}
+					}
+				})
+			}
+		case markdown.Code:
+			ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.SurfacePressed).Border(1, t.Border).Radius(t.Radius).Children(func() {
+				if node.Language != "" {
+					ui.Text(c, node.Language).FontSize(11).Bold().TextColor(t.TextMuted).SingleLine()
+				}
+				if strings.EqualFold(node.Language, "svg") {
+					s.renderSVG(c, node, t)
+				}
+				s.renderCode(c, node, t)
+			})
+		case markdown.Table:
+			ui.Box(c).Border(1, t.Border).Radius(t.Radius).Children(func() {
+				ui.Row(c).Background(t.SurfacePressed).Children(func() {
+					for _, cell := range node.Headers {
+						ui.Box(c).Grow(1).Padding(t.Space(2), t.Space(2)).Children(func() { ui.Text(c, cell).Bold().Selectable() })
+					}
+				})
+				for _, row := range node.Rows {
+					ui.Row(c).Children(func() {
+						for _, cell := range row {
+							ui.Box(c).Grow(1).Padding(t.Space(2), t.Space(2)).Children(func() { ui.Text(c, cell).Selectable() })
+						}
+					})
+				}
+			})
+		case markdown.List:
+			for _, line := range node.Lines {
+				ui.Text(c, "• "+line).Selectable()
+			}
+		case markdown.Quote:
+			ui.Box(c).Padding(t.Space(2), t.Space(3)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
+				if len(node.Inlines) > 0 {
+					s.renderInlines(c, node.Inlines, t)
+				} else {
+					ui.Text(c, node.Text).TextColor(t.TextMuted).Selectable()
+				}
+			})
+		case markdown.ToolCall:
+			s.renderToolCall(c, node, t)
+		case markdown.ToolResult:
+			s.renderToolResult(c, node, t)
+		case markdown.Rule:
+			ui.Divider(c)
+		default:
+			if node.Kind == markdown.Paragraph && len(node.Inlines) > 0 {
+				s.renderInlines(c, node.Inlines, t)
+			} else {
+				ui.Text(c, node.Text).Selectable()
+			}
+		}
+	}
+}
+
+// renderInlines keeps prose and inline math in one native row. Math is
+// converted to path-only SVG by the pure-Go renderer; if a provider emits a
+// command outside that renderer's supported TeX subset, the original source
+// remains visible as a selectable native text fallback.
+func (s *nativeShell) renderInlines(c *ui.Context, inlines []markdown.InlineNode, t *ui.Theme) {
+	ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+		for _, inline := range inlines {
+			if inline.Math == nil {
+				if inline.Text != "" {
+					ui.Text(c, inline.Text).Selectable()
+				}
+				continue
+			}
+			s.renderMath(c, inline.Math, false, t)
+		}
+	})
+}
+
+func (s *nativeShell) renderMath(c *ui.Context, formula *markdown.MathFormula, display bool, t *ui.Theme) {
+	if formula == nil {
+		return
+	}
+	size := 20
+	if display {
+		size = 28
+	}
+	svg, err := markdown.RenderMathSVG(formula, size)
+	if err != nil {
+		// Keep streamed or unsupported TeX readable rather than hiding it. The
+		// next SSE snapshot can replace this fallback once the formula closes.
+		ui.Text(c, formula.Raw).TextColor(t.Warning).Selectable()
+		return
+	}
+	vector, err := ui.ParseSVG(svg)
+	if err != nil || vector == nil {
+		ui.Text(c, formula.Raw).TextColor(t.Warning).Selectable()
+		return
+	}
+	image := ui.Image(c, vector)
+	if display {
+		ui.Box(c).Padding(t.Space(2), t.Space(3)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
+			image.MaxWidth(820).MaxHeight(220)
+		})
+	} else {
+		image.MaxHeight(30).MaxWidth(820)
+	}
+}
+
+// renderSVG asks MyGo's native SVG parser to draw a complete (or currently
+// parseable) fence. While an SSE fence is incomplete, the fallback card keeps
+// the stream visible; the next snapshot automatically upgrades it to a real
+// vector preview when closing markup arrives. No browser or WebView is used.
+func (s *nativeShell) renderSVG(c *ui.Context, node markdown.Node, t *ui.Theme) {
+	vector, err := ui.ParseSVG([]byte(node.Code))
+	if err != nil || vector == nil {
+		ui.Text(c, "SVG 预览 · 等待完整标记").FontSize(11).TextColor(t.Warning).SingleLine()
+		return
+	}
+	ui.Text(c, "SVG 预览 · 原生实时渲染").FontSize(11).TextColor(t.Success).SingleLine()
+	ui.Box(c).Padding(t.Space(2)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
+		ui.Image(c, vector).MaxWidth(820).MaxHeight(180)
+	})
+}
+
+func (s *nativeShell) renderToolCall(c *ui.Context, node markdown.Node, t *ui.Theme) {
+	ui.Box(c).Padding(t.Space(2), t.Space(3)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
+		ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "工具调用").FontSize(11).Bold().TextColor(t.Warning).SingleLine()
+			if node.ToolName != "" {
+				ui.Text(c, node.ToolName).FontSize(12).Bold().Selectable()
+			}
+			if node.ToolCallID != "" {
+				ui.Text(c, "#"+node.ToolCallID).FontSize(10).TextColor(t.TextMuted).SingleLine()
+			}
+		})
+		if node.Arguments != "" {
+			ui.Box(c).Padding(t.Space(1), t.Space(2)).Background(t.SurfacePressed).Border(1, t.Border).Radius(t.Radius).Children(func() {
+				s.renderToolPayload(c, node.Arguments, t)
+			})
+		}
+	})
+}
+
+func (s *nativeShell) renderToolResult(c *ui.Context, node markdown.Node, t *ui.Theme) {
+	ui.Box(c).Padding(t.Space(2), t.Space(3)).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Radius(t.Radius).Children(func() {
+		ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+			label := "工具结果"
+			color := t.Success
+			if node.Error {
+				label = "工具失败"
+				color = t.Warning
+			}
+			ui.Text(c, label).FontSize(11).Bold().TextColor(color).SingleLine()
+			if node.ToolName != "" {
+				ui.Text(c, node.ToolName).FontSize(12).Bold().Selectable()
+			}
+			if node.ToolCallID != "" {
+				ui.Text(c, "#"+node.ToolCallID).FontSize(10).TextColor(t.TextMuted).SingleLine()
+			}
+		})
+		if node.ErrorMessage != "" {
+			ui.Text(c, node.ErrorMessage).TextColor(t.Warning).Selectable()
+		}
+		if node.Output != "" {
+			ui.Box(c).Padding(t.Space(1), t.Space(2)).Background(t.SurfacePressed).Border(1, t.Border).Radius(t.Radius).Children(func() {
+				s.renderToolPayload(c, node.Output, t)
+			})
+		}
+	})
+}
+
+// renderToolPayload uses the same native syntax token path as fenced code,
+// while accepting plain-text tool output and pretty-printing JSON when valid.
+func (s *nativeShell) renderToolPayload(c *ui.Context, payload string, t *ui.Theme) {
+	payload = formatNativeToolPayload(payload)
+	node := markdown.Node{Kind: markdown.Code, Language: "json", Code: payload, Lines: strings.Split(payload, "\n"), Tokens: markdown.Highlight(payload, "json")}
+	s.renderCode(c, node, t)
+}
+
+func formatNativeToolPayload(payload string) string {
+	payload = strings.TrimSpace(payload)
+	if payload == "" {
+		return ""
+	}
+	var pretty bytes.Buffer
+	if json.Indent(&pretty, []byte(payload), "", "  ") == nil {
+		return pretty.String()
+	}
+	return payload
+}
+
+// renderCode maps each lexer token to a native MyGo Span. RichText handles
+// wrapping and newline preservation as one selectable element, while each
+// token keeps its own syntax color. There is no HTML/CSS or JavaScript here.
+func (s *nativeShell) renderCode(c *ui.Context, node markdown.Node, t *ui.Theme) {
+	spans := make([]ui.Span, 0, len(node.Tokens))
+	for _, token := range node.Tokens {
+		if token.Text == "" {
+			continue
+		}
+		span := ui.Span{Text: token.Text, Color: codeTokenColor(t, token.Kind)}
+		if token.Kind == "keyword" {
+			span.Weight = 600
+		}
+		spans = append(spans, span)
+	}
+	if len(spans) == 0 {
+		for _, line := range node.Lines {
+			spans = append(spans, ui.Span{Text: line, Color: t.Text})
+			spans = append(spans, ui.Span{Text: "\n", Color: t.Text})
+		}
+	}
+	if len(spans) > 0 {
+		ui.RichText(c, spans...).FontSize(12).Selectable()
+	}
+}
+
+func codeTokenColor(t *ui.Theme, kind string) ui.Color {
+	switch kind {
+	case "keyword":
+		return t.Warning
+	case "string":
+		return t.Success
+	case "comment", "whitespace", "punctuation":
+		return t.TextMuted
+	default:
+		return t.Text
+	}
+}
+
+func (s *nativeShell) placeholderPage(c *ui.Context, title, description string) {
+	t := c.Theme()
+	ui.Column(c).MaxWidth(820).Gap(t.Space(4)).Children(func() {
+		ui.Text(c, title).FontSize(18).Bold()
+		ui.Text(c, description).TextColor(t.TextMuted)
+		ui.Box(c).Padding(t.Space(4)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Children(func() {
+			ui.Text(c, "原生页面边界").Bold()
+			ui.Text(c, "原生壳提供可用导航和数据接缝，完整编辑体验正在完善。").FontSize(12).TextColor(t.TextMuted)
+		})
+	})
+}
+
+func (s *nativeShell) settingsPage(c *ui.Context) {
+	t := c.Theme()
+	if s.onboardingOpen {
+		s.onboardingPage(c)
+		return
+	}
+	ui.Row(c).AlignItems(ui.Start).Gap(t.Space(5)).Children(func() {
+		ui.Column(c).Width(176).Padding(t.Space(2)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Gap(t.Space(1)).Children(func() {
+			for _, tab := range []struct {
+				id, label string
+			}{
+				{id: "general", label: "常规"},
+				{id: "appearance", label: "外观"},
+				{id: "runtime", label: "运行环境"},
+			} {
+				button := ui.Button(c, tab.label)
+				button.FillWidth().TextAlign(ui.Start)
+				if s.settingsTab == tab.id {
+					button.Background(t.SurfacePressed).TextColor(t.Text)
+				}
+				if button.Clicked() {
+					s.settingsTab = tab.id
+				}
+			}
+		})
+		ui.Column(c).Grow(1).Gap(t.Space(4)).Children(func() {
+			s.settingsContent(c)
+		})
+	})
+}
+
+func (s *nativeShell) onboardingPage(c *ui.Context) {
+	t := c.Theme()
+	labels := []string{"学习目标", "学习方式", "模型", "运行环境"}
+	options := [][]string{
+		{"备考与考试", "跟上课程", "长期掌握技能"},
+		{"练习优先", "整理优先", "计划优先"},
+		{"DeepStudent Local", "OpenAI", "兼容 OpenAI 的服务"},
+		{"Go 运行环境", "浏览器运行环境"},
+	}
+	ui.Column(c).MaxWidth(760).Gap(t.Space(4)).Children(func() {
+		ui.Text(c, "首次设置").FontSize(12).TextColor(t.TextMuted).SingleLine()
+		ui.Text(c, "设置你的学习方式").FontSize(24).Bold()
+		ui.Text(c, fmt.Sprintf("第 %d / %d 步 · %s", s.onboardingStep+1, len(labels), labels[s.onboardingStep])).TextColor(t.TextMuted)
+		ui.Column(c).Gap(t.Space(2)).Children(func() {
+			for index, option := range options[s.onboardingStep] {
+				button := ui.Button(c, option)
+				button.FillWidth().TextAlign(ui.Start)
+				if s.onboarding[s.onboardingStep] == option {
+					button.Background(t.SurfacePressed).TextColor(t.Text)
+				}
+				if button.Clicked() {
+					s.onboarding[s.onboardingStep] = option
+				}
+				_ = index
+			}
+		})
+		ui.Row(c).Gap(t.Space(2)).Children(func() {
+			if ui.Button(c, "退出向导").Clicked() {
+				s.onboardingOpen = false
+			}
+			if s.onboardingStep > 0 && ui.Button(c, "上一步").Clicked() {
+				s.onboardingStep--
+			}
+			ui.Spacer(c)
+			label := "下一步"
+			if s.onboardingStep == len(labels)-1 {
+				label = "完成设置"
+			}
+			if ui.PrimaryButton(c, label).Clicked() {
+				if s.onboardingStep == len(labels)-1 {
+					s.onboardingOpen = false
+					s.onboardingStep = 0
+				} else {
+					s.onboardingStep++
+				}
+			}
+		})
+	})
+}
+
+func (s *nativeShell) settingsContent(c *ui.Context) {
+	t := c.Theme()
+	switch s.settingsTab {
+	case "appearance":
+		ui.Text(c, "外观").FontSize(16).Bold()
+		ui.Row(c).Gap(t.Space(3)).Children(func() {
+			if ui.Button(c, "浅色主题").Clicked() {
+				s.dark = false
+			}
+			if ui.Button(c, "深色主题").Clicked() {
+				s.dark = true
+			}
+		})
+		ui.Text(c, "主题选择使用原生控件，并应用到完整桌面壳。").FontSize(12).TextColor(t.TextMuted)
+	case "runtime":
+		ui.Text(c, "运行环境").FontSize(16).Bold()
+		ui.Text(c, "原生壳与 serverapp 共享同一个进程边界；这里读取并保存 Pi Agent 的完整配置。").TextColor(t.TextMuted)
+		ui.Column(c).Gap(t.Space(2)).Children(func() {
+			ui.Text(c, "默认服务商").FontSize(12).Bold()
+			ui.TextInput(c, &s.configProvider).Placeholder("例如 deterministic 或 deepseek")
+			ui.Text(c, "模型").FontSize(12).Bold()
+			ui.TextInput(c, &s.configModel).Placeholder("例如 stub 或 deepseek-chat")
+			ui.Text(c, "服务地址（可选）").FontSize(12).Bold()
+			ui.TextInput(c, &s.configBaseURL).Placeholder("例如 https://api.example.com/v1")
+			ui.Text(c, "密钥变量（只填变量名）").FontSize(12).Bold()
+			ui.TextInput(c, &s.configAPIKeyEnv).Placeholder("例如 DEEPSEEK_API_KEY")
+			ui.Divider(c)
+			ui.Text(c, "Pi Agent").FontSize(14).Bold()
+			ui.Text(c, "运行模式").FontSize(12).Bold()
+			ui.Row(c).Gap(t.Space(2)).Children(func() {
+				for _, mode := range []struct{ id, label string }{{"auto", "自动发现"}, {"manual", "手动托管"}, {"external", "外部连接"}} {
+					button := ui.Button(c, mode.label)
+					if s.configAgentMode == mode.id {
+						button.Background(t.SurfacePressed).TextColor(t.Text)
+					}
+					if button.Clicked() {
+						s.configAgentMode = mode.id
+					}
+				}
+			})
+			if s.configAgentMode != "auto" {
+				ui.Text(c, "Agent 地址").FontSize(12).Bold()
+				ui.TextInput(c, &s.configPiEndpoint).Placeholder("例如 http://127.0.0.1:8787")
+			}
+			if s.configAgentMode == "manual" {
+				ui.Text(c, "CLI 命令").FontSize(12).Bold()
+				ui.TextInput(c, &s.configPiCommand).Placeholder("例如 pi-agent-sidecar")
+				ui.Text(c, "CLI 参数（每行一个）").FontSize(12).Bold()
+				ui.TextInput(c, &s.configPiArgs).Placeholder("例如 --port\n8787")
+			}
+			ui.Text(c, "取消超时").FontSize(12).Bold()
+			ui.TextInput(c, &s.configPiCancelTimeout).Placeholder("例如 5s")
+			if s.configAgentMode == "external" {
+				ui.Row(c).Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "跳过启动外部进程").FontSize(12).Bold()
+					if ui.Button(c, map[bool]string{true: "已开启", false: "未开启"}[s.configPiSkipStart]).Clicked() {
+						s.configPiSkipStart = !s.configPiSkipStart
+					}
+				})
+			}
+			status := s.configPiStatus
+			ui.Box(c).Padding(t.Space(3)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Children(func() {
+				ui.Text(c, "Pi Agent 状态").Bold()
+				state := status.State
+				if state == "" {
+					state = "未启动"
+				}
+				ui.Text(c, fmt.Sprintf("%s · 配置 %s · 生效 %s", state, firstNativeNonEmpty(status.ConfiguredMode, s.configAgentMode), firstNativeNonEmpty(status.EffectiveMode, s.configAgentMode))).FontSize(12).TextColor(t.TextMuted)
+				if status.Command != "" {
+					ui.Text(c, "命令："+status.Command).FontSize(12).TextColor(t.TextMuted)
+				}
+				if len(status.Args) > 0 {
+					ui.Text(c, "参数："+strings.Join(status.Args, " ")).FontSize(12).TextColor(t.TextMuted)
+				}
+				if status.Endpoint != "" {
+					ui.Text(c, "地址："+status.Endpoint).FontSize(12).TextColor(t.TextMuted)
+				}
+				ui.Text(c, fmt.Sprintf("跳过启动：%s · 取消超时：%s", map[bool]string{true: "是", false: "否"}[s.configPiSkipStart], firstNativeNonEmpty(s.configPiCancelTimeout, "默认"))).FontSize(12).TextColor(t.TextMuted)
+				if status.Reason != "" {
+					ui.Text(c, status.Reason).FontSize(12).TextColor(t.TextMuted)
+				}
+				if len(s.piCandidates) > 0 {
+					ui.Text(c, "本机发现").FontSize(12).Bold()
+					for _, candidate := range s.piCandidates {
+						label := candidate.Command + " · " + firstNativeNonEmpty(candidate.Path, "路径未知")
+						if candidate.Version != "" {
+							label += " · " + candidate.Version
+						}
+						if candidate.SidecarCapable {
+							label += " · sidecar"
+						} else {
+							label += " · 需手动配置"
+						}
+						ui.Text(c, label).FontSize(12).TextColor(t.TextMuted)
+					}
+				}
+			})
+			if ui.PrimaryButton(c, "保存模型配置").Clicked() {
+				go s.saveRuntimeConfig()
+			}
+			ui.Text(c, "保存后可刷新状态，检查运行环境连接。").FontSize(12).TextColor(t.TextMuted)
+			if s.piDiscoveryNote != "" {
+				ui.Text(c, s.piDiscoveryNote).FontSize(12).TextColor(t.TextMuted)
+			}
+			if s.configNote != "" {
+				ui.Text(c, s.configNote).FontSize(12).TextColor(t.TextMuted)
+			}
+		})
+		ui.Box(c).Padding(t.Space(4)).Radius(t.Radius).Material(glass.Glass{Style: glass.Regular}).Border(1, t.Border).Children(func() {
+			ui.Text(c, "HTTP/SSE 状态").Bold()
+			ui.Row(c).Gap(t.Space(2)).Children(func() {
+				statusDot(c, t.Success)
+				ui.Text(c, fmt.Sprintf("健康 · 检查于 %s", s.lastRefresh.Format("15:04:05"))).FontSize(12).TextColor(t.TextMuted)
+			})
+		})
+	default:
+		ui.Text(c, "常规").FontSize(16).Bold()
+		ui.Text(c, "桌面壳偏好和导航已使用原生控件，账号与模型配置继续由 Go API 提供。").TextColor(t.TextMuted)
+		if ui.PrimaryButton(c, "打开首次设置向导").Clicked() {
+			s.onboardingOpen = true
+		}
+	}
+}
+
+func (s *nativeShell) statusBar(c *ui.Context) {
+	t := c.Theme()
+	ui.Row(c).Height(30).Padding(0, t.Space(4)).Gap(t.Space(2)).Material(glass.Glass{Style: glass.Regular}).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).AlignItems(ui.Center).Children(func() {
+		color := t.Success
+		label := "运行环境健康"
+		if !s.runtimeHealthy {
+			color = t.Warning
+			label = "运行环境重连中"
+		}
+		statusDot(c, color)
+		ui.Text(c, label).FontSize(11).TextColor(t.TextMuted).SingleLine()
+		ui.Spacer(c)
+		ui.Text(c, "原生壳 · Go runtime · MyGo v0.3.0").FontSize(11).TextColor(t.TextMuted).SingleLine()
+	})
+}
+
+func statusDot(c *ui.Context, color ui.Color) {
+	ui.Box(c).Size(8, 8).Radius(4).Background(color).Shrink(0)
+}
