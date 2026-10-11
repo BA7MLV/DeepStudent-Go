@@ -25,6 +25,9 @@ func TestParseMathInlineAndEscapes(t *testing.T) {
 	if len(inlines) != 3 || inlines[1].Math == nil || inlines[0].Text != "speed " || inlines[2].Math != nil {
 		t.Fatalf("inlines = %#v", inlines)
 	}
+	if got := ParseInlines("cost $5 and $10"); len(got) != 1 || got[0].Math != nil {
+		t.Fatalf("currency was parsed as math: %#v", got)
+	}
 }
 
 func TestMathStreamingBlocks(t *testing.T) {
