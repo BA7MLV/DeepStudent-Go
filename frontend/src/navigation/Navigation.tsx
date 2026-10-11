@@ -14,8 +14,8 @@ export function Navigation({ view, settingsOpen, onSelect, onOpenSettings, onTog
     <div className="ds-sidebar__brand">
       <span className="ds-sidebar__brand-name">DeepStudent</span>
       <div className="ds-sidebar__brand-actions">
-        <button className="ds-icon-button" type="button" onClick={() => onSelect("learning-hub")} aria-label="搜索资料"><Icon name="search" size={15} /></button>
-        <button className="ds-sidebar-toggle" type="button" onClick={onToggleSidebar} aria-label="收起侧边栏"><Icon name="sidebar" size={16} /></button>
+        <button className="ds-icon-button" type="button" onClick={() => onSelect("learning-hub")} aria-label="查找资料"><Icon name="search" size={15} /></button>
+        <button className="ds-sidebar-toggle" type="button" onClick={onToggleSidebar} aria-label="收起"><Icon name="sidebar" size={16} /></button>
       </div>
     </div>
     <nav className="ds-primary-nav" aria-label="主入口">
