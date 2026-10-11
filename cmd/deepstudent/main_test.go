@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func TestNativeShellEnabledDefaultsAndOverrides(t *testing.T) {
@@ -103,5 +105,22 @@ func TestNativeRunEventToolPayloads(t *testing.T) {
 	id, name, output, failed, message, ok := result.toolResult()
 	if !ok || id != "call-1" || name != "clock" || output != `{"hour":12}` || failed || message != "" {
 		t.Fatalf("tool result = %q %q %q %t %q %t", id, name, output, failed, message, ok)
+	}
+}
+
+func TestNativeProgressiveBlurMask(t *testing.T) {
+	light := nativeProgressiveBlur(&ui.Theme{}, true)
+	if light.Radius != 14 {
+		t.Fatalf("light blur radius = %v, want 14", light.Radius)
+	}
+	if light.Mask == nil || light.Mask.From.A <= light.Mask.To.A {
+		t.Fatalf("top blur mask should fade from strong to soft: %#v", light.Mask)
+	}
+	bottom := nativeProgressiveBlur(&ui.Theme{Dark: true}, false)
+	if bottom.Radius != 16 {
+		t.Fatalf("dark blur radius = %v, want 16", bottom.Radius)
+	}
+	if bottom.Mask == nil || bottom.Mask.From.A >= bottom.Mask.To.A {
+		t.Fatalf("bottom blur mask should fade from soft to strong: %#v", bottom.Mask)
 	}
 }
