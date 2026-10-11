@@ -786,6 +786,8 @@ func (s *nativeShell) startNativeDemo() {
 		}
 		steps := []demoStep{
 			{kind: "delta", text: "这是一个原生 SSE 增量 Demo。"},
+			{kind: "delta", text: " 行内公式：$E=mc^2$，分数 $\\frac{a_1+b}{\\sqrt{x}}$。\n\n"},
+			{kind: "delta", text: "$$\n\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix} \\times \\begin{pmatrix}x\\\\y\\end{pmatrix} = \\begin{pmatrix}5\\\\6\\end{pmatrix}\n$$\n\n"},
 			{kind: "delta", text: "\n\n先调用工具读取当前时间："},
 			{kind: "call", node: markdown.NewToolCallNode("demo-call-1", "clock", `{"timezone":"UTC"}`)},
 			{kind: "result", node: markdown.NewToolResultNode("demo-call-1", "clock", `{"time":"2026-10-11T02:00:00Z"}`, false, "")},
@@ -1330,12 +1332,26 @@ func (s *nativeShell) renderMarkdown(c *ui.Context, message nativeMessage) {
 	}
 	for _, node := range nodes {
 		switch node.Kind {
+		case markdown.MathBlock:
+			s.renderMath(c, node.Math, true, t)
 		case markdown.Heading:
 			size := float32(22 - (node.Level-1)*2)
 			if size < 14 {
 				size = 14
 			}
-			ui.Text(c, node.Text).FontSize(size).Bold().Selectable()
+			if len(node.Inlines) == 0 {
+				ui.Text(c, node.Text).FontSize(size).Bold().Selectable()
+			} else {
+				ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+					for _, inline := range node.Inlines {
+						if inline.Math != nil {
+							s.renderMath(c, inline.Math, false, t)
+						} else if inline.Text != "" {
+							ui.Text(c, inline.Text).FontSize(size).Bold().Selectable()
+						}
+					}
+				})
+			}
 		case markdown.Code:
 			ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.SurfacePressed).Border(1, t.Border).Radius(t.Radius).Children(func() {
 				if node.Language != "" {
@@ -1367,7 +1383,11 @@ func (s *nativeShell) renderMarkdown(c *ui.Context, message nativeMessage) {
 			}
 		case markdown.Quote:
 			ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
-				ui.Text(c, node.Text).TextColor(t.TextMuted).Selectable()
+				if len(node.Inlines) > 0 {
+					s.renderInlines(c, node.Inlines, t)
+				} else {
+					ui.Text(c, node.Text).TextColor(t.TextMuted).Selectable()
+				}
 			})
 		case markdown.ToolCall:
 			s.renderToolCall(c, node, t)
@@ -1376,8 +1396,60 @@ func (s *nativeShell) renderMarkdown(c *ui.Context, message nativeMessage) {
 		case markdown.Rule:
 			ui.Divider(c)
 		default:
-			ui.Text(c, node.Text).Selectable()
+			if node.Kind == markdown.Paragraph && len(node.Inlines) > 0 {
+				s.renderInlines(c, node.Inlines, t)
+			} else {
+				ui.Text(c, node.Text).Selectable()
+			}
 		}
+	}
+}
+
+// renderInlines keeps prose and inline math in one native row. Math is
+// converted to path-only SVG by the pure-Go renderer; if a provider emits a
+// command outside that renderer's supported TeX subset, the original source
+// remains visible as a selectable native text fallback.
+func (s *nativeShell) renderInlines(c *ui.Context, inlines []markdown.InlineNode, t *ui.Theme) {
+	ui.Row(c).Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+		for _, inline := range inlines {
+			if inline.Math == nil {
+				if inline.Text != "" {
+					ui.Text(c, inline.Text).Selectable()
+				}
+				continue
+			}
+			s.renderMath(c, inline.Math, false, t)
+		}
+	})
+}
+
+func (s *nativeShell) renderMath(c *ui.Context, formula *markdown.MathFormula, display bool, t *ui.Theme) {
+	if formula == nil {
+		return
+	}
+	size := 20
+	if display {
+		size = 28
+	}
+	svg, err := markdown.RenderMathSVG(formula, size)
+	if err != nil {
+		// Keep streamed or unsupported TeX readable rather than hiding it. The
+		// next SSE snapshot can replace this fallback once the formula closes.
+		ui.Text(c, formula.Raw).TextColor(t.Warning).Selectable()
+		return
+	}
+	vector, err := ui.ParseSVG(svg)
+	if err != nil || vector == nil {
+		ui.Text(c, formula.Raw).TextColor(t.Warning).Selectable()
+		return
+	}
+	image := ui.Image(c, vector)
+	if display {
+		ui.Box(c).Padding(t.Space(2), t.Space(3)).Background(t.Surface).Border(1, t.Border).Radius(t.Radius).Children(func() {
+			image.MaxWidth(820).MaxHeight(220)
+		})
+	} else {
+		image.MaxHeight(30).MaxWidth(820)
 	}
 }
 
