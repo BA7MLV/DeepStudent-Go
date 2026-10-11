@@ -99,7 +99,12 @@ func ParseInlines(text string) []InlineNode {
 		j := i + 1
 		for j < len(text) {
 			if text[j] == '$' && !escapedAt(text, j) && (j+1 >= len(text) || text[j+1] != '$') {
-				break
+				// Like CommonMark math extensions, reject a delimiter preceded
+				// by whitespace. This keeps currency such as "$5 and $10"
+				// ordinary text while accepting punctuation after a formula.
+				if j > i+1 && !unicode.IsSpace(rune(text[j-1])) {
+					break
+				}
 			}
 			j++
 		}
