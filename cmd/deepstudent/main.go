@@ -107,6 +107,12 @@ func run() error {
 			TitleBarStyle:   mygo.TitleBarHidden,
 			TitleBarHeight:  44,
 			BackgroundColor: "#f7f7f5",
+			// Keep the native surface eligible for the platform's vibrancy
+			// material. The in-window glass.Blur layers in native_shell.go provide
+			// the deterministic progressive transitions for every platform; this
+			// option adds the system backdrop where macOS/Windows support it.
+			Vibrancy:    mygo.VibrancySidebar,
+			Transparent: true,
 		}
 		if shell != nil {
 			opts.Content = ui.View(shell.view)
