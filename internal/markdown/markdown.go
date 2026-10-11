@@ -13,13 +13,15 @@ import (
 type Kind string
 
 const (
-	Paragraph Kind = "paragraph"
-	Heading   Kind = "heading"
-	Code      Kind = "code"
-	Table     Kind = "table"
-	List      Kind = "list"
-	Quote     Kind = "quote"
-	Rule      Kind = "rule"
+	Paragraph  Kind = "paragraph"
+	Heading    Kind = "heading"
+	Code       Kind = "code"
+	Table      Kind = "table"
+	List       Kind = "list"
+	Quote      Kind = "quote"
+	Rule       Kind = "rule"
+	MathInline Kind = "math.inline"
+	MathBlock  Kind = "math.block"
 	// ToolCall and ToolResult are emitted by the native chat event adapter for
 	// runtime tool execution events. They are deliberately separate from
 	// Markdown blocks so a tool event can be inserted between two streamed
@@ -44,6 +46,8 @@ type Node struct {
 	Rows      [][]string
 	Alignment []Alignment
 	Tokens    []Token
+	Inlines   []InlineNode
+	Math      *MathFormula
 
 	// Tool fields are populated for ToolCall and ToolResult nodes. Arguments
 	// and Output retain their JSON/text representation so the native renderer
@@ -93,11 +97,13 @@ type Token struct {
 // parser keeps the incomplete final line until the next call. Flush emits the
 // final unterminated block.
 type Parser struct {
-	line     []byte
-	block    []string
-	fence    string
-	language string
-	code     []string
+	line      []byte
+	block     []string
+	fence     string
+	language  string
+	code      []string
+	mathFence bool
+	mathLines []string
 }
 
 // NewParser creates a parser with no pending blocks.
@@ -111,6 +117,7 @@ func (p *Parser) Snapshot() []Node {
 	clone.line = append([]byte(nil), p.line...)
 	clone.block = append([]string(nil), p.block...)
 	clone.code = append([]string(nil), p.code...)
+	clone.mathLines = append([]string(nil), p.mathLines...)
 	return clone.Flush()
 }
 
@@ -140,6 +147,8 @@ func (p *Parser) Flush() []Node {
 	}
 	if p.fence != "" {
 		out = append(out, p.finishCode())
+	} else if p.mathFence {
+		out = append(out, p.finishMath())
 	} else {
 		out = append(out, p.finishBlock()...)
 	}
@@ -154,7 +163,25 @@ func (p *Parser) lineComplete(line string) []Node {
 		p.code = append(p.code, line)
 		return nil
 	}
+	if p.mathFence {
+		if strings.TrimSpace(line) == "$$" {
+			return []Node{p.finishMath()}
+		}
+		p.mathLines = append(p.mathLines, line)
+		return nil
+	}
 	trim := strings.TrimSpace(line)
+	if trim == "$$" {
+		out := p.finishBlock()
+		p.mathFence = true
+		p.mathLines = nil
+		return out
+	}
+	if strings.HasPrefix(trim, "$$") && strings.HasSuffix(trim, "$$") && len(trim) >= 4 {
+		out := p.finishBlock()
+		formula := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trim, "$$"), "$$"))
+		return append(out, Node{Kind: MathBlock, Text: formula, Math: ParseMath(formula, true)})
+	}
 	if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
 		out := p.finishBlock()
 		p.fence = trim[:3]
@@ -177,7 +204,7 @@ func (p *Parser) lineComplete(line string) []Node {
 	// surface can show them before the provider finishes the next paragraph.
 	if level, text, ok := heading(line); ok {
 		out := p.finishBlock()
-		return append(out, Node{Kind: Heading, Level: level, Text: text, Tokens: HighlightInline(text)})
+		return append(out, Node{Kind: Heading, Level: level, Text: text, Tokens: HighlightInline(text), Inlines: ParseInlines(text)})
 	}
 	if isRule(trim) {
 		out := p.finishBlock()
@@ -211,6 +238,12 @@ func (p *Parser) finishCode() Node {
 	return n
 }
 
+func (p *Parser) finishMath() Node {
+	raw := strings.Join(p.mathLines, "\n")
+	p.mathFence, p.mathLines = false, nil
+	return Node{Kind: MathBlock, Text: raw, Math: ParseMath(raw, true)}
+}
+
 func (p *Parser) finishBlock() []Node {
 	if len(p.block) == 0 {
 		return nil
@@ -240,9 +273,11 @@ func (p *Parser) finishBlock() []Node {
 		for _, line := range lines {
 			parts = append(parts, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), ">")))
 		}
-		return []Node{{Kind: Quote, Text: strings.Join(parts, "\n"), Tokens: HighlightInline(strings.Join(parts, "\n"))}}
+		text := strings.Join(parts, "\n")
+		return []Node{{Kind: Quote, Text: text, Tokens: HighlightInline(text), Inlines: ParseInlines(text)}}
 	}
-	return []Node{{Kind: Paragraph, Text: strings.Join(lines, "\n"), Tokens: HighlightInline(strings.Join(lines, "\n"))}}
+	text := strings.Join(lines, "\n")
+	return []Node{{Kind: Paragraph, Text: text, Tokens: HighlightInline(text), Inlines: ParseInlines(text)}}
 }
 
 func heading(line string) (int, string, bool) {
