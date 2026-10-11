@@ -14,7 +14,7 @@ type ProviderPreview = {
 // stay in the Go process environment and are never read, entered, or persisted
 // in the browser.
 const providerPreviews: ProviderPreview[] = [
-  { id: "deterministic", label: "DeepStudent Local（无密钥）", model: "stub", baseURL: "本地 runtime", apiKeyEnv: "不需要" },
+  { id: "deterministic", label: "本地模型（无密钥）", model: "stub", baseURL: "本地 runtime", apiKeyEnv: "不需要" },
   { id: "siliconflow", label: "SiliconFlow", model: "Qwen/Qwen2.5-7B-Instruct", baseURL: "https://api.siliconflow.cn/v1", apiKeyEnv: "SILICONFLOW_API_KEY" },
   { id: "deepseek", label: "DeepSeek", model: "deepseek-chat", baseURL: "https://api.deepseek.com/v1", apiKeyEnv: "DEEPSEEK_API_KEY" },
   { id: "custom-openai", label: "自定义 OpenAI 兼容服务", model: "未设置", baseURL: "由 DEEPSTUDENT_CUSTOM_BASE_URL 提供", apiKeyEnv: "DEEPSTUDENT_CUSTOM_API_KEY" },
@@ -22,8 +22,8 @@ const providerPreviews: ProviderPreview[] = [
 
 const agentModeOptions: Array<{ value: RuntimeAgentMode; label: string; description: string }> = [
   { value: "auto", label: "自动发现", description: "自动查找本地 Pi CLI；找不到时使用内置 Go Agent" },
-  { value: "manual", label: "手动托管 CLI", description: "由 Go runtime 按命令和参数启动 Pi Agent" },
-  { value: "external", label: "外部 Pi Agent", description: "连接已由其他进程启动的 Pi sidecar" },
+  { value: "manual", label: "手动托管", description: "由 Go runtime 按命令和参数启动 Pi Agent" },
+  { value: "external", label: "外部代理", description: "连接已由其他进程启动的 Pi sidecar" },
 ];
 
 const isAgentMode = (value: unknown): value is RuntimeAgentMode => agentModeOptions.some((option) => option.value === value);
@@ -98,7 +98,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   const saveConfig = async () => {
-    setStatus("正在保存…");
+    setStatus("保存中");
     try {
       const savedAgent = {
         mode: agentMode,
@@ -126,10 +126,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   };
 
   const checkConfig = async () => {
-    setStatus("正在测试连接…");
+    setStatus("测试中");
     try {
       await testRuntimeConfig({ provider: providerId, model, base_url: baseURL });
-      setStatus("连接成功，可以保存配置。");
+      setStatus("连接成功，可以保存设置。");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "连接失败");
     }
@@ -141,7 +141,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div>
           <p className="ds-settings-modal__eyebrow">DeepStudent</p>
           <h1 id="ds-settings-modal-title">设置</h1>
-          <p className="ds-settings-modal__subtitle">模型服务商与运行环境</p>
+          <p className="ds-settings-modal__subtitle">模型与运行环境</p>
         </div>
         <button className="ds-icon-button" type="button" onClick={onClose} aria-label="关闭设置"><Icon name="x" size={18} /></button>
       </header>
@@ -149,13 +149,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="ds-settings-empty-state" role="status">
           <span className="ds-settings-empty-state__icon"><Icon name="settings" size={20} /></span>
           <div>
-            <b>{runtimeConfig ? "Go runtime 配置已连接" : "正在读取服务商配置"}</b>
+            <b>{runtimeConfig ? "已连接" : "读取配置"}</b>
             <p>{runtimeConfig ? "修改配置后可保存，下一条消息将立即使用新模型；密钥仍由 Go 进程环境变量管理。" : "请确认本地 Go runtime 已启动；密钥不会进入页面，也不会写入浏览器存储。"}</p>
           </div>
         </div>
         <section className="ds-settings-provider" aria-labelledby="ds-provider-heading">
           <div className="ds-settings-provider__heading">
-            <div><h2 id="ds-provider-heading">模型配置</h2><p>编辑服务商配置并保存；保存时会检查 Go runtime 连接状态。</p></div>
+            <div><h2 id="ds-provider-heading">模型设置</h2><p>编辑服务商配置并保存；保存时会检查 Go runtime 连接状态。</p></div>
           </div>
           <label className="ds-settings-field">
             <span>服务商 <small>provider</small></span>
@@ -178,17 +178,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </section>
         <section className="ds-settings-provider" aria-labelledby="ds-agent-heading">
           <div className="ds-settings-provider__heading">
-            <div><h2 id="ds-agent-heading">Agent 运行模式</h2><p>选择消息由哪个 Agent 处理；CLI 参数每行填写一个参数。</p></div>
+            <div><h2 id="ds-agent-heading">运行模式</h2><p>选择消息由哪个 Agent 处理；CLI 参数每行填写一个参数。</p></div>
           </div>
           <label className="ds-settings-field">
             <span>运行模式 <small>pi_mode</small></span>
-            <select value={agentMode} onChange={(event) => setAgentMode(event.target.value as RuntimeAgentMode)} aria-label="Agent 运行模式">
+            <select value={agentMode} onChange={(event) => setAgentMode(event.target.value as RuntimeAgentMode)} aria-label="运行模式">
               {agentModeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
           {agentMode !== "auto" && <label className="ds-settings-field">
-            <span>Agent 地址 <small>pi_endpoint</small></span>
-            <input value={piEndpoint} onChange={(event) => setPiEndpoint(event.target.value)} placeholder="http://127.0.0.1:8787" aria-label="Agent 地址" />
+            <span>代理地址 <small>pi_endpoint</small></span>
+            <input value={piEndpoint} onChange={(event) => setPiEndpoint(event.target.value)} placeholder="http://127.0.0.1:8787" aria-label="代理地址" />
           </label>}
           {agentMode === "external" && <label className="ds-settings-field ds-settings-field--checkbox">
             <span>跳过启动 <small>pi_skip_start</small></span>
@@ -212,9 +212,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       </main>
       <footer className="ds-settings-modal__footer">
         <p>{status || "配置会保存到本机；API key 不会进入页面或保存，api_key_env 仅用于显示。先测试连接，再保存模型设置。"}</p>
-        <button type="button" className="ds-secondary-button" onClick={() => void checkConfig()} disabled={!runtimeConfig || status === "正在测试连接…"}>测试连接</button>
-        <button type="button" className="ds-primary-button" onClick={() => void saveConfig()} disabled={!runtimeConfig || status === "正在保存…"}>{status === "正在保存…" ? "保存中…" : "保存配置"}</button>
-        <button type="button" className="ds-secondary-button" onClick={onClose}>完成</button>
+        <button type="button" className="ds-secondary-button" onClick={() => void checkConfig()} disabled={!runtimeConfig || status === "测试中"}>测试连接</button>
+        <button type="button" className="ds-primary-button" onClick={() => void saveConfig()} disabled={!runtimeConfig || status === "保存中"}>{status === "保存中" ? "保存中…" : "保存设置"}</button>
+        <button type="button" className="ds-secondary-button" onClick={onClose}>关闭</button>
       </footer>
     </section>
   </div>;
