@@ -27,3 +27,14 @@ func TestHighlight(t *testing.T) {
 	for _, token := range tokens { if token.Kind == "keyword" { haveKeyword = true }; if token.Kind == "number" { haveNumber = true }; if token.Kind == "comment" { haveComment = true } }
 	if !haveKeyword || !haveNumber || !haveComment { t.Fatalf("tokens = %#v", tokens) }
 }
+
+func TestToolNodes(t *testing.T) {
+	call := NewToolCallNode("call-1", "clock", `{"tz":"UTC"}`)
+	if call.Kind != ToolCall || call.ToolCallID != "call-1" || call.ToolName != "clock" || call.Arguments == "" {
+		t.Fatalf("tool call = %#v", call)
+	}
+	result := NewToolResultNode("call-1", "clock", `{"hour":12}`, false, "")
+	if result.Kind != ToolResult || result.ToolCallID != "call-1" || result.Output == "" || result.Error {
+		t.Fatalf("tool result = %#v", result)
+	}
+}
