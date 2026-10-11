@@ -20,6 +20,64 @@
   --ds-ease: cubic-bezier(.22,1,.36,1);
 }
 :root[data-theme="dark"] { color-scheme: dark; --ds-bg:#161616; --ds-nav:#1d1d1d; --ds-panel:#202020; --ds-panel-muted:#292929; --ds-fg:#f5f5f5; --ds-muted:#9a9a9a; --ds-border:#343434; --ds-hover:rgba(255,255,255,.075); --ds-active:rgba(255,255,255,.11); --ds-accent:#f5f5f5; --ds-accent-soft:rgba(255,255,255,.1); --ds-title-accent:#93c5fd; --ds-voice-color:#60a5fa; }
+
+/* Progressive glass tokens shared with the native MyGo shell.  Keep the
+   fallback gradients opaque enough to read on WebViews that do not expose
+   backdrop-filter, while the supported path lets the page continue to show
+   through each surface.  The blur radii intentionally increase as a surface
+   moves closer to the controls: page < sidebar < titlebar < composer. */
+:root {
+  --ds-glass-page: rgba(255,255,255,.72);
+  --ds-glass-page-fallback: linear-gradient(135deg,rgba(255,255,255,.98) 0%,rgba(248,250,255,.94) 52%,rgba(235,242,255,.88) 100%);
+  --ds-glass-sidebar: rgba(247,247,247,.78);
+  --ds-glass-sidebar-fallback: linear-gradient(160deg,rgba(247,247,247,.98) 0%,rgba(236,240,248,.92) 100%);
+  --ds-glass-header: rgba(255,255,255,.68);
+  --ds-glass-header-fallback: linear-gradient(180deg,rgba(255,255,255,.97) 0%,rgba(248,250,255,.86) 100%);
+  --ds-glass-input: rgba(255,255,255,.82);
+  --ds-glass-input-fallback: linear-gradient(180deg,rgba(255,255,255,.96) 0%,rgba(242,246,255,.9) 100%);
+  --ds-glass-border: rgba(100,116,139,.2);
+  --ds-glass-shadow: rgba(15,23,42,.1);
+  --ds-progressive-strong: rgba(255,255,255,.92);
+  --ds-progressive-soft: rgba(255,255,255,.08);
+  --ds-progressive-top-fallback: linear-gradient(180deg,var(--ds-progressive-strong),var(--ds-progressive-soft));
+  --ds-progressive-bottom-fallback: linear-gradient(180deg,var(--ds-progressive-soft),var(--ds-progressive-strong));
+  --ds-progressive-blur-page: 4px;
+  --ds-progressive-blur-sidebar: 20px;
+  --ds-progressive-blur-header: 14px;
+  --ds-progressive-blur-input: 24px;
+  --ds-progressive-blur-bottom: 14px;
+  --ds-progressive-saturation: 135%;
+  --ds-progressive-strip-height: 58px;
+  /* Compatibility aliases for components that opt into the shared glass
+     surface class. */
+  --ds-glass-light: var(--ds-glass-page);
+  --ds-glass-soft-light: var(--ds-glass-sidebar);
+  --ds-glass-dark: rgba(22,22,22,.74);
+  --ds-glass-soft-dark: rgba(29,29,29,.82);
+  --ds-glass-bg: var(--ds-glass-page);
+  --ds-glass-soft-bg: var(--ds-glass-sidebar);
+  --ds-blur-sidebar: var(--ds-progressive-blur-sidebar);
+  --ds-blur-header: var(--ds-progressive-blur-header);
+  --ds-blur-scroll: var(--ds-progressive-blur-bottom);
+  --ds-blur-composer: var(--ds-progressive-blur-input);
+  --ds-blur-saturation: 1.35;
+}
+:root[data-theme="dark"] {
+  --ds-glass-page: rgba(22,22,22,.74);
+  --ds-glass-page-fallback: linear-gradient(135deg,rgba(22,22,22,.98) 0%,rgba(28,31,40,.95) 52%,rgba(23,31,48,.9) 100%);
+  --ds-glass-sidebar: rgba(29,29,29,.82);
+  --ds-glass-sidebar-fallback: linear-gradient(160deg,rgba(29,29,29,.98) 0%,rgba(29,33,43,.94) 100%);
+  --ds-glass-header: rgba(22,22,22,.72);
+  --ds-glass-header-fallback: linear-gradient(180deg,rgba(22,22,22,.98) 0%,rgba(28,31,40,.9) 100%);
+  --ds-glass-input: rgba(32,32,32,.86);
+  --ds-glass-input-fallback: linear-gradient(180deg,rgba(32,32,32,.98) 0%,rgba(27,32,44,.93) 100%);
+  --ds-glass-border: rgba(203,213,225,.18);
+  --ds-glass-shadow: rgba(0,0,0,.34);
+  --ds-progressive-strong: rgba(22,22,22,.94);
+  --ds-progressive-soft: rgba(22,22,22,.1);
+  --ds-glass-dark: var(--ds-glass-page);
+  --ds-glass-soft-dark: var(--ds-glass-sidebar);
+}
 * { box-sizing: border-box; }
 html, body, #app { margin:0; min-width:720px; min-height:100%; height:100%; }
 body { background:var(--ds-bg); color:var(--ds-fg); font:14px/1.5 var(--ds-font); -webkit-font-smoothing:antialiased; }
@@ -291,4 +349,130 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     height:100%;
     pointer-events:none;
   }
+}
+
+/* Shared progressive-glass surfaces. The native shell uses MyGo glass.Blur;
+   this WebView path uses backdrop-filter when available and the same masked
+   gradients as an explicit fallback when it is not. */
+.ds-shell.ds-progressive-blur {
+  position:relative;
+  isolation:isolate;
+  background:var(--ds-glass-page);
+  -webkit-backdrop-filter:blur(var(--ds-progressive-blur-page)) saturate(var(--ds-progressive-saturation));
+  backdrop-filter:blur(var(--ds-progressive-blur-page)) saturate(var(--ds-progressive-saturation));
+}
+.ds-progressive-blur .ds-body,
+.ds-progressive-blur .ds-main,
+.ds-progressive-blur .ds-main__content { background:transparent; }
+.ds-progressive-blur .ds-glass,
+.ds-progressive-blur .ds-sidebar,
+.ds-progressive-blur .ds-main__header,
+.ds-progressive-blur .ds-composer-dock,
+.ds-progressive-blur .ds-panel,
+.ds-progressive-blur .ds-resource-tree,
+.ds-progressive-blur .ds-resource-card,
+.ds-progressive-blur .ds-skill-card,
+.ds-progressive-blur .ds-metric-card,
+.ds-progressive-blur .ds-chat-message,
+.ds-progressive-blur .ds-empty-state,
+.ds-progressive-blur .ds-settings-modal__card,
+.ds-progressive-blur .ds-onboarding__card {
+  background:var(--ds-glass-page);
+  border-color:var(--ds-glass-border);
+  -webkit-backdrop-filter:blur(var(--ds-progressive-blur-header)) saturate(var(--ds-progressive-saturation));
+  backdrop-filter:blur(var(--ds-progressive-blur-header)) saturate(var(--ds-progressive-saturation));
+}
+.ds-progressive-blur .ds-sidebar {
+  background:var(--ds-glass-sidebar);
+  -webkit-backdrop-filter:blur(var(--ds-progressive-blur-sidebar)) saturate(var(--ds-progressive-saturation));
+  backdrop-filter:blur(var(--ds-progressive-blur-sidebar)) saturate(var(--ds-progressive-saturation));
+}
+.ds-progressive-blur .ds-main__header {
+  position:relative;
+  z-index:5;
+  background:var(--ds-glass-header);
+  border-bottom-color:var(--ds-glass-border);
+}
+.ds-progressive-blur .ds-main__content {
+  position:relative;
+  isolation:isolate;
+}
+.ds-progressive-blur .ds-main__content::before,
+.ds-progressive-blur .ds-main__content::after {
+  position:absolute;
+  right:0;
+  left:0;
+  z-index:3;
+  height:var(--ds-progressive-strip-height);
+  pointer-events:none;
+  content:"";
+  -webkit-backdrop-filter:blur(var(--ds-progressive-blur-bottom)) saturate(var(--ds-progressive-saturation));
+  backdrop-filter:blur(var(--ds-progressive-blur-bottom)) saturate(var(--ds-progressive-saturation));
+}
+.ds-progressive-blur .ds-main__content::before {
+  top:0;
+  -webkit-mask-image:linear-gradient(to bottom,#000 0%,rgba(0,0,0,.72) 38%,transparent 100%);
+  mask-image:linear-gradient(to bottom,#000 0%,rgba(0,0,0,.72) 38%,transparent 100%);
+}
+.ds-progressive-blur .ds-main__content::after {
+  bottom:0;
+  -webkit-mask-image:linear-gradient(to top,#000 0%,rgba(0,0,0,.72) 38%,transparent 100%);
+  mask-image:linear-gradient(to top,#000 0%,rgba(0,0,0,.72) 38%,transparent 100%);
+}
+.ds-progressive-blur .ds-composer-dock {
+  position:relative;
+  z-index:6;
+  background:var(--ds-glass-input);
+  border-top-color:var(--ds-glass-border);
+  -webkit-backdrop-filter:blur(var(--ds-progressive-blur-input)) saturate(var(--ds-progressive-saturation));
+  backdrop-filter:blur(var(--ds-progressive-blur-input)) saturate(var(--ds-progressive-saturation));
+}
+.ds-progressive-blur .ds-composer {
+  background:var(--ds-glass-input);
+  border-color:var(--ds-glass-border);
+  -webkit-backdrop-filter:blur(var(--ds-progressive-blur-input)) saturate(var(--ds-progressive-saturation));
+  backdrop-filter:blur(var(--ds-progressive-blur-input)) saturate(var(--ds-progressive-saturation));
+}
+.ds-progressive-blur .ds-composer-dock::before {
+  position:absolute;
+  right:0;
+  bottom:100%;
+  left:0;
+  height:var(--ds-progressive-strip-height);
+  pointer-events:none;
+  content:"";
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0%,rgba(0,0,0,.72) 66%,#000 100%);
+  mask-image:linear-gradient(to bottom,transparent 0%,rgba(0,0,0,.72) 66%,#000 100%);
+  -webkit-backdrop-filter:blur(var(--ds-progressive-blur-bottom)) saturate(var(--ds-progressive-saturation));
+  backdrop-filter:blur(var(--ds-progressive-blur-bottom)) saturate(var(--ds-progressive-saturation));
+}
+.ds-progressive-blur .ds-thread-viewport {
+  position:relative;
+  scroll-padding-block-end:var(--ds-progressive-strip-height);
+}
+
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  .ds-shell.ds-progressive-blur { background:var(--ds-glass-page-fallback); }
+  .ds-progressive-blur .ds-sidebar { background:var(--ds-glass-sidebar-fallback); }
+  .ds-progressive-blur .ds-main__header { background:var(--ds-glass-header-fallback); }
+  .ds-progressive-blur .ds-composer-dock,
+  .ds-progressive-blur .ds-composer,
+  .ds-progressive-blur .ds-panel,
+  .ds-progressive-blur .ds-resource-tree,
+  .ds-progressive-blur .ds-resource-card,
+  .ds-progressive-blur .ds-skill-card,
+  .ds-progressive-blur .ds-metric-card,
+  .ds-progressive-blur .ds-chat-message,
+  .ds-progressive-blur .ds-empty-state { background:var(--ds-glass-input-fallback); }
+  .ds-progressive-blur .ds-main__content::before { background:var(--ds-progressive-top-fallback); -webkit-backdrop-filter:none; backdrop-filter:none; }
+  .ds-progressive-blur .ds-composer-dock::before { background:var(--ds-progressive-bottom-fallback); -webkit-backdrop-filter:none; backdrop-filter:none; }
+  .ds-progressive-blur .ds-main__content::after { background:var(--ds-progressive-bottom-fallback); -webkit-backdrop-filter:none; backdrop-filter:none; }
+}
+@media (prefers-reduced-transparency:reduce) {
+  .ds-progressive-blur .ds-sidebar,
+  .ds-progressive-blur .ds-main__header,
+  .ds-progressive-blur .ds-composer-dock,
+  .ds-progressive-blur .ds-composer,
+  .ds-progressive-blur .ds-panel { -webkit-backdrop-filter:none; backdrop-filter:none; }
+  .ds-shell.ds-progressive-blur { background:var(--ds-bg); }
 }
