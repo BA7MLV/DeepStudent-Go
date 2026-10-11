@@ -10,6 +10,10 @@ func TestParseMathCommonConstructs(t *testing.T) {
 	if formula.Expr.Children[0].Kind != MathSequence || formula.Expr.Children[1].Kind != MathSqrt {
 		t.Fatalf("fraction children = %#v", formula.Expr.Children)
 	}
+	greek := ParseMath("α + β", false)
+	if !greek.Valid || greek.Expr.Kind != MathSequence || greek.Expr.Children[0].Text != "α" {
+		t.Fatalf("unicode math = %#v", greek.Expr)
+	}
 	matrix := ParseMath(`\begin{pmatrix}a&b\\c&d\end{pmatrix}`, true)
 	if !matrix.Valid || matrix.Expr.Kind != MathMatrix || len(matrix.Expr.Rows) != 2 || len(matrix.Expr.Rows[0]) != 2 {
 		t.Fatalf("matrix = %#v", matrix)
