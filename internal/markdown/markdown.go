@@ -49,11 +49,11 @@ type Node struct {
 	// and Output retain their JSON/text representation so the native renderer
 	// can pretty-print them without coupling the markdown package to runtime
 	// protocol types.
-	ToolCallID  string
-	ToolName    string
-	Arguments   string
-	Output      string
-	Error       bool
+	ToolCallID   string
+	ToolName     string
+	Arguments    string
+	Output       string
+	Error        bool
 	ErrorMessage string
 }
 
@@ -93,11 +93,11 @@ type Token struct {
 // parser keeps the incomplete final line until the next call. Flush emits the
 // final unterminated block.
 type Parser struct {
-	line []byte
-	block []string
-	fence string
+	line     []byte
+	block    []string
+	fence    string
 	language string
-	code []string
+	code     []string
 }
 
 // NewParser creates a parser with no pending blocks.
@@ -121,7 +121,9 @@ func (p *Parser) Feed(chunk []byte) []Node {
 	var out []Node
 	for {
 		i := bytes.IndexByte(p.line, '\n')
-		if i < 0 { break }
+		if i < 0 {
+			break
+		}
 		line := strings.TrimSuffix(string(p.line[:i]), "\r")
 		p.line = p.line[i+1:]
 		out = append(out, p.lineComplete(line)...)
@@ -175,7 +177,7 @@ func (p *Parser) lineComplete(line string) []Node {
 	// surface can show them before the provider finishes the next paragraph.
 	if level, text, ok := heading(line); ok {
 		out := p.finishBlock()
-		return append(out, Node{Kind: Heading, Level: level, Text: text, Tokens: HighlightInline(text)} )
+		return append(out, Node{Kind: Heading, Level: level, Text: text, Tokens: HighlightInline(text)})
 	}
 	if isRule(trim) {
 		out := p.finishBlock()
@@ -210,7 +212,9 @@ func (p *Parser) finishCode() Node {
 }
 
 func (p *Parser) finishBlock() []Node {
-	if len(p.block) == 0 { return nil }
+	if len(p.block) == 0 {
+		return nil
+	}
 	lines := append([]string(nil), p.block...)
 	p.block = nil
 	if len(lines) >= 2 && isTableSeparator(lines[1]) && isPipeLine(lines[0]) {
@@ -218,18 +222,24 @@ func (p *Parser) finishBlock() []Node {
 		align := tableAlignment(lines[1])
 		rows := make([][]string, 0, len(lines)-2)
 		for _, line := range lines[2:] {
-			if isPipeLine(line) { rows = append(rows, splitTableRow(line)) }
+			if isPipeLine(line) {
+				rows = append(rows, splitTableRow(line))
+			}
 		}
 		return []Node{{Kind: Table, Headers: headers, Rows: rows, Alignment: align}}
 	}
 	if isListLine(lines[0]) {
 		parts := make([]string, 0, len(lines))
-		for _, line := range lines { parts = append(parts, strings.TrimSpace(stripListMarker(line))) }
+		for _, line := range lines {
+			parts = append(parts, strings.TrimSpace(stripListMarker(line)))
+		}
 		return []Node{{Kind: List, Lines: parts}}
 	}
 	if isQuoteLine(lines[0]) {
 		parts := make([]string, 0, len(lines))
-		for _, line := range lines { parts = append(parts, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), ">"))) }
+		for _, line := range lines {
+			parts = append(parts, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), ">")))
+		}
 		return []Node{{Kind: Quote, Text: strings.Join(parts, "\n"), Tokens: HighlightInline(strings.Join(parts, "\n"))}}
 	}
 	return []Node{{Kind: Paragraph, Text: strings.Join(lines, "\n"), Tokens: HighlightInline(strings.Join(lines, "\n"))}}
@@ -238,50 +248,92 @@ func (p *Parser) finishBlock() []Node {
 func heading(line string) (int, string, bool) {
 	trim := strings.TrimSpace(line)
 	i := 0
-	for i < len(trim) && trim[i] == '#' { i++ }
-	if i == 0 || i > 6 || i >= len(trim) || trim[i] != ' ' { return 0, "", false }
+	for i < len(trim) && trim[i] == '#' {
+		i++
+	}
+	if i == 0 || i > 6 || i >= len(trim) || trim[i] != ' ' {
+		return 0, "", false
+	}
 	return i, strings.TrimSpace(trim[i+1:]), true
 }
 func isRule(s string) bool {
-	if len(s) < 3 { return false }
+	if len(s) < 3 {
+		return false
+	}
 	first := s[0]
-	if first != '-' && first != '*' && first != '_' { return false }
-	for _, c := range s { if c != rune(first) && c != ' ' { return false } }
+	if first != '-' && first != '*' && first != '_' {
+		return false
+	}
+	for _, c := range s {
+		if c != rune(first) && c != ' ' {
+			return false
+		}
+	}
 	return true
 }
 func isListLine(s string) bool {
 	t := strings.TrimSpace(s)
-	if len(t) < 2 { return false }
-	if t[0] == '-' || t[0] == '*' || t[0] == '+' { return t[1] == ' ' }
-	for i := 0; i < len(t) && t[i] >= '0' && t[i] <= '9'; i++ { if i+1 < len(t) && t[i+1] == '.' { return strings.HasPrefix(t[i+2:], " ") } }
+	if len(t) < 2 {
+		return false
+	}
+	if t[0] == '-' || t[0] == '*' || t[0] == '+' {
+		return t[1] == ' '
+	}
+	for i := 0; i < len(t) && t[i] >= '0' && t[i] <= '9'; i++ {
+		if i+1 < len(t) && t[i+1] == '.' {
+			return strings.HasPrefix(t[i+2:], " ")
+		}
+	}
 	return false
 }
 func isQuoteLine(s string) bool { return strings.HasPrefix(strings.TrimSpace(s), ">") }
 func stripListMarker(s string) string {
 	t := strings.TrimSpace(s)
-	if len(t) >= 2 && (t[0] == '-' || t[0] == '*' || t[0] == '+') && t[1] == ' ' { return t[2:] }
-	for i := 0; i < len(t) && t[i] >= '0' && t[i] <= '9'; i++ { if i+1 < len(t) && t[i+1] == '.' { return strings.TrimSpace(t[i+2:]) } }
+	if len(t) >= 2 && (t[0] == '-' || t[0] == '*' || t[0] == '+') && t[1] == ' ' {
+		return t[2:]
+	}
+	for i := 0; i < len(t) && t[i] >= '0' && t[i] <= '9'; i++ {
+		if i+1 < len(t) && t[i+1] == '.' {
+			return strings.TrimSpace(t[i+2:])
+		}
+	}
 	return t
 }
 func isPipeLine(s string) bool { return strings.Contains(s, "|") }
 func isTableSeparator(s string) bool {
 	cells := splitTableRow(s)
-	if len(cells) == 0 { return false }
+	if len(cells) == 0 {
+		return false
+	}
 	for _, cell := range cells {
 		cell = strings.TrimSpace(cell)
-		if strings.HasPrefix(cell, ":") { cell = cell[1:] }
-		if strings.HasSuffix(cell, ":") { cell = cell[:len(cell)-1] }
-		if len(cell) < 1 { return false }
-		if strings.Trim(cell, "-") != "" { return false }
+		if strings.HasPrefix(cell, ":") {
+			cell = cell[1:]
+		}
+		if strings.HasSuffix(cell, ":") {
+			cell = cell[:len(cell)-1]
+		}
+		if len(cell) < 1 {
+			return false
+		}
+		if strings.Trim(cell, "-") != "" {
+			return false
+		}
 	}
 	return true
 }
 func splitTableRow(s string) []string {
 	t := strings.TrimSpace(s)
-	if strings.HasPrefix(t, "|") { t = t[1:] }
-	if strings.HasSuffix(t, "|") { t = t[:len(t)-1] }
+	if strings.HasPrefix(t, "|") {
+		t = t[1:]
+	}
+	if strings.HasSuffix(t, "|") {
+		t = t[:len(t)-1]
+	}
 	cells := strings.Split(t, "|")
-	for i := range cells { cells[i] = strings.TrimSpace(cells[i]) }
+	for i := range cells {
+		cells[i] = strings.TrimSpace(cells[i])
+	}
 	return cells
 }
 func tableAlignment(s string) []Alignment {
@@ -289,7 +341,13 @@ func tableAlignment(s string) []Alignment {
 	for i, cell := range splitTableRow(s) {
 		cell = strings.TrimSpace(cell)
 		left, right := strings.HasPrefix(cell, ":"), strings.HasSuffix(cell, ":")
-		if left && right { align[i] = AlignCenter } else if right { align[i] = AlignRight } else if left { align[i] = AlignLeft }
+		if left && right {
+			align[i] = AlignCenter
+		} else if right {
+			align[i] = AlignRight
+		} else if left {
+			align[i] = AlignLeft
+		}
 	}
 	return align
 }
@@ -307,6 +365,8 @@ func Parse(input string) []Node {
 func Scanner(r *bufio.Scanner) []Node {
 	p := NewParser()
 	var out []Node
-	for r.Scan() { out = append(out, p.Feed(append(r.Bytes(), '\n'))...) }
+	for r.Scan() {
+		out = append(out, p.Feed(append(r.Bytes(), '\n'))...)
+	}
 	return append(out, p.Flush()...)
 }
