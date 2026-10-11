@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -37,9 +36,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// MyGo serves the embedded React document from this custom origin. Keep
+	// The optional WebView debug page is served from this custom origin. Keep
 	// the origin desktop-only so the shared server defaults remain strict.
-	// MyGo 0.3.7 uses a custom origin on macOS/Linux and maps it to
+	// MyGo 0.3.0 uses a custom origin on macOS/Linux and maps it to
 	// http://mygo.localhost on Windows WebView2. Allow both so the same
 	// embedded frontend can reach the Go runtime on every desktop target.
 	cfg.Server.CORSAllowlist = append(cfg.Server.CORSAllowlist, "mygo://localhost", "http://mygo.localhost")
@@ -64,25 +63,25 @@ func run() error {
 	mygo.Bind(runtime.NewHealthService())
 
 	mygo.App.WhenReady(func() {
-		// The native shell is the default desktop surface on macOS, where the
-		// MyGo window provides the actual app chrome and input controls. Keep an
-		// explicit opt-out for the WebView while retaining the opt-in switch on
-		// other platforms so headless and preview builds stay unchanged.
-		nativeMode := nativeShellEnabled(goruntime.GOOS, os.Getenv("DEEPSTUDENT_NATIVE_SHELL"))
-		// The embedded MyGo document is served from mygo://localhost. Pass the
-		// actual loopback listener to the React shell so its Go adapter can send
-		// POST /runs and follow the SSE stream instead of resolving /api/v1 on the
-		// custom mygo:// origin.
-		webURL := desktopWebURL(listener)
+		// The production desktop surface is the native MyGo UI. Keep the React
+		// document behind an explicit debug switch so it cannot become a second
+		// runtime frontend again.
+		webViewDebug := webViewDebugEnabled(os.Getenv("DEEPSTUDENT_WEBVIEW_DEBUG"))
+		var webURL string
+		if webViewDebug {
+			// The embedded MyGo document is served from mygo://localhost. Pass the
+			// actual loopback listener to the debug page so its Go adapter can send
+			// requests to this serverapp process.
+			webURL = desktopWebURL(listener)
+		}
 		var shell *nativeShell
 		var window *mygo.Window
-		var chatWindow *mygo.Window
-		if nativeMode {
+		if !webViewDebug {
 			shell = newNativeShell(nativeRuntimeBaseURL(listener))
 			go shell.hydrateSession()
 		}
 		installNativeMenu(func(command string) {
-			if nativeMode && shell != nil {
+			if shell != nil {
 				switch command {
 				case "settings":
 					shell.selected = "settings"
@@ -103,32 +102,13 @@ func run() error {
 			}
 			_, _ = window.Page().Eval("window.dispatchEvent(new CustomEvent('deepstudent:command',{detail:{command:" + strconv.Quote(command) + "}}))")
 		})
-		openChat := func() {
-			if chatWindow != nil {
-				chatWindow.Show()
-				chatWindow.Focus()
-				return
-			}
-			chatWindow = mygo.NewWindow(mygo.WindowOptions{
-				Title: "DeepStudent Chat", URL: webURL + "&view=chat-v2&onboarding=skip", Parent: window, Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: 44, BackgroundColor: "#f7f7f5", StateKey: "chat-web",
-			})
-			child := chatWindow
-			child.OnClosed(func() {
-				if chatWindow == child {
-					chatWindow = nil
-				}
-			})
-		}
-		if shell != nil {
-			shell.openChat = openChat
-		}
 		opts := mygo.WindowOptions{
 			Title:           "DeepStudent Go",
 			TitleBarStyle:   mygo.TitleBarHidden,
 			TitleBarHeight:  44,
 			BackgroundColor: "#f7f7f5",
 		}
-		if nativeMode {
+		if shell != nil {
 			opts.Content = ui.View(shell.view)
 			opts.Width = 1200
 			opts.Height = 780
@@ -154,10 +134,10 @@ func run() error {
 	return mygo.App.Run()
 }
 
-// nativeShellEnabled chooses the desktop surface without making a platform
-// build depend on an environment variable being present. macOS uses the
-// native MyGo shell by default; DEEPSTUDENT_NATIVE_SHELL=0 (or false/off/no)
-// opts out. On other platforms, the shell remains opt-in for now.
+// nativeShellEnabled is kept for callers that still exercise the pre-unification
+// platform policy. The desktop entry point no longer uses this policy: native
+// MyGo is the production surface on every platform, with WebView only through
+// DEEPSTUDENT_WEBVIEW_DEBUG.
 func nativeShellEnabled(goos, setting string) bool {
 	switch strings.ToLower(strings.TrimSpace(setting)) {
 	case "1", "true", "yes", "on":
@@ -166,6 +146,18 @@ func nativeShellEnabled(goos, setting string) bool {
 		return false
 	default:
 		return goos == "darwin"
+	}
+}
+
+// webViewDebugEnabled is deliberately opt-in. It provides a short-lived
+// development escape hatch for inspecting the embedded React bundle without
+// making WebView a second production frontend.
+func webViewDebugEnabled(setting string) bool {
+	switch strings.ToLower(strings.TrimSpace(setting)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
 	}
 }
 
