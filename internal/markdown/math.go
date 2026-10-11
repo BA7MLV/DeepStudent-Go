@@ -3,6 +3,7 @@ package markdown
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // MathKind identifies a node in the small, dependency-free TeX expression AST.
@@ -263,13 +264,11 @@ func (p *mathParser) parseAtom() *MathExpr {
 const utf8RuneSelf = 0x80
 
 func decodeRuneInMath(s string) (rune, int) {
-	for n := 1; n <= len(s) && n <= 4; n++ {
-		r := []rune(s[:n])
-		if len(r) == 1 {
-			return r[0], n
-		}
+	r, n := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError && n == 0 {
+		return rune(s[0]), 1
 	}
-	return rune(s[0]), 1
+	return r, n
 }
 
 func (p *mathParser) parseCommand(command string) *MathExpr {
