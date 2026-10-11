@@ -19,7 +19,7 @@ build glue and as the compatibility client.
 | Attachments | browser `File`/`FormData` and drag/drop | MyGo `Dialog.Open`/`OnFileDrop` plus existing Go `/attachments` API can replace it |
 | Resources | IndexedDB, FileReader, browser selection | Requires a Go resources table/API before a durable native page |
 | Theme/navigation | React state + localStorage + CSS | Native state and `ui.Theme`/sidebar/buttons are direct migrations |
-| Settings | React modal, provider metadata preview | Native shell exposes credential-free provider/model/base URL/API-env editing through the in-memory Go config API |
+| Settings | React modal, provider/model routing | Native shell exposes credential-free provider/model/base URL/API-env editing through the Go config API and SQLite settings store |
 
 ## Phase 1: smallest shippable native slice
 
@@ -32,8 +32,8 @@ build glue and as the compatibility client.
 4. Keep text-only composer on `ui.TextInput`; show a disabled attachment affordance
    until the attachment slice is enabled.
 5. Finish native theme toggle, sidebar navigation, and runtime/provider status.
-   Provider metadata edits stay in memory for the next run and never expose or
-   persist credential values.
+   Provider metadata edits are tested, persisted in SQLite, and restored on the
+   next launch; credential values are never exposed or persisted.
 
 Phase 1 acceptance:
 
@@ -66,6 +66,8 @@ Phase 1 acceptance:
 - A one-shot rewrite of all 915 lines of `App.tsx` and 290 lines of CSS.
 - Liquid Glass/glass plugin and terminal/headless features: unrelated to the
   first native chat slice and would add platform/visual regression surface.
-- Durable cross-restart provider config persistence and credential-manager
-  integration remain deferred. The local API accepts only endpoint, model and
-  environment-variable names and keeps edits in memory.
+- Credential-manager integration remains deferred. The local API accepts only
+  endpoint, model and environment-variable names; routing metadata and Pi
+  runtime choices persist in SQLite, while secret values remain environment
+  managed. `POST /api/v1/config/test` checks a provider without sending a
+  prompt or returning credential data.

@@ -22,6 +22,7 @@ import (
 
 	"github.com/BA7MLV/DeepStudent-Go/internal/attachments"
 	"github.com/BA7MLV/DeepStudent-Go/internal/config"
+	"github.com/BA7MLV/DeepStudent-Go/internal/piagent"
 	"github.com/BA7MLV/DeepStudent-Go/internal/runtime"
 )
 
@@ -32,9 +33,19 @@ type Server struct {
 	cfgMu       sync.RWMutex
 	runs        runtime.AgentRuntime
 	store       runtime.SessionStore
+	configStore ConfigStore
 	attachments AttachmentStore
 	ready       atomic.Bool
 	now         func() time.Time
+	piStatusMu  sync.RWMutex
+	piStatus    PiRuntimeStatus
+}
+
+// ConfigStore is the durable, credential-free configuration boundary. It is
+// intentionally separate from runtime.SessionStore so lightweight API tests
+// and embedders can continue using an in-memory store.
+type ConfigStore interface {
+	SaveConfig(context.Context, config.Config) error
 }
 
 // AttachmentStore is the HTTP-facing subset of storage.AttachmentStore. The
@@ -47,6 +58,42 @@ type AttachmentStore interface {
 	List(context.Context, int) ([]attachments.Metadata, error)
 }
 
+// PiRuntimeStatus is the effective, credential-free Pi agent state exposed
+// to settings clients. It deliberately contains no API key or secret value.
+type PiRuntimeStatus struct {
+	ConfiguredMode string   `json:"configured_mode,omitempty"`
+	EffectiveMode  string   `json:"effective_mode,omitempty"`
+	State          string   `json:"state,omitempty"`
+	Command        string   `json:"command,omitempty"`
+	Args           []string `json:"args,omitempty"`
+	Endpoint       string   `json:"endpoint,omitempty"`
+	Reason         string   `json:"reason,omitempty"`
+}
+
+// SetPiRuntimeStatus updates the startup outcome reported by /config and the
+// discovery route. It is safe to call after NewServer while startup completes.
+func (s *Server) SetPiRuntimeStatus(status PiRuntimeStatus) {
+	s.piStatusMu.Lock()
+	s.piStatus = status
+	s.piStatusMu.Unlock()
+}
+
+// SetPiRuntimeState updates only the transient startup state while preserving
+// command, endpoint, and configured mode metadata.
+func (s *Server) SetPiRuntimeState(state, reason string) {
+	s.piStatusMu.Lock()
+	s.piStatus.State, s.piStatus.Reason = state, reason
+	s.piStatusMu.Unlock()
+}
+
+func (s *Server) getPiRuntimeStatus() PiRuntimeStatus {
+	s.piStatusMu.RLock()
+	defer s.piStatusMu.RUnlock()
+	status := s.piStatus
+	status.Args = append([]string(nil), status.Args...)
+	return status
+}
+
 // NewServer creates an API server. Dependencies may include a
 // runtime.SessionStore and/or an AttachmentStore. The variadic any form keeps
 // the original two- and three-argument call sites source-compatible while
@@ -54,6 +101,7 @@ type AttachmentStore interface {
 func NewServer(cfg config.Config, runs runtime.AgentRuntime, dependencies ...any) *Server {
 	var store runtime.SessionStore
 	var attachmentStore AttachmentStore
+	var configStore ConfigStore
 	for _, dependency := range dependencies {
 		switch value := dependency.(type) {
 		case runtime.SessionStore:
@@ -61,8 +109,11 @@ func NewServer(cfg config.Config, runs runtime.AgentRuntime, dependencies ...any
 		case AttachmentStore:
 			attachmentStore = value
 		}
+		if value, ok := dependency.(ConfigStore); ok {
+			configStore = value
+		}
 	}
-	s := &Server{cfg: cfg, runs: runs, store: store, attachments: attachmentStore, now: time.Now}
+	s := &Server{cfg: cfg, runs: runs, store: store, configStore: configStore, attachments: attachmentStore, now: time.Now}
 	s.ready.Store(runs != nil)
 	return s
 }
@@ -101,8 +152,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"version": apiVersion, "service": "deepstudent-api", "request_id": requestID})
+	case (r.URL.Path == "/api/v1/pi/discovery" || r.URL.Path == "/api/v1/pi" || r.URL.Path == "/api/v1/discovery" || r.URL.Path == "/api/v1/config/discovery") && r.Method == http.MethodGet:
+		s.piDiscovery(w, r, requestID)
 	case r.URL.Path == "/api/v1/config" && r.Method == http.MethodGet:
 		s.getConfig(w, requestID)
+	case r.URL.Path == "/api/v1/config/test" && r.Method == http.MethodPost:
+		s.testConfig(w, r, requestID)
 	case r.URL.Path == "/api/v1/config" && (r.Method == http.MethodPatch || r.Method == http.MethodPut):
 		s.updateConfig(w, r, requestID)
 	case r.URL.Path == "/api/v1/runs" && r.Method == http.MethodPost:
@@ -141,22 +196,100 @@ func (s *Server) getConfig(w http.ResponseWriter, requestID string) {
 			"streaming": provider.Streaming,
 		}
 	}
+	status := s.getPiRuntimeStatus()
+	configuredMode := strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
+	if configuredMode == "" {
+		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart {
+			configuredMode = "external"
+		} else {
+			configuredMode = "auto"
+		}
+	}
+	if configuredMode == "managed" || configuredMode == "local" {
+		configuredMode = "manual"
+	}
+	if status.ConfiguredMode == "" {
+		status.ConfiguredMode = configuredMode
+	}
+	if status.EffectiveMode == "" {
+		status.EffectiveMode = configuredMode
+	}
+	if status.Command == "" {
+		status.Command = cfg.Runtime.PiCommand
+	}
+	if len(status.Args) == 0 {
+		status.Args = append([]string(nil), cfg.Runtime.PiArgs...)
+	}
+	if status.Endpoint == "" {
+		status.Endpoint = cfg.Runtime.PiEndpoint
+	}
+	piCommand, piArgs := cfg.Runtime.PiCommand, cfg.Runtime.PiArgs
+	if piCommand == "" && status.EffectiveMode == "auto" {
+		piCommand = status.Command
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"default_provider": cfg.Runtime.DefaultProvider,
 		"default_model":    cfg.Runtime.DefaultModel,
-		"providers":        providers,
-		"request_id":       requestID,
+		"runtime": map[string]any{
+			"default_provider": cfg.Runtime.DefaultProvider,
+			"default_model":    cfg.Runtime.DefaultModel,
+			"pi_endpoint":      cfg.Runtime.PiEndpoint,
+			"pi_skip_start":    cfg.Runtime.PiSkipStart,
+			"pi_mode":          cfg.Runtime.PiMode,
+			"pi_command":       piCommand,
+			"pi_args":          piArgs,
+			"pi_cancel_timeout": func() string {
+				if cfg.Runtime.PiCancelTimeout > 0 {
+					return cfg.Runtime.PiCancelTimeout.String()
+				}
+				return ""
+			}(),
+			"pi_status": status,
+		},
+		"providers":  providers,
+		"request_id": requestID,
 	})
+}
+
+func (s *Server) piDiscovery(w http.ResponseWriter, r *http.Request, requestID string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	candidates := piagent.Discover(ctx)
+	status := s.getPiRuntimeStatus()
+	if status.ConfiguredMode == "" {
+		cfg := s.configSnapshot()
+		status.ConfiguredMode = strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
+		if status.ConfiguredMode == "" {
+			if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart {
+				status.ConfiguredMode = "external"
+			} else {
+				status.ConfiguredMode = "auto"
+			}
+		}
+		if status.ConfiguredMode == "managed" || status.ConfiguredMode == "local" {
+			status.ConfiguredMode = "manual"
+		}
+	}
+	if status.EffectiveMode == "" {
+		status.EffectiveMode = status.ConfiguredMode
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": candidates, "current_mode": status.ConfiguredMode, "configured_mode": status.ConfiguredMode, "effective_mode": status.EffectiveMode, "status": status, "request_id": requestID})
 }
 
 type configUpdateRequest struct {
 	DefaultProvider *string `json:"default_provider"`
 	DefaultModel    *string `json:"default_model"`
 	// provider/model are accepted as concise aliases for native clients.
-	Provider *string `json:"provider"`
-	Model    *string `json:"model"`
-	BaseURL  *string `json:"base_url"`
-	APIKeyEnv *string `json:"api_key_env"`
+	Provider        *string   `json:"provider"`
+	Model           *string   `json:"model"`
+	BaseURL         *string   `json:"base_url"`
+	APIKeyEnv       *string   `json:"api_key_env"`
+	PiEndpoint      *string   `json:"pi_endpoint"`
+	PiSkipStart     *bool     `json:"pi_skip_start"`
+	PiMode          *string   `json:"pi_mode"`
+	PiCommand       *string   `json:"pi_command"`
+	PiArgs          *[]string `json:"pi_args"`
+	PiCancelTimeout *string   `json:"pi_cancel_timeout"`
 }
 
 func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID string) {
@@ -170,15 +303,32 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID 
 	s.cfgMu.RUnlock()
 	provider := cfg.Runtime.DefaultProvider
 	model := cfg.Runtime.DefaultModel
-	if input.DefaultProvider != nil { provider = strings.TrimSpace(*input.DefaultProvider) }
-	if input.Provider != nil { provider = strings.TrimSpace(*input.Provider) }
-	if input.DefaultModel != nil { model = strings.TrimSpace(*input.DefaultModel) }
-	if input.Model != nil { model = strings.TrimSpace(*input.Model) }
+	if input.DefaultProvider != nil {
+		provider = strings.TrimSpace(*input.DefaultProvider)
+	}
+	if input.Provider != nil {
+		provider = strings.TrimSpace(*input.Provider)
+	}
+	if input.DefaultModel != nil {
+		model = strings.TrimSpace(*input.DefaultModel)
+	}
+	if input.Model != nil {
+		model = strings.TrimSpace(*input.Model)
+	}
 	if provider == "" {
 		writeError(w, requestID, http.StatusBadRequest, "invalid_config", "default provider is required", nil)
 		return
 	}
-	if _, err := cfg.ResolveModel(provider, model); err != nil {
+	if provider != "deterministic" && strings.TrimSpace(model) == "" {
+		if configured := strings.TrimSpace(cfg.Providers[provider].Model); configured != "" {
+			model = configured
+		} else {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", "model is required for non-deterministic providers", nil)
+			return
+		}
+	}
+	selection, err := cfg.ResolveModel(provider, model)
+	if err != nil {
 		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
 		return
 	}
@@ -189,11 +339,11 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID 
 			writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
 			return
 		}
-		profile.BaseURL = baseURL
 		// An explicit endpoint should win over an environment-backed endpoint.
 		// An empty UI field means “keep the configured environment endpoint” so
 		// simply saving model metadata cannot accidentally disable a provider.
 		if baseURL != "" {
+			profile.BaseURL = baseURL
 			profile.BaseURLEnv = ""
 		}
 	}
@@ -208,13 +358,132 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request, requestID 
 	if input.Model != nil || input.DefaultModel != nil {
 		profile.Model = model
 	}
+	// Re-resolve after applying overrides so endpoint/model validation and the
+	// persisted snapshot use the effective final route rather than stale config.
 	cfg.Providers[provider] = profile
+	selection, err = cfg.ResolveModel(provider, model)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
+		return
+	}
+	if provider != "deterministic" {
+		endpoint := strings.TrimSpace(profile.BaseURL)
+		if endpoint == "" {
+			// ResolveModel may obtain an environment-backed endpoint; use the
+			// selected value to validate the effective route before persisting.
+			endpoint = strings.TrimSpace(selection.BaseURL)
+		}
+		if endpoint == "" {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", "base_url is required for non-deterministic providers", nil)
+			return
+		}
+		if strings.TrimSpace(profile.APIKeyEnv) == "" {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", "api_key_env is required for non-deterministic providers", nil)
+			return
+		}
+	}
 	cfg.Runtime.DefaultProvider = provider
 	cfg.Runtime.DefaultModel = model
+	if input.PiEndpoint != nil {
+		cfg.Runtime.PiEndpoint = strings.TrimSpace(*input.PiEndpoint)
+	}
+	if input.PiSkipStart != nil {
+		cfg.Runtime.PiSkipStart = *input.PiSkipStart
+	}
+	if input.PiMode != nil {
+		cfg.Runtime.PiMode = strings.ToLower(strings.TrimSpace(*input.PiMode))
+	}
+	if input.PiCommand != nil {
+		cfg.Runtime.PiCommand = strings.TrimSpace(*input.PiCommand)
+	}
+	if input.PiArgs != nil {
+		cfg.Runtime.PiArgs = make([]string, 0, len(*input.PiArgs))
+		for _, arg := range *input.PiArgs {
+			arg = strings.TrimSpace(arg)
+			if arg != "" {
+				cfg.Runtime.PiArgs = append(cfg.Runtime.PiArgs, arg)
+			}
+		}
+	}
+	if input.PiCancelTimeout != nil {
+		timeout := strings.TrimSpace(*input.PiCancelTimeout)
+		if timeout == "" {
+			cfg.Runtime.PiCancelTimeout = 0
+		} else if parsed, err := time.ParseDuration(timeout); err != nil || parsed < 0 {
+			writeError(w, requestID, http.StatusBadRequest, "invalid_config", "pi_cancel_timeout must be a non-negative duration", nil)
+			return
+		} else {
+			cfg.Runtime.PiCancelTimeout = parsed
+		}
+	}
+	if err := config.Validate(cfg); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
+		return
+	}
+	if s.configStore != nil {
+		if err := s.configStore.SaveConfig(r.Context(), cfg); err != nil {
+			writeError(w, requestID, http.StatusInternalServerError, "config_persist_failed", "could not persist configuration", nil)
+			return
+		}
+	}
 	s.cfgMu.Lock()
 	s.cfg = cfg
 	s.cfgMu.Unlock()
 	s.getConfig(w, requestID)
+}
+
+type configTestRequest struct {
+	Provider  string `json:"provider,omitempty"`
+	Model     string `json:"model,omitempty"`
+	BaseURL   string `json:"base_url,omitempty"`
+	APIKeyEnv string `json:"api_key_env,omitempty"`
+}
+
+// testConfig verifies only endpoint and credential availability. It never
+// sends a prompt and never includes credential values in the response.
+func (s *Server) testConfig(w http.ResponseWriter, r *http.Request, requestID string) {
+	var input configTestRequest
+	if err := decodeJSON(http.MaxBytesReader(w, r.Body, 64<<10), &input); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_json", "request body must be valid JSON", nil)
+		return
+	}
+	cfg := s.configSnapshot()
+	provider := strings.TrimSpace(input.Provider)
+	model := strings.TrimSpace(input.Model)
+	selection, err := cfg.ResolveModel(provider, model)
+	if err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_model", err.Error(), nil)
+		return
+	}
+	if provider == "" {
+		provider = selection.Provider
+	}
+	if model == "" {
+		model = selection.Model
+	}
+	baseURL := strings.TrimSpace(input.BaseURL)
+	if baseURL == "" {
+		baseURL = selection.BaseURL
+	}
+	apiKeyEnv := strings.TrimSpace(input.APIKeyEnv)
+	if apiKeyEnv == "" {
+		apiKeyEnv = selection.APIKeyEnv
+	}
+	if provider == "deterministic" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "provider": provider, "model": model, "request_id": requestID})
+		return
+	}
+	if err := config.ValidateProviderOverride(baseURL, apiKeyEnv); err != nil {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
+		return
+	}
+	if err := runtime.TestOpenAICompatible(r.Context(), baseURL, apiKeyEnv, nil, selection.Timeout); err != nil {
+		// The error text intentionally contains only endpoint/HTTP status and
+		// the environment variable name, never the credential value or body.
+		writeError(w, requestID, http.StatusBadGateway, "connection_failed", err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "provider": provider, "model": model, "request_id": requestID})
 }
 
 func (s *Server) configSnapshot() config.Config {
@@ -255,9 +524,9 @@ const (
 
 // attachmentRoute implements the stable v1 attachment contract:
 //
-//   POST /api/v1/attachments              multipart/form-data (file field)
-//   GET  /api/v1/attachments/<sha256>     content stream (or metadata=1)
-//   GET  /api/v1/attachments?ref=<ref>    metadata for a workspace reference
+//	POST /api/v1/attachments              multipart/form-data (file field)
+//	GET  /api/v1/attachments/<sha256>     content stream (or metadata=1)
+//	GET  /api/v1/attachments?ref=<ref>    metadata for a workspace reference
 //
 // The explicit /metadata, /content and /download suffixes are accepted as
 // convenience aliases for clients that prefer self-describing URLs. Every
@@ -598,6 +867,14 @@ func (s *Server) startRunInput(w http.ResponseWriter, r *http.Request, requestID
 	if strings.TrimSpace(input.APIKeyEnv) == "" {
 		input.APIKeyEnv = selection.APIKeyEnv
 	}
+	if selection.Provider != "deterministic" && strings.TrimSpace(input.BaseURL) == "" {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", "provider endpoint is not configured", nil)
+		return
+	}
+	if selection.Provider != "deterministic" && strings.TrimSpace(input.APIKeyEnv) == "" {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_config", "provider credential environment variable is not configured", nil)
+		return
+	}
 	if err := config.ValidateProviderOverride(input.BaseURL, input.APIKeyEnv); err != nil {
 		writeError(w, requestID, http.StatusBadRequest, "invalid_config", err.Error(), nil)
 		return
@@ -714,12 +991,17 @@ func (s *Server) streamRun(w http.ResponseWriter, r *http.Request, requestID str
 		writeError(w, requestID, http.StatusBadRequest, "invalid_request", "run id is required", nil)
 		return
 	}
+	lastEventID := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	if len(lastEventID) > 256 || strings.ContainsAny(lastEventID, "\r\n") {
+		writeError(w, requestID, http.StatusBadRequest, "invalid_last_event_id", "last-event-id is invalid", nil)
+		return
+	}
 	var events <-chan runtime.StreamEvent
 	var err error
 	if replay, ok := s.runs.(interface {
 		SubscribeFrom(context.Context, string, string) (<-chan runtime.StreamEvent, error)
 	}); ok {
-		events, err = replay.SubscribeFrom(r.Context(), runID, strings.TrimSpace(r.Header.Get("Last-Event-ID")))
+		events, err = replay.SubscribeFrom(r.Context(), runID, lastEventID)
 	} else {
 		events, err = s.runs.Subscribe(r.Context(), runID)
 	}
@@ -978,6 +1260,13 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request, requestID string
 	var err error
 	if inspector, ok := s.runs.(runtime.RunInspector); ok {
 		run, err = inspector.Run(r.Context(), runID)
+		// A live runtime may evict completed runs from memory. If a durable
+		// store is wired, fall back to it before reporting a 404.
+		if err != nil {
+			if reader, ok := s.store.(runtime.RunReader); ok {
+				run, err = reader.Run(r.Context(), runID)
+			}
+		}
 	} else if reader, ok := s.store.(runtime.RunReader); ok {
 		run, err = reader.Run(r.Context(), runID)
 	} else {

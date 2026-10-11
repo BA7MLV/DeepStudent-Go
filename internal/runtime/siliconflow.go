@@ -46,9 +46,6 @@ type SiliconFlowProvider struct {
 
 func NewSiliconFlowProvider(cfg SiliconFlowConfig) *SiliconFlowProvider {
 	base := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
-	if base == "" {
-		base = DefaultSiliconFlowBaseURL
-	}
 	keyEnv := strings.TrimSpace(cfg.APIKeyEnv)
 	if keyEnv == "" {
 		keyEnv = "SILICONFLOW_API_KEY"
@@ -76,10 +73,64 @@ func NewSiliconFlowProvider(cfg SiliconFlowConfig) *SiliconFlowProvider {
 	if name == "" {
 		name = "siliconflow"
 	}
+	// Only the built-in SiliconFlow profile has a safe default endpoint. A
+	// custom/deepseek profile with an empty endpoint must fail explicitly rather
+	// than silently sending credentials to SiliconFlow.
+	if base == "" && name == "siliconflow" {
+		base = DefaultSiliconFlowBaseURL
+	}
 	return &SiliconFlowProvider{name: name, baseURL: base, apiKeyEnv: keyEnv, defaultModel: strings.TrimSpace(cfg.Model), timeout: timeout, maxRetries: cfg.MaxRetries, backoff: backoff, client: client, lookup: lookup}
 }
 
 func (p *SiliconFlowProvider) Name() string { return p.name }
+
+// TestOpenAICompatible checks that a provider endpoint is reachable and the
+// configured environment credential is accepted. It performs only a GET
+// /models request and never returns response bodies or credential values.
+func TestOpenAICompatible(ctx context.Context, baseURL, apiKeyEnv string, lookup func(string) (string, bool), timeout time.Duration) error {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		return errors.New("provider endpoint is not configured")
+	}
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
+	if apiKeyEnv == "" {
+		return errors.New("provider credential environment variable is not configured")
+	}
+	key, ok := lookup(apiKeyEnv)
+	if !ok || strings.TrimSpace(key) == "" {
+		return fmt.Errorf("credential environment variable %s is empty", apiKeyEnv)
+	}
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, baseURL+"/models", nil)
+	if err != nil {
+		return errors.New("provider endpoint is invalid")
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	req.Header.Set("Accept", "application/json")
+	response, err := (&http.Client{}).Do(req)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return errors.New("provider endpoint is unreachable")
+	}
+	defer response.Body.Close()
+	_, _ = io.CopyN(io.Discard, response.Body, 4096)
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("provider returned HTTP %d", response.StatusCode)
+	}
+	return nil
+}
 
 type openAIMessage struct {
 	Role    string `json:"role"`

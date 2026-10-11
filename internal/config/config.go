@@ -134,7 +134,7 @@ func Defaults() Config {
         Version: DefaultVersion,
         Server: ServerConfig{Addr: "127.0.0.1:8080", ReadTimeout: 15*time.Second, WriteTimeout: 0, IdleTimeout: 60*time.Second, SSEHeartbeat: 15*time.Second, CORSAllowlist: []string{"http://127.0.0.1:5173", "http://localhost:5173"}},
         Storage: StorageConfig{SQLitePath: "data/deepstudent.db", BlobRoot: "data/blobs", AttachmentMaxBytes: 32 << 20, AttachmentAllowedMIMEs: []string{"text/*", "application/json", "application/pdf", "application/octet-stream", "image/*", "audio/*", "video/*"}},
-        Runtime: RuntimeConfig{DefaultProvider: "deterministic", DefaultTimeout: 45*time.Second, MaxTokens: 2048, MaxConcurrency: 2},
+        Runtime: RuntimeConfig{DefaultProvider: "deterministic", DefaultTimeout: 45*time.Second, MaxTokens: 2048, MaxConcurrency: 2, PiMode: "auto"},
         Auth: AuthConfig{CookieName: "deepstudent_session", SessionTTL: 24*time.Hour},
         Providers: map[string]ProviderProfile{
             "deterministic": {Name: "deterministic", Model: "stub", Timeout: 45*time.Second, InputCapabilities: []string{InputText}, Streaming: true},
@@ -232,6 +232,7 @@ func applyEnv(cfg *Config, lookup lookupEnv) error {
 	if v, ok := lookup("DEEPSTUDENT_PI_ENDPOINT"); ok { cfg.Runtime.PiEndpoint = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_SIDECAR_URL"); ok { cfg.Runtime.PiEndpoint = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_PI_SKIP_START"); ok { b, err := strconv.ParseBool(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_PI_SKIP_START: %w", err) }; cfg.Runtime.PiSkipStart = b }
+	if v, ok := lookup("DEEPSTUDENT_PI_MODE"); ok { cfg.Runtime.PiMode = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_SIDECAR_MODE"); ok { cfg.Runtime.PiMode = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_PI_COMMAND"); ok { cfg.Runtime.PiCommand = strings.TrimSpace(v) }
 	if v, ok := lookup("DEEPSTUDENT_PI_ARGS"); ok { cfg.Runtime.PiArgs = splitList(v) }
@@ -240,8 +241,19 @@ func applyEnv(cfg *Config, lookup lookupEnv) error {
     if v, ok := lookup("DEEPSTUDENT_COOKIE_SECURE"); ok { b, err := strconv.ParseBool(v); if err != nil { return fmt.Errorf("DEEPSTUDENT_COOKIE_SECURE: %w", err) }; cfg.Auth.CookieSecure = b }
 	if v, ok := lookup("DEEPSTUDENT_BASE_URL"); ok { if cfg.Providers == nil { cfg.Providers = map[string]ProviderProfile{} }; p := cfg.Providers[cfg.Runtime.DefaultProvider]; p.BaseURL = strings.TrimSpace(v); if p.Name == "" { p.Name = cfg.Runtime.DefaultProvider }; cfg.Providers[cfg.Runtime.DefaultProvider] = p }
 	if v, ok := lookup("DEEPSEEK_BASE_URL"); ok {
-		providerName := "deepseek-official"
-		if p, exists := cfg.Providers[providerName]; exists { p.BaseURL = strings.TrimSpace(v); cfg.Providers[providerName] = p }
+		// Older protocol examples used deepseek-official while the shipped
+		// profile is named deepseek. Apply the compatibility alias to whichever
+		// profile is present, preferring the current canonical name.
+		providerName := "deepseek"
+		if _, exists := cfg.Providers[providerName]; !exists {
+			providerName = "deepseek-official"
+		}
+		p := cfg.Providers[providerName]
+		if p.Name == "" {
+			p.Name = providerName
+		}
+		p.BaseURL = strings.TrimSpace(v)
+		cfg.Providers[providerName] = p
 	}
     for name, p := range cfg.Providers {
         prefix := "DEEPSTUDENT_PROVIDER_" + envKey(name) + "_"
@@ -278,26 +290,26 @@ func Validate(cfg Config) error {
     if cfg.Runtime.MaxConcurrency <= 0 { return errors.New("runtime maxConcurrency must be positive") }
 	piMode := strings.ToLower(strings.TrimSpace(cfg.Runtime.PiMode))
 	if piMode == "" {
-		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart {
-			piMode = "external"
-		} else {
-			piMode = "deterministic"
-		}
+		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { piMode = "external" } else { piMode = "auto" }
 	}
+	// Legacy managed/local names remain accepted for config files written by
+	// earlier releases; the public API uses manual for an explicitly managed
+	// CLI process.
+	if piMode == "managed" || piMode == "local" { piMode = "manual" }
 	switch piMode {
-	case "deterministic":
+	case "auto", "deterministic":
 		if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" || cfg.Runtime.PiSkipStart { return errors.New("runtime piEndpoint/piSkipStart require piMode external") }
+	case "manual":
+		if cfg.Runtime.PiSkipStart { return errors.New("runtime piSkipStart cannot be used with manual pi mode") }
+		if strings.TrimSpace(cfg.Runtime.PiCommand) == "" { return errors.New("runtime piCommand is required for manual pi mode") }
 	case "external":
 		if strings.TrimSpace(cfg.Runtime.PiEndpoint) == "" { return errors.New("runtime piEndpoint is required for external pi mode") }
-		if err := validateURL(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
-	case "managed", "local":
-		if cfg.Runtime.PiSkipStart { return errors.New("runtime piSkipStart cannot be used with managed pi mode") }
-		if strings.TrimSpace(cfg.Runtime.PiCommand) == "" { return fmt.Errorf("runtime piCommand is required for piMode %q", piMode) }
+		if err := validatePiEndpoint(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
 	default:
 		return fmt.Errorf("runtime piMode %q is invalid", piMode)
 	}
-	if strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" && piMode != "external" {
-		if err := validateURL(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
+	if piMode == "manual" && strings.TrimSpace(cfg.Runtime.PiEndpoint) != "" {
+		if err := validatePiEndpoint(cfg.Runtime.PiEndpoint, "runtime piEndpoint"); err != nil { return err }
 	}
 	if cfg.Runtime.PiCancelTimeout < 0 { return errors.New("runtime piCancelTimeout must not be negative") }
     if cfg.Auth.SessionTTL <= 0 { return errors.New("auth sessionTTL must be positive") }
@@ -314,10 +326,10 @@ func ValidateWithEnv(cfg Config, lookup func(string) (string, bool)) error {
 	for name, p := range cfg.Providers {
 		endpoint := p.BaseURL
 		if p.BaseURLEnv != "" && lookup != nil { if v, ok := lookup(p.BaseURLEnv); ok && strings.TrimSpace(v) != "" { endpoint = strings.TrimSpace(v) } }
-		if err := validateURL(endpoint, "provider "+name+" baseURL"); err != nil { return err }
-		for id, m := range p.Models { if m.BaseURLEnv != "" && lookup != nil { if v, ok := lookup(m.BaseURLEnv); ok && strings.TrimSpace(v) != "" { if err := validateURL(v, "model "+id+" base_url"); err != nil { return err } } } }
+		if err := validateProviderBaseURL(endpoint, "provider "+name+" baseURL"); err != nil { return err }
+		for id, m := range p.Models { if m.BaseURLEnv != "" && lookup != nil { if v, ok := lookup(m.BaseURLEnv); ok && strings.TrimSpace(v) != "" { if err := validateProviderBaseURL(v, "model "+id+" base_url"); err != nil { return err } } } }
 	}
-	for id, m := range cfg.Models { if m.BaseURLEnv != "" && lookup != nil { if v, ok := lookup(m.BaseURLEnv); ok && strings.TrimSpace(v) != "" { if err := validateURL(v, "model "+id+" base_url"); err != nil { return err } } } }
+	for id, m := range cfg.Models { if m.BaseURLEnv != "" && lookup != nil { if v, ok := lookup(m.BaseURLEnv); ok && strings.TrimSpace(v) != "" { if err := validateProviderBaseURL(v, "model "+id+" base_url"); err != nil { return err } } } }
 	return nil
 }
 
@@ -327,14 +339,8 @@ func ValidateWithEnv(cfg Config, lookup func(string) (string, bool)) error {
 // provider process at run time.
 func ValidateProviderOverride(baseURL, apiKeyEnv string) error {
 	baseURL = strings.TrimSpace(baseURL)
-	if err := validateURL(baseURL, "provider baseURL"); err != nil {
+	if err := validateProviderBaseURL(baseURL, "provider baseURL"); err != nil {
 		return err
-	}
-	if baseURL != "" {
-		parsed, _ := url.Parse(baseURL)
-		if parsed.User != nil {
-			return errors.New("provider baseURL must not contain credentials")
-		}
 	}
 	apiKeyEnv = strings.TrimSpace(apiKeyEnv)
 	if apiKeyEnv != "" && !envNamePattern.MatchString(apiKeyEnv) {
@@ -346,7 +352,7 @@ func ValidateProviderOverride(baseURL, apiKeyEnv string) error {
 func validateProvider(name string, p ProviderProfile) error {
     if strings.TrimSpace(name) != name || name == "" { return fmt.Errorf("provider name %q is invalid", name) }
     if p.Name != "" && p.Name != name { return fmt.Errorf("provider %q name must match map key", name) }
-    if err := validateURL(p.BaseURL, "provider "+name+" baseURL"); err != nil { return err }
+    if err := validateProviderBaseURL(p.BaseURL, "provider "+name+" baseURL"); err != nil { return err }
     if !envNamePattern.MatchString(p.APIKeyEnv) && p.APIKeyEnv != "" { return fmt.Errorf("provider %q apiKeyEnv is invalid", name) }
     if !envNamePattern.MatchString(p.BaseURLEnv) && p.BaseURLEnv != "" { return fmt.Errorf("provider %q baseURLEnv is invalid", name) }
     if p.Timeout < 0 || p.MaxTokens < 0 || p.MaxRetries < 0 || p.RetryBackoff < 0 { return fmt.Errorf("provider %q limits must not be negative", name) }
@@ -362,13 +368,21 @@ func validateModel(id string, m ModelProfile) error {
     if m.MaxTokens < 0 || m.Timeout < 0 || m.MaxRetries < 0 || m.RetryBackoff < 0 { return fmt.Errorf("model %q limits must not be negative", id) }
     if err := validateEffort(m.ReasoningEffort, "model "+id+" reasoning_effort"); err != nil { return err }
     caps := m.InputCapabilities; if caps == nil { caps = m.Input }; if err := validateCapabilities(caps, "model "+id+" input_capabilities"); err != nil { return err }
-    if err := validateURL(m.BaseURL, "model "+id+" base_url"); err != nil { return err }
+    if err := validateProviderBaseURL(m.BaseURL, "model "+id+" base_url"); err != nil { return err }
 	if m.BaseURLEnv != "" && !envNamePattern.MatchString(m.BaseURLEnv) { return fmt.Errorf("model %q base_url_env is invalid", id) }
     return nil
 }
 func validateCapabilities(values []string, field string) error { seen := map[string]struct{}{}; for _, value := range values { value = strings.ToLower(strings.TrimSpace(value)); if value == "" { return fmt.Errorf("%s contains empty capability", field) }; if _, ok := validInputs[value]; !ok { return fmt.Errorf("%s contains unsupported capability %q", field, value) }; if _, ok := seen[value]; ok { return fmt.Errorf("%s contains duplicate capability %q", field, value) }; seen[value] = struct{}{} }; return nil }
 func validateEffort(value, field string) error { if value != strings.TrimSpace(value) || strings.ContainsAny(value, "\r\n") { if value != "" { return fmt.Errorf("%s is invalid", field) } }; return nil }
+func validatePiEndpoint(value, field string) error {
+	if err := validateURL(value, field); err != nil { return err }
+	parsed, _ := url.Parse(strings.TrimSpace(value))
+	if parsed.User != nil { return fmt.Errorf("%s must not contain credentials", field) }
+	if parsed.RawQuery != "" || parsed.Fragment != "" { return fmt.Errorf("%s must not contain query or fragment", field) }
+	return nil
+}
 func validateURL(value, field string) error { if strings.TrimSpace(value) == "" { return nil }; parsed, err := url.Parse(value); if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") { return fmt.Errorf("%s must be an absolute http(s) URL", field) }; return nil }
+func validateProviderBaseURL(value, field string) error { if err := validateURL(value, field); err != nil { return err }; if strings.TrimSpace(value) == "" { return nil }; parsed, _ := url.Parse(value); if parsed.User != nil { return fmt.Errorf("%s must not contain credentials", field) }; if parsed.RawQuery != "" || parsed.Fragment != "" { return fmt.Errorf("%s must not contain query or fragment", field) }; return nil }
 
 func (p ProviderProfile) EffectiveBaseURL(lookup lookupEnv) string { if lookup != nil && p.BaseURLEnv != "" { if v, ok := lookup(p.BaseURLEnv); ok && strings.TrimSpace(v) != "" { return strings.TrimSpace(v) } }; return strings.TrimSpace(p.BaseURL) }
 
@@ -390,7 +404,7 @@ type Manager struct { mu sync.RWMutex; path string; lookup lookupEnv; cfg Config
 func NewManager(path string) (*Manager, error) { lookup := os.LookupEnv; cfg, err := load(path, lookup); if err != nil { return nil, err }; if path == "" { path, _ = lookup("DEEPSTUDENT_CONFIG") }; return &Manager{path: path, lookup: lookup, cfg: cloneConfig(cfg)}, nil }
 func (m *Manager) Config() Config { m.mu.RLock(); defer m.mu.RUnlock(); return cloneConfig(m.cfg) }
 func (m *Manager) Reload() error { cfg, err := load(m.path, m.lookup); if err != nil { return err }; m.mu.Lock(); m.cfg = cloneConfig(cfg); m.mu.Unlock(); return nil }
-func cloneConfig(cfg Config) Config { out := cfg; out.Server.CORSAllowlist = append([]string(nil), cfg.Server.CORSAllowlist...); out.Storage.AttachmentAllowedMIMEs = append([]string(nil), cfg.Storage.AttachmentAllowedMIMEs...); out.Models = map[string]ModelProfile{}; for id, m := range cfg.Models { out.Models[id] = cloneModel(m) }; out.Providers = map[string]ProviderProfile{}; for name, p := range cfg.Providers { p.Input = append([]string(nil), p.Input...); p.InputCapabilities = append([]string(nil), p.InputCapabilities...); p.Models = map[string]ModelProfile{}; for id, m := range p.Models { p.Models[id] = cloneModel(m) }; out.Providers[name] = p }; return out }
+func cloneConfig(cfg Config) Config { out := cfg; out.Server.CORSAllowlist = append([]string(nil), cfg.Server.CORSAllowlist...); out.Runtime.PiArgs = append([]string(nil), cfg.Runtime.PiArgs...); out.Storage.AttachmentAllowedMIMEs = append([]string(nil), cfg.Storage.AttachmentAllowedMIMEs...); out.Models = map[string]ModelProfile{}; for id, m := range cfg.Models { out.Models[id] = cloneModel(m) }; out.Providers = map[string]ProviderProfile{}; for name, p := range cfg.Providers { p.Input = append([]string(nil), p.Input...); p.InputCapabilities = append([]string(nil), p.InputCapabilities...); p.Models = map[string]ModelProfile{}; for id, m := range p.Models { p.Models[id] = cloneModel(m) }; out.Providers[name] = p }; return out }
 
 // Clone returns an independent configuration snapshot for callers that need
 // to inspect or edit configuration outside this package's manager.

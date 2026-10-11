@@ -6,40 +6,6 @@ import (
 	"testing"
 )
 
-func TestPiSidecarConfigurationUsesSafeLocalDefault(t *testing.T) {
-	cfg := Defaults()
-	if cfg.Runtime.PiEndpoint != "" || cfg.Runtime.PiSkipStart || cfg.Runtime.PiMode != "" {
-		t.Fatalf("Pi sidecar should be opt-in: %+v", cfg.Runtime)
-	}
-	if err := Validate(cfg); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestLoadPiSidecarEndpointEnvironment(t *testing.T) {
-	t.Setenv("DEEPSTUDENT_PI_ENDPOINT", "http://pi-sidecar:8787")
-	t.Setenv("DEEPSTUDENT_PI_SKIP_START", "1")
-	cfg, err := Load("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Runtime.PiEndpoint != "http://pi-sidecar:8787" || !cfg.Runtime.PiSkipStart {
-		t.Fatalf("unexpected Pi runtime config: %+v", cfg.Runtime)
-	}
-}
-
-func TestValidateRequiresManagedPiCommand(t *testing.T) {
-	cfg := Defaults()
-	cfg.Runtime.PiMode = "managed"
-	if err := Validate(cfg); err == nil {
-		t.Fatal("expected managed Pi mode without command to fail")
-	}
-	cfg.Runtime.PiMode = "external"
-	if err := Validate(cfg); err == nil {
-		t.Fatal("expected external Pi mode without endpoint to fail")
-	}
-}
-
 func TestLoadEnvironmentOverridesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -106,6 +72,17 @@ func TestDefaultsExposeCredentialFreeProviderPresets(t *testing.T) {
 	}
 }
 
+func TestDeepSeekBaseURLEnvironmentTargetsCanonicalProfile(t *testing.T) {
+	t.Setenv("DEEPSEEK_BASE_URL", "https://override.example/v1")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Providers["deepseek"].BaseURL; got != "https://override.example/v1" {
+		t.Fatalf("deepseek base URL = %q", got)
+	}
+}
+
 func TestLoadAttachmentStorageOverrides(t *testing.T) {
 	t.Setenv("DEEPSTUDENT_BLOB_ROOT", "/var/lib/deepstudent/blobs")
 	t.Setenv("DEEPSTUDENT_ATTACHMENT_MAX_BYTES", "4096")
@@ -120,4 +97,13 @@ func TestLoadAttachmentStorageOverrides(t *testing.T) {
 	if len(cfg.Storage.AttachmentAllowedMIMEs) != 2 || cfg.Storage.AttachmentAllowedMIMEs[1] != "image/*" {
 		t.Fatalf("unexpected MIME policy: %+v", cfg.Storage.AttachmentAllowedMIMEs)
 	}
+}
+
+func TestPiModesValidateCanonicalConfiguration(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Runtime.PiMode != "auto" || Validate(cfg) != nil { t.Fatalf("defaults should use auto Pi mode: %+v", cfg.Runtime) }
+	cfg.Runtime.PiMode, cfg.Runtime.PiCommand = "manual", "pi-sidecar"
+	if err := Validate(cfg); err != nil { t.Fatalf("manual mode rejected: %v", err) }
+	cfg.Runtime.PiMode, cfg.Runtime.PiCommand, cfg.Runtime.PiEndpoint = "external", "", "http://127.0.0.1:8787"
+	if err := Validate(cfg); err != nil { t.Fatalf("external mode rejected: %v", err) }
 }

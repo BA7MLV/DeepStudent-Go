@@ -5,6 +5,7 @@ on:
     branches:
       - migration/mygo-shell-poc
       - integration/agent-loop
+      - feature/agent-loop-config-closure
   workflow_dispatch:
 
 permissions:
@@ -32,7 +33,9 @@ jobs:
           path: frontend/dist
 
   deploy:
-    if: github.event_name == 'push'
+    # The agent-loop config closure branch is intentionally publishable so the
+    # public Pages preview reflects the same frontend under review.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/migration/mygo-shell-poc' || github.ref == 'refs/heads/integration/agent-loop' || github.ref == 'refs/heads/feature/agent-loop-config-closure')
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

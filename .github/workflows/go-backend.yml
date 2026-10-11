@@ -7,6 +7,7 @@ on:
       - feature/go-backend-runtime
       - goal/go-runtime-foundation
       - integration/agent-loop
+      - feature/agent-loop-config-closure
 
 permissions:
   contents: read
@@ -22,10 +23,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Resolve Go module checksums
         run: go mod tidy
       - name: Normalize Go formatting
         run: gofmt -w cmd internal
+      - name: Install agent sidecar dependencies
+        run: npm install --prefix packages/agent-sidecar --no-audit --no-fund
       - name: Contract tests (HTTP/SSE, replay, attachments, persistence)
         run: go test -count=1 ./internal/api ./internal/attachments ./internal/storage
       - name: Test
@@ -43,3 +50,6 @@ jobs:
         run: go vet ./...
       - name: Build server
         run: CGO_ENABLED=0 go build ./cmd/server
+      - name: Test Pi sidecar
+        run: |
+          npm test --prefix packages/agent-sidecar

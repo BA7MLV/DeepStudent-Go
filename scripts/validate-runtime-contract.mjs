@@ -24,6 +24,8 @@ assert.match(event.data.startedAt, /^\d{4}-\d\d-\d\dT.*Z$/, "startedAt must be a
 for (const field of ["status", "runtime", "startedAt"]) {
   assert.match(bridge, new RegExp(`\\b${field}\\??:`), `HealthStatus must expose ${field}`);
 }
-assert.match(bridge, /call<HealthStatus>\("HealthService\.Health"\)/);
+// MyGo 0.3.7 emits an untyped call while older generators emitted the
+// generic return annotation. Both forms describe the same bridge contract.
+assert.match(bridge, /call(?:<HealthStatus>)?\("HealthService\.Health"\)/);
 
 console.log("runtime.v1 contract examples and MyGo health bridge are aligned");

@@ -166,7 +166,13 @@ async function runFake(run, request) {
 
 function makeAgent(run, request) {
   // Credentials are process-owned. Never accept provider keys in a run request.
-  const apiKey = process.env.PI_API_KEY || process.env.OPENAI_API_KEY;
+  // Go may select a configured environment-variable name per provider. Only
+  // resolve a conventional shell variable name here; the value itself never
+  // enters the request, NDJSON stream, or an error message.
+  const requestedKeyEnv = typeof request.api_key_env === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(request.api_key_env.trim())
+    ? request.api_key_env.trim()
+    : "";
+  const apiKey = (requestedKeyEnv && process.env[requestedKeyEnv]) || process.env.PI_API_KEY || process.env.OPENAI_API_KEY;
   const model = createModel(request);
   const agent = new Agent({
     initialState: {

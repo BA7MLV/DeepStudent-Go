@@ -12,14 +12,4 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
   },
-  // MyGo's development window loads the Vite dev URL while the Go runtime
-  // listens on its own loopback port. Proxy API and SSE paths so the default
-  // relative runtime URL works without requiring VITE_GO_RUNTIME_URL.
-  server: {
-    proxy: {
-      "/api": "http://127.0.0.1:8080",
-      "/healthz": "http://127.0.0.1:8080",
-      "/readyz": "http://127.0.0.1:8080",
-    },
-  },
 });
