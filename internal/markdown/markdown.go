@@ -20,6 +20,13 @@ const (
 	List      Kind = "list"
 	Quote     Kind = "quote"
 	Rule      Kind = "rule"
+	// ToolCall and ToolResult are emitted by the native chat event adapter for
+	// runtime tool execution events. They are deliberately separate from
+	// Markdown blocks so a tool event can be inserted between two streamed
+	// text blocks without being encoded as HTML or a synthetic Markdown
+	// fence.
+	ToolCall   Kind = "tool.call"
+	ToolResult Kind = "tool.result"
 )
 
 // Node is a complete Markdown block. Text is used by prose/list/quote blocks;
@@ -37,6 +44,31 @@ type Node struct {
 	Rows      [][]string
 	Alignment []Alignment
 	Tokens    []Token
+
+	// Tool fields are populated for ToolCall and ToolResult nodes. Arguments
+	// and Output retain their JSON/text representation so the native renderer
+	// can pretty-print them without coupling the markdown package to runtime
+	// protocol types.
+	ToolCallID  string
+	ToolName    string
+	Arguments   string
+	Output      string
+	Error       bool
+	ErrorMessage string
+}
+
+// NewToolCallNode creates a native-renderable node for one runtime tool call.
+// The helper keeps protocol/event decoding outside this package while making
+// node construction consistent for streaming clients and tests.
+func NewToolCallNode(id, name, arguments string) Node {
+	return Node{Kind: ToolCall, ToolCallID: id, ToolName: name, Arguments: arguments}
+}
+
+// NewToolResultNode creates a native-renderable node for a completed tool
+// invocation. Output may be JSON or plain text; renderers decide how to show
+// it and preserve ErrorMessage when the invocation failed.
+func NewToolResultNode(id, name, output string, failed bool, errorMessage string) Node {
+	return Node{Kind: ToolResult, ToolCallID: id, ToolName: name, Output: output, Error: failed, ErrorMessage: errorMessage}
 }
 
 // Alignment is the optional Markdown table column alignment.
