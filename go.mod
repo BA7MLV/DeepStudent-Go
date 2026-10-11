@@ -3,7 +3,7 @@ module github.com/BA7MLV/DeepStudent-Go
 go 1.27.1
 
 require (
-	github.com/egoist/mygo v0.3.7
+	github.com/egoist/mygo v0.3.0
 	modernc.org/sqlite v1.34.5
 )
 
