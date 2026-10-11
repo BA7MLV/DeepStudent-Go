@@ -21,9 +21,9 @@ export function readOnboardingConfig(): OnboardingConfig | null {
 }
 
 const onboardingGoals: Array<{ value: LearningGoal; label: string; description: string }> = [
-  { value: "exam", label: "备考与考试", description: "按考试节奏复习" },
-  { value: "course", label: "跟上课程", description: "理解课程并完成练习" },
-  { value: "skill", label: "长期掌握技能", description: "持续积累可迁移能力" },
+  { value: "exam", label: "备考", description: "按考试节奏复习" },
+  { value: "course", label: "跟课", description: "理解课程并完成练习" },
+  { value: "skill", label: "长期技能", description: "持续积累可迁移能力" },
 ];
 const onboardingModes: Array<{ value: LearningMode; label: string; description: string }> = [
   { value: "practice", label: "练习优先", description: "先练习，再看反馈" },
@@ -31,14 +31,14 @@ const onboardingModes: Array<{ value: LearningMode; label: string; description: 
   { value: "plan", label: "计划优先", description: "按目标安排行动" },
 ];
 const onboardingModels: Array<{ value: ModelChoice; label: string; description: string }> = [
-  { value: "local", label: "DeepStudent Local", description: "本机模型，数据留在当前环境" },
+  { value: "local", label: "本地模型", description: "本机模型，数据留在当前环境" },
   { value: "openai", label: "OpenAI", description: "使用已配置的模型" },
-  { value: "compatible", label: "兼容 OpenAI 的服务", description: "连接兼容接口" },
+  { value: "compatible", label: "兼容服务", description: "连接兼容接口" },
 ];
 
 const onboardingRuntimeOptions: Array<{ value: RuntimeChoice; label: string; description: string }> = [
-  { value: "go", label: "Go 运行环境", description: "推荐，适合完整功能" },
-  { value: "browser", label: "浏览器运行环境", description: "无需本地服务" },
+  { value: "go", label: "Go 环境", description: "推荐，适合完整功能" },
+  { value: "browser", label: "浏览器", description: "无需本地服务" },
 ];
 
 export function Onboarding({ initial, onComplete }: { initial: OnboardingConfig | null; onComplete: (config: Omit<OnboardingConfig, "completedAt">) => void }) {
@@ -87,11 +87,11 @@ export function Onboarding({ initial, onComplete }: { initial: OnboardingConfig 
     <section className="ds-onboarding__card">
       <header className="ds-onboarding__header"><div><span className="ds-onboarding__brand">DeepStudent</span><span className="ds-onboarding__kicker">首次设置</span></div>{isMobile && <span className="ds-onboarding__progress">{step + 1} / {steps.length}</span>}</header>
       <main className="ds-onboarding__body">
-        <h1 id="ds-onboarding-title">选择你的学习偏好</h1>
+        <h1 id="ds-onboarding-title">学习偏好</h1>
         {isMobile ? <div className="ds-onboarding__mobile-step">{steps[step]}</div> : <>{steps}</>}
       </main>
       <footer className="ds-onboarding__footer">
-        <button type="button" className="ds-text-button" onClick={() => onComplete(defaultOnboardingConfig)}>使用默认设置</button>
+        <button type="button" className="ds-text-button" onClick={() => onComplete(defaultOnboardingConfig)}>默认设置</button>
         <div className="ds-onboarding__footer-main">
           {isMobile && step > 0 && <button type="button" className="ds-secondary-button" onClick={() => setStep((current) => current - 1)}>上一步</button>}
           <button type="button" className="ds-primary-button" onClick={finishOrAdvance}>{isMobile && step < steps.length - 1 ? "下一步" : "完成设置"}</button>
