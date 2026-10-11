@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/url"
@@ -26,6 +27,19 @@ func TestNativeShellEnabledDefaultsAndOverrides(t *testing.T) {
 				t.Fatalf("nativeShellEnabled(%q, %q) = %t, want %t", test.goos, test.setting, got, test.want)
 			}
 		})
+	}
+}
+
+func TestWebViewDebugEnabledIsOptIn(t *testing.T) {
+	for _, setting := range []string{"", "0", "false", " off ", "no"} {
+		if webViewDebugEnabled(setting) {
+			t.Fatalf("webViewDebugEnabled(%q) = true, want false", setting)
+		}
+	}
+	for _, setting := range []string{"1", "true", "YES", " on "} {
+		if !webViewDebugEnabled(setting) {
+			t.Fatalf("webViewDebugEnabled(%q) = false, want true", setting)
+		}
 	}
 }
 
@@ -57,4 +71,23 @@ func TestShutdownDesktopHTTPClosesListenerAndWaitsForServe(t *testing.T) {
 	conn, dialErr := net.DialTimeout("tcp", listener.Addr().String(), 100*time.Millisecond)
 	if conn != nil { _ = conn.Close() }
 	if dialErr == nil { t.Fatal("listener remained open after desktop shutdown") }
+}
+
+func TestNativeRunEventToolPayloads(t *testing.T) {
+	var call nativeRunEvent
+	if err := json.Unmarshal([]byte(`{"type":"tool.call","tool_call":{"id":"call-1","name":"clock","arguments":{"tz":"UTC"}}}`), &call); err != nil {
+		t.Fatal(err)
+	}
+	id, name, args, ok := call.toolCall()
+	if !ok || id != "call-1" || name != "clock" || args != `{"tz":"UTC"}` {
+		t.Fatalf("tool call = %q %q %q %t", id, name, args, ok)
+	}
+	var result nativeRunEvent
+	if err := json.Unmarshal([]byte(`{"type":"tool.result","metadata":{"tool_call_id":"call-1","tool_name":"clock","output":{"hour":12}}}`), &result); err != nil {
+		t.Fatal(err)
+	}
+	id, name, output, failed, message, ok := result.toolResult()
+	if !ok || id != "call-1" || name != "clock" || output != `{"hour":12}` || failed || message != "" {
+		t.Fatalf("tool result = %q %q %q %t %q %t", id, name, output, failed, message, ok)
+	}
 }
