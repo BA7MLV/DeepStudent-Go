@@ -36,6 +36,6 @@ export default function ModelPresets({ value, providers, onChange }: { value: Pr
       </div>
     </fieldset>)}
     <Button className="self-start" variant="secondary" onPress={() => onChange({ ...value, modelPresets: [...presets, { id: `preset-${crypto.randomUUID()}`, name: '新 Preset', purposes: ['chat', 'bot'], candidates: [{ ref: { providerId: providers[0]?.id ?? '', model: '' } }], policy: { allowCrossProvider: false, maxAttemptsPerCandidate: 2 } }] })}>创建 Preset</Button>
-    <p className="text-xs text-muted">修改后使用下方「保存模型设置」。正在作为用途默认的 Preset 需先更换默认再删除；失效候选会阻止保存，不会静默选择其他供应商。</p>
+    <p className="text-xs text-muted">修改后点击「保存模型设置」。正在作为用途默认的 Preset 需先更换默认再删除；失效候选会阻止保存，不会静默选择其他供应商。</p>
   </section>;
 }

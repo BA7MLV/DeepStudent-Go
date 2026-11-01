@@ -119,7 +119,9 @@ try {
   assert.equal(saved.providers[0].apiKey, undefined);
   await noBrowserKey();
   const id = saved.providers[0].id;
-  assert.equal(await page.getByTestId(`api-key-${id}`).inputValue(), '');
+  assert.equal(saved.providers[0].keyHint, '••••only');
+  assert.equal(await page.getByTestId(`provider-key-hint-${id}`).innerText(), '••••only');
+  assert.equal(await page.getByTestId(`api-key-${id}`).count(), 0, 'saved keys are shown as list items, not empty credential inputs');
   await page.getByTestId('btn-check-models').click();
   await page.getByText(/2 个可用模型/).first().waitFor();
   assert.equal(upstream[0].url, 'https://fixture.example/v1/models');
@@ -163,6 +165,25 @@ try {
   await page.goto(`${origin}/#/settings/models`);
   await page.reload();
   await page.getByTestId(`provider-summary-${id}`).click();
+  assert.equal(await page.getByTestId('cloud-models-save').count(), 0, 'clean settings do not show a redundant save action');
+  assert.equal(await page.getByTestId(`field-api-key-${id}`).getByTestId(`provider-accounts-${id}`).count(), 1, 'key input and account management belong to the same API Key field');
+  assert.equal(await page.getByTestId(`field-api-key-${id}`).locator('input[type="password"]').count(), 0, 'key management has no duplicate always-visible input');
+  await page.getByTestId(`provider-name-${id}`).fill('Renamed connection');
+  const assertSaveDock = async () => {
+    const dock = page.getByTestId('cloud-models-save-actions');
+    await dock.waitFor();
+    assert.equal(await dock.evaluate(element => element.parentElement.dataset.testid), 'settings-modal', 'save actions stay inside the modal focus scope, outside its scroll container');
+    const before = await dock.boundingBox();
+    await page.getByTestId('settings-module-models').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    const after = await dock.boundingBox();
+    assert.equal(after.y, before.y, 'scrolling settings never moves the save dock');
+    assert.ok(after.x >= 0 && after.y >= 0 && after.x + after.width <= (await page.viewportSize()).width && after.y + after.height <= (await page.viewportSize()).height, 'save actions stay within the viewport');
+    await page.getByTestId('settings-module-models').evaluate(element => { element.scrollTop = 0; });
+  };
+  await assertSaveDock();
+  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-save-desktop.png') });
+  await page.getByTestId(`provider-name-${id}`).fill(saved.providers[0].name);
+  await page.getByTestId('cloud-models-save-actions').waitFor({ state: 'detached' });
   await page.getByTestId(`provider-name-${id}`).fill('Renamed connection');
   assert.equal(await page.getByTestId('btn-check-models').innerText(), '保存连接并获取模型', 'display name changes are not mistaken for a saved connection');
   await page.getByTestId('saved-models').getByText('openai/gpt-4o', { exact: true }).waitFor();
@@ -171,6 +192,7 @@ try {
   await page.getByTestId('model-editor').getByRole('button', { name: '取消', exact: true }).click();
   await page.getByTestId('btn-check-models').click();
   await page.getByText(/2 个可用模型/).first().waitFor();
+  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
   assert.ok(upstream.every(r => r.headers.authorization === 'Bearer secret-for-server-only'), 'blank editor keys preserve credentials');
   await noBrowserKey();
   await page.mouse.move(0, 0);
@@ -185,12 +207,17 @@ try {
   await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-mobile.png') });
   // Saving rotated credentials succeeds even when the provider has no model-list endpoint.
   await page.getByTestId(`provider-summary-${id}`).click();
+  await page.getByRole('button', { name: '更换 Key', exact: true }).click();
+  assert.equal(await page.getByTestId(`field-api-key-${id}`).locator('input[type="password"]').count(), 1, 'replacing a key opens exactly one credential input');
   await page.getByTestId(`api-key-${id}`).fill('rotated-secret');
+  await assertSaveDock();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'key accounts and floating actions fit mobile screens');
+  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-save-mobile.png') });
   assert.equal(await page.getByTestId('btn-check-models').innerText(), '保存连接并获取模型');
   upstreamStatus = 404;
   await page.getByTestId('btn-check-models').click();
   await page.getByText(/接口未提供模型列表/).first().waitFor();
-  assert.equal(await page.getByTestId(`api-key-${id}`).inputValue(), '', 'saved credentials are cleared from the editor after a discovery failure');
+  assert.equal(await page.getByTestId(`api-key-${id}`).count(), 0, 'saved credentials and their form are cleared after a discovery failure');
   assert.equal((await readConfig()).llmModel.model, 'catalog-model', 'connection save preserves defaults');
   assert.equal((await readConfig()).providers[0].configured, true);
   assert.equal(upstream.at(-1).headers.authorization, 'Bearer rotated-secret');
@@ -204,6 +231,7 @@ try {
     provider: { ...latest.providers[0], name: 'Externally changed' }, modelRevision: latest.modelRevision,
   } });
   assert.equal(changed.status(), 200);
+  await page.getByRole('button', { name: '更换 Key', exact: true }).click();
   await page.getByTestId(`api-key-${id}`).fill('unsaved-conflict-secret');
   await page.getByTestId('btn-check-models').click();
   await page.getByText(/服务器上的模型设置已被其他页面修改/).first().waitFor();
@@ -213,7 +241,49 @@ try {
   await page.getByTestId('confirm-dialog').getByRole('button', { name: '重新载入', exact: true }).click();
   await page.getByTestId('provider-add-card').waitFor();
   await page.getByTestId(`provider-summary-${id}`).click();
-  assert.equal(await page.getByTestId(`api-key-${id}`).inputValue(), '');
+  assert.equal(await page.getByTestId(`api-key-${id}`).count(), 0);
+
+  // Account changes save immediately in the same API Key section, not in the model draft.
+  const accounts = page.getByTestId(`provider-accounts-${id}`);
+  await accounts.getByRole('button', { name: '添加 Key', exact: true }).click();
+  assert.equal(await page.getByTestId(`field-api-key-${id}`).locator('input[type="password"]').count(), 1, 'adding a key uses the same single-input area');
+  await accounts.getByLabel('Key 名称（可选）', { exact: true }).fill('Secondary account');
+  await accounts.getByLabel('API Key', { exact: true }).fill('account-secret-for-server-only');
+  await page.getByTestId('cloud-models-save').click();
+  await page.getByRole('alert').filter({ hasText: '当前 API Key 尚未保存' }).waitFor();
+  await page.route(`**/api/v1/cloud/providers/${id}/accounts`, route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, json: { error: 'test_key_save_failed' } }) : route.continue());
+  await accounts.getByRole('button', { name: '保存 Key', exact: true }).click();
+  await accounts.getByRole('alert').filter({ hasText: 'test_key_save_failed' }).waitFor();
+  assert.equal(await accounts.getByLabel('API Key', { exact: true }).inputValue(), 'account-secret-for-server-only', 'failed key saves retain the single form for retry');
+  await page.unroute(`**/api/v1/cloud/providers/${id}/accounts`);
+  await accounts.getByRole('button', { name: '保存 Key', exact: true }).click();
+  await accounts.getByText('Secondary account', { exact: false }).waitFor();
+  assert.equal(await accounts.getByLabel('API Key', { exact: true }).count(), 0, 'saved account secrets and the input form are removed');
+  assert.equal((await readConfig()).providers[0].accounts[0].name, 'Secondary account');
+  const account = (await readConfig()).providers[0].accounts[0];
+  assert.equal(account.keyHint, '••••only');
+  assert.equal(await accounts.getByTestId(`account-key-hint-${account.id}`).innerText(), '••••only', 'named accounts display their identifying suffix in the key list');
+  assert.equal(await page.getByTestId('cloud-models-save').count(), 0, 'immediately saved accounts do not leave a misleading pending save');
+  assert.ok(!(await page.evaluate(() => JSON.stringify(localStorage))).includes('account-secret-for-server-only'));
+  await page.getByTestId('field-api-key-' + id).evaluate(element => element.scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-unified-keys-mobile.png') });
+  await accounts.getByRole('button', { name: '删除', exact: true }).click();
+  await accounts.getByText('Secondary account', { exact: false }).waitFor({ state: 'detached' });
+  await page.getByTestId(`provider-default-key-${id}`).getByText('当前使用', { exact: true }).waitFor();
+  await accounts.getByRole('button', { name: '添加 Key', exact: true }).click();
+  await accounts.getByLabel('API Key', { exact: true }).fill('discarded-extra-key');
+  await accounts.getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(await accounts.getByLabel('API Key', { exact: true }).count(), 0, 'cancel removes the form and its secret');
+  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
+  await accounts.getByRole('button', { name: '更换 Key', exact: true }).click();
+  await accounts.getByLabel('API Key', { exact: true }).fill('replacement-from-unified-form');
+  await accounts.getByRole('button', { name: '保存 Key', exact: true }).click();
+  await accounts.getByLabel('API Key', { exact: true }).waitFor({ state: 'detached' });
+  await page.getByTestId('btn-check-models').click();
+  await page.getByText(/2 个可用模型/).first().waitFor();
+  assert.equal(upstream.at(-1).headers.authorization, 'Bearer replacement-from-unified-form');
+  assert.equal(await page.getByTestId(`provider-key-hint-${id}`).innerText(), '••••form', 'replacing a credential updates its display suffix');
 
   // Preset drafts share the model-settings CAS and never persist credentials locally.
   const presets = page.getByTestId('model-presets');
@@ -221,6 +291,13 @@ try {
   await presets.getByLabel('Preset 名称', { exact: true }).fill('Gateway fixture');
   await presets.getByLabel('精确 Model ID', { exact: true }).fill('private-preset-model');
   await presets.getByLabel('候选 1 · 供应商', { exact: true }).selectOption(id);
+  await page.route('**/api/v1/cloud/model-settings', route => route.request().method() === 'PUT'
+    ? route.fulfill({ status: 503, json: { error: 'test_dock_save_failed' } }) : route.continue());
+  await page.getByTestId('cloud-models-save').click();
+  await page.getByTestId('cloud-models-save-actions').getByRole('alert').filter({ hasText: 'test_dock_save_failed' }).waitFor();
+  await assertSaveDock();
+  assert.equal(await presets.getByLabel('Preset 名称', { exact: true }).inputValue(), 'Gateway fixture', 'failed floating saves keep the draft intact');
+  await page.unroute('**/api/v1/cloud/model-settings');
   await page.getByTestId('cloud-models-save').click();
   await page.getByText('模型设置已保存到服务器', { exact: true }).waitFor();
   let presetConfig = await readConfig();
@@ -279,8 +356,10 @@ try {
   await page.getByTestId('cloud-models-save').click();
   await page.getByText('模型设置已保存到服务器', { exact: true }).waitFor();
   assert.deepEqual((await readConfig()).decisionModel, { providerId: '', model: '' });
-  await page.getByRole('button', { name: '添加 OpenCode Go（服务端环境密钥）', exact: true }).click();
+  await page.getByRole('button', { name: '添加 OpenCode Go', exact: true }).click();
   await page.getByText('连接已保存到服务器', { exact: true }).waitFor();
+  await page.getByTestId('provider-summary-opencode-go').click();
+  await page.getByTestId('field-api-key-opencode-go').getByText('OPENCODE_GO_API_KEY', { exact: true }).waitFor();
   const goConfig = await readConfig();
   assert.equal(goConfig.providers.find(p => p.id === 'opencode-go').configured, false, 'no test credential is installed');
   await page.getByRole('button', { name: '刷新路由与用量', exact: true }).click();
@@ -290,9 +369,9 @@ try {
   assert.equal(upstream.at(-1).url, 'https://opencode.ai/inference/go/v1/models');
   assert.equal(upstream.at(-1).headers['user-agent'], 'wangke-model-gateway/0.1');
   await page.reload();
-  await page.getByRole('region', { name: 'OpenCode Go', exact: true }).waitFor();
+  await page.getByTestId('provider-summary-opencode-go').waitFor();
   assert.deepEqual(errors, []);
-  console.log('PASS: onboarding/settings, paginated discovery, credential safety, completion retry, 404 recovery, concurrent conflicts, deletion, legacy field repair, skip and mobile layout');
+  console.log('PASS: onboarding/settings, grouped key accounts, floating save/retry on desktop and mobile, paginated discovery, credential safety, completion retry, 404 recovery, concurrent conflicts, deletion, legacy field repair and skip');
 } catch (error) {
   const page = browser?.contexts()[0]?.pages()[0];
   if (page) {

@@ -39,6 +39,7 @@ try {
   const files = path.join(root, 'files'); fs.mkdirSync(files);
   const image = await receiveFile(store, files, owner, Readable.from([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF9sAAAAASUVORK5CYII=', 'base64')]), 'image.png', 'image/png', 1024);
   const document = await receiveFile(store, files, owner, Readable.from(['notes']), 'notes.txt', 'text/plain', 1024);
+  const secondImage = await receiveFile(store, files, owner, Readable.from([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF9sAAAAASUVORK5CYII=', 'base64')]), 'second.png', 'image/png', 1024);
   const privateFile = await receiveFile(store, files, other, Readable.from(['private']), 'private.txt', 'text/plain', 1024);
   const messages = () => store.db.prepare("SELECT kind,content FROM messages WHERE thread_id=? AND role='assistant' ORDER BY seq").all(thread);
   let turns = 0;
@@ -136,6 +137,20 @@ try {
     assert.equal(status(multipart), 'completed'); assert.equal(requests, 4); assert.equal(executions, 1);
     assert.deepEqual(replies(multipart), parts.map(content => ({ kind: 'text', content })), 'only the meaningful answer parts reach the conversation');
     assert.equal(eventCount(), eventsBefore + parts.length, 'each part creates exactly one delivery event');
+
+    const albumRun = createRun(`${protocol}: 两张图片一起发送，再单独发送文件`);
+    let albumRequests = 0;
+    runner = new BotRunner(store, { configuration, study: new StudyTools(store, configuration, files), fetch: async () => ++albumRequests === 1
+      ? modelResponse(protocol, '', ['study_send_file', { fileIds: [image.id, secondImage.id], caption: '两张一起看' }], ['study_send_file', { fileId: document.id }])
+      : modelResponse(protocol, '', ['finish_turn', {}]) });
+    runner.start(); await until(() => ['completed', 'failed', 'paused'].includes(status(albumRun))); await runner.close();
+    assert.equal(status(albumRun), 'completed');
+    assert.equal(albumRequests, 2);
+    const attachments = replies(albumRun).map(message => JSON.parse(message.content));
+    assert.equal(attachments.length, 2, 'one album and one independent file, without narration or duplicate summary');
+    assert.deepEqual(attachments[0].attachments.map(file => file.fileId), [image.id, secondImage.id]);
+    assert.equal(attachments[0].caption, '两张一起看');
+    assert.equal(attachments[1].fileId, document.id);
   }
   configuration.save(owner, { ...configuration.get(owner, true), providers: [{ id: 'direct', name: 'Direct', baseUrl: 'https://offline.invalid', apiKey: 'test', protocol: 'openai-chat', catalogId: '', serves: ['chat'] }] });
   const recoverable = createRun('请接着整理'), superseded = createRun('旧请求'), uncertain = createRun('旧操作'), archived = createRun('归档请求');

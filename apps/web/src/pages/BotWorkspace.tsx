@@ -13,7 +13,7 @@ import { BotAttachmentDraft, BotMessageAttachments, type BotDraftFile } from '..
 import { botProgressText } from '@wangke/contracts/cloud';
 import MessageComposer from '../components/MessageComposer';
 import VirtualMessages from '../components/VirtualMessages';
-import { formatListTime, createMessageGrouper, timeOf, type Row } from './botMessages';
+import { compactThreadTitle, formatListTime, createMessageGrouper, timeOf, type Row } from './botMessages';
 import DeliveryReceipt from '../components/DeliveryReceipt';
 import AccessForm from './BotAccess';
 import './bot.css';
@@ -264,12 +264,6 @@ function plainPreview(text: string) {
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-/** IM 线程标题只保留联系人标识，避免把通道前缀和超长 peer 展开到顶栏。 */
-function compactThreadTitle(title: string | null | undefined) {
-  const value = (title ?? '').replace(/^IM\s*[·•:]\s*/i, '').trim();
-  return value.length > 28 ? `${value.slice(0, 28)}…` : value;
 }
 
 function lastText(messages: MessageDto[] | undefined) {
@@ -716,6 +710,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
 
   const landing = !activeId && !filesOpen;
   const chatTitle = filesOpen ? tp('files') : activeSummary?.title && activeSummary.title !== tp('newTitle') ? compactThreadTitle(activeSummary.title) : currentAgent?.name ?? '';
+  const fullChatTitle = filesOpen ? tp('files') : activeSummary?.title || chatTitle;
 
   /* ── 对话区（Bot 栏与项目共用） ── */
 
@@ -764,7 +759,16 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
           </>
         )}
       </div>
-       {(history.hasNewer || !stickRef.current) && <Button size="sm" variant="secondary" className="bot-jump-latest" onPress={() => { void history.jumpLatest().then(ok => { if (ok) { stickRef.current = true; followEnd(); } }); }}>{t('botHome.jumpLatest')}</Button>}
+       {(history.hasNewer || !stickRef.current) && (
+         <button
+           type="button"
+           className="bot-jump-latest"
+           aria-label={t('botHome.jumpLatest')}
+           onClick={() => { void history.jumpLatest().then(ok => { if (ok) { stickRef.current = true; followEnd(); } }); }}
+         >
+           <Sym name="arrow_downward" />
+         </button>
+       )}
       {history.syncStatus === 'offline' && <span className="bot-sync-status" role="status">{t('botHome.reconnecting')}</span>}
       {history.syncStatus === 'error' && <span className="bot-sync-status" role="alert">{t('botHome.syncError')}</span>}
       <span className="sr-only" aria-live="polite" aria-atomic="true">{history.announcement ? `${history.announcement} · ${t('botHome.newMessage')}` : ''}</span>
@@ -818,7 +822,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       <Dropdown>
         <Button variant="ghost" className="bot-panel__switcher" aria-label={t('botHome.history')} data-testid="bot-panel-history">
           <BotAvatar agent={currentAgent} size={28} />
-          <span className="bot-panel__switcher-name" title={landing ? currentAgent?.name || 'Bot' : chatTitle}>{landing ? currentAgent?.name || 'Bot' : chatTitle}</span>
+          <span className="bot-panel__switcher-name" title={landing ? currentAgent?.name || 'Bot' : fullChatTitle}>{landing ? currentAgent?.name || 'Bot' : chatTitle}</span>
           <Sym name="keyboard_arrow_down" aria-hidden="true" />
         </Button>
         <Dropdown.Popover placement="bottom start" className="bot-panel__history">
@@ -834,7 +838,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
           >
             {recentThreads.map(({ thread, time }) => (
               <Dropdown.Item key={thread.id} id={thread.id} textValue={compactThreadTitle(thread.title) || tp('newTitle')}>
-                <span className="min-w-0 flex-1 truncate">{compactThreadTitle(thread.title) || tp('newTitle')}</span>
+                <span className="min-w-0 flex-1 truncate" title={thread.title ?? undefined}>{compactThreadTitle(thread.title) || tp('newTitle')}</span>
                 <time className="shrink-0 text-xs text-muted" dateTime={time}>{formatListTime(time, locale)}</time>
               </Dropdown.Item>
              ))}
@@ -946,7 +950,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
           <h2 className="bh-chat__who">
             {!filesOpen && <BotAvatar agent={currentAgent} size={28} />}
             <span className="bh-chat__identity">
-              <span className="bh-chat__name" title={chatTitle}>{chatTitle}</span>
+              <span className="bh-chat__name" title={fullChatTitle}>{chatTitle}</span>
               <BotActivity active={(activeRunning || activeWaiting) && !filesOpen} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} beat={activityBeat} />
             </span>
           </h2>

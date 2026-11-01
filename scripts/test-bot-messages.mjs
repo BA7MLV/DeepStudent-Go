@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { groupMessages, formatListTime } from '../apps/web/src/pages/botMessages.ts';
+import { compactThreadTitle, groupMessages, formatListTime } from '../apps/web/src/pages/botMessages.ts';
+
+test('IM titles show a short, distinguishable peer instead of the platform address', () => {
+  assert.equal(compactThreadTitle('IM · o9cq80wWsvX1RRaph6t-ewUlmtYk@im.wechat'), 'o9cq80…mtYk');
+  assert.equal(compactThreadTitle('o9cq80wWsvX1RRaph6t-ewUlmtYk'), 'o9cq80…mtYk');
+  assert.equal(compactThreadTitle(' IM • alice@im.wechat '), 'alice');
+  assert.equal(compactThreadTitle('IM · 图片与输入框'), '图片与输入框');
+  assert.equal(compactThreadTitle('另一段对话'), '另一段对话');
+  assert.equal(compactThreadTitle('😀'.repeat(30)), `${'😀'.repeat(28)}…`);
+  assert.equal(compactThreadTitle(null), '');
+});
 
 const at = (minutes) => new Date(Date.UTC(2026, 9, 24, 8, 0) + minutes * 60_000).toISOString();
 const msg = (id, role, minutes) => ({ id, threadId: 't', clientNonce: id, seq: 0, role, kind: 'text', content: id, replyTo: null, createdAt: at(minutes) });

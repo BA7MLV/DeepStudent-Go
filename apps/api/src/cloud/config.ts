@@ -13,6 +13,12 @@ export class ModelConfigurationError extends Error {
   constructor(message: string, readonly issues: ModelSettingsIssue[] = [], readonly status = 400) { super(message); }
 }
 
+/** Short credentials must not be revealed in full, even as a display hint. */
+function keyHint(key: string | undefined): string | undefined {
+  if (!key) return undefined;
+  return key.length > 8 ? `••••${key.slice(-4)}` : '••••（短密钥）';
+}
+
 export class CloudConfiguration {
   private key: Buffer;
   constructor(private store: DatabaseStore, directory: string) {
@@ -50,9 +56,9 @@ export class CloudConfiguration {
     Object.assign(value, migrateModelPresets(value));
     value.modelRevision = this.modelRevision(value);
     if (!secrets) for (const provider of value.providers) if (provider.accounts) {
-      provider.accounts = provider.accounts.map(account => ({ id: account.id, name: account.name, configured: Boolean(account.apiKey) }));
+      provider.accounts = provider.accounts.map(account => ({ id: account.id, name: account.name, configured: Boolean(account.apiKey), keyHint: keyHint(account.apiKey) }));
     }
-    if (!secrets) value.providers = value.providers.map(({ apiKey, ...p }) => ({ ...p, configured: Boolean(apiKey) }));
+    if (!secrets) value.providers = value.providers.map(({ apiKey, ...p }) => ({ ...p, configured: Boolean(apiKey), keyHint: keyHint(apiKey) }));
     return value;
   }
   private modelRevision(value: CloudConfig) {

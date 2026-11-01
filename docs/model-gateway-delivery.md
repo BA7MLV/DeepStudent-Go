@@ -91,7 +91,7 @@
 
 ### Provider 多 Key 账户
 
-- 所有 Provider 都支持多个服务端保存的 Key。设置页可添加账户名称和 Key、手动启用或删除账户；当前激活账户的 Key 只在 API 进程内解密使用，浏览器只看到账户 ID、名称和 configured 状态。OpenCode Go 另支持用 `OPENCODE_GO_API_KEY` 作为无账户的单 Key 入口。
+- 所有 Provider 都支持多个服务端保存的 Key。设置页可添加账户名称和 Key、手动启用或删除账户；完整 Key 只在 API 进程内解密使用，浏览器只看到账户 ID、名称、configured 状态和用于核对的 `keyHint`（掩码 + 末 4 位，长度不超过 8 的短密钥不显示尾号）。默认 Key、账户 Key 和环境变量 Key 使用同一脱敏规则。OpenCode Go 另支持用 `OPENCODE_GO_API_KEY` 作为无账户的单 Key 入口。
 - 账户凭据与现有 CloudConfig 一起加密保存，并受 `modelRevision` CAS 保护；模型设置保存不会覆盖账户凭据。环境变量 Key 可作为无账户时的简单默认连接。
 - 多 Key 当前是手动切换，不默认自动轮换；这样不会无声绕过供应商额度、区域或审计边界。后续若需要账户级 fallback，应单独配置并记录切换原因。
 

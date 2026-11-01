@@ -107,6 +107,7 @@ test('Go environment credential is key-only, never persisted or returned; metada
     for (const owner of [input.owner, 'other-owner']) config.save(owner, { ...config.get(owner), providers: [{ ...provider, apiKey: undefined }], llmModel: ref });
     assert.equal(config.get(input.owner, true).providers[0].apiKey, secret); assert.equal(config.get('other-owner', true).providers[0].apiKey, secret);
     assert.doesNotMatch(JSON.stringify(config.get(input.owner)), new RegExp(secret));
+    assert.equal(config.get(input.owner).providers[0].keyHint, `••••${secret.slice(-4)}`, 'environment keys have the same safe display hint');
     const row = store.db.prepare('SELECT value FROM cloud_config WHERE owner_id=?').get(input.owner);
     assert.ok(!config.open(row.value).includes(secret));
     const { createModelGateway } = await import('../apps/api/src/agent/model-gateway-factory.ts');
@@ -149,6 +150,7 @@ test('Go saved accounts are encrypted, switchable and never exposed to the clien
     const view = configuration.get(owner);
     assert.equal(view.providers[0].accounts?.length, 2);
     assert.equal(view.providers[0].accounts?.every(account => !('apiKey' in account)), true);
+    assert.ok(view.providers[0].accounts.every(account => account.keyHint === '••••（短密钥）'), 'short account keys are never revealed as suffixes');
     const backup = view.providers[0].accounts?.find(account => account.name === '备用 Key');
     assert.ok(backup);
     saved = configuration.activateProviderAccount(owner, 'opencode-go', backup.id, saved.modelRevision);
@@ -157,6 +159,11 @@ test('Go saved accounts are encrypted, switchable and never exposed to the clien
     assert.equal(new ModelAdapter(runtime, ref.model).transport('chat/completions', { owner, conversationId: 'c' }).headers.authorization, 'Bearer go-key-b');
     const row = store.db.prepare('SELECT value FROM cloud_config WHERE owner_id=?').get(owner);
     assert.doesNotMatch(row.value, /go-key-[ab]/);
+    saved = configuration.addProviderAccount(owner, 'opencode-go', { name: '工作账号', apiKey: 'long-account-key-7xQ2', modelRevision: saved.modelRevision });
+    const displayAccount = saved.providers[0].accounts.find(account => account.name === '工作账号');
+    assert.equal(displayAccount.keyHint, '••••7xQ2');
+    assert.equal('apiKey' in displayAccount, false);
+    assert.ok(!JSON.stringify(saved).includes('long-account-key-7xQ2'));
   } finally {
     if (old === undefined) delete process.env.OPENCODE_GO_API_KEY; else process.env.OPENCODE_GO_API_KEY = old;
     store.close(); fs.rmSync(directory, { recursive: true, force: true });

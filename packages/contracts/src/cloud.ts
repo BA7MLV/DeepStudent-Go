@@ -69,6 +69,8 @@ export interface CloudProviderAccount {
   /** Present only inside the server's decrypted configuration. */
   apiKey?: string;
   configured?: boolean;
+  /** Display-only masked suffix; never contains a complete credential. */
+  keyHint?: string;
 }
 export interface CloudProvider {
   id: string;
@@ -77,6 +79,8 @@ export interface CloudProvider {
   protocol: 'openai-chat' | 'openai-responses' | 'anthropic-messages';
   apiKey?: string;
   configured?: boolean;
+  /** Display-only masked suffix of the default/environment key. */
+  keyHint?: string;
   catalogId: string;
   serves: Array<'chat' | 'vision' | 'asr' | 'decision'>;
   /** Cross-provider fallback cannot cross this explicit data boundary. */

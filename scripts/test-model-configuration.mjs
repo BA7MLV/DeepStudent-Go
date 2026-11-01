@@ -35,6 +35,7 @@ try {
   config = result.body;
   assert.notEqual(config.modelRevision, baseRevision);
   assert.equal(config.providers[0].configured, true);
+  assert.equal(config.providers[0].keyHint, '••••cret', 'default keys expose only a masked suffix for identification');
   assert.equal(configuration.get(owner, true).providers[0].apiKey, 'first-secret');
 
   result = await put('/providers/p2', { provider: { ...provider, id: 'p2' }, modelRevision: baseRevision });
@@ -91,6 +92,13 @@ try {
   assert.equal((await put('/providers/p1', { provider })).status, 400, 'version required on scoped endpoints');
   assert.equal((await put('/providers/p1', { provider, modelRevision: config.modelRevision }, { 'x-test-auth': 'no' })).status, 401);
   assert.equal((await put('/model-settings', { ...config, llmModel: { providerId: 'p1', model: 'x'.repeat(201) } })).body.issues[0].reason, 'model_too_long');
+  for (const apiKey of ['x', 'abcd', 'abcdefgh', 'long-key-7xQ2', '']) {
+    const latest = configuration.get(owner);
+    const response = await put('/providers/p1', { provider: { ...provider, apiKey }, modelRevision: latest.modelRevision });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.providers[0].keyHint, apiKey.length > 8 ? '••••7xQ2' : apiKey ? '••••（短密钥）' : undefined);
+    assert.equal('apiKey' in response.body.providers[0], false, 'no complete key is returned, regardless of credential length');
+  }
   console.log('PASS: scoped config APIs, incomplete setup, version conflicts, policy isolation, credentials, legacy recovery, atomic deletion and field errors');
 } finally {
   await app.close();

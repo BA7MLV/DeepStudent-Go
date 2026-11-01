@@ -118,10 +118,10 @@ try {
   console.log('Review 2/3: real Bot read/update/read/approved delete, raw snapshots, owner/conflict, SQL filtered cursor over 1140 rows and player URLs');
 
   const file = await receiveFile(store, files, owner, Readable.from(['private study file']), 'study.txt', 'text/plain', 1024);
-  for (const read of ['deny', 'ask']) {
+  for (const read of ['deny', 'ask']) for (const batch of [false, true]) {
     policy({ read, write: 'allow' }); let n = 0;
     const thread = service.create(owner, 'bot', `attachment ${read}`, 'agent').id;
-    const run = await runIn(thread, async () => { n++; return n === 1 ? tool('send_message', { kind: 'attachment', text: JSON.stringify({ fileId: file.id }) }) : n === 2 ? tool('study_send_file', { fileId: file.id }) : tool('send_message', { kind: 'text', text: 'done' }); });
+    const run = await runIn(thread, async () => { n++; return n === 1 ? tool('send_message', { kind: 'attachment', text: JSON.stringify(batch ? { attachments: [{ fileId: file.id }] } : { fileId: file.id }) }) : n === 2 ? tool('study_send_file', batch ? { fileIds: [file.id] } : { fileId: file.id }) : tool('send_message', { kind: 'text', text: 'done' }); });
     if (read === 'ask') {
       await until(() => status(run) === 'waiting_user');
       assert.equal(store.db.prepare("SELECT COUNT(*) n FROM messages WHERE thread_id=? AND kind='attachment'").get(thread).n, 0);

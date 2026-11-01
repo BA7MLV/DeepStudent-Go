@@ -1,5 +1,16 @@
 import type { MessageDto } from '@wangke/contracts';
 
+/** 兼容旧 IM 标题；平台 ID 保留首尾以区分联系人，不把机器标识铺满顶栏。 */
+export function compactThreadTitle(title: string | null | undefined): string {
+  const value = (title ?? '').replace(/^\s*IM\s*[·•:]\s*/i, '').trim();
+  const peer = value.replace(/@im\.wechat$/i, '');
+  if (peer !== value || /^[\w-]{20,}$/.test(peer)) {
+    return peer.length > 12 ? `${peer.slice(0, 6)}…${peer.slice(-4)}` : peer;
+  }
+  const chars = Array.from(value);
+  return chars.length > 28 ? `${chars.slice(0, 28).join('')}…` : value;
+}
+
 /* ─────────────────────────── 消息分组（iMessage / Telegram 规则） ───────────────────────────
  * 同一发送方、相隔不到 GROUP_GAP_MS 的连续消息算一组：组内间距收紧，只有最后一条带尾巴。
  * 时间不再单独占一行，而是像 Telegram 一样放进气泡右下角；跨天时插一枚居中的日期胶囊。

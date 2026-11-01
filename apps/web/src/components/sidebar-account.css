@@ -82,7 +82,7 @@
 .sidebar-account__settings[data-testid][data-hovered='true'],
 .sidebar-account__settings[data-testid][data-pressed='true'] {
   background: transparent;
-  color: var(--foreground);
+  color: var(--muted);
 }
 
 .sidebar-account__settings[data-testid] > svg {

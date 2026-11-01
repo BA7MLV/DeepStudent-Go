@@ -10,7 +10,7 @@ import { publishBotEvent } from '../agent/events.js';
 import { GATEWAY_CONNECTION_ERRORS, type GatewayConnectionDiagnostics, type GatewayReadiness } from '@wangke/contracts/gateway';
 import { splitGatewayMarkdown } from './chunk.js';
 import { photoBatch, type PhotoInboxItem } from './photo-batch.js';
-import { MAX_BOT_MESSAGE_ATTACHMENTS } from '@wangke/contracts';
+import { MAX_BOT_MESSAGE_ATTACHMENTS, parseBotAttachments } from '@wangke/contracts';
 import { readableApprovalText } from '../agent/approval-copy.js';
 
 const stamp = () => new Date().toISOString();
@@ -620,7 +620,15 @@ export class GatewayCore {
            if (finalMessage || channelStatus) {
              let text = m.content;
             let fileId: string | undefined;
-            if (m.kind === 'attachment') { try { const f = JSON.parse(text); if (f.fileId) { fileId = f.fileId; text = f.caption ?? f.name ?? '文件'; } } catch { /* legacy plain text */ } }
+            let batchFiles: string[] | undefined;
+            if (m.kind === 'attachment') {
+              const attachment = parseBotAttachments(text);
+              if (attachment) {
+                if (attachment.files.some(file => !file.fileId)) throw new Error('invalid_outbound_attachment');
+                if (attachment.files.length > 1) { batchFiles = attachment.files.map(file => file.fileId!); text = attachment.text; }
+                else { fileId = attachment.files[0].fileId; text = attachment.text || attachment.files[0].name || '文件'; }
+              }
+            }
             if (m.kind === 'approval') {
               const a = this.store.db.prepare('SELECT a.id,a.status,m.seq FROM approvals a JOIN messages m ON m.id=a.message_id WHERE a.message_id=?').get(m.id) as any;
               if (!a || a.status !== 'pending') {
@@ -633,7 +641,10 @@ export class GatewayCore {
             }
             const maxMessageLength = this.live.get(b.account_id)?.plugin.manifest.capabilities.maxMessageLength ?? 1500;
             const parts = splitGatewayMarkdown(String(text), maxMessageLength);
-            for (let i = 0; i < parts.length; i++) this.enqueue(b.id, `event:${event.event_id}:${i}`, { text: parts[i], ...(i === 0 && fileId ? { fileId } : {}) });
+            const payloads: GatewayPayload[] = batchFiles
+              ? [...(text.trim() ? parts.map(text => ({ text })) : []), ...batchFiles.map(fileId => ({ text: '', fileId }))]
+              : parts.map((text, i) => ({ text, ...(i === 0 && fileId ? { fileId } : {}) }));
+            for (let i = 0; i < payloads.length; i++) this.enqueue(b.id, `event:${event.event_id}:${i}`, payloads[i]);
           }
           this.store.db.prepare('UPDATE gateway_bindings SET checkpoint=? WHERE id=?').run(event.event_id, b.id);
           this.store.db.prepare('DELETE FROM gateway_projection_failures WHERE binding_id=? AND event_id=?').run(b.id, event.event_id);

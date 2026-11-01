@@ -61,7 +61,8 @@ export function cloudProviderDirty(provider: Provider, config: CloudConfig): boo
 
 export function cloudModelsDirty(settings: Settings, baseline: CloudConfig): boolean {
   const candidate = cloudModelConfig(settings, baseline);
-  const providers = (config: CloudConfig) => config.providers.map(({ configured: _configured, apiKey, ...p }) => ({ ...p, apiKey: apiKey || undefined }));
+  // Accounts save immediately through their own endpoints, not the model-settings draft.
+  const providers = (config: CloudConfig) => config.providers.map(({ configured: _configured, keyHint: _keyHint, accounts: _accounts, activeAccountId: _activeAccountId, apiKey, ...p }) => ({ ...p, apiKey: apiKey || undefined }));
   return JSON.stringify(providers(candidate)) !== JSON.stringify(providers(baseline))
     || MODEL_FIELDS.some((slot) => JSON.stringify(candidate[slot]) !== JSON.stringify(baseline[slot] ?? { providerId: '', model: '' }));
 }

@@ -55,6 +55,28 @@ try {
   assert.equal(projects.files.read(bot, 'notes.md').text, '# Generated notes');
   await tools.plugins.get('study_send_file').execute({ fileId: exported.fileId }, ctx);
   assert.equal(resources.list(owner, bot).entries.length, 3, 're-sending the same file is not another library item');
+  const deliveries = [];
+  const deliveryContext = { ...ctx, append: (kind, content) => deliveries.push({ kind, content }) };
+  const sendFile = tools.plugins.get('study_send_file');
+  const albumIds = [photo.id, legacy.id];
+  assert.deepEqual(await sendFile.execute({ fileIds: albumIds, caption: '一组图片' }, deliveryContext), { sent: true, fileIds: albumIds });
+  assert.equal(deliveries.length, 1, 'a batch publishes exactly one Web message');
+  const album = JSON.parse(deliveries[0].content);
+  assert.deepEqual(album.attachments.map(file => file.fileId), albumIds);
+  assert.equal(album.caption, '一组图片');
+  assert.ok(album.attachments.every(file => file.mimeType === 'image/png'));
+  for (const fileId of albumIds) await sendFile.execute({ fileId }, deliveryContext);
+  assert.deepEqual(deliveries.slice(1).map(message => JSON.parse(message.content).fileId), albumIds, 'individual sends stay separate');
+  const beforeInvalid = deliveries.length;
+  for (const args of [{}, { fileId: photo.id, fileIds: albumIds }, { fileIds: [] }, { fileIds: 'not-an-array' }, { fileIds: [photo.id, photo.id] },
+    { fileIds: [photo.id, ''] }, { fileIds: Array.from({ length: 100 }, (_, i) => `id-${i}`) }, { fileIds: [photo.id, privateFile.id] },
+    { fileIds: albumIds, caption: 1 }]) {
+    await assert.rejects(() => sendFile.execute(args, deliveryContext));
+    assert.equal(deliveries.length, beforeInvalid, 'invalid/partially unowned batches publish nothing');
+  }
+  let checks = 0;
+  await assert.rejects(() => sendFile.execute({ fileIds: albumIds }, { ...deliveryContext, checkActive() { if (++checks === 3) throw new Error('cancelled'); } }), /cancelled/);
+  assert.equal(deliveries.length, beforeInvalid, 'authority is rechecked after all reads, before a single commit');
   projects.files.move(bot, 'photo.png', bot, 'renamed.png', listing.entries.find(e => e.name === 'photo.png').revision);
   listing = resources.list(owner, bot);
   assert.ok(listing.entries.some(e => e.name === 'renamed.png'));

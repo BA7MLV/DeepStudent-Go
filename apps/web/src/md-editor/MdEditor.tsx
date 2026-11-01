@@ -1,9 +1,9 @@
 /**
  * md 所见即所得编辑面的 React 外壳。
  *
- * 这个文件只干三件事，其余都已经拆出去了：
+ * 编辑器生命周期、视图切换与保存：
  *   - 把 EditorView 的生命周期绑到 React 上（建 / 毁）；
- *   - 把「预览 ⇄ 源码」这个开关翻译成一次 Compartment 重配；
+ *   - 实时编辑 / 源码用 Compartment 重配，完整预览复用阅读态渲染；
  *   - 把 docChanged 接成「防抖落盘」（./save.ts），并把这个编辑面注册进 agent 桥（./bridge.ts）。
  * 「某个语法符号该不该藏」在 ./hideRanges.ts（纯函数 + 单测），
  * 「md 内容该长什么样」在 ./theme.ts，这里一概不重复那些判断。
@@ -33,6 +33,12 @@ import { livePreview } from './livePreview';
 import { createMdSaver, mdSaveLabel, type MdSaveState } from './save';
 import { mdEditorTheme } from './theme';
 import { formatMarkdown, MD_FORMAT_ACTIONS, type MdFormatAction } from './format';
+import { Markdown } from '../components/markdown/Markdown';
+import { MarkdownCode, MarkdownPre } from '../components/mermaid/markdown';
+import ScrollStatus from './ScrollStatus';
+
+const PREVIEW_COMPONENTS = { code: MarkdownCode, pre: MarkdownPre };
+type EditorMode = 'live' | 'source' | 'preview';
 
 /**
  * 落盘器交给上层的唯一能力。
@@ -99,7 +105,7 @@ export default function MdEditor({
    * 放 ref 则由挂载/卸载严格配对，identity 在这个 view 的生命周期内必然稳定。
    */
   const slotRef = useRef<{ slot: Compartment; live: Extension } | null>(null);
-  /** 「预览 ⇄ 源码」开关有没有被真正拨过一次（用来跳过挂载后的空跑一趟）。 */
+  /** 实时编辑 / 源码开关是否已初始化（跳过挂载后的空跑）。 */
   const toggledRef = useRef(false);
   /** 当前注册进 agent 桥的那个控制器：撤销按钮要用它；卸载时置空 */
   const ctlRef = useRef<MdEditorController | null>(null);
@@ -109,7 +115,12 @@ export default function MdEditor({
    */
   const aliveRef = useRef(true);
 
-  const [showSource, setShowSource] = useState(false);
+  const [mode, setMode] = useState<EditorMode>('live');
+  const showSource = mode === 'source';
+  const [previewText, setPreviewText] = useState(initialText);
+  const previewOpenRef = useRef(false);
+  const [editorScroller, setEditorScroller] = useState<HTMLElement | null>(null);
+  const [previewScroller, setPreviewScroller] = useState<HTMLDivElement | null>(null);
   /**
    * 落盘状态。
    *
@@ -272,6 +283,7 @@ export default function MdEditor({
             // 那是**视图切换不是内容变化**，把它算成「有修改」会让状态文案说谎。
             if (!u.docChanged) return;
             const text = u.state.doc.toString();
+            if (previewOpenRef.current) setPreviewText(text);
             // 防抖、串行、失败留痕全在 saver 里，这里只管把每一版原文递进去
             saver.schedule(text);
             onDirtyRef.current?.(text);
@@ -296,6 +308,7 @@ export default function MdEditor({
       }),
     });
     viewRef.current = view;
+    setEditorScroller(view.scrollDOM);
 
     /**
      * agent 控制器：一个 view 一个（撤销凭据是 per-view 的，见 bridge.ts）。
@@ -380,6 +393,16 @@ export default function MdEditor({
     view.dispatch({ effects: s.slot.reconfigure(showSource ? [] : s.live) });
   }, [showSource]);
 
+  const switchMode = (next: EditorMode) => {
+    previewOpenRef.current = next === 'preview';
+    if (next === 'preview') setPreviewText(viewRef.current?.state.doc.toString() ?? initial);
+    setMode(next);
+  };
+
+  useEffect(() => {
+    if (mode !== 'preview') viewRef.current?.requestMeasure();
+  }, [mode]);
+
   /**
    * 「撤销本次 agent 改动」。
    *
@@ -444,19 +467,20 @@ export default function MdEditor({
         <ToggleButtonGroup
           selectionMode="single"
           disallowEmptySelection
-          selectedKeys={[showSource ? 'source' : 'preview']}
+          selectedKeys={[mode]}
           onSelectionChange={(keys) => {
             const next = [...keys][0];
-            if (next === 'source') setShowSource(true);
-            else if (next === 'preview') setShowSource(false);
+            if (next === 'source' || next === 'live' || next === 'preview') switchMode(next);
           }}
           data-testid="md-source-view"
+          aria-label="Markdown 视图"
         >
-          <ToggleButton id="preview">预览</ToggleButton>
+          <ToggleButton id="live">实时编辑</ToggleButton>
           <ToggleButton id="source">源码</ToggleButton>
+          <ToggleButton id="preview">预览</ToggleButton>
         </ToggleButtonGroup>
       </div>
-      <div className="mr-format-bar" role="group" aria-label="Markdown 格式" data-testid="md-format-bar">
+      <div className="mr-format-bar" role="group" aria-label="Markdown 格式" data-testid="md-format-bar" hidden={mode === 'preview'}>
         {MD_FORMAT_ACTIONS.map((action) => (
           <Button key={action.id} variant="tertiary" size="sm"
             aria-label={action.label}
@@ -495,7 +519,18 @@ export default function MdEditor({
         它的 100% 按内容盒算，编辑器上方会凭空多出一截内边距、滚动条也比内容短。
         滚动由 CodeMirror 自己的 .cm-scroller 负责（理由见 material-reader.css）。
       */}
-      <div className="mr-edit-wrap" ref={hostRef} data-testid="md-editor" />
+      {/* Keep CodeMirror mounted: preview must not reset history, selection, saving or the agent bridge. */}
+      <div className="mr-edit-wrap" ref={hostRef} data-testid="md-editor" hidden={mode === 'preview'} />
+      {mode === 'preview' && (
+        <div className="mr-scroll mr-edit-preview" ref={setPreviewScroller} data-testid="md-rendered-preview"
+          role="region" aria-label="Markdown 预览" tabIndex={0}>
+          <div className="mr-md">
+            {previewText.trim() ? <Markdown content={previewText} components={PREVIEW_COMPONENTS} />
+              : <p className="mr-edit-preview__empty">暂无内容，切回编辑后输入 Markdown 即可预览。</p>}
+          </div>
+        </div>
+      )}
+      <ScrollStatus target={mode === 'preview' ? previewScroller : editorScroller} />
     </>
   );
 }

@@ -9,6 +9,7 @@
 
 type Fence = { start: number; end: number; open: string; close: string };
 type Span = { start: number; end: number };
+type Table = Span & { header: string; rowEnds: number[]; rows: string[][]; labels: string[] };
 
 const fenceOpen = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 
@@ -17,10 +18,6 @@ function units(value: string): number { return codePoints(value).length; }
 
 function indexAtUnits(value: string, count: number): number {
   if (count <= 0) return 0;
-  let seen = 0;
-  for (const part of codePoints(value)) {
-    if (seen++ >= count) break;
-  }
   return Array.from(value).slice(0, count).join('').length;
 }
 
@@ -70,6 +67,65 @@ function protectedSpans(value: string): Span[] {
   return spans;
 }
 
+/** Root-level pipe tables only; pipes in escaped text/code are not cell boundaries. */
+function tableCells(line: string): string[] | undefined {
+  if (/^(?: {4}|\t)/.test(line)) return undefined;
+  const value = line.trim();
+  const cells: string[] = [];
+  let start = 0, ticks = 0;
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] === '\\') { i++; continue; }
+    if (value[i] === '`') {
+      let end = i + 1;
+      while (value[end] === '`') end++;
+      const size = end - i;
+      if (!ticks) ticks = size;
+      else if (ticks === size) ticks = 0;
+      i = end - 1;
+    } else if (value[i] === '|' && !ticks) {
+      cells.push(value.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  if (!cells.length) return undefined;
+  cells.push(value.slice(start).trim());
+  if (value.startsWith('|')) cells.shift();
+  if (!cells.at(-1) && start === value.length) cells.pop();
+  return cells;
+}
+
+function tableSpans(value: string, fences: Fence[]): Table[] {
+  const lines: Array<{ text: string; start: number; end: number }> = [];
+  let offset = 0;
+  for (const line of value.split(/(?<=\n)/)) {
+    lines.push({ text: line.replace(/\r?\n$/, ''), start: offset, end: offset + line.length });
+    offset += line.length;
+  }
+  const tables: Table[] = [];
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (fences.some(fence => lines[i].start >= fence.start && lines[i].start < fence.end)) continue;
+    const labels = tableCells(lines[i].text), delimiter = tableCells(lines[i + 1].text);
+    if (!labels?.length || delimiter?.length !== labels.length || !delimiter.every(cell => /^:?-+:?$/.test(cell))) continue;
+    const table: Table = { start: lines[i].start, end: lines[i + 1].end,
+      header: `${lines[i].text}\n${lines[i + 1].text}\n`, labels, rowEnds: [], rows: [] };
+    i += 2;
+    for (; i < lines.length; i++) {
+      if (fences.some(fence => lines[i].start >= fence.start && lines[i].start < fence.end)) break;
+      const cells = tableCells(lines[i].text);
+      if (!cells) break;
+      table.rowEnds.push(lines[i].end); table.rows.push(cells); table.end = lines[i].end;
+    }
+    tables.push(table);
+    i--;
+  }
+  return tables;
+}
+
+/** An individually oversized row cannot remain a valid, platform-sized table. */
+function tableAsText(table: Table): string {
+  return table.rows.length ? table.rows.map(row => row.map((cell, index) => `${table.labels[index] ?? `列${index + 1}`}：${cell}`).join('\n')).join('\n\n') : table.labels.join(' / ');
+}
+
 function safeBoundary(value: string, index: number, fences: Fence[], protectedRanges: Span[]): boolean {
   if (index <= 0 || index >= value.length) return false;
   if (fences.some(fence => index > fence.start && index < fence.end)) return false;
@@ -109,18 +165,39 @@ function activeFence(value: string, index: number, fences: Fence[]): Fence | und
 
 /** Split Markdown into deterministic, platform-sized outbound messages. */
 export function splitGatewayMarkdown(input: string, maxUnits = 1500): string[] {
+  if (!Number.isSafeInteger(maxUnits) || maxUnits < 1) throw new Error('invalid_message_limit');
   const value = String(input);
   if (!value || units(value) <= maxUnits) return [value];
   const parts: string[] = [];
   let rest = value;
   while (units(rest) > maxUnits) {
     const fences = fenceSpans(rest);
-    const protectedRanges = protectedSpans(rest).filter(span => !fences.some(fence => span.start >= fence.start && span.end <= fence.end));
+    const tables = tableSpans(rest, fences);
+    const inlineRanges = protectedSpans(rest).filter(span => !fences.some(fence => span.start >= fence.start && span.end <= fence.end));
+    const protectedRanges = [...inlineRanges, ...tables];
     const limit = indexAtUnits(rest, maxUnits);
     const minimum = indexAtUnits(rest, Math.max(1, Math.floor(maxUnits * 0.45)));
     let cut = findBreak(rest, limit, minimum, fences, protectedRanges);
+    const table = tables.find(table => table.start < limit && table.end > limit);
+    if (table) {
+      // Even below the low watermark, leave a fitting table intact and start
+      // a long table on its own rather than orphaning its first/header rows.
+      if (table.start > 0) cut = cut > 0 ? Math.min(cut, table.start) : table.start;
+      else {
+        const rowEnd = table.rowEnds.filter(end => end <= limit).at(-1);
+        if (rowEnd !== undefined) {
+          parts.push(rest.slice(0, rowEnd).trimEnd());
+          rest = table.header + rest.slice(rowEnd).replace(/^\n+/, '');
+          continue;
+        }
+        // Preserve all cell values as labelled text if a header + one row
+        // cannot fit; never emit an oversized or header-only continuation.
+        rest = `${tableAsText(table)}\n\n${rest.slice(table.end)}`;
+        continue;
+      }
+    }
     const fence = activeFence(rest, limit, fences);
-    const atomic = protectedRanges.find(span => limit > span.start && limit < span.end);
+    const atomic = inlineRanges.find(span => limit > span.start && limit < span.end);
     // A formula, inline code span, or link is more valuable intact than
     // syntactically broken. Prefer a boundary immediately before it; if the
     // single span itself is larger than the platform limit, send that span as

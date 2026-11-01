@@ -979,21 +979,21 @@
 }
 
 /* 同时覆盖组件的原生 hover 与 React Aria 状态，避免两套入口闪出不同底色。
+   交互状态只改变背景，文字和图标始终保持灰色。
    保留组件自带 focus ring；触屏不产生粘滞 hover。 */
 .sidebar-control {
   background: transparent;
+  color: var(--muted);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .sidebar-control:not(:disabled, [aria-disabled='true'], [data-disabled='true']):is(:hover, [data-hovered='true']) {
     background: var(--sidebar-hover);
-    color: var(--foreground);
   }
 }
 
 .sidebar-control:is([data-selected='true'], [aria-current='page']) {
   background: var(--sidebar-selected);
-  color: var(--foreground);
 }
 
 /* 选中项悬停仍保留当前目的地的高亮。 */
@@ -1013,7 +1013,10 @@
   flex-direction: column;
   width: min(420px, 100vw);
   max-width: 100vw;
+  top: var(--vv-top, 0px);
+  bottom: auto;
   height: var(--vvh, 100dvh);
+  max-height: var(--vvh, 100dvh);
   padding: 0;
   background: var(--background-secondary);
   --drawer-enter-duration: var(--duration-slow);

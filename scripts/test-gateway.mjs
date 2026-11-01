@@ -142,6 +142,17 @@ try {
     return m.seq;
   };
   const flush = async () => { for (let i = 0; i < 15; i++) await gateway.tick(); };
+  const beforeAlbum = outboxCount();
+  const imageIds = [crypto.randomUUID(), crypto.randomUUID()];
+  bot.append(ilinkBinding.thread_id, 'assistant', 'attachment', JSON.stringify({ attachments: imageIds.map(fileId => ({ fileId, mimeType: 'image/png', name: 'photo.png' })), caption: '两张图片一起看' }));
+  gateway.project();
+  const albumParts = store.db.prepare('SELECT payload FROM gateway_outbox WHERE binding_id=? ORDER BY seq').all(ilinkBinding.id).slice(beforeAlbum).map(row => JSON.parse(row.payload));
+  assert.deepEqual(albumParts, [{ text: '两张图片一起看' }, ...imageIds.map(fileId => ({ text: '', fileId }))], 'IM sends the caption and every album image separately, in order');
+  gateway.project();
+  assert.equal(outboxCount(), beforeAlbum + 3, 'projection replay never duplicates album parts');
+  await flush();
+  const sentAlbum = sent.filter(item => imageIds.includes(item.payload.fileId));
+  assert.deepEqual(sentAlbum.map(item => item.payload.fileId), imageIds);
   const decision = id => store.db.prepare('SELECT status FROM approvals WHERE id=?').get(id).status;
   ask('text-approval', conversationalRequest);
   gateway.receive(ilink, [envelope('before-prompt', '可以')]);

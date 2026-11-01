@@ -203,14 +203,13 @@ const gotoLine = async (line, { col = 0 } = {}) => {
   await press('ArrowRight', col);
 };
 
-/** 「预览 ⇄ 源码」切换。等组件自身的 value 落到目标档 —— 它就是 React 的 showSource */
+/** The original inline-preview cases now use "实时编辑"; rich preview has a separate E2E. */
 async function switchView(view) {
-  await page.click(`[data-testid="md-source-view"] mdui-segmented-button[value="${view}"]`);
-  await page.waitForFunction(
-    (v) => document.querySelector('[data-testid="md-source-view"]')?.value === v,
-    view,
-    { timeout: 5000 },
-  );
+  const button = page.getByTestId('md-source-view').getByRole('radio', {
+    name: view === 'source' ? '源码' : '实时编辑', exact: true,
+  });
+  await button.click();
+  assert.equal(await button.getAttribute('aria-checked'), 'true');
   await settle();
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from 'zustand';
 import { Button } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
@@ -6,7 +7,7 @@ import type { CloudConfig } from '@wangke/contracts/cloud';
 import ModelsModule from '../components/settings/ModelsModule';
 import { ModelSettingsContext } from '../components/settings/modelSettingsContext';
 import { useSettings, type Provider } from '../store/settings';
-import { LoadingButton, confirmDialog } from '../ui';
+import { LoadingButton, confirmDialog, toast } from '../ui';
 import { cloudRequest } from './state';
 import { applyCloudConfig, flushCloud } from './sync';
 import { cloudDiscoveryProviders, cloudEditorProviders, cloudModelConfig, cloudModelPreferences, cloudModelUpdate, cloudModelsDirty, cloudProviderDirty, createCloudModelDraft, modelSettingsError } from './modelSettings';
@@ -15,12 +16,27 @@ import { registerSettingsLeaveGuard } from '../components/settingsDialogStore';
 import ModelPresets, { type PresetDraft } from './ModelPresets';
 import ModelGatewayStatus from './ModelGatewayStatus';
 
-function ProviderAccounts({ config, provider, onSaved }: { config: CloudConfig; provider: Pick<CloudConfig['providers'][number], 'id' | 'name' | 'accounts' | 'activeAccountId'>; onSaved: (value: CloudConfig) => void }) {
+function ProviderAccounts({ config, provider, onSaved, onReplaceKey, onChangeKey, onDraftChange }: { config: CloudConfig; provider: Provider; onSaved: (value: CloudConfig) => void; onReplaceKey: (provider: Provider) => Promise<void>; onChangeKey: (apiKey: string) => void; onDraftChange: (dirty: boolean) => void }) {
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [editing, setEditing] = useState<'add' | 'replace' | null>(() => provider.apiKey ? 'replace' : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const accounts = provider.accounts ?? [];
+  const activeAccount = accounts.find(account => account.id === provider.activeAccountId && account.configured) ?? accounts.find(account => account.configured);
+  const environmentKey = provider.id === 'opencode-go';
+  const currentKey = editing === 'replace' ? provider.apiKey : apiKey;
+  const previousKey = useRef(provider.apiKey);
+  useEffect(() => {
+    if (previousKey.current && !provider.apiKey && editing === 'replace') setEditing(null);
+    previousKey.current = provider.apiKey;
+  }, [provider.apiKey, editing]);
+  const addingKey = editing === 'add' && Boolean(apiKey || name);
+  useEffect(() => {
+    onDraftChange(addingKey);
+    return () => onDraftChange(false);
+  }, [addingKey, onDraftChange]);
+  const cancel = () => { setEditing(null); setName(''); setApiKey(''); onChangeKey(''); setError(''); };
   const prefix = `/providers/${encodeURIComponent(provider.id)}/accounts`;
   const run = async (path: string, init: RequestInit) => {
     setBusy(true); setError('');
@@ -31,18 +47,39 @@ function ProviderAccounts({ config, provider, onSaved }: { config: CloudConfig; 
     } catch (e) { setError(modelSettingsError(e)); return undefined; }
     finally { setBusy(false); }
   };
-  return <div className="mt-2 flex flex-col gap-2 rounded-lg border border-foreground/10 p-3" data-testid={`provider-accounts-${provider.id}`}>
-    <p className="text-xs font-medium">API Key 账户</p>
-    {accounts.length ? <div className="flex flex-col gap-1">{accounts.map(account => <div key={account.id} className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="min-w-28">{account.name}</span><span className="text-muted">{account.configured ? '已配置' : '未配置'}</span>
-      {provider.activeAccountId === account.id ? <span className="text-success">当前使用</span> : <Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => void run(`${prefix}/${encodeURIComponent(account.id)}/active`, { method: 'PUT', body: JSON.stringify({ modelRevision: config.modelRevision }) })}>启用</Button>}
+  return <div className="flex min-w-0 flex-col gap-3" data-testid={`provider-accounts-${provider.id}`}>
+    {(provider.configured || accounts.length > 0) ? <div className="flex flex-col gap-2">
+      {provider.configured && <div className="flex flex-wrap items-center gap-2 rounded-lg bg-background-secondary px-3 py-2 text-xs" data-testid={`provider-default-key-${provider.id}`}>
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{environmentKey ? '服务器环境 Key' : '默认 Key'} <code className="text-muted" data-testid={`provider-key-hint-${provider.id}`}>{provider.keyHint ?? '••••••••'}</code></span>
+        <span className={activeAccount ? 'text-muted' : 'text-success'}>{activeAccount ? '备用' : '当前使用'}</span>
+        {!environmentKey && <Button size="sm" variant="tertiary" isDisabled={busy || editing !== null} onPress={() => { setEditing('replace'); setError(''); }}>更换 Key</Button>}
+      </div>}
+      {accounts.map(account => <div key={account.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-background-secondary px-3 py-2 text-xs">
+      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-2"><span className="break-all">{account.name}</span> <code className="text-muted" data-testid={`account-key-hint-${account.id}`}>{account.keyHint ?? '••••••••'}</code></span>
+      {activeAccount?.id === account.id ? <span className="text-success">当前使用</span> : <Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => void run(`${prefix}/${encodeURIComponent(account.id)}/active`, { method: 'PUT', body: JSON.stringify({ modelRevision: config.modelRevision }) })}>启用</Button>}
       <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => void run(`${prefix}/${encodeURIComponent(account.id)}`, { method: 'DELETE', body: JSON.stringify({ modelRevision: config.modelRevision }) })}>删除</Button>
-    </div>)}</div> : <p className="text-xs text-muted">暂无已保存 Key{provider.id === 'opencode-go' ? '，也可使用服务器 OPENCODE_GO_API_KEY' : ''}。</p>}
-    <div className="flex flex-wrap gap-2">
-      <input className="min-w-32 flex-1 rounded border border-foreground/15 bg-transparent px-2 py-1 text-xs" placeholder="账户名称（可选）" value={name} onChange={e => setName(e.target.value)} />
-      <input className="min-w-48 flex-[2] rounded border border-foreground/15 bg-transparent px-2 py-1 text-xs" type="password" autoComplete="new-password" placeholder="粘贴新的 API Key" value={apiKey} onChange={e => setApiKey(e.target.value)} />
-      <Button size="sm" variant="secondary" isDisabled={busy || !apiKey.trim()} onPress={async () => { const saved = await run(prefix, { method: 'POST', body: JSON.stringify({ name, apiKey, modelRevision: config.modelRevision }) }); if (saved) { setName(''); setApiKey(''); } }}>添加 Key</Button>
-    </div>
+    </div>)}</div> : <p className="text-xs text-muted">尚未添加 API Key，本地免密服务可留空。</p>}
+    {editing ? <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-border p-3" data-testid={`provider-key-form-${provider.id}`}>
+      <p className="text-xs font-medium">{editing === 'replace' ? '更换默认 Key' : '添加 API Key'}</p>
+      {editing === 'add' && <input className="min-w-0 rounded border border-foreground/15 bg-transparent px-3 py-2 text-sm" aria-label="Key 名称（可选）" placeholder="名称（可选，用于区分多把 Key）" value={name} onChange={e => setName(e.target.value)} />}
+      <input className="min-w-0 rounded border border-foreground/15 bg-transparent px-3 py-2 text-sm" data-testid={`api-key-${provider.id}`} aria-label="API Key" type="password" autoComplete="new-password" placeholder="粘贴 API Key" value={currentKey} onChange={e => editing === 'replace' ? onChangeKey(e.target.value) : setApiKey(e.target.value)} />
+      <div className="flex flex-wrap gap-2">
+        <LoadingButton size="sm" loading={busy} isDisabled={!currentKey.trim()} onPress={async () => {
+          if (editing === 'add') {
+            const saved = await run(prefix, { method: 'POST', body: JSON.stringify({ name, apiKey, modelRevision: config.modelRevision }) });
+            if (saved) cancel();
+          } else {
+            setBusy(true); setError('');
+            try { await onReplaceKey(provider); cancel(); }
+            catch (error) { setError(error instanceof Error ? error.message : String(error)); }
+            finally { setBusy(false); }
+          }
+        }}>保存 Key</LoadingButton>
+        <Button size="sm" variant="ghost" isDisabled={busy} onPress={cancel}>取消</Button>
+      </div>
+    </div> : <Button size="sm" variant="secondary" className="self-start" isDisabled={busy} onPress={() => { setEditing('add'); setError(''); }}>添加 Key</Button>}
+    {environmentKey && <p className="break-words text-xs text-muted">也可使用服务器环境变量 <code className="break-all">OPENCODE_GO_API_KEY</code>，无需重复添加。</p>}
+    <p className="text-xs text-muted">通过名称和 Key 末 4 位核对；短密钥不显示尾号。完整 Key 加密保存在服务器，保存、启用和删除后立即生效。</p>
     {error && <p className="text-xs text-danger" role="alert">{error}</p>}
   </div>;
 }
@@ -60,12 +97,18 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
   const [focusIssue, setFocusIssue] = useState(0);
   const [editorGeneration, setEditorGeneration] = useState(0);
   const [editingConnection, setEditingConnection] = useState(false);
+  const [addingKey, setAddingKey] = useState(false);
   const [savedPreferences, setSavedPreferences] = useState(() => JSON.stringify(cloudModelPreferences(store.getState())));
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [actionContainer, setActionContainer] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!standalone) setActionContainer(editorRef.current?.closest<HTMLElement>('[data-testid="settings-modal"]') ?? null);
+  }, [standalone]);
   const operation = useRef(false);
   const baseline = useRef(config);
   baseline.current = config;
   const issues = modelReferenceIssues(settings);
-  const dirty = editingConnection || cloudModelsDirty(settings, config) || JSON.stringify(presets) !== JSON.stringify({ modelPresets: config.modelPresets, modelRoutes: config.modelRoutes }) || JSON.stringify(cloudModelPreferences(settings)) !== savedPreferences;
+  const dirty = editingConnection || addingKey || cloudModelsDirty(settings, config) || JSON.stringify(presets) !== JSON.stringify({ modelPresets: config.modelPresets, modelRoutes: config.modelRoutes }) || JSON.stringify(cloudModelPreferences(settings)) !== savedPreferences;
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
   useEffect(() => {
@@ -99,7 +142,7 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
     const current = store.getState();
     store.setState({ providers: current.providers.map(provider => {
       const next = remote.get(provider.id);
-      return next ? { ...provider, accounts: next.accounts, activeAccountId: next.activeAccountId } : provider;
+      return next ? { ...provider, configured: next.configured, keyHint: next.keyHint, accounts: next.accounts, activeAccountId: next.activeAccountId } : provider;
     }) });
   }
   function showError(error: unknown) {
@@ -127,6 +170,7 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
   async function save(complete = false) {
     if (operation.current) return;
     if (editingConnection) { setError('当前新连接尚未保存，请先保存连接或取消编辑，再保存模型设置。'); return; }
+    if (addingKey) { setError('当前 API Key 尚未保存，请先点击“保存 Key”或取消添加。'); return; }
     if (modelReferenceIssues(store.getState()).length) {
       setError('请先修复下方默认模型配置，或清除失效选择后稍后配置。');
       setFocusIssue((value) => value + 1);
@@ -150,6 +194,7 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
       }
       setSavedPreferences(JSON.stringify(cloudModelPreferences(draft)));
       setMessage('模型设置已保存到服务器'); setConflict(false);
+      if (!standalone) toast.success('模型设置已保存');
       if (complete) onDone?.();
     } catch (e) { showError(e); }
     finally { operation.current = false; setBusy(false); }
@@ -169,25 +214,28 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
     } catch (error) { showError(error); }
     finally { operation.current = false; setBusy(false); }
   }
-  return <div className="flex min-w-0 flex-col gap-5">
+  const saveActions = (standalone || dirty || busy || error) ? <div className={actionContainer ? 'model-settings-save-dock' : 'flex flex-col gap-3'} data-testid="cloud-models-save-actions" aria-label="模型设置保存操作">
+    <div className="flex flex-wrap items-center justify-end gap-3">
+      <span className="mr-auto text-xs text-muted" data-testid="cloud-models-dirty">{dirty ? '有未保存修改' : '连接与默认模型已保存'}</span>
+      <LoadingButton loading={busy} onPress={() => void save()} data-testid="cloud-models-save">保存模型设置</LoadingButton>
+    </div>
+    {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+    {conflict && <Button variant="secondary" isDisabled={busy} className="self-start" onPress={() => void reload()}>重新载入服务器设置</Button>}
+  </div> : null;
+  return <div ref={editorRef} className={`flex min-w-0 flex-col gap-5 ${actionContainer ? 'pb-32' : ''}`}>
     {issues.length > 0 && <div className="rounded-xl bg-danger/10 p-3" role="status">
       <p className="text-sm text-danger">有 {issues.length} 项默认模型配置需要修复。你仍可独立保存连接并获取模型列表。</p>
       <Button variant="tertiary" size="sm" onPress={() => setFocusIssue((value) => value + 1)}>定位并修复</Button>
     </div>}
     <ModelSettingsContext.Provider value={store}>
       <fieldset disabled={busy} className="m-0 flex min-w-0 flex-col gap-5 border-0 p-0">
-       <ModelsModule key={editorGeneration} serverManaged standalone={standalone} discoveryProviders={cloudDiscoveryProviders(settings, config, discoveryRevision)} providerNeedsSave={(provider) => cloudProviderDirty(provider, config)} onSaveProvider={saveProvider} onDraftChange={setEditingConnection} renderProviderAccounts={provider => <ProviderAccounts config={config} provider={provider} onSaved={savedAccounts} />} onAddOpenCodeGo={!config.providers.some(p => p.id === 'opencode-go') ? () => void saveProvider({ id: 'opencode-go', name: 'OpenCode Go', protocol: 'openai-chat', baseUrl: 'https://opencode.ai/inference/go/openai/v1', apiKey: '', catalogId: '', serves: ['chat'] }).catch(() => {}) : undefined} addOpenCodeGoDisabled={busy} issues={issues} focusIssue={focusIssue} />
+       <ModelsModule key={editorGeneration} serverManaged standalone={standalone} discoveryProviders={cloudDiscoveryProviders(settings, config, discoveryRevision)} providerNeedsSave={(provider) => cloudProviderDirty(provider, config)} onSaveProvider={saveProvider} onDraftChange={setEditingConnection} renderProviderAccounts={provider => <ProviderAccounts config={config} provider={provider} onSaved={savedAccounts} onReplaceKey={saveProvider} onDraftChange={setAddingKey} onChangeKey={apiKey => store.setState(current => ({ providers: current.providers.map(p => p.id === provider.id ? { ...p, apiKey } : p) }))} />} onAddOpenCodeGo={!config.providers.some(p => p.id === 'opencode-go') ? () => void saveProvider({ id: 'opencode-go', name: 'OpenCode Go', protocol: 'openai-chat', baseUrl: 'https://opencode.ai/inference/go/openai/v1', apiKey: '', catalogId: '', serves: ['chat'] }).catch(() => {}) : undefined} addOpenCodeGoDisabled={busy} issues={issues} focusIssue={focusIssue} />
       </fieldset>
     </ModelSettingsContext.Provider>
     <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0"><ModelPresets value={presets} providers={settings.providers} onChange={setPresets} /></fieldset>
     <ModelGatewayStatus />
-    <div className="flex flex-wrap items-center gap-3">
-      <LoadingButton loading={busy} onPress={() => void save()} data-testid="cloud-models-save">保存模型设置</LoadingButton>
-      <span className="text-xs text-muted" data-testid="cloud-models-dirty">{dirty ? '有未保存修改' : '连接与默认模型已保存'}</span>
-      {message && <p role="status" className="text-sm text-success">{message}</p>}
-    </div>
-    {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-    {conflict && <Button variant="secondary" isDisabled={busy} className="self-start" onPress={() => void reload()}>重新载入服务器设置</Button>}
+    {actionContainer ? createPortal(saveActions, actionContainer) : saveActions}
+    {message && <p role="status" className="text-sm text-success">{message}</p>}
     {onDone && <div className="ob__actions">
       <LoadingButton className="ob__primary" size="lg" loading={busy} onPress={() => void save(true)} data-testid="onboarding-models-done">
         {busy ? t('onboarding.models.saving') : t('onboarding.models.done')}

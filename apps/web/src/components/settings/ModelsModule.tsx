@@ -777,10 +777,10 @@ function ProviderRow({
           </>}
           <Field
             label="API Key"
-            hint={serverManaged ? '密钥加密保存在服务器；留空保留已保存的密钥，修改后点击“保存连接并获取模型”' : status === 'draft' ? '点击保存后仅存于本机浏览器；不参与云同步与迁移导出' : '仅保存在本机浏览器 localStorage 中；云同步与迁移包都不含它'}
+            hint={accountContent ? undefined : serverManaged ? '密钥加密保存在服务器；留空保留已保存的密钥，修改后点击“保存连接并获取模型”' : status === 'draft' ? '点击保存后仅存于本机浏览器；不参与云同步与迁移导出' : '仅保存在本机浏览器 localStorage 中；云同步与迁移包都不含它'}
             testId={`field-api-key-${provider.id}`}
           >
-            <div>
+            {accountContent ?? <div>
               <div
                 ref={inputRef}
                 className={`rounded-md border transition-colors duration-150 ${shaking ? 'border-danger' : 'border-border'}`}
@@ -815,7 +815,7 @@ function ProviderRow({
               >
                 请先填写这家供应商的 API Key
               </p>
-            </div>
+            </div>}
           </Field>
             </div>
           </MotionDisclosure>
@@ -824,7 +824,6 @@ function ProviderRow({
               {note}
             </div>
           )}
-          {accountContent}
           {children}
         </div>
       )}

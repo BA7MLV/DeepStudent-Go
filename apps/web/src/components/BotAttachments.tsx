@@ -52,6 +52,12 @@ function useAttachmentImage(url?: string, local?: File) {
 
 type ImageItem = { name: string; url?: string; local?: File };
 
+/** Decorative cards share the authenticated image cache with the full viewer. */
+function AttachmentImageCard({ url }: { url?: string }) {
+  const { source, failed, setFailed } = useAttachmentImage(url);
+  return source && !failed ? <img src={source} alt="" decoding="async" onError={() => setFailed(true)} /> : null;
+}
+
 function AttachmentImage({ name, url, local, draft = false, images }: ImageItem & { draft?: boolean; images?: ImageItem[] }) {
   const { source, failed, setFailed, retry } = useAttachmentImage(url, local);
   const [open, setOpen] = useState(false);
@@ -95,7 +101,8 @@ export function BotMessageAttachments({ files, projectId }: { files: BotAttachme
     {groups.map((group, index) => {
       const file = group[0];
       const name = nameOf(file), url = urlOf(file, projectId);
-      return isImage(file) ? <ImageGallery count={group.length} key={`${file.fileId ?? file.projectPath ?? 'image'}:${index}`}>
+      return isImage(file) ? <ImageGallery count={group.length} key={`${file.fileId ?? file.projectPath ?? 'image'}:${index}`}
+        cards={group.slice(1, 3).map((item, depth) => <AttachmentImageCard key={`${item.fileId ?? item.projectPath}:${depth}`} url={urlOf(item, projectId)} />)}>
         <AttachmentImage name={name} url={url} images={group.map(item => ({ name: nameOf(item), url: urlOf(item, projectId) }))} />
       </ImageGallery>
         : <div className="imsg-bubble imsg-bubble--file" key={index}>

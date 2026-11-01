@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { Readable } from 'node:stream';
+import { MAX_BOT_MESSAGE_ATTACHMENTS, type BotAttachment } from '@wangke/contracts';
 import { unzipSync, strFromU8 } from 'fflate';
 import type { DatabaseStore } from '../storage/database.js';
 import type { CloudConfiguration } from '../cloud/config.js';
@@ -183,9 +184,20 @@ export class StudyTools {
       if (a.send !== false) c.append('attachment', JSON.stringify({ fileId: f.id, name: f.originalName, caption: f.originalName, mimeType: f.mimeType, sizeBytes: f.sizeBytes }));
       return { fileId: f.id, name: f.originalName };
     } });
-    this.register({ name: 'study_send_file', description: 'Send one existing owned image or file of any type to the current Web/IM conversation, optionally with a short caption. This queues a separate message immediately and keeps the turn open; IM transport delivery is asynchronous. For workspace paths, FIRST call study_upload_file(path) to obtain fileId. Choose only useful final artifacts to send. Call again for another file, send_message for conversational text, or finish_turn when done.', properties: { fileId: { type: 'string' }, caption: { type: 'string', maxLength: 2000 } }, required: ['fileId'], capability: () => 'read', execute: async (a, c) => {
+    this.register({ name: 'study_send_file', description: 'Send existing owned images/files to the current Web/IM conversation, optionally with a short caption. Choose exactly one: fileId for one independent file, or fileIds (ordered, unique, up to 99) for one batch. A batch is one Web message; consecutive images appear as a stacked album with a viewer. Separate fileId calls remain independent, even when called together. IM delivers batch files individually in order. All batch files are validated before publishing anything. This keeps the turn open; IM delivery is asynchronous. For workspace paths, FIRST use study_upload_file to obtain real fileIds. Send only useful finished artifacts; use send_message for text or finish_turn when done.', properties: { fileId: { type: 'string', minLength: 1 }, fileIds: { type: 'array', minItems: 1, maxItems: MAX_BOT_MESSAGE_ATTACHMENTS, uniqueItems: true, items: { type: 'string', minLength: 1 } }, caption: { type: 'string', maxLength: 2000 } }, required: [], capability: () => 'read', execute: async (a, c) => {
       if (a.caption !== undefined && (typeof a.caption !== 'string' || a.caption.length > 2000)) throw new Error('invalid_caption');
-      const f = await this.file(c.owner, a.fileId); c.checkActive(); c.append('attachment', JSON.stringify({ fileId: a.fileId, name: f.name, ...(a.caption ? { caption: a.caption } : {}), mimeType: f.mime, sizeBytes: f.bytes.length })); return { sent: true, fileId: a.fileId };
+      if ((a.fileId === undefined) === (a.fileIds === undefined)) throw new Error('choose_fileId_or_fileIds');
+      const ids: unknown[] = a.fileIds ?? [a.fileId];
+      if (!Array.isArray(ids) || !ids.length || ids.length > MAX_BOT_MESSAGE_ATTACHMENTS || ids.some(id => typeof id !== 'string' || !id.trim()) || new Set(ids).size !== ids.length) throw new Error('invalid_file_ids');
+      const attachments: BotAttachment[] = [];
+      for (const id of ids) {
+        c.checkActive();
+        const f = await this.file(c.owner, id as string);
+        attachments.push({ fileId: id as string, name: f.name, mimeType: f.mime, sizeBytes: f.bytes.length });
+      }
+      c.checkActive();
+      c.append('attachment', JSON.stringify({ ...(a.fileIds === undefined ? attachments[0] : { attachments }), ...(a.caption ? { caption: a.caption } : {}) }));
+      return a.fileIds === undefined ? { sent: true, fileId: a.fileId } : { sent: true, fileIds: ids };
     } });
     this.register({ name: 'study_reminder', description: 'Persistent reminder create/list/cancel. at MUST be ISO8601 with explicit offset or Z; timezone MUST be an IANA zone. Optional intervalSeconds is an elapsed-time interval (not local wall-clock; DST may shift). Missed reminders coalesce once on restart. Delivery depends on channel availability; Web always retains it.', properties: { action: { type: 'string', enum: ['create','list','cancel'] }, id: { type: 'string' }, at: { type: 'string' }, timezone: { type: 'string' }, text: { type: 'string' }, intervalSeconds: { type: 'integer', minimum: 60, maximum: 31536000 } }, required: ['action'], capability: a => a.action === 'list' ? 'read' : 'write', execute: async (a, c) => {
       if (a.action === 'list') return store.db.prepare('SELECT id,text,timezone,next_at AS nextAt,interval_seconds AS intervalSeconds,status FROM bot_reminders WHERE owner_id=? AND thread_id=? ORDER BY next_at').all(c.owner, c.thread);

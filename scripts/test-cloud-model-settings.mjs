@@ -13,6 +13,14 @@ const store = createCloudModelDraft(config, original);
 const before = store.getState();
 assert.equal(before.providers[0].apiKey, '', 'server credentials are never hydrated into the editor');
 assert.equal(cloudModelsDirty(before, config), false);
+const hinted = { ...config, providers: [{ ...config.providers[0], keyHint: '••••7xQ2' }] };
+assert.equal(cloudModelsDirty(createCloudModelDraft(hinted, original).getState(), hinted), false, 'display-only key hints never create unsaved edits');
+for (const accounts of [[], [{ id: 'key-1', name: 'Main account', configured: true }]]) {
+  const withAccounts = { ...config, providers: [{ ...config.providers[0], accounts, activeAccountId: accounts[0]?.id }] };
+  const accountDraft = createCloudModelDraft(withAccounts, original).getState();
+  assert.equal(cloudModelsDirty(accountDraft, withAccounts), false, 'saved key accounts never create false unsaved edits');
+  assert.equal(cloudModelsDirty({ ...accountDraft, providers: [{ ...accountDraft.providers[0], apiKey: 'rotated-key' }] }, withAccounts), true, 'key rotation still requires saving');
+}
 assert.equal(cloudProviderDirty(before.providers[0], config), false);
 assert.equal(cloudProviderDirty({ ...before.providers[0], name: 'Renamed' }, config), true, 'display-only edits still require saving the connection');
 assert.equal(cloudModelsDirty({ ...before, llmModel: { providerId: '', model: '' } }, config), true);

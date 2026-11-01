@@ -61,8 +61,8 @@ export function useViewportResize(onResize: () => void): void {
 /**
  * 全局移动端副作用（App 顶层挂一次），两件事：
  *
- * 1. **visualViewport → `--vvh`**：iOS 键盘弹出时 layout viewport 高度不变，
- *    贴底的输入栏会被键盘盖住；用 `--vvh` 把 `.page` 高度同步为可视高度使其收缩。
+ * 1. **visualViewport → `--vvh` / `--vv-top`**：iOS 键盘弹出时 layout viewport
+ *    不变，视觉视口却会缩小并平移。应用外壳同步高度和顶部，输入栏才能始终贴底。
  *    横屏时 `--vvh` 还被用来约束视频宽度（左右分栏下视频不能把控制栏顶出可视区）。
  *    Android Chrome 由 viewport 的 `interactive-widget=resizes-content` 直接缩 layout，
  *    visualViewport 同步变化，两者殊途同归不冲突。无 visualViewport 的老浏览器回退 100%。
@@ -77,30 +77,23 @@ export function useMobileGlobals(): void {
     const vp = window.visualViewport;
     if (!vp) return;
 
-    // ── 1. 页面高度 = 可视高度 ──
+    // ── 1. 页面位置与尺寸 = 视觉视口 ──
     const syncHeight = () => {
-      /**
-       * iOS 键盘弹出时视觉视口除了变矮还会**平移**：`offsetTop` 变大，把聚焦的
-       * 输入框从键盘后面拨进可视区（这是 Safari 的既定行为，iOS 26 尤其明显）。
-       *
-       * 旧算法只取 `vp.height`，在这种「既缩又移」的情况下会缩两轮：页面先按
-       * 键盘高度塌一截，视觉视口又整体上移一截，输入栏于是悬在键盘上方一条
-       * `offsetTop` 高的空档，底下露出 body 底色 —— 表现就是「键盘起来了，
-       * 输入框却浮在上面，中间一条大缝」。
-       *
-       * `height + offsetTop` 恰好是键盘上沿在 layout 视口里的位置：页面长到那里，
-       * 输入栏正好贴在键盘上沿，iOS 平移 / 不平移两种行为都成立。
-       * 再夹一层 `window.innerHeight` 是兜底 —— iOS 26 收起键盘后 `offsetTop`
-       * 迟迟不归位是个已知 bug，夹一刀至少不让页面越过 layout 视口被裁掉底边。
-       */
-      const height = Math.min(vp.height + vp.offsetTop, window.innerHeight);
+      // 捏合缩放只改变放大区域，不应把整页重排成更小的布局。
+      if (vp.scale !== 1) return;
+      // 不能把 offsetTop 加进高度：那只对齐了底边，顶部仍可被 Safari 推出屏幕。
+      // 收键盘后 offsetTop 偶尔残留，夹到 layout viewport 内，避免整页悬空。
+      const height = Math.min(vp.height, window.innerHeight);
+      const top = Math.max(0, Math.min(vp.offsetTop, window.innerHeight - height));
       document.documentElement.style.setProperty('--vvh', `${height}px`);
+      document.documentElement.style.setProperty('--vv-top', `${top}px`);
     };
     syncHeight();
     // resize = 高度/缩放变化（键盘弹收、旋转）；scroll = 视口内平移
     // （键盘把聚焦输入框拨上来时 offsetTop 变而 height 不变，只有 scroll 会响）。
     vp.addEventListener('resize', syncHeight);
     vp.addEventListener('scroll', syncHeight);
+    window.addEventListener('resize', syncHeight);
 
     // ── 2. 键盘开关态 ──
     /**
@@ -133,7 +126,9 @@ export function useMobileGlobals(): void {
     return () => {
       vp.removeEventListener('resize', syncHeight);
       vp.removeEventListener('scroll', syncHeight);
+      window.removeEventListener('resize', syncHeight);
       document.documentElement.style.removeProperty('--vvh');
+      document.documentElement.style.removeProperty('--vv-top');
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
       window.clearTimeout(blurTimer);
