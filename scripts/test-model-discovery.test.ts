@@ -3,6 +3,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { discoverModels } from '../apps/web/src/api/modelDiscovery';
 import { listModels } from '../apps/web/src/api/siliconflow';
 import { MODEL_LIST_CACHE_VERSION, __resetModelListCacheForTest, modelListCacheKey, readModelList, writeModelList } from '../apps/web/src/api/modelListCache';
+import { isTypeSafeConnection, typeSafeFallbackModels } from '../apps/web/src/api/typeSafeModels';
 
 const connection = { baseUrl: 'https://models.test/v1/', apiKey: 'secret-account-a', protocol: 'openai-chat' as const };
 const storage = new Map<string, string>();
@@ -81,6 +82,14 @@ test('empty arrays are a successful result and can be cached', async () => {
   globalThis.fetch = async () => json({ models: [] });
   assert.deepEqual(await discoverModels(connection, new AbortController().signal), []);
   assert.deepEqual(readModelList(await modelListCacheKey(connection))?.ids, []);
+});
+
+test('TypeSafe 451 fallback only offers documented decision model IDs', () => {
+  assert.equal(isTypeSafeConnection({ catalogId: 'typesafe', baseUrl: '/api/v1/cloud/models/typesafe' }), true);
+  assert.equal(isTypeSafeConnection({ catalogId: '', baseUrl: 'https://api.typesafe.ai/v1' }), true);
+  assert.equal(isTypeSafeConnection({ catalogId: 'other', baseUrl: 'https://models.test/v1' }), false);
+  assert.deepEqual(typeSafeFallbackModels().map((model) => model.id), ['jev-1.14.0', 'jev-1.13.0', 'jev']);
+  assert.ok(typeSafeFallbackModels().every((model) => model.modelType === 'decision'));
 });
 
 test('deduplicates concurrent automatic/manual requests; cancelling one subscriber keeps the other alive', async () => {

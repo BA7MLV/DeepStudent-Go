@@ -859,7 +859,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
   const [providerError, setProviderError] = useState('');
   const [pendingDiscovery, setPendingDiscovery] = useState<string | null>(null);
   const { open: settingsOpen } = useSettingsDialog();
-  const { modelOptions, discoveredModels, providerNotes, checking, refresh: refreshProviderModels } = useProviderModels(discoveryProviders ?? settings.providers, selectedProviderId);
+  const { modelOptions, discoveredModels, discoveredModelFallback, providerNotes, checking, refresh: refreshProviderModels } = useProviderModels(discoveryProviders ?? settings.providers, selectedProviderId);
   const [metaInfo, setMetaInfo] = useState(modelMetaInfo);
   const [metaRefreshing, setMetaRefreshing] = useState(false);
   const [metaError, setMetaError] = useState('');
@@ -1159,6 +1159,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
                 providerId={selectedProvider.id}
                 allowDecision
                 discovered={discoveredModels[selectedProvider.id]}
+                discoveredFromFallback={discoveredModelFallback[selectedProvider.id]}
                 checking={checking || providerSaving}
                 refreshLabel={serverManaged && providerNeedsSave?.(selectedProvider) ? '保存连接并获取模型' : '获取模型列表'}
                 onRefresh={() => void handleCheck(selectedProvider.id)}
@@ -1189,7 +1190,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
                 }}
                 onRemove={() => void confirmRemove(p)}
               >
-                <ModelLibrary key={p.id} providerId={p.id} allowDecision checking={checking} onRefresh={() => void handleCheck(p.id)} />
+                <ModelLibrary key={p.id} providerId={p.id} allowDecision discoveredFromFallback={discoveredModelFallback[p.id]} checking={checking} onRefresh={() => void handleCheck(p.id)} />
               </ProviderRow>
             )}
           />

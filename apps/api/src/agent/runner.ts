@@ -32,7 +32,7 @@ import { hasWechatLatex, wechatToolHasLatex, WECHAT_REPLY_POLICY, WECHAT_FORMAT_
 import { imageInputReads, ImageInputFailure, IMAGE_INPUT_POLICY } from './image-input.js';
 import { executeToolBatch, recordToolResult, TOOL_BATCH_GUIDANCE } from '@wangke/study-core/tool-batch';
 
-type Run = { id: string; thread_id: string; context_json: string | null; step_count: number; trigger_message_id: string | null };
+type Run = { id: string; thread_id: string; context_json: string | null; step_count: number; trigger_message_id: string | null; context_end_seq?: number | null };
 const now = () => new Date().toISOString();
 const systemResourcePolicy = 'The ENTIRE owner-scoped /system directory can be read, created and modified without human approval, including notes, instructions, MCP configuration and Skills. Only deletion requires one-shot approval, even for trusted Bots; explicit policy denials still apply.';
 const conversationStyle = `Communicate warmly and naturally in the user's language. Match their tone; respond to feelings when relevant, and use a brief emoji only when it fits. Warmth comes from attentive, specific wording. Avoid canned praise, ceremonial openings, repeated acknowledgments and automatic offers of more help.
@@ -319,7 +319,12 @@ export class BotRunner {
         throw new Error('run_not_active');
       }
     };
+    const hasUnconsumedInput = () => Boolean(this.store.db.prepare('SELECT 1 FROM run_inputs WHERE run_id=? AND consumed_at IS NULL LIMIT 1').get(run.id));
     const appendActive = (kind: string, text: string, nonce?: string) => this.store.transaction(() => { checkActive(); return this.append(run.thread_id, kind, text, nonce); });
+    const appendVisibleIfCurrent = (kind: string, text: string, nonce?: string) => this.store.transaction(() => {
+      checkActive();
+      return hasUnconsumedInput() ? null : this.append(run.thread_id, kind, text, nonce);
+    });
     // External child/proxy budget pauses do not call this runner's cancel().
     // Abort outstanding model/tool I/O as well as checking every commit gate.
     const monitor = setInterval(() => {
@@ -354,7 +359,8 @@ export class BotRunner {
       const maxSteps = config?.policy.maxSteps ?? Math.max(1, Math.min(1000, Number(process.env.BOT_MAX_STEPS) || 100));
       if (!(provider?.baseUrl || process.env.MODEL_API_KEY) || !model) throw new Error('model_not_configured');
       const modelKey = JSON.stringify([provider?.id ?? 'server', provider?.baseUrl ?? process.env.MODEL_BASE_URL ?? 'https://api.openai.com/v1', provider?.protocol ?? 'openai-chat', model]);
-      context = run.context_json ? JSON.parse(run.context_json) : this.initialContext(run, modelKey);
+       context = run.context_json ? JSON.parse(run.context_json) : this.initialContext(run, modelKey);
+       this.consumeInputs(run, context);
       // Persisted runs may still carry the previous all-system-writes-ask rule.
       if (context[0]?.role === 'system' && !context[0].content?.includes(systemResourcePolicy)) {
         context[0] = { ...context[0], content: `${context[0].content ?? ''}\nCurrent system-resource policy (supersedes earlier system-resource approval wording): ${systemResourcePolicy} Use shell systemWrite=true for creates/edits/installs without approval, and requiresApproval=true for deletion, including scripts. Other scopes and external-impact approvals are unchanged.` };
@@ -364,7 +370,7 @@ export class BotRunner {
       }
       const savedModel = this.store.db.prepare('SELECT context_model FROM runs WHERE id=?').get(run.id) as { context_model: string | null };
       if (run.context_json && savedModel.context_model !== modelKey) context = context.map(({ response_items: _native, ...message }) => message);
-      this.store.db.prepare('UPDATE runs SET context_model=?,context_end_seq=(SELECT seq FROM messages WHERE id=trigger_message_id) WHERE id=?').run(modelKey, run.id);
+       this.store.db.prepare('UPDATE runs SET context_model=?,context_end_seq=COALESCE((SELECT MAX(seq) FROM messages WHERE thread_id=? AND role=\'user\'),(SELECT seq FROM messages WHERE id=trigger_message_id)) WHERE id=?').run(modelKey, run.thread_id, run.id);
       // Complete a persisted tool-call envelope after a crash, without re-executing the command.
       let envelopeIndex = context.length - 1;
       while (envelopeIndex >= 0 && !(context[envelopeIndex].role === 'assistant' && context[envelopeIndex].tool_calls?.length)) envelopeIndex--;
@@ -560,12 +566,23 @@ export class BotRunner {
           if (imageProgressTimer) { clearTimeout(imageProgressTimer); imageProgressTimer = undefined; }
           if (imageProgressSent) appendActive('progress', '图片已读完，正在整理答复。', `im:status:${run.id}:image-ready`);
         }
-        checkActive();
-        if (calls.length > 16 || calls.some(c => !c?.function || typeof c.function.name !== 'string' || typeof c.function.arguments !== 'string' || c.function.arguments.length > 128000)) throw new Error('invalid_structured_response');
-        const batch: Call[] = calls.map(c => ({ id: crypto.randomUUID(), ...(c.id ? { provider_id: c.id } : {}), type: 'function', function: { ...c.function } }));
+         checkActive();
+         if (calls.length > 16 || calls.some(c => !c?.function || typeof c.function.name !== 'string' || typeof c.function.arguments !== 'string' || c.function.arguments.length > 128000)) throw new Error('invalid_structured_response');
+         const batch: Call[] = calls.map(c => ({ id: crypto.randomUUID(), ...(c.id ? { provider_id: c.id } : {}), type: 'function', function: { ...c.function } }));
+         // A follow-up accepted while the request was in flight wins before
+         // any tool call from the stale response is committed or executed.
+         if (this.store.db.prepare('SELECT 1 FROM run_inputs WHERE run_id=? AND consumed_at IS NULL LIMIT 1').get(run.id)) {
+           this.consumeInputs(run, context);
+           continue;
+         }
         // Tool-round text stays in model context, not the Web/IM conversation.
         // Explicit message/file tools deliver parts; a lone finish_turn may accompany a direct reply.
-        const directReply = !batch.length || batch.length === 1 && batch[0].function.name === 'finish_turn';
+         const directReply = !batch.length || batch.length === 1 && batch[0].function.name === 'finish_turn';
+         // Completion dependencies must be checked before *any* visible text
+         // is appended. A lone finish_turn still carries model text in the
+         // same response, so checking only the no-tool path is insufficient.
+          const blockedByTask = this.pendingForegroundTasks(run.id) &&
+           (directReply || batch.some(call => call.function.name === 'finish_turn' || call.function.name === 'send_message'));
         signal.throwIfAborted();
         context.push({ role: 'assistant', content: text || null, ...(batch.length ? { tool_calls: batch } : {}), response_items: body === undefined ? undefined : responseContinuation(selected.protocol, body) });
         if (wechat && (directReply && hasWechatLatex(text) || batch.some(call => wechatToolHasLatex(call.function.name, call.function.arguments)))) {
@@ -586,22 +603,36 @@ export class BotRunner {
           if (context.filter(m => m.runtime_notice && m.content === repair).length >= 3) throw new Error('wechat_reply_format_failed');
           continue;
         }
-        this.store.transaction(() => {
-          checkActive();
-          if (directReply && text.trim()) this.append(run.thread_id, 'text', text, `bot:${run.id}:reply:${context.length}`);
-          this.save(run, context);
-          for (const call of batch) this.store.db.prepare('INSERT INTO run_steps(id,run_id,tool,arguments,status,created_at) VALUES(?,?,?,?,?,?)').run(call.id, run.id, call.function.name, call.function.arguments, 'queued', now());
-          if (!batch.length) { this.finish(run.id, 'completed'); governor.completed(run.id, context); }
-        });
-        if (!batch.length) {
-          publishBotEvent(this.store, { owner, thread: run.thread_id, run: run.id, type: 'run.finished', status: 'completed' }, this.options.onEvent);
+          let supersededByInput = false;
+          this.store.transaction(() => {
+            checkActive();
+            if (directReply && text.trim() && !blockedByTask) {
+              if (hasUnconsumedInput()) supersededByInput = true;
+              else this.append(run.thread_id, 'text', text, `bot:${run.id}:reply:${context.length}`);
+            }
+            this.save(run, context);
+            for (const call of batch) this.store.db.prepare('INSERT INTO run_steps(id,run_id,tool,arguments,status,created_at) VALUES(?,?,?,?,?,?)').run(call.id, run.id, call.function.name, call.function.arguments, 'queued', now());
+            if (!batch.length && hasUnconsumedInput()) supersededByInput = true;
+            if (!batch.length && !blockedByTask && !supersededByInput) { this.finish(run.id, 'completed'); governor.completed(run.id, context); }
+          });
+         if (!batch.length) {
+            if (supersededByInput) {
+              this.consumeInputs(run, context, 'Not executed: superseded by new input.');
+              continue;
+            }
+            if (blockedByTask && !batch.length) {
+             context.push({ role: 'user', runtime_notice: true, content: 'A required foreground study task is still running. Do not claim completion; call study_task.wait with its task ID or clearly state only background work was started.' });
+             this.save(run, context);
+             continue;
+           }
+           publishBotEvent(this.store, { owner, thread: run.thread_id, run: run.id, type: 'run.finished', status: 'completed' }, this.options.onEvent);
           return;
         }
         const resultStart = context.length;
         let batchStopped = false;
         await executeToolBatch(batch, {
           signal,
-          shouldStop: () => batchStopped,
+           shouldStop: () => batchStopped || hasUnconsumedInput(),
           canParallel: call => {
             try {
               const name = call.function.name, args = JSON.parse(call.function.arguments);
@@ -628,7 +659,7 @@ export class BotRunner {
         let args: any;
         try { args = JSON.parse(call.function.arguments); } catch { args = null; }
         let result = 'Unknown tool or invalid arguments.';
-        let state: 'completed' | 'waiting_user' | 'queued' | undefined;
+         let state: 'completed' | 'waiting_user' | 'waiting_event' | 'queued' | undefined;
         let wake: string | null = null;
         let suspended = false;
         const hiddenManaged = this.managedTool(call.function.name);
@@ -740,22 +771,37 @@ export class BotRunner {
           wake = new Date(Date.now() + args.seconds * 1000).toISOString();
           result = `Scheduled wake: ${wake}`; state = 'queued';
           appendActive('progress', `${args.reason.slice(0, 2000)}（下次运行：${wake}）`);
-        } else if (call.function.name === 'send_message' && ['text', 'progress', 'question', 'approval', 'attachment'].includes(args.kind) && typeof args.text === 'string' && args.text.length > 0 && args.text.length <= 12000) {
+         } else if (call.function.name === 'send_message' && ['text', 'progress', 'question', 'approval', 'attachment'].includes(args.kind) && typeof args.text === 'string' && args.text.length > 0 && args.text.length <= 12000) {
           let fileAttachment = false;
           if (args.kind === 'attachment') { try { fileAttachment = Boolean(JSON.parse(args.text)?.fileId); } catch { /* historical plain-text attachments remain supported */ } }
           if (fileAttachment) result = 'File attachments must use study_send_file with the owned fileId; send_message cannot bypass read policy or approval.';
           else {
-          const message = appendActive(args.kind, args.text, `bot:${call.id}:message`);
-           result = args.kind === 'progress' ? 'Progress recorded internally; not shown to the user.' : 'Message delivered.';
-          if (args.kind === 'approval') {
-            this.store.db.prepare('INSERT INTO approvals(id,thread_id,message_id,run_id,status,created_at) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), run.thread_id, message.id, run.id, 'pending', now());
+           const premature = !['progress', 'question', 'approval'].includes(args.kind) && args.complete !== false && this.pendingForegroundTasks(run.id);
+           const message = premature ? null
+             : ['question', 'approval'].includes(args.kind)
+               ? appendActive(args.kind, args.text, `bot:${call.id}:message`)
+               : appendVisibleIfCurrent(args.kind, args.text, `bot:${call.id}:message`);
+             result = premature
+               ? 'A required foreground task is still running. The message was not delivered; wait for its terminal result before claiming completion.'
+               : !message ? 'A newer user input superseded this delivery; the message was not sent.'
+               : args.kind === 'progress' ? 'Progress recorded internally; not shown to the user.' : 'Message delivered.';
+           if (premature || !message) { /* Do not create a terminal delivery for a superseded response. */ }
+          else if (args.kind === 'approval') {
+            this.store.db.prepare('INSERT INTO approvals(id,thread_id,message_id,run_id,status,created_at) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), run.thread_id, message!.id, run.id, 'pending', now());
             state = 'waiting_user';
-           } else if (args.kind === 'question' || args.kind !== 'progress' && args.complete !== false) state = 'completed';
-           }
+             } else if (args.kind === 'question') {
+               this.store.db.prepare('INSERT OR IGNORE INTO run_questions(id,run_id,message_id,status,created_at) VALUES(?,?,?,?,?)').run(call.id, run.id, message!.id, 'pending', now());
+               state = 'waiting_user';
+             } else if (args.kind !== 'progress' && args.complete !== false) {
+                if (this.pendingForegroundTasks(run.id)) result = 'A required foreground task is still running. Wait for its terminal result before claiming completion.';
+                else state = 'completed';
+             }
+            }
         } else if (call.function.name === 'finish_turn') {
           const sent = this.store.db.prepare(`SELECT 1 FROM messages m WHERE m.thread_id=? AND m.role='assistant' AND m.kind IN ('text','attachment','question')
             AND (m.client_nonce LIKE ? OR EXISTS (SELECT 1 FROM run_steps s WHERE s.run_id=? AND m.client_nonce IN ('bot:' || s.id || ':message','bot:' || s.id || ':attachment'))) LIMIT 1`).get(run.thread_id, `bot:${run.id}:reply:%`, run.id);
-          if (sent) { result = 'Turn finished; previously sent messages are the reply.'; state = 'completed'; }
+           if (this.pendingForegroundTasks(run.id)) result = 'A required foreground task is still running; do not finish the turn yet. Use study_task.wait and verify its terminal result.';
+           else if (sent) { result = 'Turn finished; previously sent messages are the reply.'; state = 'completed'; }
           else result = 'Send a reply or file to the user before finishing the turn.';
         }
         scoped.checkActive();
@@ -770,7 +816,14 @@ export class BotRunner {
         checkActive();
         if (!outcome.ok && outcome.error.code === 'tool_timeout') throw new BudgetBlocked('tool_timeout');
         if (!outcome.ok && outcome.error.code === 'sandbox_unavailable') throw new Error('sandbox_unavailable');
-        result = outcome.ok ? String(outcome.value) : JSON.stringify(outcome);
+         result = outcome.ok ? String(outcome.value) : JSON.stringify(outcome);
+          if (call.function.name === 'study_task') {
+            try { if (JSON.parse(result)?.waiting === true) state = 'waiting_event'; } catch { /* preserve ordinary tool result */ }
+          }
+          // An async operation may have accepted input before it returned a
+          // scheduled wait. Record its real result, but do not park the run
+          // before the accepted follow-up has had a model turn.
+          if (hasUnconsumedInput()) { state = undefined; wake = null; }
         const visibleResult = result.length > 12000 ? JSON.stringify(new BotArtifacts(this.store).put(owner, run.id, call.id, result)) : result;
         recordToolResult(context, resultStart, batch, { role: 'tool', tool_call_id: call.id, content: visibleResult });
         this.store.transaction(() => {
@@ -794,7 +847,14 @@ export class BotRunner {
         publishBotEvent(this.store, { owner, thread: run.thread_id, run: run.id, step: call.id, type: 'tool.finished' }, this.options.onEvent);
           },
         });
-        if (batchStopped) return;
+         if (batchStopped) return;
+         if (hasUnconsumedInput()) {
+           // Preserve completed tool results, explicitly account for queued
+           // calls from the stale response, consume the follow-up, and let
+           // the next model turn re-plan before any old delivery occurs.
+           this.consumeInputs(run, context, 'Not executed: superseded by new input.', batch);
+           continue;
+         }
       }
     } catch (error) {
       const status = (this.store.db.prepare('SELECT status FROM runs WHERE id=?').get(run.id) as { status: string } | undefined)?.status;
@@ -835,6 +895,35 @@ export class BotRunner {
   private save(run: Run, context: Message[]) {
     this.store.db.prepare('UPDATE runs SET context_json=? WHERE id=?').run(JSON.stringify(context), run.id);
   }
+  /** Atomically moves explicit follow-up messages into the replayable context.
+   * The receipt means only that the raw input is available to this run; it does
+   * not claim the model obeyed it. */
+  private consumeInputs(run: Run, context: Message[], supersededToolResult?: string, skippedCalls: Array<{ id: string }> = []) {
+    this.store.transaction(() => {
+      if (supersededToolResult) {
+        this.store.db.prepare("UPDATE run_steps SET status='interrupted',result=?,completed_at=? WHERE run_id=? AND status='queued'")
+          .run(supersededToolResult, now(), run.id);
+        for (const call of skippedCalls) {
+          if (!context.some(message => message.role === 'tool' && message.tool_call_id === call.id)) {
+            context.push({ role: 'tool', tool_call_id: call.id, content: supersededToolResult });
+          }
+        }
+      }
+      const rows = this.store.db.prepare(`SELECT i.message_id,m.seq,m.role,m.kind,m.content,m.reply_to
+        FROM run_inputs i JOIN messages m ON m.id=i.message_id
+        WHERE i.run_id=? AND i.consumed_at IS NULL ORDER BY m.seq`).all(run.id) as any[];
+      for (const row of rows) {
+        const content = row.kind === 'attachment' ? (() => {
+          try { const parsed = parseBotAttachments(row.content); return parsed ? [parsed.text, ...parsed.files.map((f: any) => `Attachment fileId=${f.fileId ?? ''}, name=${f.originalName ?? f.name ?? 'attachment'}. Read it with study_file.`)].filter(Boolean).join('\n') : row.content;
+          } catch { return row.content; }
+        })() : row.content;
+        context.push({ role: 'user', content: `${content}\n[explicit follow-up messageId=${row.message_id}]` });
+        this.store.db.prepare('UPDATE run_inputs SET consumed_at=?,context_version=(SELECT COALESCE(step_count,0) FROM runs WHERE id=?) WHERE message_id=? AND consumed_at IS NULL').run(now(), run.id, row.message_id);
+        this.store.db.prepare('UPDATE runs SET context_end_seq=MAX(COALESCE(context_end_seq,0),?) WHERE id=?').run(row.seq, run.id);
+      }
+      if (rows.length) this.save(run, context);
+    });
+  }
   private async executeStudy(name: string, args: any, owner: string, run: Run, step: string, signal: AbortSignal) {
     try {
       const plugin = this.options.study!.plugins.get(name)!;
@@ -871,7 +960,11 @@ export class BotRunner {
               throw error;
             }
           },
-          append: (kind, text) => { scoped.checkActive(); return this.append(run.thread_id, kind, text, `bot:${step}:attachment`); } });
+          append: (kind, text) => this.store.transaction(() => {
+            scoped.checkActive();
+            if (this.store.db.prepare('SELECT 1 FROM run_inputs WHERE run_id=? AND consumed_at IS NULL LIMIT 1').get(run.id)) throw new Error('run_input_superseded');
+            return this.append(run.thread_id, kind, text, `bot:${step}:attachment`);
+          }) });
       });
       if (!outcome.ok) { if (outcome.error.code === 'tool_timeout') throw new BudgetBlocked('tool_timeout'); return JSON.stringify(outcome); }
       const value = outcome.value;
@@ -897,6 +990,23 @@ export class BotRunner {
   }
   private syncChildren() {
     this.store.transaction(() => {
+      const waits = this.store.db.prepare("SELECT * FROM run_waits WHERE status='waiting'").all() as any[];
+      for (const wait of waits) {
+        const ids = JSON.parse(wait.task_ids) as string[];
+        const tasks = ids.map(id => this.store.db.prepare('SELECT id,status,result,error FROM cloud_tasks WHERE id=? AND owner_id=(SELECT owner_id FROM threads WHERE id=(SELECT thread_id FROM runs WHERE id=?))').get(id, wait.run_id) as any);
+        if (tasks.length !== ids.length || tasks.some(t => !t || !['completed','failed','cancelled','interrupted'].includes(t.status))) continue;
+        const result = JSON.stringify({ waitId: wait.id, tasks });
+        this.store.db.prepare("UPDATE run_waits SET status='ready',result=?,resolved_at=? WHERE id=? AND status='waiting'").run(result, now(), wait.id);
+        this.store.db.prepare("UPDATE run_steps SET result=? WHERE id=? AND status='completed'").run(result, wait.step_id);
+        const run = this.store.db.prepare('SELECT context_json,status FROM runs WHERE id=?').get(wait.run_id) as any;
+        if (run?.context_json) {
+          const context = JSON.parse(run.context_json) as any[];
+          const tool = context.find(m => m.tool_call_id === wait.step_id);
+          if (tool) tool.content = result;
+          this.store.db.prepare('UPDATE runs SET context_json=?,status=CASE WHEN status=\'waiting_event\' THEN \'queued\' ELSE status END,completed_at=NULL WHERE id=? AND status NOT IN (\'cancelled\',\'failed\')').run(JSON.stringify(context), wait.run_id);
+        }
+        this.store.db.prepare("UPDATE run_waits SET status='consumed' WHERE id=? AND status='ready'").run(wait.id);
+      }
       const permissions = this.store.db.prepare(`SELECT p.*,r.thread_id FROM cloud_permissions p JOIN cloud_tasks t ON t.id=p.task_id JOIN runs r ON r.id=t.parent_run_id WHERE p.status='pending' AND r.status NOT IN ('cancelled','failed','paused') AND NOT EXISTS(SELECT 1 FROM approvals a WHERE a.cloud_permission_id=p.id)`).all() as any[];
       for (const p of permissions) {
         const m = this.append(p.thread_id, 'approval', `学习子任务权限 ${p.capability}\n${p.arguments}`);
@@ -909,6 +1019,23 @@ export class BotRunner {
         this.store.db.prepare('INSERT INTO cloud_task_events(task_id,event) VALUES(?,?)').run(t.id, 'bot_terminal_projected');
       }
     });
+  }
+  /** A foreground child is a completion dependency.  Background jobs are
+   * explicitly opt-in and may be reported as started without waiting. */
+  private pendingForegroundTasks(runId: string) {
+    const rows = this.store.db.prepare("SELECT input,status,result FROM cloud_tasks WHERE parent_run_id=? AND status IN ('queued','running','waiting_user','completed')").all(runId) as Array<{ input: string; status: string; result: string | null }>;
+    const blockedTask = rows.some(row => {
+      let background = false;
+      try { background = JSON.parse(row.input).background === true; } catch { /* malformed input is never an optional task */ }
+      if (background) return false;
+      // A completed child without a persisted result is not a usable
+      // completion dependency. Failed/cancelled/interrupted are terminal and
+      // are intentionally left for the model to explain as failure/partial
+      // delivery rather than being falsely upgraded to success.
+      return row.status !== 'completed' || row.result === null;
+    });
+    const unconsumedWait = Boolean(this.store.db.prepare("SELECT 1 FROM run_waits WHERE run_id=? AND status IN ('waiting','ready') LIMIT 1").get(runId));
+    return blockedTask || unconsumedWait;
   }
   private finish(id: string, status: string) {
     this.store.db.prepare("UPDATE runs SET status=?,completed_at=? WHERE id=? AND status='running'").run(status, now(), id);

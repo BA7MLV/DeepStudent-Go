@@ -18,9 +18,9 @@ import BrandLogo from './BrandLogo';
 import { toast } from './feedback';
 import { useRailCollapsed } from './rail';
 import { DotBadge, MatrixDots } from '../components/motion';
-import { useSettingsDialog } from '../components/settingsDialogStore';
 import { useChatNotifications } from '../store/chatNotifications';
 import { observeBrowserChrome } from './browserChrome';
+import { overflowTitleProps, updateOverflowTitle } from './overflowTitle';
 import './layout.css';
 
 /**
@@ -127,6 +127,7 @@ function measureRecentTitle(row: HTMLElement) {
   if (!title) return;
   const overflow = Math.max(0, title.scrollWidth - title.clientWidth);
   title.dataset.overflow = String(overflow > 0);
+  updateOverflowTitle({ currentTarget: title });
   title.style.setProperty('--recent-shift', `${-overflow}px`);
   title.style.setProperty('--recent-duration', `${Math.max(5, overflow / 40)}s`);
 }
@@ -208,7 +209,7 @@ function NavigationItem({ item, active, compact = false, onNavigate }: {
   };
   const content = compact ? item.icon : <>
     <span className="page-shell__nav-icon" aria-hidden="true">{item.icon}</span>
-    <span className="min-w-0 truncate">{item.label}</span>
+    <span className="min-w-0 truncate" {...overflowTitleProps}>{item.label}</span>
   </>;
 
   if (item.to !== undefined) {
@@ -523,15 +524,12 @@ export function NavigationShell({
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const hasUnread = useChatNotifications((s) => s.unreadIds.length > 0);
-  const { open: settingsOpen } = useSettingsDialog();
-  useEffect(() => {
-    if (settingsOpen) setDrawerOpen(false);
-  }, [settingsOpen]);
   const isNarrow = useIsNarrow();
   const [railCollapsed, toggleRail] = useRailCollapsed();
   const navigationId = useId();
   const drawerId = `${navigationId}-drawer`;
-  const navOpen = isNarrow && drawerOpen && !settingsOpen;
+  // 设置是叠在当前界面上的工具层，不应为了打开它先收起导航、复位正文。
+  const navOpen = isNarrow && drawerOpen;
   const open = useCallback(() => setDrawerOpen(true), []);
   const navigation = useMemo(() => ({ isNarrow, isOpen: navOpen, drawerId, open }), [isNarrow, navOpen, drawerId, open]);
 
@@ -780,10 +778,11 @@ export function PageShell({
                 id={titleId}
                 data-testid="page-title"
                 className="truncate text-base leading-[1.3] font-semibold"
+                {...overflowTitleProps}
               >
                 {title}
               </h1>
-              {subtitle && <div className="truncate text-xs leading-[1.3] text-muted">{subtitle}</div>}
+              {subtitle && <div className="truncate text-xs leading-[1.3] text-muted" {...overflowTitleProps}>{subtitle}</div>}
             </div>
             <div className="flex-1" />
             {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
@@ -961,7 +960,7 @@ export function Field({
             {label}
           </div>
           {hint && (
-            <div className="col-start-1 row-start-2 mt-0.5 self-start text-xs leading-normal text-muted">
+            <div className="ui-field__hint col-start-1 row-start-2 mt-0.5 self-start text-xs leading-normal text-muted">
               {hint}
             </div>
           )}
@@ -976,7 +975,7 @@ export function Field({
             {label}
           </div>
           <div>{children}</div>
-          {hint && <div className="mt-1.5 text-xs leading-normal text-muted">{hint}</div>}
+          {hint && <div className="ui-field__hint mt-1.5 text-xs leading-normal text-muted">{hint}</div>}
         </>
       )}
     </div>

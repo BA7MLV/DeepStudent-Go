@@ -139,7 +139,7 @@ export default function LiveModule() {
       )}
       {live.enabled && live.code && (
         <div
-          className="py-2 text-xs break-all text-muted"
+          className="py-2 text-xs wrap-anywhere text-muted"
           data-testid="live-link-preview"
         >
           将复制：{liveLink}

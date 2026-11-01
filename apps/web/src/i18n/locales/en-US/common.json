@@ -120,6 +120,13 @@
     "stopFailed": "Couldn't stop",
     "approve": "Approve",
     "reject": "Decline",
+    "answer": "Answer",
+    "answerPrompt": "Type your answer below.",
+    "answerTarget": "Answering this question",
+    "continueTarget": "Adding to the current run",
+    "continueCurrent": "Add to current task",
+    "clearTarget": "Clear",
+    "waitingBackground": "Waiting for background work",
     "approved": "Approved",
     "rejected": "Declined",
     "approvalFailed": "Couldn't submit the approval",
@@ -144,6 +151,19 @@
       "connecting": "Connecting the clues…",
       "checking": "Checking the important details…",
       "composing": "Shaping it into an answer…"
+    }
+  },
+  "chat": {
+    "interrupted": "Answer unfinished",
+    "continue": "Continue",
+    "failed": "Answer failed: {{reason}}",
+    "requestNotCompleted": "The request did not finish",
+    "loadEarlier": "Load earlier messages",
+    "loadingEarlier": "Loading earlier messages…",
+    "historyLoadFailed": "Could not load earlier messages. Click to retry",
+    "errors": {
+      "loadFailed": "The connection failed to load. Please retry",
+      "networkFailed": "The network connection failed. Please retry"
     }
   }
 }

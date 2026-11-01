@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseStore } from '../apps/api/src/storage/database.ts';
+import { BotApplicationService } from '../apps/api/src/agent/service.ts';
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-continuity-'));
+const store = new DatabaseStore(path.join(root, 'db.sqlite'));
+const at = new Date().toISOString();
+const owner = 'owner';
+store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run(owner, 'Test', at);
+const thread = 'thread';
+store.db.prepare("INSERT INTO threads(id,owner_id,mode,title,created_at,updated_at) VALUES(?,?, 'bot', ?, ?, ?)").run(thread, owner, 'Continuity', at, at);
+const runner = { enqueue() {}, cancel() {} };
+const service = new BotApplicationService(store, runner);
+
+const first = service.send(owner, thread, { clientNonce: 'n1', content: '分析原始附件' });
+assert.equal(first.receipt.disposition, 'created');
+const appended = service.send(owner, thread, { clientNonce: 'n2', content: '补充：只分析前三份', target: { kind: 'run', runId: first.receipt.runId } });
+assert.equal(appended.receipt.disposition, 'appended');
+assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM runs').get().n, 1);
+assert.equal(store.db.prepare('SELECT consumed_at FROM run_inputs WHERE message_id=?').get(appended.id).consumed_at, null);
+store.db.prepare("UPDATE runs SET status='waiting_event' WHERE id=?").run(first.receipt.runId);
+const waitingSupplement = service.send(owner, thread, { clientNonce: 'n-wait', content: '补充：后台结果回来后也检查引用', target: { kind: 'run', runId: first.receipt.runId } });
+assert.equal(waitingSupplement.receipt.disposition, 'appended');
+assert.equal(store.db.prepare('SELECT status FROM runs WHERE id=?').get(first.receipt.runId).status, 'queued');
+const duplicate = service.send(owner, thread, { clientNonce: 'n2', content: '不同内容' });
+assert.equal(duplicate.deduplicated, true);
+store.db.prepare("UPDATE runs SET status='completed',completed_at=? WHERE id=?").run(at, first.receipt.runId);
+assert.throws(() => service.send(owner, thread, { clientNonce: 'n3', content: '不能复活', target: { kind: 'run', runId: first.receipt.runId } }), /target_expired/);
+console.log('Bot continuity: explicit target append, waiting-event wake, durable input receipt, nonce idempotency and terminal fence passed');
+store.db.close();
+fs.rmSync(root, { recursive: true, force: true });

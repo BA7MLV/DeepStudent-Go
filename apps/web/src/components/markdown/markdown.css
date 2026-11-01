@@ -1,4 +1,13 @@
-.x-markdown { min-width: 0; }
+.x-markdown {
+  min-width: 0;
+  /* Identical for live output and history. Do not inherit UI's pretty/balance
+     or change algorithms when streaming ends. Keep pre/code whitespace intact. */
+  text-wrap-style: auto;
+}
+
+.x-markdown :where(h1, h2, h3, h4, h5, h6, p, li, dd, blockquote):not(:where(.md-embedded-ui, .md-embedded-ui *)) {
+  text-wrap-style: auto;
+}
 
 /* Reasoning inherits its muted typography, but Markdown owns whitespace/layout. */
 .reasoning-markdown { white-space: normal; color: inherit; font: inherit; }

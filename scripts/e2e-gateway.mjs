@@ -16,19 +16,20 @@ const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');
 let qrStatus = 'confirmed', statusPolls = 0, transportHealthy = false;
 const verifySubmissions = [];
+const incoming = [], outgoing = [];
 const app = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: async (url, init) => {
   if (String(url).includes('get_bot_qrcode')) { assert.equal(init.method, 'POST'); return Response.json({ qrcode: 'test-qr-handle', qrcode_img_content: 'https://weixin.qq.com/test-qr-not-real-account' }); }
   if (String(url).includes('get_qrcode_status')) {
     statusPolls++;
     const code = new URL(url).searchParams.get('verify_code');
     if (code) { verifySubmissions.push(code); return Response.json({ status: 'verify_code_blocked' }); }
-    return Response.json({ status: qrStatus, ...(qrStatus === 'confirmed' ? { bot_token: 'DO-NOT-EXPOSE-THIS-TOKEN', ilink_bot_id: 'test-bot', baseurl: 'https://ilinkai.weixin.qq.com' } : {}) });
+    return Response.json({ status: qrStatus, ...(qrStatus === 'confirmed' ? { bot_token: 'DO-NOT-EXPOSE-THIS-TOKEN', ilink_bot_id: 'test-bot', ilink_user_id: 'ui-owner-peer', baseurl: 'https://ilinkai.weixin.qq.com' } : {}) });
   }
   if (transportHealthy && String(url).includes('getupdates')) {
     await sleep(250, undefined, { signal: init.signal });
-    return Response.json({ ret: 0, msgs: [], get_updates_buf: 'fixture-cursor' });
+    return Response.json({ ret: 0, msgs: incoming.splice(0), get_updates_buf: 'fixture-cursor' });
   }
-  if (transportHealthy && String(url).includes('sendmessage')) return Response.json({ ret: 0 });
+  if (transportHealthy && String(url).includes('sendmessage')) { outgoing.push(JSON.parse(init.body).msg); return Response.json({ ret: 0 }); }
   throw new TypeError('DO-NOT-EXPOSE-THIS-TRANSPORT-ERROR', { cause: { code: 'ENOTFOUND' } });
 } });
 let browser, store, web;
@@ -55,7 +56,7 @@ try {
   const initialized = await context.request.post(`${origin}/api/v1/bootstrap/initialize`, { headers: { origin, 'X-Bootstrap-Secret': fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim() }, data: { adminName: 'GatewayTest', adminPassword: 'gateway-test-password-12345' } }); assert.equal(initialized.status(), 201);
   // Bootstrap initializes without assuming an authenticated browser.
   const login = await context.request.post(`${origin}/api/v1/auth/password/login`, { headers: { origin }, data: { username: 'GatewayTest', password: 'gateway-test-password-12345' } }); assert.equal(login.status(), 200);
-  const owner = (await login.json()).user.id;
+  const user = (await login.json()).user, owner = user.id;
   await context.request.get(`${origin}/api/v1/agents`);
   const page = await context.newPage(), errors = [];
   const setLocale = locale => page.evaluate(async locale => { const { applyLocale } = await import('/src/i18n/index.ts'); applyLocale(locale); }, locale);
@@ -71,7 +72,13 @@ try {
   await page.getByTestId('gateway-connection-details').getByText('dns_error', { exact: true }).waitFor();
   const data = await (await context.request.get(`${origin}/api/v1/gateway`)).json(); assert.equal(data.accounts.length, 1);
   const id = data.accounts[0].id;
+  assert.equal(data.accounts[0].readiness.bound, false, 'QR login must not bypass manual pairing');
   assert.equal(await page.getByTestId('gateway-pair').isDisabled(), true, 'pairing waits for platform connectivity');
+  assert.equal(await page.getByTestId('gateway-readiness').getByRole('listitem').filter({ hasText: 'Link yourself' }).count(), 1);
+  store = new DatabaseStore(path.join(directory, 'db.sqlite'));
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_bindings').get().n, 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_outbox').get().n, 0);
+  assert.equal(outgoing.length, 0, 'nothing is sent before the user pairs');
   transportHealthy = true;
   await panel.getByRole('button', { name: 'Reconnect now', exact: true }).click();
   await page.getByTestId('gateway-readiness').getByText('Connected · Link required', { exact: true }).waitFor();
@@ -84,19 +91,31 @@ try {
     await page.screenshot({ path: path.join(output, `gateway-unlinked-${width}.png`), fullPage: true });
     await setLocale('zh-CN');
     await page.getByTestId('gateway-readiness').getByText('已连接 · 待绑定', { exact: true }).waitFor();
+    assert.equal(await page.getByTestId('gateway-readiness').getByRole('listitem').filter({ hasText: '绑定本人' }).count(), 1);
     await page.screenshot({ path: path.join(output, `gateway-unlinked-zh-${width}.png`), fullPage: true });
     await setLocale('en-US');
   }
   await page.getByTestId('gateway-pair').click();
-  assert.match(await page.getByTestId('gateway-pair-command').innerText(), /^\/pair [0-9A-HJKMNP-TV-Z]{8}$/);
+  assert.match(await page.getByTestId('gateway-pair-command').innerText(), /^[0-9A-HJKMNP-TV-Z]{4}$/);
   const firstCommand = await page.getByTestId('gateway-pair-command').innerText();
-  await panel.getByRole('button', { name: 'Generate new linking command', exact: true }).click();
+  await panel.getByRole('button', { name: 'Generate new linking code', exact: true }).click();
   await page.waitForFunction(old => document.querySelector('[data-testid="gateway-pair-command"]')?.textContent !== old, firstCommand);
+  const pairCommand = await page.getByTestId('gateway-pair-command').innerText();
+  assert.match(pairCommand, /^[0-9A-HJKMNP-TV-Z]{4}$/);
+  assert.equal(outgoing.length, 0, 'generating or renewing a code must not greet or bind');
+  incoming.push({ message_id: 'manual-pair-message', from_user_id: 'ui-owner-peer', message_type: 1, context_token: 'private-scanner-context', item_list: [{ type: 1, text_item: { text: pairCommand } }] });
+  for (let n = 0; n < 100 && outgoing.length < 2; n++) await sleep(100);
+  assert.equal(outgoing[0]?.item_list[0].text_item.text, `嗨，${user.name}！我是 DeepStudent Go！`);
+  assert.match(outgoing[1]?.item_list[0].text_item.text, /^绑定成功/);
+  assert.equal(outgoing.length, 2, 'two welcomes follow the user-initiated pairing message');
+  assert.ok(outgoing.every(msg => msg.to_user_id === 'ui-owner-peer' && msg.context_token === 'private-scanner-context'));
+  const bindingId = store.db.prepare('SELECT id FROM gateway_bindings WHERE account_id=?').get(id).id;
+  const thread = store.db.prepare('SELECT t.* FROM threads t JOIN gateway_bindings b ON b.thread_id=t.id WHERE b.id=?').get(bindingId);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM messages WHERE thread_id=?').get(thread.id).n, 0, 'pair code and welcomes stay out of model history');
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM message_events WHERE thread_id=?').get(thread.id).n, 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM runs').get().n, 0);
   assert.equal((await (await context.request.get(`${origin}/api/v1/gateway`)).text()).includes('DO-NOT-EXPOSE-THIS-TOKEN'), false);
   assert.equal((await (await context.request.get(`${origin}/api/v1/gateway`)).text()).includes('DO-NOT-EXPOSE-THIS-TRANSPORT-ERROR'), false);
-  const threadResult = await context.request.post(`${origin}/api/v1/threads`, { headers: { origin }, data: { mode: 'bot', title: 'IM · browser-test' } }); const thread = await threadResult.json();
-  store = new DatabaseStore(path.join(directory, 'db.sqlite'));
-  store.db.prepare('INSERT INTO gateway_bindings(id,account_id,tenant,peer,chat,topic,thread_id) VALUES(?,?,?,?,?,?,?)').run('ui-binding', id, '', 'ui-owner-peer', 'ui-chat', '', thread.id);
   await panel.getByRole('button', { name: 'Open conversation', exact: true }).waitFor({ timeout: 10000 });
   await page.getByTestId('gateway-readiness').getByText('Model required', { exact: true }).waitFor();
   assert.equal(await panel.getByRole('button', { name: 'Configure chat model', exact: true }).count(), 1);
@@ -113,7 +132,7 @@ try {
 
   // A second gateway link must switch the already-mounted Bot panel.
   const second = await (await context.request.post(`${origin}/api/v1/threads`, { headers: { origin }, data: { mode: 'bot', title: 'IM · second thread' } })).json();
-  store.db.prepare('UPDATE gateway_bindings SET thread_id=? WHERE id=?').run(second.id, 'ui-binding');
+  store.db.prepare('UPDATE gateway_bindings SET thread_id=? WHERE id=?').run(second.id, bindingId);
   await page.getByTestId('nav-rail-settings').click();
   await page.getByTestId('settings-nav-gateway').click();
   await page.getByTestId('gateway-account-ilink').click();
@@ -127,7 +146,7 @@ try {
   await panel.getByText('复习测试提醒', { exact: false }).waitFor({ timeout: 10000 });
   await panel.getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(store.db.prepare('SELECT status FROM bot_reminders WHERE id=?').get('ui-reminder').status, 'cancelled');
-  for (const status of ['failed', 'uncertain', 'sent']) store.db.prepare('INSERT INTO gateway_outbox(id,binding_id,payload,status,error,created_at) VALUES(?,?,?,?,?,?)').run(`ui-${status}`, 'ui-binding', '{"text":"UI queue result"}', status, 'ui-test', Date.now());
+  for (const status of ['failed', 'uncertain', 'sent']) store.db.prepare('INSERT INTO gateway_outbox(id,binding_id,payload,status,error,created_at) VALUES(?,?,?,?,?,?)').run(`ui-${status}`, bindingId, '{"text":"UI queue result"}', status, 'ui-test', Date.now());
   for (const status of ['failed', 'uncertain']) {
     const row = panel.getByText(`WeChat · ${status === 'failed' ? 'Failed' : 'Unknown result'}`, { exact: true }).locator('../..');
     await row.getByRole('button', { name: 'Discard', exact: true }).click();
@@ -177,7 +196,7 @@ try {
   await panel.getByRole('button', { name: 'Unlink', exact: true }).click();
   await page.getByTestId('confirm-dialog-confirm').click();
   await page.getByTestId('gateway-pair').waitFor();
-  assert.equal(store.db.prepare('SELECT revoked FROM gateway_bindings WHERE id=?').get('ui-binding').revoked, 1);
+  assert.equal(store.db.prepare('SELECT revoked FROM gateway_bindings WHERE id=?').get(bindingId).revoked, 1);
 
   // Leaving the login view aborts both QR creation and an outstanding long poll.
   const loginUrl = `${origin}/api/v1/gateway/accounts/${id}/login`;
@@ -233,7 +252,7 @@ try {
   assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_accounts').get().n, 0);
   assert.ok(store.db.prepare('SELECT 1 FROM threads WHERE id=?').get(second.id), 'removal preserves web history');
   assert.deepEqual(errors, []);
-  console.log(`Gateway management browser passed: connection/binding/model readiness, pairing renewal, duplicate login feedback, cancel/confirm channel removal preserving history, separate Web/API, safe diagnostics, automatic QR login, explicit verification, blocked/already-bound states, open/switch Bot panel, masked credentials, reminder cancel, delivery discard, revoke, QR/poll cancellation and controls at 390/1440px. Screenshots: ${output}`);
+  console.log(`Gateway management browser passed: manual pairing after QR login, code renewal, two transport-only welcomes after the pairing message (no model history/runs), connection/binding/model readiness, duplicate login feedback, cancel/confirm channel removal preserving history, separate Web/API, safe diagnostics, explicit platform verification, blocked/already-bound states, open/switch Bot panel, masked credentials, reminder cancel, delivery discard, revoke, QR/poll cancellation and controls at 390/1440px. Screenshots: ${output}`);
 } catch (e) {
   const pages = browser?.contexts()[0]?.pages() ?? [];
   for (const page of pages) console.error('UI failure:', page.url(), (await page.locator('body').innerText()).slice(-8000));

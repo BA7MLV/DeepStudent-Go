@@ -4,11 +4,13 @@ import { modelListCacheKey, modelListIdentity, pruneModelLists, readModelList, t
 import { discoverModels } from '../api/modelDiscovery';
 import type { DiscoveredModel } from '../api/modelDiscoveryData';
 import { ApiError } from '../api/siliconflow';
+import { isTypeSafeConnection, typeSafeFallbackModels } from '../api/typeSafeModels';
 
 function discoveryFailure(error: unknown) {
   if (error instanceof ApiError) {
     if (error.status === 401) return '供应商拒绝了当前凭据，请检查 API Key 并保存连接后重试。';
     if (error.status === 403) return '当前凭据没有访问模型列表的权限，请检查账号权限；也可手动添加已获授权的模型。';
+    if (error.status === 451) return '供应商拒绝了模型目录请求（HTTP 451，通常与地区或账号访问限制有关）；可使用已知模型并测试连接。';
     if ([404, 405, 501].includes(error.status)) return '接口未提供模型列表，请确认 API 地址，或手动添加已获授权的模型。';
     if (error.status === 429) return '供应商请求频率或配额受限，请稍后重试。';
   }
@@ -18,6 +20,7 @@ function discoveryFailure(error: unknown) {
 interface DiscoveryState {
   ids?: string[];
   models?: DiscoveredModel[];
+  fallback?: boolean;
   note?: string;
   loading: boolean;
 }
@@ -46,13 +49,20 @@ export function useProviderModels(providers: DiscoveryProvider[], selectedProvid
       const ids = await discoverModels(provider, signal);
       const cached = readModelList(await modelListCacheKey(provider));
       if (!current()) return null;
-      setStates((prev) => ({ ...prev, [identity]: { ids, models: cached?.models, note: `${ids.length} 个可用模型（列表不代表调用测试通过）`, loading: false } }));
+      setStates((prev) => ({ ...prev, [identity]: { ids, models: cached?.models, fallback: false, note: `${ids.length} 个可用模型（列表不代表调用测试通过）`, loading: false } }));
       return ids;
     } catch (error) {
       if (signal.aborted && sequences.current.get(identity) === sequence) {
         setStates((prev) => ({ ...prev, [identity]: { ...prev[identity], loading: false } }));
       }
       if (!current()) return null;
+      if (error instanceof ApiError && error.status === 451 && isTypeSafeConnection(provider)) {
+        const models = typeSafeFallbackModels();
+        const ids = models.map((model) => model.id);
+        setStates((prev) => ({ ...prev, [identity]: { ids, models, fallback: true, loading: false,
+          note: 'TypeSafe 的模型目录返回 HTTP 451；以下是本机已知模型，不代表当前 Key 已获授权，请添加后测试决策连接。' } }));
+        return ids;
+      }
       setStates((prev) => ({ ...prev, [identity]: { ...prev[identity], loading: false,
         note: `拉取失败：${discoveryFailure(error)}` } }));
       throw error;
@@ -103,12 +113,14 @@ export function useProviderModels(providers: DiscoveryProvider[], selectedProvid
 
   const modelOptions: Record<string, string[]> = {};
   const discoveredModels: Record<string, DiscoveredModel[]> = {};
+  const discoveredModelFallback: Record<string, boolean> = {};
   const providerNotes: Record<string, string> = {};
   for (const p of providers) {
     const state = states[modelListIdentity(p)];
     if (state?.ids) modelOptions[p.id] = state.ids;
     if (state?.models) discoveredModels[p.id] = state.models;
+    if (state?.fallback) discoveredModelFallback[p.id] = true;
     if (state?.note) providerNotes[p.id] = state.note;
   }
-  return { modelOptions, discoveredModels, providerNotes, refresh, checking: selected ? states[modelListIdentity(selected)]?.loading ?? false : false };
+  return { modelOptions, discoveredModels, discoveredModelFallback, providerNotes, refresh, checking: selected ? states[modelListIdentity(selected)]?.loading ?? false : false };
 }

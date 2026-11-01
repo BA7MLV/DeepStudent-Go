@@ -22,6 +22,10 @@
   "setupSteps": "使用前的准备",
   "stepDone": "已完成",
   "stepPending": "待完成",
+  "wechatPairWelcome": "先由你在微信私聊直接发送绑定码，无需输入 /pair。绑定成功后，Bot 会打招呼并介绍用法；绑定消息和欢迎语均不计入模型上下文。",
+  "wechatPairExplanation": "扫码登录与本人绑定是两步。复制下方 4 位绑定码，直接在这个微信机器人的私聊里发送；收到确认后，本页会自动更新。10 分钟内输错 5 次会使绑定码失效，请稍后重新生成。",
+  "wechatPairWaiting": "等待你在微信发送绑定码。绑定前的普通消息不会自动补执行，请在绑定成功后重新发送问题。",
+  "wechatPairRenew": "重新生成绑定码",
   "steps": { "connection": "连接平台", "binding": "绑定本人", "bot": "启用 Bot", "model": "配置模型" },
   "readiness": {
     "disabled": "已停用", "login_required": "待登录", "connection_required": "等待连接",

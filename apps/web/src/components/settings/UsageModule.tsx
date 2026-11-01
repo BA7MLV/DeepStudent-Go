@@ -105,7 +105,7 @@ export default function UsageModule() {
             <tbody>{rows.map(row => <tr key={JSON.stringify(['date' in row ? row.date : '', row.source, row.provider, row.model])} className="border-b border-border last:border-0">
               {groupBy === 'day' ? <td className="whitespace-nowrap px-2 py-3">{'date' in row ? String(row.date) : ''}</td> : null}
               <td className="px-2 py-3">{t(`usage.sources.${row.source}`)}</td>
-              <th scope="row" className="max-w-56 break-all px-2 py-3 font-normal">{row.provider} / {row.model}</th>
+              <th scope="row" className="max-w-56 wrap-anywhere px-2 py-3 font-normal">{row.provider} / {row.model}</th>
               <td className="px-2 py-3">{number(row.requests)}</td>
               <td className="px-2 py-3">{amount(row.inputTokens, row.inputMeasuredRequests, row.requests)}</td>
               <td className="px-2 py-3">{amount(row.outputTokens, row.outputMeasuredRequests, row.requests)}</td>

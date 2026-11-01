@@ -14,9 +14,10 @@ const slots: ModelSlot[] = ['chat', 'vision', 'asr', 'decision'];
 const capabilities = ['text', 'image', 'audio', 'video', 'pdf'];
 type Draft = SavedModel & { contextWindowText: string; maxOutputTokensText: string };
 
-export default function ModelLibrary({ providerId, discovered = [], checking, onRefresh, note, allowDecision = true, refreshLabel = '获取模型列表' }: {
+export default function ModelLibrary({ providerId, discovered = [], discoveredFromFallback = false, checking, onRefresh, note, allowDecision = true, refreshLabel = '获取模型列表' }: {
   providerId: string;
   discovered?: DiscoveredModel[];
+  discoveredFromFallback?: boolean;
   checking: boolean;
   onRefresh: () => void;
   note?: string;
@@ -191,7 +192,7 @@ export default function ModelLibrary({ providerId, discovered = [], checking, on
         </div>)}
         {!filtered.length && <p role="status" className="py-5 text-sm text-muted">{saved.length ? '没有匹配的已保存模型。' : '还没有添加模型，请从下方接口列表选择添加；接口不支持列出模型时，可点击“新模型”手动添加。'}</p>}
       </div>
-      {!checking && !available.length && <p className="text-xs text-muted" data-testid="discovery-empty">{discovered.length ? '接口返回的模型均已添加。' : '暂无接口模型列表，可点击“获取模型列表”重试，或点击“新模型”手动添加。models.dev 仅补充模型参数，不提供此连接的可用模型列表。'}</p>}
+       {!checking && !available.length && <p className="text-xs text-muted" data-testid="discovery-empty">{discovered.length ? (discoveredFromFallback ? '本机已知模型均已添加。' : '接口返回的模型均已添加。') : '暂无接口模型列表，可点击“获取模型列表”重试，或点击“新模型”手动添加。models.dev 仅补充模型参数，不提供此连接的可用模型列表。'}</p>}
       {available.length > 0 && <div className="t-acc rounded-xl border border-border" data-testid="discovered-models" data-open={discoveryOpen}>
         <button type="button" className="t-acc-head flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl px-3 py-3 text-left text-sm font-medium tabular-nums focus-visible:outline-2 focus-visible:outline-focus"
           data-testid="discovered-model-select" aria-expanded={discoveryOpen} aria-controls={discoveryId} onClick={() => {
@@ -203,7 +204,7 @@ export default function ModelLibrary({ providerId, discovered = [], checking, on
         </button>
         <Collapse open={discoveryOpen} id={discoveryId}>
           <div className="flex flex-col gap-3 border-t border-border p-3">
-          <p className="text-xs text-pretty text-muted">来自当前供应商的 /models 接口，不代表调用测试通过。批量添加按模型能力预选用途，models.dev 仅补全缺失参数。</p>
+           <p className="text-xs text-pretty text-muted">{discoveredFromFallback ? '以下是本机已知的 TypeSafe 模型，不代表当前 Key 已获授权；添加后请测试决策连接。' : '来自当前供应商的 /models 接口，不代表调用测试通过。批量添加按模型能力预选用途，models.dev 仅补全缺失参数。'}</p>
           <SearchField aria-label="搜索接口模型" value={discoveryQuery} onChange={setDiscoveryQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="搜索模型名称或 ID" /><SearchField.ClearButton /></SearchField.Group></SearchField>
           {/* 批量操作条：全选只作用于当前筛选结果；「添加所选」按预选用途直接入库，
               需要改参数或用途的模型仍走右侧「添加」打开编辑器。 */}

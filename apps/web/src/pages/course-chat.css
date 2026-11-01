@@ -836,30 +836,15 @@
   color: var(--muted);
 }
 
-/* ── 中断提示条 ────────────────────────────────────────────────────────────
-   「这条回答写到一半断了，还能接着写」。刻意**不用** danger 色：它不是
-   「出错了」（那由 `data-error` 那条管，一个字都没流出来的情况），而是「还没写完」。
-
-   做成一张小卡片（surface + 边框 + 左侧 accent 竖线）而不是一行纯文字：
-   它在正文流里，得让人一眼看出这是一个「可操作的提示」而不是模型说的某句话。 */
+/* 未完成提示保持为一行轻量状态，不做卡片化装饰，也不抢回答正文的注意力。 */
 .course-chat__interrupted {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--foreground);
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--muted);
   font-size: 0.8125rem;
   line-height: 1.5;
-}
-
-.course-chat__interrupted > svg {
-  flex: none;
-  color: var(--accent);
 }
 
 .course-chat__interrupted-text {
@@ -867,10 +852,15 @@
   overflow-wrap: anywhere;
 }
 
-/* 「继续写」顶到最右：提示语可长可短，按钮位置固定才不用每次重新找 */
 .course-chat__interrupted-continue {
   flex: none;
-  margin-left: auto;
+  margin-left: 2px;
+  min-height: auto;
+  padding: 0;
+  color: var(--foreground);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .course-chat__failed {

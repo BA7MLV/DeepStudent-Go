@@ -8,13 +8,13 @@
 .resource-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .resource-open > svg { width: 72px; height: 64px; color: var(--accent); flex-shrink: 0; }
 .resource-open > span { max-width: 100%; overflow-wrap: anywhere; text-align: center; font-size: .9rem; }
-.resource-open > small { color: var(--muted); font-size: .75rem; }
+.resource-open > small { color: var(--muted); font-size: .75rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .resource-open > .resource-file-icon { display: flex; align-items: center; justify-content: center; width: 128px; max-width: 100%; height: 112px; flex-shrink: 0; }
 .resource-more { position: absolute; right: 0; top: 0; }
 .resource-grid[data-view='list'] { display: flex; flex-direction: column; gap: 4px; }
 .resource-grid[data-view='list'] .resource-open { flex-direction: row; padding: 12px 44px 12px 12px; gap: 12px; }
 .resource-grid[data-view='list'] .resource-open > svg { width: 30px; height: 30px; }
-.resource-grid[data-view='list'] .resource-open > span { flex: 1; text-align: start; }
+.resource-grid[data-view='list'] .resource-open > span:not(.resource-file-icon) { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; }
 .resource-grid[data-view='list'] .resource-open > .resource-file-icon { flex: 0 0 30px; width: 30px; height: 30px; }
 .resource-grid[data-view='list'] .resource-file-icon .finder-document { width: 18px; height: 24px; border-radius: var(--radius-xs); }
 .resource-grid[data-view='list'] .resource-file-icon .finder-video { width: 26px; height: 19px; border-width: 1px; }

@@ -43,7 +43,7 @@ export class UsageLedger {
     if (a.run) {
       const row = this.store.db.prepare('SELECT r.status FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=? AND t.owner_id=?').get(a.run, a.owner) as { status: string } | undefined;
       if (!row) throw new Error('request_run_not_owned');
-      const allowed = a.purpose === 'memory' ? ['completed'] : a.purpose.startsWith('study:') && a.task ? ['running', 'queued', 'waiting_user', 'completed'] : ['running'];
+      const allowed = a.purpose === 'memory' ? ['completed'] : a.purpose.startsWith('study:') && a.task ? ['running', 'queued', 'waiting_user', 'waiting_event', 'completed'] : ['running'];
       if (!allowed.includes(row.status)) throw new Error('request_run_not_active');
     }
     if (a.task && !this.store.db.prepare("SELECT 1 FROM cloud_tasks WHERE id=? AND owner_id=? AND parent_run_id=? AND status IN ('running','waiting_user')").get(a.task, a.owner, a.run ?? null)) throw new Error('request_task_not_active_or_owned');

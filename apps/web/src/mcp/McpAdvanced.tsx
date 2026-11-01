@@ -47,6 +47,6 @@ export function McpConnectionActions({ server, onSaved }: { server: McpServer; o
   return <div className="flex flex-col gap-2">
     {server.auth === 'oauth' ? <><p className="text-sm">{t(server.oauthAuthorized ? 'mcp.authorized' : 'mcp.notAuthorized')}</p><div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" isDisabled={busy} onPress={() => void run('start')}>{t('mcp.authorize')}</Button><Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => void run('disconnect')}>{t('mcp.disconnect')}</Button></div></> : <div className="flex gap-2 items-center">{server.pid ? <span>PID {server.pid}</span> : null}<Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => void run('log')}>{t('mcp.logs')}</Button></div>}
     {link && <a className="underline text-accent" href={link} target="_blank" rel="noreferrer">{t('mcp.openAuthorization')}</a>}
-    {message && <pre role="status" className="text-sm whitespace-pre-wrap break-all max-h-48 overflow-auto">{message}</pre>}
+    {message && <pre role="status" className="text-sm whitespace-pre-wrap wrap-anywhere max-h-48 overflow-auto">{message}</pre>}
   </div>;
 }

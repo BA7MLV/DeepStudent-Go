@@ -15,13 +15,17 @@ import { MAX_BOT_MESSAGE_ATTACHMENTS } from '@wangke/contracts';
 const stamp = () => new Date().toISOString();
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 /**
- * 绑定码：8 位 Crockford Base32（不含 I/L/O/U，约 40 bit）。
- * 码要在手机上读一眼就能输入或粘贴，32 位十六进制做不到；同一账号同时只有一个码、
- * 10 分钟过期、只能从该渠道的本人私聊提交，这个熵足够。比较时忽略大小写与空白。
+ * 绑定码：微信 4 位、飞书 8 位 Crockford Base32（不含 I/L/O/U）。
+ * 同一账号同时只有一个码，10 分钟过期，只能从该渠道的本人私聊提交。
+ * 微信 10 分钟内输错 5 次即废除当前码，避免短码被反复猜测；比较时忽略大小写与空白。
  */
 const PAIR_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-const pairCode = () => Array.from(crypto.randomBytes(8), byte => PAIR_ALPHABET[byte % 32]).join('');
+const pairCode = (length: number) => Array.from(crypto.randomBytes(length), byte => PAIR_ALPHABET[byte % 32]).join('');
 const pairHash = (code: string) => hash(code.replace(/[\s-]/g, '').toUpperCase());
+const barePairCode = (text: string) => {
+  const code = text.replace(/[\s-]/g, '').toUpperCase();
+  return /^(?:[0-9A-HJKMNP-TV-Z]{4}|[0-9A-HJKMNP-TV-Z]{8})$/.test(code) ? code : undefined;
+};
 type ApprovalReply = { id?: string; approved: boolean };
 type InboundEnvelope = GatewayEnvelope & { approvalReply?: ApprovalReply };
 const approvalPrompt = (content: string, number: number) => {
@@ -140,13 +144,13 @@ export class GatewayCore {
     return { id };
   }
   pair(owner: string, id: string) {
-    this.account(owner, id);
-    const code = pairCode(), expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    const account = this.account(owner, id);
+    const code = pairCode(account.channel === 'ilink' ? 4 : 8), expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
     this.store.db.prepare('INSERT INTO gateway_pairings(account_id,code_hash,expires_at) VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET code_hash=excluded.code_hash,expires_at=excluded.expires_at').run(id, pairHash(code), expiresAt);
     return { command: `/pair ${code}`, code, expiresAt };
   }
   revoke(owner: string, id: string, binding: string) {
-    this.account(owner, id);
+    const account = this.account(owner, id);
     const b = this.store.db.prepare('SELECT * FROM gateway_bindings WHERE id=? AND account_id=?').get(binding, id) as any;
     if (!b) throw new Error('binding_not_found');
     this.store.transaction(() => {
@@ -154,7 +158,7 @@ export class GatewayCore {
       for (const pending of this.store.db.prepare("SELECT id,envelope FROM gateway_inbox WHERE account_id=? AND status='pending'").all(id) as any[]) {
         try {
           const m: GatewayEnvelope = JSON.parse(this.secrets.open(pending.envelope));
-          if (m.text.trimStart().startsWith('/pair ')) this.store.db.prepare("UPDATE gateway_inbox SET status='cancelled',error='pairing_revoked' WHERE id=?").run(pending.id);
+          if (m.text.trimStart().startsWith('/pair ') || (account.channel === 'ilink' && barePairCode(m.text))) this.store.db.prepare("UPDATE gateway_inbox SET status='cancelled',error='pairing_revoked' WHERE id=?").run(pending.id);
         } catch { this.store.db.prepare("UPDATE gateway_inbox SET status='failed',error='invalid_inbound_envelope' WHERE id=?").run(pending.id); }
       }
       this.store.db.prepare('UPDATE gateway_bindings SET revoked=1,context=NULL WHERE id=?').run(binding);
@@ -414,13 +418,27 @@ export class GatewayCore {
     this.project();
     await this.deliver();
   }
+  private pairingCode(accountId: string, channel: string, message: InboundEnvelope): string | undefined {
+    const text = message.text.trim();
+    if (text.startsWith('/pair ')) return text.slice(6);
+    const code = channel === 'ilink' && !message.attachments?.length ? barePairCode(text) : undefined;
+    if (!code) return;
+    const binding = this.binding(accountId, message);
+    // Once linked, ordinary short answers remain normal messages.
+    // Only a currently issued code can request an explicit rebind.
+    if (!binding || binding.revoked || this.store.db.prepare('SELECT 1 FROM gateway_pairings WHERE account_id=? AND code_hash=? AND expires_at>?').get(accountId, pairHash(code), stamp())) return code;
+  }
   private incomingPhotos(row: { id: number; account_id: string; received_at: number }, message: InboundEnvelope) {
     const items: PhotoInboxItem[] = [{ id: row.id, received_at: row.received_at, message }];
     // Include terminal rows as boundaries: a cancelled/failed/control item must
     // not disappear from ordering merely because only pending work is runnable.
     for (const next of this.store.db.prepare('SELECT id,received_at,status,envelope FROM gateway_inbox WHERE account_id=? AND id>? ORDER BY id LIMIT ?').all(row.account_id, row.id, MAX_BOT_MESSAGE_ATTACHMENTS + 1) as any[]) {
       if (next.status !== 'pending') return { ...photoBatch(items), ready: true };
-      try { items.push({ id: next.id, received_at: next.received_at, message: JSON.parse(this.secrets.open(next.envelope)) }); }
+      try {
+        const message: InboundEnvelope = JSON.parse(this.secrets.open(next.envelope));
+        if (this.pairingCode(row.account_id, 'ilink', message) !== undefined) return { ...photoBatch(items), ready: true };
+        items.push({ id: next.id, received_at: next.received_at, message });
+      }
       catch { return { ...photoBatch(items), ready: true }; }
     }
     return photoBatch(items);
@@ -436,10 +454,25 @@ export class GatewayCore {
         let b = this.binding(row.account_id, m);
         if ((this.store.db.prepare('SELECT status FROM gateway_inbox WHERE id=?').get(row.id) as any)?.status !== 'pending') continue;
         if (b) this.inbound.set(row.id, { binding: b.id, controller });
-        if (m.text.startsWith('/pair ')) {
+        const code = this.pairingCode(row.account_id, row.channel, m);
+        if (code !== undefined) {
           this.store.transaction(() => {
-            const pair = this.store.db.prepare('SELECT * FROM gateway_pairings WHERE account_id=? AND code_hash=? AND expires_at>?').get(row.account_id, pairHash(m.text.trim().slice(6)), stamp());
-            if (!pair) return;
+            if (row.channel === 'ilink') {
+              const failures = this.store.db.prepare("SELECT COUNT(*) n FROM gateway_inbox WHERE account_id=? AND error='invalid_pairing_code' AND received_at>=?").get(row.account_id, Date.now() - 10 * 60_000) as { n: number };
+              if (failures.n >= 5) {
+                this.store.db.prepare('DELETE FROM gateway_pairings WHERE account_id=?').run(row.account_id);
+                return;
+              }
+            }
+            const pair = this.store.db.prepare('SELECT * FROM gateway_pairings WHERE account_id=? AND code_hash=? AND expires_at>?').get(row.account_id, pairHash(code), stamp());
+            if (!pair) {
+              if (row.channel === 'ilink') {
+                this.store.db.prepare("UPDATE gateway_inbox SET error='invalid_pairing_code' WHERE id=?").run(row.id);
+                const failures = this.store.db.prepare("SELECT COUNT(*) n FROM gateway_inbox WHERE account_id=? AND error='invalid_pairing_code' AND received_at>=?").get(row.account_id, Date.now() - 10 * 60_000) as { n: number };
+                if (failures.n >= 5) this.store.db.prepare('DELETE FROM gateway_pairings WHERE account_id=?').run(row.account_id);
+              }
+              return;
+            }
             // One owner identity per account. Rebinding requires explicit revocation first.
             if (this.store.db.prepare('SELECT 1 FROM gateway_bindings WHERE account_id=? AND revoked=0').get(row.account_id) && (!b || b.revoked)) return;
             const thread = b ? { id: b.thread_id } : this.bot.create(row.owner_id, 'bot', `IM · ${m.peer.slice(0, 60)}`, row.agent_id);
@@ -447,7 +480,15 @@ export class GatewayCore {
             this.store.db.prepare('INSERT INTO thread_participants(thread_id,agent_id,joined_at) VALUES(?,?,?)').run(thread.id, row.agent_id, stamp());
             this.store.db.prepare(`INSERT INTO gateway_bindings(id,account_id,tenant,peer,chat,topic,thread_id,context) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account_id,tenant,peer,chat,topic) DO UPDATE SET revoked=0,context=excluded.context`).run(crypto.randomUUID(), row.account_id, m.tenant, m.peer, m.chat, m.topic, thread.id, m.context ? this.secrets.seal(m.context) : null);
             this.store.db.prepare('DELETE FROM gateway_pairings WHERE account_id=?').run(row.account_id);
-            this.bot.append(thread.id, 'assistant', 'text', '绑定成功，可以直接发消息了。需要确认时回复“同意”或“拒绝”即可；多项待确认时回复“同意 编号”或“拒绝 编号”。/stop 停止；/status 查看状态。');
+            if (row.channel === 'ilink') {
+              const binding = this.binding(row.account_id, m);
+              const user = this.store.db.prepare('SELECT name FROM users WHERE id=?').get(row.owner_id) as { name: string };
+              // Send onboarding only after the user's pairing message supplies the
+              // identity and context. No chat messages/events/runs: no model context.
+              // The consumed code and stable source IDs make replay/restart inert.
+              this.enqueue(binding.id, `pair:${row.id}:welcome:0`, { text: `嗨，${user.name.slice(0, 80)}！我是 DeepStudent Go！` });
+              this.enqueue(binding.id, `pair:${row.id}:welcome:1`, { text: '绑定成功！可以直接把问题、图片或文件发给我，我们一起学习吧！\n需要确认操作时回复“同意”或“拒绝”；多项待确认时回复“同意 编号”或“拒绝 编号”。/stop 停止当前任务，/status 查看状态。' });
+            } else this.bot.append(thread.id, 'assistant', 'text', '绑定成功，可以直接发消息了。需要确认时回复“同意”或“拒绝”即可；多项待确认时回复“同意 编号”或“拒绝 编号”。/stop 停止；/status 查看状态。');
             this.secrets.audit(row.owner_id, 'gateway.paired', { account: row.account_id, peer: m.peer });
           });
         } else if (b && !b.revoked) {
@@ -528,7 +569,7 @@ export class GatewayCore {
             });
           }
         }
-        if ((!b || b.revoked) && !m.text.startsWith('/pair ')) {
+        if ((!b || b.revoked) && code === undefined) {
           this.store.db.prepare("UPDATE gateway_inbox SET status='done',error='binding_required' WHERE id=?").run(row.id);
         } else this.store.db.prepare("UPDATE gateway_inbox SET status='done' WHERE id=?").run(row.id);
       } catch {

@@ -44,11 +44,12 @@ test('photo burst waits for quiet through long uploads, up to 99 images; text an
 
 test('runtime progress projects only marked image milestones to WeChat', async t => {
   const f = await fixture(t);
+  const sentBeforeProgress = f.sent.length;
   f.bot.append(f.account.thread, 'assistant', 'progress', '正在收集图片，可以继续发送。', 'web:status:collecting:test');
   f.bot.append(f.account.thread, 'assistant', 'progress', '正在读取这批图片，请稍候。', 'im:status:test:image-reading');
   f.bot.append(f.account.thread, 'assistant', 'progress', '内部工具进度', 'bot:test:progress');
   await f.gateway.tick();
-  assert.deepEqual(f.sent.filter(p => p.text.includes('图片')).map(p => p.text), ['正在读取这批图片，请稍候。']);
+  assert.deepEqual(f.sent.slice(sentBeforeProgress).filter(p => p.text.includes('图片')).map(p => p.text), ['正在读取这批图片，请稍候。']);
   assert.equal(f.sent.some(p => p.text === '内部工具进度'), false);
 });
 

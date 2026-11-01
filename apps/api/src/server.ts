@@ -657,9 +657,21 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
     const participants = (store.db.prepare('SELECT a.* FROM agent_profiles a JOIN thread_participants p ON p.agent_id=a.id WHERE p.thread_id=? ORDER BY p.joined_at').all(thread.id) as any[]).map(agentDto);
     const approvals = store.db.prepare('SELECT id,message_id AS messageId,run_id AS runId,status,created_at AS createdAt,resolved_at AS resolvedAt,resolution FROM approvals WHERE thread_id=? ORDER BY created_at').all(thread.id);
+    const questions = store.db.prepare(`SELECT q.id,q.run_id AS runId,q.message_id AS messageId,q.status,
+      q.created_at AS createdAt,q.answered_at AS answeredAt,q.answer_message_id AS answerMessageId
+      FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE r.thread_id=? ORDER BY q.created_at`).all(thread.id);
+    const runs = store.db.prepare(`SELECT id,status,error_code AS errorCode,wake_at AS wakeAt
+      FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 20`).all(thread.id);
     // running：有没有排队或正在跑的任务，前端据此显示「正在输入」和已读。
-    const running = Boolean(store.db.prepare("SELECT 1 FROM runs WHERE thread_id=? AND status IN ('queued','running') LIMIT 1").get(thread.id));
-    return { id: thread.id, mode: thread.mode, title: thread.title, projectId: thread.project_id, agentId: thread.agent_id, archived: Boolean(thread.archived), createdAt: thread.created_at, updatedAt: thread.updated_at, participants, approvals, running, messages: store.db.prepare('SELECT id,thread_id AS threadId,client_nonce AS clientNonce,seq,role,kind,content,reply_to AS replyTo,created_at AS createdAt FROM messages WHERE thread_id=? ORDER BY seq').all(thread.id) };
+    const running = Boolean(store.db.prepare("SELECT 1 FROM runs WHERE thread_id=? AND status IN ('queued','running','waiting_event') LIMIT 1").get(thread.id));
+    return { id: thread.id, mode: thread.mode, title: thread.title, projectId: thread.project_id, agentId: thread.agent_id, archived: Boolean(thread.archived), createdAt: thread.created_at, updatedAt: thread.updated_at, participants, approvals, questions, runs, running, messages: store.db.prepare('SELECT id,thread_id AS threadId,client_nonce AS clientNonce,seq,role,kind,content,reply_to AS replyTo,created_at AS createdAt FROM messages WHERE thread_id=? ORDER BY seq').all(thread.id) };
+  });
+  app.get<{ Params: { id: string } }>('/api/v1/threads/:id/state', async (request, reply) => {
+    const user = requireAuth(request, reply); if (!user) return;
+    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
+    const runs = store.db.prepare("SELECT id,status,error_code AS errorCode,wake_at AS wakeAt FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 20").all(thread.id);
+    const questions = store.db.prepare("SELECT q.id,q.run_id AS runId,q.message_id AS messageId,q.status,q.created_at AS createdAt,q.answered_at AS answeredAt,q.answer_message_id AS answerMessageId FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE r.thread_id=? ORDER BY q.created_at").all(thread.id);
+    return { runs, questions, running: Boolean((runs as any[]).some(run => ['queued','running','waiting_user','waiting_event'].includes(run.status))) };
   });
   app.post<{ Params: { id: string } }>('/api/v1/threads/:id/stop', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
@@ -672,7 +684,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
     return { runs: botService.status(user.id, thread.id) };
   });
-  app.post<{ Params: { id: string }; Body: { clientNonce?: string; role?: MessageRole; kind?: string; content?: string; replyTo?: string } }>('/api/v1/threads/:id/messages', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { clientNonce?: string; role?: MessageRole; kind?: string; content?: string; replyTo?: string; target?: { kind?: string; runId?: string; questionId?: string } } }>('/api/v1/threads/:id/messages', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
     const user = requireAuth(request, reply); if (!user) return;
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
@@ -703,14 +715,16 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const makeDto = (row: any, deduplicated = false) => ({ id: row.id, threadId: row.thread_id, clientNonce: row.client_nonce, seq: row.seq, role: row.role, kind: row.kind, content: row.content, replyTo: row.reply_to, createdAt: row.created_at, ...(deduplicated ? { deduplicated: true } : {}) });
     const existing = store.db.prepare('SELECT * FROM messages WHERE thread_id=? AND client_nonce=?').get(thread.id, nonce) as any;
     if (existing) return makeDto(existing, true);
+    if (b.target !== undefined && (!b.target || !['run', 'question'].includes(b.target.kind ?? '') || (b.target.kind === 'run' ? typeof b.target.runId !== 'string' : typeof b.target.questionId !== 'string'))) return bad(reply, 400, 'invalid_target');
     try {
-      const message = botService.send(user.id, thread.id, { clientNonce: nonce, kind, content: b.content!, replyTo: b.replyTo });
+      const message = botService.send(user.id, thread.id, { clientNonce: nonce, kind, content: b.content!, replyTo: b.replyTo, target: b.target?.kind === 'run' ? { kind: 'run', runId: b.target.runId } : b.target?.kind === 'question' ? { kind: 'question', questionId: b.target.questionId } : undefined });
       if (thread.mode === 'bot') {
-        const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id) as { id: string } | undefined;
+        const run = (message as any).receipt?.runId ? { id: (message as any).receipt.runId } : store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id) as { id: string } | undefined;
         if (run) runner.enqueue(run.id);
       }
       return reply.code(201).send({ ...message, deduplicated: false });
     } catch (error: any) {
+      if (error?.message === 'target_expired' || error?.message === 'question_already_answered' || error?.message === 'target_waiting_for_specific_answer') return bad(reply, 409, error.message);
       if (String(error?.code) === 'SQLITE_CONSTRAINT_UNIQUE') {
         const row = store.db.prepare('SELECT * FROM messages WHERE thread_id=? AND client_nonce=?').get(thread.id, nonce) as any;
         if (row) return makeDto(row, true);

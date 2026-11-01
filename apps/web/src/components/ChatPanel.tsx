@@ -36,6 +36,7 @@ import { copyText } from '../utils/clipboard';
 import { messageTime } from '../utils/messageTime';
 import { useMediaQuery } from '../utils/useMobile';
 import { useModelMetaRevision } from '../utils/useModelMeta';
+import { displayChatError, displayChatFailure } from '../utils/chatError';
 import {
   Panel,
   PanelBar,
@@ -472,6 +473,7 @@ export default function ChatPanel({
   materialKind,
   materialFormat,
 }: Props) {
+  const { t: chatText } = useTranslation('common');
   const { t: settingsText } = useTranslation('settings');
   /** 材料课程（PDF / Word / Markdown / HTML）：没有字幕、没有播放器，检索与引用都走材料那一套 */
   const isMaterial = materialKind !== undefined;
@@ -479,6 +481,10 @@ export default function ChatPanel({
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [historyError, setHistoryError] = useState(false);
+  const latestInterruptedKey = useMemo(
+    () => [...msgs].reverse().find((message) => message.role === 'ai' && message.interrupted && !message.streaming)?.key,
+    [msgs],
+  );
   const historyRequest = useRef(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -1817,7 +1823,7 @@ export default function ChatPanel({
         )}
         {msgs.length > 0 && loadedSessionId === activeId && <div className="chat-panel-history" aria-live="polite">
           {hasOlder && <button type="button" disabled={loadingOlder} onClick={() => void loadOlder()}>
-            {loadingOlder ? '正在加载历史消息…' : historyError ? '加载失败，点击重试' : '加载更早消息'}
+            {loadingOlder ? chatText('chat.loadingEarlier') : historyError ? chatText('chat.historyLoadFailed') : chatText('chat.loadEarlier')}
           </button>}
         </div>}
         {msgs.length > 0 && loadedSessionId === activeId && <VirtualMessages key={activeId} items={msgs} scrollRef={listRef} ref={virtualMessagesRef} onResize={pinList}>{(m, index) => {
@@ -1870,7 +1876,7 @@ export default function ChatPanel({
                       phase={m.processPhase} hint={m.hint} since={m.processStartedAt ?? m.reasoningStartedAt}
                       elapsedMs={m.reasoningMs} />
                     <div aria-hidden="true" data-chat-answer-start={m.content || m.quiz || m.widget || m.widgetPreview ? '' : undefined} />
-                        <WidgetMessage message={m} content={m.content} dark={widgetDark} rowId={m.rowId}
+                        <WidgetMessage message={m} content={m.error ? displayChatFailure(m.content) : m.content} dark={widgetDark} rowId={m.rowId}
                           disabled={loading || !!m.streaming || !!m.error} onPrompt={(text) => void send(text)}>
                         {(markdown) => !markdown ? null : (
                           <AssistantContent content={markdown} streaming={!!m.streaming}>
@@ -1910,10 +1916,12 @@ export default function ChatPanel({
                         )}
                   </div>
                   </ArtifactEditProvider>
-                  {!m.streaming && m.interrupted && (
-                    <div className="chat-note" role="status" data-testid="chat-interrupted">
-                      <Sym name="warning" className="chat-note__icon" />
-                      <span>回答中断：{m.interruptReason || '请求未正常完成'}。重试将重新生成这条回答。</span>
+                  {!m.streaming && m.interrupted && m.key === latestInterruptedKey && (
+                    <div className="chat-note chat-note--interrupted" role="status" data-testid="chat-interrupted">
+                      <span>{chatText('chat.interrupted')}{m.interruptReason ? `：${displayChatError(m.interruptReason)}` : ''}</span>
+                      <Button size="sm" variant="tertiary" className="chat-note__continue" onPress={() => void retryMessage(m.key)}>
+                        {chatText('chat.continue')}
+                      </Button>
                     </div>
                   )}
                   {!m.streaming && (m.content || m.widget || m.quiz) && (m.rowId != null || m.error) && (

@@ -21,6 +21,11 @@
   grid-area: 1 / 1;
 }
 
+/* A grid item's automatic minimum must not defeat descendant text ellipsis. */
+.skel-reveal__content {
+  min-width: 0;
+}
+
 /* ── 交叉淡入（骨架 → 内容） ──────────────────────────────────────────────
    只在「骨架确实露过脸」时才加 .is-revealing，所以快速路径（加载 < delayMs）
    拿到的是一个不带任何动画的普通容器 —— 不会被动画抖一下。 */

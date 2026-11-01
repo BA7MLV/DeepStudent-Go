@@ -8,6 +8,7 @@ import ReasoningEffortSlider from './ReasoningEffortSlider';
 import './subtitle-danmaku.css';
 import { modelKey, modelLabel, modelsForSlot } from '../store/modelLibrary';
 import { ModelCapabilities } from './ModelCapabilities';
+import { overflowTitleProps } from '../ui/overflowTitle';
 
 interface Props {
   slot: ModelSlot;
@@ -134,7 +135,7 @@ export default function ModelPicker({
           style={sameRef(ref, value) ? undefined : { opacity: 0 }}
         />
         {/* 供应商名独立一列：多供应商下模型 id 不再能唯一标识一个模型 */}
-        <span className="model-picker__provider">{nameOf(ref.providerId)}</span>
+        <span className="model-picker__provider" {...overflowTitleProps}>{nameOf(ref.providerId)}</span>
         <span className="model-picker__id" title={ref.model}>{modelLabel(settings, ref)}</span>
         <ModelCapabilities catalogId={cat} model={ref.model} overrides={modelOverridesOf(settings, ref)} compact />
       </span>
@@ -274,7 +275,7 @@ function ChipDropdown({
             只列模型名的话分不清自己开的是哪一个槽位的面板 */}
         <div className="model-picker__panel-head">
           <span className="shrink-0 text-sm font-semibold">{SLOT_LABEL[slot]}</span>
-          <span className="min-w-0 truncate text-xs text-muted">
+          <span className="min-w-0 truncate text-xs text-muted" {...overflowTitleProps}>
             {nameOf(value.providerId)} · {value.model}
           </span>
         </div>

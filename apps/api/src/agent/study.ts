@@ -109,15 +109,26 @@ export class StudyTools {
       if (a.after && a.table === 'files' && !store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(a.after.blob?.$file, c.owner)) throw new Error('file_not_found');
       return records.apply(c.owner, [{ id: c.step, table: a.table, key: a.key, before: a.before, after: a.after }], (table, key, current, value) => { c.checkActive(); validateStudyMutation(records, c.owner, table, key, current, value); });
     } });
-    this.register({ name: 'study_task', description: 'Create a persistent cards/handout/material child learning job, inspect status/progress/result, or cancel it. create requires owned courseId. Use wait then status until terminal. Never claim generation succeeded from a queued status. Web shows task and linked approvals.', properties: { action: { type: 'string', enum: ['create','status','cancel'] }, kind: { type: 'string', enum: ['cards','handout','material'] }, courseId: { type: 'string' }, taskId: { type: 'string' }, format: { type: 'string', enum: ['md','docx','pdf'] } }, required: ['action'], capability: a => a.action === 'create' ? 'write' : 'read', permissions: a => a.action === 'create' ? ['read','write'] : ['read'], execute: async (a, c) => {
+    this.register({ name: 'study_task', description: 'Create a persistent cards/handout/material child learning job, inspect status/progress/result, wait for a set of owned tasks, or cancel it. wait is a durable event barrier and does not poll with the model. By default create is a required foreground dependency; set background=true only when it is acceptable to report that work was started without its result.', properties: { action: { type: 'string', enum: ['create','status','wait','cancel'] }, kind: { type: 'string', enum: ['cards','handout','material'] }, courseId: { type: 'string' }, taskId: { type: 'string' }, taskIds: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 32 }, format: { type: 'string', enum: ['md','docx','pdf'] }, background: { type: 'boolean' } }, required: ['action'], capability: a => a.action === 'create' ? 'write' : 'read', permissions: a => a.action === 'create' ? ['read','write'] : ['read'], execute: async (a, c) => {
       if (a.action === 'create') {
         if (!['cards','handout','material'].includes(a.kind) || typeof a.courseId !== 'string' || !records.get(c.owner, 'videos', a.courseId)) throw new Error('course_not_found');
         const existing = store.db.prepare('SELECT * FROM cloud_tasks WHERE parent_step_id=? AND owner_id=?').get(c.step, c.owner);
         if (existing) return taskDto(existing);
         const id = crypto.randomUUID(), at = new Date().toISOString();
-        store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at,parent_run_id,parent_step_id) VALUES(?,?,?,?,?,?,'queued',?,?,?,?)").run(id, c.owner, `bot:${c.step}`, a.kind, `course:${a.courseId}`, JSON.stringify({ videoId: a.courseId, ...(a.kind === 'handout' ? { botStudyText: true } : {}), ...(a.format ? { format: a.format } : {}) }), at, at, c.run, c.step);
+        store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at,parent_run_id,parent_step_id) VALUES(?,?,?,?,?,?,'queued',?,?,?,?)").run(id, c.owner, `bot:${c.step}`, a.kind, `course:${a.courseId}`, JSON.stringify({ videoId: a.courseId, ...(a.kind === 'handout' ? { botStudyText: true } : {}), ...(a.format ? { format: a.format } : {}), ...(a.background === true ? { background: true } : {}) }), at, at, c.run, c.step);
         config.audit(c.owner, 'bot.study_task_created', { id, parentRun: c.run });
         return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(id));
+      }
+      if (a.action === 'wait') {
+        if (!Array.isArray(a.taskIds) || !a.taskIds.length || a.taskIds.some((id: unknown) => typeof id !== 'string')) throw new Error('invalid_task_ids');
+        const ids = [...new Set(a.taskIds as string[])];
+        const tasks = ids.map(id => store.db.prepare('SELECT id,status,result,error,parent_run_id FROM cloud_tasks WHERE id=? AND owner_id=?').get(id, c.owner) as any);
+        if (tasks.some(t => !t || t.parent_run_id !== c.run)) throw new Error('task_not_owned_by_run');
+        const result = { wait: true, taskIds: ids, tasks: tasks.map(t => taskDto(t)) };
+        if (tasks.every(t => ['completed','failed','cancelled','interrupted'].includes(t.status))) return result;
+        const waitId = crypto.randomUUID();
+        store.db.prepare("INSERT INTO run_waits(id,run_id,step_id,task_ids,status,created_at) VALUES(?,?,?,?,?,?)").run(waitId, c.run, c.step, JSON.stringify(ids), 'waiting', new Date().toISOString());
+        return { ...result, waiting: true, waitId };
       }
       const task = store.db.prepare('SELECT * FROM cloud_tasks WHERE id=? AND owner_id=?').get(a.taskId, c.owner) as any;
       if (!task) throw new Error('task_not_found');

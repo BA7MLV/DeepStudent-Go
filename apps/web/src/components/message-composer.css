@@ -12,5 +12,6 @@
   flex: none;
 }
 .imsg-composer__accessory { grid-area: context; min-width: 0; max-height: 28dvh; overflow-y: auto; margin-bottom: 8px; }
+.imsg-composer__target { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 4px 8px; border-radius: 8px; color: var(--muted-foreground); background: color-mix(in srgb, var(--primary) 10%, transparent); font-size: 0.82rem; }
 .imsg-composer[data-disabled] .study-composer { opacity: 0.6; }
 .imsg-composer:has(.composer-expand:not([hidden])) .imsg-composer__accessory { padding-inline-end: 36px; }

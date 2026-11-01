@@ -13,6 +13,7 @@ import { db } from '../store/db';
 import { flushCloud } from '../cloud/sync';
 import { MoreMenu, PageShell, Sym, toast, promptDialog, confirmDialog, MODAL_CONTAINER_CLASS } from '../ui';
 import { SkeletonReveal, useSkeletonGate } from '../ui/skeleton';
+import { overflowTitleProps } from '../ui/overflowTitle';
 import { projectError } from '../projects/errors';
 import ProjectSettings from '../projects/ProjectSettings';
 import ImagePreview from '../components/ImagePreview';
@@ -301,7 +302,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
               }}>
               <button className="resource-open" disabled={busy} onClick={() => void open(entry)} title={entry.scope?.workspacePath ?? entry.path}>
                 {entry.kind === 'directory' ? <FolderIcon color={entry.color} /> : <ResourceFileIcon entry={entry} />}
-                <span>{entry.name}</span><small>{entry.scope?.archived ? t('archived') : entry.kind === 'directory' ? t('folder') : entry.missing ? t('learningRecord') : formatSize(entry.size)}</small>
+                <span {...overflowTitleProps}>{entry.name}</span><small>{entry.scope?.archived ? t('archived') : entry.kind === 'directory' ? t('folder') : entry.missing ? t('learningRecord') : formatSize(entry.size)}</small>
               </button>
               <MoreMenu className="resource-more" label={`${t('more')} · ${entry.name}`} actions={[
                 ...(!entry.missing ? [{ key: 'rename', label: t('rename'), icon: <Sym name="edit" />, disabled: busy || readOnly, onAction: () => void rename(entry) }] : []),

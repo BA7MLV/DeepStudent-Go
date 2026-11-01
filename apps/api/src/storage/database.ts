@@ -406,6 +406,37 @@ const MIGRATIONS: Array<[number, string]> = [
     CREATE INDEX system_skills_owner_enabled ON system_skills(owner_id, enabled, updated_at);
   `],
   [24, `CREATE TABLE web_search_config (owner_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, value TEXT NOT NULL, revision TEXT NOT NULL);`],
+  [29, `
+    CREATE TABLE run_inputs (
+      message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      source_seq INTEGER NOT NULL,
+      consumed_at TEXT,
+      context_version INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      UNIQUE(run_id,message_id)
+    );
+    CREATE INDEX run_inputs_pending ON run_inputs(run_id,consumed_at,source_seq);
+    CREATE TABLE run_questions (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      message_id TEXT NOT NULL UNIQUE REFERENCES messages(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK(status IN ('pending','answered','expired')),
+      answer_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL, answered_at TEXT
+    );
+    CREATE INDEX run_questions_pending ON run_questions(id,status,run_id);
+    CREATE TABLE run_waits (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+      step_id TEXT NOT NULL UNIQUE REFERENCES run_steps(id) ON DELETE CASCADE,
+      task_ids TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('waiting','ready','consumed','cancelled')),
+      version INTEGER NOT NULL DEFAULT 1,
+      result TEXT, created_at TEXT NOT NULL, resolved_at TEXT
+    );
+    CREATE INDEX run_waits_active ON run_waits(status,run_id);
+  `],
 ];
 
 // These two migrations were already numbered 14 and 15 on the main branch.
@@ -526,7 +557,8 @@ export class DatabaseStore {
           { version: 25, tables: ['system_skills'], extra: [], sql: MIGRATIONS.find(([v]) => v === 23)![1] },
           { version: 26, tables: ['system_mcp_files'], extra: [], sql: MCP_FILE_MIGRATION },
           { version: 27, tables: ['system_skill_bindings'], extra: [], sql: SKILL_RECORDS_MIGRATION },
-          { version: 28, tables: ['web_search_config'], extra: [], sql: MIGRATIONS.find(([v]) => v === 24)![1] },
+           { version: 28, tables: ['web_search_config'], extra: [], sql: MIGRATIONS.find(([v]) => v === 24)![1] },
+           { version: 29, tables: ['run_inputs', 'run_questions', 'run_waits'], extra: [], sql: MIGRATIONS.find(([v]) => v === 29)![1] },
         ];
         const present = groups.map(group => {
           const markers = [...group.tables.map(table => columns(this.db, table).length > 0), ...group.extra.map(([table, column]) => columns(this.db, table).some(c => c.name === column))];
@@ -573,7 +605,8 @@ export class DatabaseStore {
         apply(23, groups[11], 11);
         apply(24, groups[12], 12);
         apply(25, groups[13], 13);
-        apply(26, groups[14], 14);
+         apply(26, groups[14], 14);
+         apply(29, groups[15], 15);
       } finally { expected.close(); }
     })();
   }

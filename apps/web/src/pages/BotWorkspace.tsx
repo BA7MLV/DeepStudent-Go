@@ -6,7 +6,7 @@ import { openSettings } from '../components/settingsDialogStore';
 import { cloud } from '../cloud/state';
 import { MoreMenu, type MenuAction } from '../ui';
 import { useBotPanel } from '../store/botPanel';
-import { serverClient, type ApprovalDto, type ThreadDetail, type Session } from '../api/serverClient';
+import { serverClient, type ApprovalDto, type ThreadDetail, type Session, type ThreadQuestionDto } from '../api/serverClient';
 import type { AgentProfileDto, MessageDto, ProjectDetailDto, SseEvent, ThreadDto } from '@wangke/contracts';
 import { parseBotAttachments, parseLegacyBotAttachments, MAX_BOT_ATTACHMENTS, type BotAttachment } from '@wangke/contracts';
 import { BotAttachmentDraft, BotMessageAttachments, type BotDraftFile } from '../components/BotAttachments';
@@ -99,15 +99,19 @@ function BotActivity({ active, progress, beat }: { active: boolean; progress?: s
 const Bubble = memo(function Bubble({
   row,
   approval,
+  question,
   onReact,
   onResolve,
+  onAnswer,
   projectId,
   rich,
 }: {
   row: Row;
   approval?: ApprovalDto;
+  question?: ThreadQuestionDto;
   onReact: (messageId: string) => void;
   onResolve: (approvalId: string, approved: boolean) => void;
+  onAnswer: (question: ThreadQuestionDto) => void;
   projectId?: string;
   /** 项目里 Bot 的文字回复一律走富渲染；聊天里只有像 Markdown 的才走。 */
   rich?: boolean;
@@ -156,6 +160,9 @@ const Bubble = memo(function Bubble({
             <Sym name={approval.status === 'approved' ? 'check' : 'close'} />
             {approval.status === 'approved' ? t('botHome.approved') : t('botHome.rejected')}
           </span>
+        )}
+        {message.kind === 'question' && question?.status === 'pending' && (
+          <div className="imsg-actions"><Button size="sm" variant="primary" onPress={() => onAnswer(question)}>{t('botHome.answer')}</Button></div>
         )}
       </div>
     );
@@ -263,6 +270,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const [detailError, setDetailError] = useState('');
   const [detailRevision, setDetailRevision] = useState(0);
   const [sendBusy, setSendBusy] = useState(false);
+  const [messageTarget, setMessageTarget] = useState<{ kind: 'run'; runId: string } | { kind: 'question'; questionId: string } | undefined>();
   const sendLock = useRef(false);
   const loadVersion = useRef(0);
   const [status, setStatus] = useState<{ initialized: boolean } | null>(null);
@@ -296,7 +304,14 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const currentAgent = agents.find(a => a.id === currentAgentId) ?? null;
   const canChat = !listLoading && !listError && !project?.archived && !activeSummary?.archived && availableAgents.some(a => a.id === currentAgentId);
   const messages = active?.messages ?? EMPTY;
-  const activeRunning = Boolean(activeId && running[activeId]);
+  const activeRuns = active?.runs ?? [];
+  const activeBusy = Boolean(activeId && (activeRuns.length
+    ? activeRuns.some(run => ['queued', 'running', 'waiting_user', 'waiting_event'].includes(run.status))
+    : running[activeId]));
+  const activeWaiting = activeRuns.some(run => run.status === 'waiting_event');
+  const activeModelRunning = activeRuns.some(run => ['queued', 'running'].includes(run.status));
+  const activeRunning = activeModelRunning || (!activeRuns.length && Boolean(activeId && running[activeId]));
+  const activeRunTarget = activeRuns.find(run => ['queued', 'running', 'waiting_event'].includes(run.status));
   const activeProgress = activeId ? activity[activeId] : undefined;
   const rows = useMemo(() => {
     // Optimistic "running" only controls the stop/typing UI, not a read receipt.
@@ -314,6 +329,11 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     for (const approval of active?.approvals ?? []) map.set(approval.messageId, approval);
     return map;
   }, [active?.approvals]);
+  const questionByMessage = useMemo(() => {
+    const map = new Map<string, ThreadQuestionDto>();
+    for (const question of active?.questions ?? []) map.set(question.messageId, question);
+    return map;
+  }, [active?.questions]);
 
   /** 列表行：最后一句话优先用已经拉到的消息，没拉过的线程用列表接口带回的 preview。 */
   const listRows = useMemo(() => threads
@@ -381,8 +401,24 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     return () => { cancelled = true; };
   }, [activeId, details, detailRevision]);
 
-  // 事件流：每个线程独立游标，切换时从 0 回放（服务端按 message.id 去重）。
   const activeLoaded = Boolean(active);
+  // Lifecycle events are persisted separately from message events. Poll only
+  // the compact state endpoint while this thread is open; never reload the
+  // message history on every progress event.
+  useEffect(() => {
+    if (!activeId || !activeLoaded || filesOpen) return;
+    let stopped = false;
+    const refreshState = () => void serverClient.threadState(activeId).then(state => {
+      if (stopped) return;
+      patchActive(activeId, thread => ({ ...thread, runs: state.runs, questions: state.questions, running: state.running }));
+      setRunning(old => ({ ...old, [activeId]: Boolean(state.running) }));
+    }).catch(() => {});
+    refreshState();
+    const timer = window.setInterval(refreshState, 1800);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [activeId, activeLoaded, filesOpen, patchActive]);
+
+  // 事件流：每个线程独立游标，切换时从 0 回放（服务端按 message.id 去重）。
   useEffect(() => {
     // 等详情到手再开事件流，否则详情请求在路上时到达的事件会被丢掉。
     if (!activeId || !activeLoaded || !session?.authenticated || filesOpen) return;
@@ -404,8 +440,8 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       patchActive(activeId, (thread) => thread.messages.some((message) => message.id === event.message.id)
         ? { ...thread, messages: thread.messages.map((message) => message.id === event.message.id ? event.message : message) }
         : { ...thread, messages: [...thread.messages, event.message].sort((a, b) => a.seq - b.seq) });
-      if (event.message.kind === 'approval') void serverClient.thread(activeId).then(detail => {
-        if (!controller.signal.aborted) patchActive(activeId, thread => ({ ...thread, approvals: detail.approvals }));
+      if (event.message.kind === 'approval' || event.message.kind === 'question' || event.message.role !== 'user') void serverClient.thread(activeId).then(detail => {
+        if (!controller.signal.aborted) patchActive(activeId, thread => ({ ...thread, approvals: detail.approvals, questions: detail.questions, runs: detail.runs, running: detail.running }));
       }).catch(() => {});
     };
     const run = async () => {
@@ -454,13 +490,14 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     return thread;
   };
   const leaveFiles = () => { if (filesOpen) navigate(`/library/folders/${projectId}/chat`); };
-  const newDraft = () => { setActiveId(null); setThreadParam({}); };
+  const newDraft = () => { setActiveId(null); setMessageTarget(undefined); setThreadParam({}); };
   /** 和某个 Bot 开始一段新对话：落在它的问候页。 */
   const startWith = (id: string) => { setAgentId(id); newDraft(); leaveFiles(); setPane('chat'); };
   const openThread = (thread: ThreadDto) => {
     setActiveId(thread.id);
     if (thread.agentId) setAgentId(thread.agentId);
     setPane('chat');
+    setMessageTarget(undefined);
     if (filesOpen) navigate(`/library/folders/${projectId}/chat?thread=${thread.id}`);
     else setThreadParam({ thread: thread.id });
   };
@@ -545,16 +582,18 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
         setDrafts(old => old[target.id]?.trim() === content ? { ...old, [target.id]: '' } : old);
       }
       settlePending(target.id, pending.id, await (attachments.length
-        ? serverClient.sendAttachment(target.id, payload, nonce)
-        : serverClient.sendMessage(target.id, payload, nonce)));
+         ? serverClient.sendAttachment(target.id, payload, nonce, messageTarget)
+         : serverClient.sendMessage(target.id, payload, nonce, messageTarget)));
+       setMessageTarget(undefined);
       setAttachmentDrafts(old => ({ ...old, [target.id]: (old[target.id] ?? []).filter(item => !files.some(file => file.id === item.id)) }));
       setRunning(old => ({ ...old, [target.id]: true }));
       if (target.title === tp('newTitle')) {
         const updated = await serverClient.updateThread(target.id, { title: (content || files[0]?.file.name || '').slice(0, 60) }).catch(() => null);
         if (updated) mergeThread(updated);
       }
-    } catch (error) {
-      if (targetId && pending) settlePending(targetId, pending.id, null);
+       } catch (error) {
+       if (error instanceof Error && ['target_expired', 'question_already_answered', 'target_waiting_for_specific_answer'].includes(error.message)) setMessageTarget(undefined);
+       if (targetId && pending) settlePending(targetId, pending.id, null);
       if (clearedDraft) setDrafts(old => ({ ...old, [targetId ?? sourceKey]: old[targetId ?? sourceKey] || content }));
       toast.error(projectError(error));
     } finally { sendLock.current = false; setSendBusy(false); }
@@ -597,6 +636,20 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       toast.error(t('botHome.stopFailed'));
     }
   };
+
+  const answerQuestion = useCallback((question: ThreadQuestionDto) => {
+    if (question.status !== 'pending') return;
+    setMessageTarget({ kind: 'question', questionId: question.id });
+    setDrafts(old => ({ ...old, [draftKey]: old[draftKey] ?? '' }));
+    toast.info(t('botHome.answerPrompt'));
+  }, [draftKey, t]);
+
+  const continueRun = useCallback(() => {
+    if (!activeRunTarget) return;
+    setMessageTarget({ kind: 'run', runId: activeRunTarget.id });
+  }, [activeRunTarget]);
+
+  const clearTarget = useCallback(() => setMessageTarget(undefined), []);
 
   const editThread = async (thread: ThreadDto, action: 'rename' | 'archive' | 'delete') => {
     try {
@@ -662,7 +715,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   /* ── 菜单 ── */
 
   const runActions: MenuAction[] = [
-    { key: 'stop', label: t('botHome.stop'), icon: <Sym name="stop" />, disabled: !activeRunning, onAction: () => void stop() },
+    { key: 'stop', label: t('botHome.stop'), icon: <Sym name="stop" />, disabled: !activeBusy, onAction: () => void stop() },
     ...(!projectId ? [{ key: 'permissions', label: t('botHome.permissions'), icon: <Sym name="tune" />, onAction: () => openSettings(cloud.enabled ? 'bot' : 'agent') }] : []),
     ...(!projectId ? [{ key: 'mcp', label: ts('mcp.scope'), icon: <Sym name="extension" />, disabled: !active, onAction: () => setMcpOpen(true) }] : []),
   ];
@@ -704,8 +757,10 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
               <Bubble
                 row={row}
                 approval={approvalByMessage.get(row.message.id)}
+                question={questionByMessage.get(row.message.id)}
                 onReact={react}
                 onResolve={resolveApproval}
+                onAnswer={answerQuestion}
                 projectId={projectId}
                 rich={Boolean(projectId)}
               />
@@ -726,14 +781,23 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       disabled={!canChat || Boolean(activeId && !active)}
       sending={sendBusy}
       hasAttachments={draftFiles.length > 0}
-      busy={activeRunning}
-      onStop={() => void stop()}
+       busy={activeRunning}
+       onStop={() => void stop()}
       onFiles={addFiles}
       onFocus={followEnd}
       onScope={active && !projectId ? () => setMcpOpen(true) : undefined}
       onSettings={() => projectId ? setSettingsOpen(true) : openSettings(cloud.enabled ? 'bot' : 'agent')}
       attachLabel={t('botHome.attach')}
-      accessory={draftFiles.length ? <BotAttachmentDraft files={draftFiles} sending={sendBusy} onRemove={id => setAttachmentDrafts(old => ({ ...old, [draftKey]: (old[draftKey] ?? []).filter(file => file.id !== id) }))} /> : undefined}
+       accessory={<>
+         {messageTarget && <div className="imsg-composer__target" role="status">
+           <span>{messageTarget.kind === 'question' ? t('botHome.answerTarget') : t('botHome.continueTarget')}</span>
+           <Button size="sm" variant="tertiary" onPress={clearTarget}>{t('botHome.clearTarget')}</Button>
+         </div>}
+         {activeRunTarget && !messageTarget && <div className="imsg-composer__target">
+           <Button size="sm" variant="tertiary" onPress={continueRun}>{t('botHome.continueCurrent')}</Button>
+         </div>}
+         {draftFiles.length ? <BotAttachmentDraft files={draftFiles} sending={sendBusy} onRemove={id => setAttachmentDrafts(old => ({ ...old, [draftKey]: (old[draftKey] ?? []).filter(file => file.id !== id) }))} /> : null}
+       </>}
     />
   </>;
 
@@ -787,7 +851,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
                 <span className="bot-panel__switcher-name">{currentAgent?.name || 'Bot'}</span>
               </h2>
             )}
-            <BotActivity active={activeRunning} progress={activeProgress} beat={activityBeat} />
+            <BotActivity active={activeRunning || activeWaiting} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} beat={activityBeat} />
           </div>
           <div className="bot-panel__actions">
             <Button isIconOnly variant="ghost" className="rounded-full" aria-label={t('botHome.compose')} data-testid="bot-panel-new"
@@ -880,7 +944,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
             {!filesOpen && <BotAvatar agent={currentAgent} size={28} />}
             <span className="bh-chat__identity">
               <span className="bh-chat__name">{chatTitle}</span>
-              <BotActivity active={activeRunning && !filesOpen} progress={activeProgress} beat={activityBeat} />
+              <BotActivity active={(activeRunning || activeWaiting) && !filesOpen} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} beat={activityBeat} />
             </span>
           </h2>
           {threadMenu.length > 0 && !filesOpen && <MoreMenu label={t('botHome.more')} actions={threadMenu} testId="bh-thread-more" />}

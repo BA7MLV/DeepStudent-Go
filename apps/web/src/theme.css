@@ -66,6 +66,55 @@ body,
   box-sizing: border-box;
 }
 
+/* Text-only progressive enhancements. Utilities and component styles keep their
+   explicit wrapping exceptions; no font, measure, alignment or copy changes. */
+@layer base {
+  /* UI copy only: generated Markdown headings must not rebalance as it grows. */
+  :where(.card__title, .modal__heading, .empty-state__title) {
+    text-wrap: balance;
+  }
+
+  :where(.card__description, .ui-field__hint) {
+    text-wrap: pretty;
+  }
+
+  /* Numeric columns/outputs only; running prose keeps proportional figures. */
+  :where(td, th, output, time, [role='timer']) {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Not every button is a label: file tiles and mobile breadcrumbs deliberately
+     contain wrapping content. Target the shared action-button classes only. */
+  :where(.button, .toggle-button, .tab, .chip, .tag-mini) {
+    white-space: nowrap;
+  }
+
+  /* Opt in the shared prose renderer, not navigation, filenames or user input.
+     Keep the same spacing while streaming and after completion. */
+  :where(.x-markdown):lang(zh) {
+    text-autospace: normal;
+  }
+
+  /* An explicitly non-Chinese subtree must not inherit Chinese spacing. */
+  :where([lang]:not(:lang(zh))) {
+    text-autospace: no-autospace;
+    text-spacing-trim: normal;
+  }
+
+  /* Preserve literal spacing in editors, source, formulas and drawn text,
+     including descendants that would otherwise match :lang(zh) themselves. */
+  :where(:lang(zh)):where(
+    pre, code, kbd, samp, input, textarea, .font-mono, .cm-editor,
+    .project-text-editor, .code-block__language, .md-embedded-ui, .katex, svg, canvas, [contenteditable='true'],
+    [style*='monospace'],
+    pre *, code *, kbd *, samp *, .font-mono *, .cm-editor *,
+    .md-embedded-ui *, .katex *, svg *, [contenteditable='true'] *, [style*='monospace'] *
+  ) {
+    text-autospace: no-autospace;
+    text-spacing-trim: normal;
+  }
+}
+
 /* ── 应用级令牌 ───────────────────────────────────────────────────────── */
 :root {
   /* 尺寸档位保持兼容；业务优先使用 control / panel / dialog 语义。

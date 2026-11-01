@@ -120,6 +120,13 @@
     "stopFailed": "停止失败",
     "approve": "批准",
     "reject": "拒绝",
+    "answer": "回答",
+    "answerPrompt": "请在下方输入回答。",
+    "answerTarget": "正在回答此问题",
+    "continueTarget": "正在补充当前任务",
+    "continueCurrent": "补充当前任务",
+    "clearTarget": "清除",
+    "waitingBackground": "正在等待后台任务",
     "approved": "已批准",
     "rejected": "已拒绝",
     "approvalFailed": "审批没有提交成功",
@@ -144,6 +151,19 @@
       "connecting": "正在把线索串起来…",
       "checking": "正在核对关键细节…",
       "composing": "正在整理成答案…"
+    }
+  },
+  "chat": {
+    "interrupted": "回答未完成",
+    "continue": "继续",
+    "failed": "回答失败：{{reason}}",
+    "requestNotCompleted": "请求未正常完成",
+    "loadEarlier": "加载更早消息",
+    "loadingEarlier": "正在加载历史消息…",
+    "historyLoadFailed": "历史消息加载失败，点击重试",
+    "errors": {
+      "loadFailed": "连接加载失败，请重试",
+      "networkFailed": "网络连接失败，请重试"
     }
   }
 }

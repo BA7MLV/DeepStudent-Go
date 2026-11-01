@@ -186,3 +186,150 @@ test('DELETE endpoint enforces authentication, origin and ownership', async t =>
   assert.deepEqual((await request({ origin: 'https://test.invalid', 'x-owner': 'owner' })).json(), { removed: true });
   assert.equal(gateway.list('owner').length, 0);
 });
+
+test('WeChat welcomes only after manual pairing, without chat history, model context or runs', async t => {
+  const { gateway, hooks, store, sent } = fixture(t);
+  store.db.prepare('UPDATE users SET name=? WHERE id=?').run('小明', 'owner');
+  const { id } = await gateway.save('owner', input('', { config: {} }));
+  const pair = gateway.pair('owner', id);
+  assert.match(pair.code, /^[0-9A-HJKMNP-TV-Z]{4}$/);
+  hooks.set(id, { login: async () => ({ status: 'confirmed', botId: 'qr-bot', botToken: 'private-token', userId: 'scanner@im.wechat' }) });
+  assert.deepEqual(await gateway.login('owner', id, { action: 'poll', qrcode: 'qr' }), { status: 'confirmed' });
+  await gateway.tick(); await gateway.tick();
+  assert.equal(gateway.list('owner')[0].readiness.state, 'binding_required', 'QR login alone never links or welcomes');
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_bindings').get().n, 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_outbox').get().n, 0);
+  gateway.receive(id, [message('ordinary-first-message'), message('bad-code', '/pair wrong'), message('group-code', pair.code, { direct: false }), message('robot-code', pair.code, { human: false })]); await gateway.tick();
+  assert.equal(sent.length, 0); assert.equal(store.db.prepare('SELECT COUNT(*) n FROM runs').get().n, 0);
+  const pairing = message('manual-pair', ` ${pair.code.slice(0, 2).toLowerCase()}- ${pair.code.slice(2).toLowerCase()} `);
+  gateway.receive(id, [pairing]); await gateway.tick();
+  const binding = store.db.prepare('SELECT * FROM gateway_bindings WHERE account_id=?').get(id);
+  assert.equal(binding.peer, pairing.peer); assert.equal(binding.chat, pairing.chat);
+  assert.equal(gateway.secrets.open(binding.context), pairing.context);
+  assert.equal(gateway.list('owner')[0].readiness.state, 'model_required');
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_pairings').get().n, 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM messages').get().n, 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM message_events').get().n, 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM runs').get().n, 0);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].payload.text, '嗨，小明！我是 DeepStudent Go！');
+  assert.match(sent[1].payload.text, /绑定成功/);
+  assert.ok(sent.every(item => item.peer.peer === binding.peer && item.peer.context === 'private-context'));
+  await gateway.login('owner', id, { action: 'poll', qrcode: 'again' });
+  gateway.receive(id, [pairing, message('consumed-code', pair.command)]); await gateway.tick();
+  await gateway.close(); gateway.start(false); await gateway.tick();
+  assert.equal(sent.length, 2); assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_bindings').get().n, 1);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM runs').get().n, 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_outbox').get().n, 2, 're-login, replay and restart do not duplicate welcomes');
+  gateway.receive(id, [message('first-question', '第一道题')]); await gateway.tick();
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM runs').get().n, 1, 'the first real question runs normally');
+  assert.deepEqual(store.db.prepare('SELECT role,content FROM messages').all(), [{ role: 'user', content: '第一道题' }], 'pairing and onboarding never enter chat history/model context');
+  gateway.revoke('owner', id, binding.id);
+  gateway.receive(id, [message('revoked', 'hello')]); await gateway.tick();
+  assert.equal(gateway.list('owner')[0].readiness.bound, false, 'a message cannot undo explicit unlinking');
+  await gateway.login('owner', id, { action: 'poll', qrcode: 'explicit-relink' });
+  assert.equal(gateway.list('owner')[0].readiness.bound, false, 'a new QR login also cannot undo unlinking');
+  gateway.receive(id, [message('manual-relink', gateway.pair('owner', id).code)]); await gateway.tick();
+  assert.equal(gateway.list('owner')[0].readiness.bound, true);
+  assert.equal(store.db.prepare('SELECT thread_id FROM gateway_bindings').get().thread_id, binding.thread_id);
+  assert.equal(sent.length, 4, 'an explicit manual rebind acknowledges success again');
+});
+
+test('renewed or expired codes never welcome; an already-linked account cannot be taken over', async t => {
+  const { gateway, store, sent } = fixture(t);
+  const { id } = await gateway.save('owner', input('manual'));
+  const old = gateway.pair('owner', id), current = gateway.pair('owner', id);
+  gateway.receive(id, [message('old-code', old.code)]); await gateway.tick();
+  assert.equal(sent.length, 0);
+  store.db.prepare('UPDATE gateway_pairings SET expires_at=?').run('2000-01-01T00:00:00.000Z');
+  gateway.receive(id, [message('expired-code', current.code)]); await gateway.tick();
+  assert.equal(sent.length, 0); assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_bindings').get().n, 0);
+  gateway.receive(id, [message('valid-code', gateway.pair('owner', id).code)]); await gateway.tick();
+  const code = gateway.pair('owner', id);
+  gateway.receive(id, [message('takeover', code.code, { peer: 'intruder' })]); await gateway.tick();
+  assert.equal(sent.length, 2); assert.equal(store.db.prepare('SELECT peer FROM gateway_bindings').get().peer, 'same-peer');
+  const feishu = (await gateway.save('owner', { channel: 'feishu', agentId: 'owner-agent', enabled: true, config: { appId: 'cli_manual', appSecret: 'secret' } })).id;
+  gateway.receive(feishu, [message('feishu-unlinked')]); await gateway.tick();
+  assert.equal(gateway.list('owner').find(a => a.id === feishu).readiness.bound, false);
+  const feishuPair = gateway.pair('owner', feishu);
+  assert.match(feishuPair.code, /^[0-9A-HJKMNP-TV-Z]{8}$/);
+  gateway.receive(feishu, [message('feishu-pair', feishuPair.command)]); await gateway.tick();
+  assert.equal(gateway.list('owner').find(a => a.id === feishu).readiness.bound, true, 'Feishu retains explicit pairing and its original acknowledgment');
+  assert.match(sent.at(-1).payload.text, /^绑定成功/);
+});
+
+test('pairing and both welcome deliveries commit atomically, so failed onboarding never consumes the code', async t => {
+  const { gateway, store, sent } = fixture(t);
+  const { id } = await gateway.save('owner', input('atomic-welcome'));
+  const pair = gateway.pair('owner', id);
+  store.db.exec("CREATE TRIGGER fail_welcome BEFORE INSERT ON gateway_outbox WHEN (SELECT COUNT(*) FROM gateway_outbox)=1 BEGIN SELECT RAISE(ABORT,'synthetic failure'); END");
+  gateway.receive(id, [message('failed-pair', pair.code)]); await gateway.tick();
+  for (const table of ['gateway_bindings', 'gateway_outbox', 'threads', 'messages', 'runs']) assert.equal(store.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 0, table);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_pairings').get().n, 1);
+  assert.equal(sent.length, 0);
+  store.db.exec('DROP TRIGGER fail_welcome');
+  gateway.receive(id, [message('retry-pair', pair.code)]); await gateway.tick();
+  assert.equal(gateway.list('owner')[0].readiness.bound, true); assert.equal(sent.length, 2);
+});
+
+test('bare WeChat codes stay account-scoped and revoked queued codes cannot restore a binding', async t => {
+  const { gateway, store, sent } = fixture(t);
+  const first = (await gateway.save('owner', input('bare-first'))).id;
+  const second = (await gateway.save('owner', input('bare-second'))).id;
+  const pair = gateway.pair('owner', first);
+  const wrong = (pair.code[0] === '0' ? '1' : '0') + pair.code.slice(1);
+  gateway.receive(second, [message('wrong-account', pair.code)]);
+  gateway.receive(first, [message('wrong-code', wrong), message('extra-prose', `我的绑定码是 ${pair.code}`)]);
+  await gateway.tick();
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_bindings').get().n, 0);
+  assert.equal(sent.length, 0);
+  gateway.receive(first, [message('bare-valid', pair.code)]); await gateway.tick();
+  const binding = store.db.prepare('SELECT * FROM gateway_bindings WHERE account_id=?').get(first);
+  assert.equal(sent.length, 2);
+  gateway.receive(first, [message('numeric-answer', '1234')]); await gateway.tick();
+  assert.equal(store.db.prepare("SELECT content FROM messages WHERE role='user'").get().content, '1234', 'ordinary four-character answers are not swallowed after linking');
+  const pending = gateway.pair('owner', first);
+  gateway.receive(first, [message('queued-bare', pending.code), message('queued-command', pending.command)]);
+  gateway.revoke('owner', first, binding.id);
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM gateway_inbox WHERE status='cancelled' AND error='pairing_revoked'").get().n, 2);
+  gateway.receive(first, [message('revoked-code', pending.code)]); await gateway.tick();
+  assert.equal(gateway.list('owner').find(a => a.id === first).readiness.bound, false);
+  assert.equal(sent.length, 2);
+});
+
+test('a current bare code is not merged into an earlier WeChat photo or text batch', async t => {
+  const { gateway, store, bind, sent } = fixture(t);
+  const id = (await gateway.save('owner', input('bare-boundary'))).id;
+  await bind(id); // Legacy /pair commands continue to work.
+  const pair = gateway.pair('owner', id);
+  gateway.receive(id, [message('question-before-code', '先处理这个问题'), message('new-bare-code', pair.code)]);
+  await gateway.tick(); await gateway.tick();
+  assert.deepEqual(store.db.prepare("SELECT content FROM messages WHERE role='user'").all(), [{ content: '先处理这个问题' }]);
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_pairings').get().n, 0);
+  assert.equal(sent.length, 4, 'the explicit rebind receives its own acknowledgment');
+});
+
+test('four-character WeChat codes limit guesses across senders and restarts, without blocking other accounts', async t => {
+  const { gateway, store, sent } = fixture(t);
+  const id = (await gateway.save('owner', input('short-code'))).id;
+  const pair = gateway.pair('owner', id);
+  assert.equal(pair.code.length, 4);
+  const wrong = (pair.code[0] === '0' ? '1' : '0') + pair.code.slice(1);
+  for (let n = 0; n < 5; n++) {
+    gateway.receive(id, [message(`wrong-${n}`, n % 2 ? `/pair ${wrong}` : wrong, { peer: `sender-${n}` })]);
+    await gateway.tick();
+  }
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_pairings WHERE account_id=?').get(id).n, 0);
+  assert.equal(sent.length, 0);
+  await gateway.close(); gateway.start(false); await gateway.tick();
+  const renewed = gateway.pair('owner', id);
+  gateway.receive(id, [message('throttled-correct-code', renewed.code)]); await gateway.tick();
+  assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_bindings WHERE account_id=?').get(id).n, 0);
+  const other = (await gateway.save('owner', input('short-other'))).id;
+  gateway.receive(other, [message('other-valid-code', gateway.pair('owner', other).code)]); await gateway.tick();
+  assert.equal(sent.length, 2, 'guess limiting is per account');
+  store.db.prepare("UPDATE gateway_inbox SET received_at=? WHERE account_id=? AND error='invalid_pairing_code'").run(Date.now() - 11 * 60_000, id);
+  gateway.receive(id, [message('after-cooldown', gateway.pair('owner', id).code)]); await gateway.tick();
+  assert.equal(sent.length, 4);
+  assert.equal(gateway.list('owner').find(a => a.id === id).readiness.bound, true);
+});

@@ -35,6 +35,14 @@
   line-height: 1.75;
 }
 .code-block__source code { padding: 0; margin: 0; font: inherit; }
+/* XMarkdown's pre/code whitespace rules are not gated by disableDefaultStyles.
+   This React-owned source view keeps indentation and scrolls long lines. */
+.x-markdown .code-block__source,
+.x-markdown .code-block__source code {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
 .code-block__preview { padding: 8px 16px 16px; }
 .code-block__preview[hidden], .code-block__source[hidden] { display: none; }
 

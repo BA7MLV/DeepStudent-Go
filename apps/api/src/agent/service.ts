@@ -38,7 +38,7 @@ export class BotApplicationService {
     return dto;
     });
   }
-  send(owner: string, threadId: string, input: { clientNonce: string; kind?: string; content: string; replyTo?: string }) {
+  send(owner: string, threadId: string, input: { clientNonce: string; kind?: string; content: string; replyTo?: string; target?: { kind: 'run' | 'question'; runId?: string; questionId?: string } }) {
     const thread = this.thread(owner, threadId);
     if (thread.archived) throw new Error('thread_archived');
     if (thread.project_id) {
@@ -63,7 +63,30 @@ export class BotApplicationService {
         const requested = new Set(Array.from(input.content.matchAll(/@([^\s@,，。！？!?]{1,64})/g), m => m[1].toLocaleLowerCase()));
         const agents = this.store.db.prepare('SELECT a.id,a.name FROM agent_profiles a JOIN thread_participants p ON p.agent_id=a.id WHERE p.thread_id=? AND a.enabled=1').all(threadId) as any[];
         for (const a of agents) if (requested.has(a.name.toLocaleLowerCase())) this.store.db.prepare('INSERT OR IGNORE INTO message_mentions(message_id,agent_id,created_at) VALUES(?,?,?)').run(dto.id, a.id, dto.createdAt);
-        this.store.db.prepare('INSERT INTO runs(id,thread_id,mode,status,created_at,trigger_message_id) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), threadId, 'bot', 'queued', dto.createdAt, dto.id);
+        let targetRun: any;
+        if (input.target?.kind === 'run') targetRun = this.store.db.prepare("SELECT r.* FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=? AND r.thread_id=? AND t.owner_id=?").get(input.target.runId, threadId, owner);
+        else if (input.target?.kind === 'question') targetRun = this.store.db.prepare("SELECT r.* FROM run_questions q JOIN runs r ON r.id=q.run_id JOIN threads t ON t.id=r.thread_id WHERE q.id=? AND q.status='pending' AND r.thread_id=? AND t.owner_id=?").get(input.target.questionId, threadId, owner);
+        else if (input.replyTo) targetRun = this.store.db.prepare("SELECT r.* FROM runs r JOIN messages m ON m.id=r.trigger_message_id WHERE m.id=? AND r.thread_id=? AND r.status IN ('queued','running','waiting_user','waiting_event') UNION SELECT r.* FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE q.message_id=? AND r.thread_id=? AND q.status='pending'").get(input.replyTo, threadId, input.replyTo, threadId);
+        if (input.target && (!targetRun || ['completed', 'failed', 'cancelled'].includes(targetRun.status))) throw new Error('target_expired');
+        if (targetRun) {
+          if (targetRun.status === 'waiting_user' && input.target?.kind === 'run') throw new Error('target_waiting_for_specific_answer');
+          this.store.db.prepare('INSERT INTO run_inputs(message_id,run_id,source_seq,created_at) VALUES(?,?,?,?)').run(dto.id, targetRun.id, dto.seq, dto.createdAt);
+           if (input.target?.kind === 'question') {
+            const changed = this.store.db.prepare("UPDATE run_questions SET status='answered',answer_message_id=?,answered_at=? WHERE id=? AND status='pending'").run(dto.id, dto.createdAt, input.target.questionId);
+            if (!changed.changes) throw new Error('question_already_answered');
+             this.store.db.prepare("UPDATE runs SET status='queued',completed_at=NULL,error_code=NULL WHERE id=? AND status='waiting_user'").run(targetRun.id);
+           } else if (targetRun.status === 'waiting_event') {
+             // An explicit user supplement is a durable wake signal. The
+             // outstanding wait remains recorded and will later inject its
+             // terminal result into the current context; it must not erase
+             // this newly accepted input or revive a cancelled run.
+             this.store.db.prepare("UPDATE runs SET status='queued',completed_at=NULL,error_code=NULL WHERE id=? AND status='waiting_event'").run(targetRun.id);
+           }
+          return { ...dto, deduplicated: false, receipt: { messageId: dto.id, runId: targetRun.id, disposition: input.target?.kind === 'question' ? 'answered' : 'appended' } };
+        }
+        const runId = crypto.randomUUID();
+        this.store.db.prepare('INSERT INTO runs(id,thread_id,mode,status,created_at,trigger_message_id) VALUES(?,?,?,?,?,?)').run(runId, threadId, 'bot', 'queued', dto.createdAt, dto.id);
+        return { ...dto, deduplicated: false, receipt: { messageId: dto.id, runId, disposition: 'created' } };
       }
       return { ...dto, deduplicated: false };
     });
@@ -71,9 +94,9 @@ export class BotApplicationService {
   }
   stop(owner: string, threadId: string) {
     this.thread(owner, threadId);
-    const runs = this.store.db.prepare("SELECT id FROM runs WHERE thread_id=? AND (status IN ('queued','running','waiting_user','paused') OR id IN (SELECT parent_run_id FROM cloud_tasks WHERE status IN ('queued','running','waiting_user')))").all(threadId) as any[];
+    const runs = this.store.db.prepare("SELECT id FROM runs WHERE thread_id=? AND (status IN ('queued','running','waiting_user','waiting_event','paused') OR id IN (SELECT parent_run_id FROM cloud_tasks WHERE status IN ('queued','running','waiting_user')))").all(threadId) as any[];
     this.store.transaction(() => {
-      this.store.db.prepare("UPDATE runs SET status='cancelled',completed_at=?,wake_at=NULL WHERE thread_id=? AND status IN ('queued','running','waiting_user','paused')").run(now(), threadId);
+      this.store.db.prepare("UPDATE runs SET status='cancelled',completed_at=?,wake_at=NULL WHERE thread_id=? AND status IN ('queued','running','waiting_user','waiting_event','paused')").run(now(), threadId);
       if (runs.length) this.append(threadId, 'assistant', 'text', '任务已停止。');
     });
     for (const run of runs) this.runner.cancel(run.id);

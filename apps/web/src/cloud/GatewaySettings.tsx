@@ -19,7 +19,7 @@ import type { GatewayManifest, GatewayConnectionDiagnostics, GatewayReadiness } 
  *   1. 选「微信」—— 渠道立即建好并开始拉二维码；
  *   2. 扫码 —— 状态自动刷新（等待扫码 → 在手机上确认 → 已登录），过期自动换码，
  *      不需要再点「检查状态」；
- *   3. 绑定 —— 给出一行 `/pair XXXXXXXX`，拷贝后发给 Bot；绑上以后这一块自动变成「已绑定」。
+ *   3. 绑定 —— 给出 4 位绑定码，拷贝后直接发给 Bot；绑定成功后发送不进入模型上下文的欢迎语。
  * 飞书没有扫码：填 App ID / App Secret，点「连接」，状态行显示长连接是否建立。
  */
 
@@ -286,7 +286,10 @@ function AccountDetail({ account, agents, busy, startLogin, title, status, deliv
   const [appSecret, setAppSecret] = useState('');
   const active = account.bindings.filter((b) => !b.revoked);
   const state = readinessState(account), readiness = account.readiness;
-  const createPair = () => act(async () => setPair(await post<{ command: string; expiresAt: string }>(`/accounts/${account.id}/pair`)));
+  const createPair = () => act(async () => {
+    const result = await post<{ command: string; code: string; expiresAt: string }>(`/accounts/${account.id}/pair`);
+    setPair({ command: wechat ? result.code : result.command, expiresAt: result.expiresAt });
+  });
   const save = (patch: Partial<{ agentId: string; preset: string; enabled: boolean }>, config: Record<string, string> = {}) => act(() => post('/accounts', {
     id: account.id, channel: account.channel, agentId: account.agentId, preset: account.preset, enabled: Boolean(account.enabled), ...patch, config,
   }));
@@ -320,8 +323,9 @@ function AccountDetail({ account, agents, busy, startLogin, title, status, deliv
       </SectionCard>
 
       {!login && !active.length && <SectionCard title={t('pairTitle')} testId="gateway-pairing">
-        <p className="py-2 text-sm text-muted">{t('pairExplanation')}</p>
-        {pair ? <PairCode pair={pair} channel={title} renew={createPair} busy={busy} /> : <Button variant="primary" fullWidth className="min-h-11" isDisabled={busy || !account.enabled || account.health !== 'connected'} data-testid="gateway-pair" onPress={() => void createPair()}>{t('pairTitle')}</Button>}
+        <p className="py-2 text-sm text-muted">{t(wechat ? 'wechatPairExplanation' : 'pairExplanation')}</p>
+        {wechat && <p className="pb-2 text-sm text-muted">{t('wechatPairWelcome')}</p>}
+        {pair ? <PairCode pair={pair} channel={title} renew={createPair} busy={busy} codeOnly={wechat} /> : <Button variant="primary" fullWidth className="min-h-11" isDisabled={busy || !account.enabled || account.health !== 'connected'} data-testid="gateway-pair" onPress={() => void createPair()}>{t('pairTitle')}</Button>}
       </SectionCard>}
 
       {wechat && login ? (
@@ -418,7 +422,7 @@ function ConnectionDetails({ connection }: { connection?: GatewayConnectionDiagn
   </div>;
 }
 
-function PairCode({ pair, channel, renew, busy }: { pair: { command: string; expiresAt: string }; channel: string; renew: () => Promise<void>; busy: boolean }) {
+function PairCode({ pair, channel, renew, busy, codeOnly }: { pair: { command: string; expiresAt: string }; channel: string; renew: () => Promise<void>; busy: boolean; codeOnly: boolean }) {
   const { t } = useTranslation('gateway');
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now);
@@ -436,8 +440,8 @@ function PairCode({ pair, channel, renew, busy }: { pair: { command: string; exp
         <Sym name={copied ? 'check' : 'content_copy'} />{copied ? t('copied') : t('copy')}
       </Button>
       <span className="text-xs text-muted">{minutes ? t('pairExpires', { minutes }) : t('pairExpired')}</span>
-      <p className="text-sm text-muted">{t('pairWaiting')}</p>
-      <Button variant="ghost" size="sm" isDisabled={busy} onPress={() => void renew()}>{t('pairRenew')}</Button>
+      <p className="text-sm text-muted">{t(codeOnly ? 'wechatPairWaiting' : 'pairWaiting')}</p>
+      <Button variant="ghost" size="sm" isDisabled={busy} onPress={() => void renew()}>{t(codeOnly ? 'wechatPairRenew' : 'pairRenew')}</Button>
     </div>
   );
 }

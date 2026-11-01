@@ -258,12 +258,41 @@ try {
   await page.getByRole('button', { name: '关闭已归档', exact: true }).click();
   await page.getByTestId('archived-sessions-dialog').waitFor({ state: 'hidden' });
   assert.equal(await drawer.isVisible(), true, 'closing nested archive returns to navigation');
+  const originUrl = page.url();
+  const originTransform = await page.locator('.app-navigation-workspace').evaluate(el => {
+    window.savedNavigation = document.querySelector('.app-nav-drawer');
+    return getComputedStyle(el).transform;
+  });
   await page.getByTestId('nav-rail-settings').click();
   await page.getByTestId('settings-modal').waitFor();
-  await closed();
+  assert.equal(page.url(), originUrl, 'settings does not navigate away from its originating page');
+  assert.equal(await page.locator('.app-navigation-shell').getAttribute('data-nav-open'), 'true');
+  assert.equal(await page.locator('.app-navigation-workspace').evaluate(el => getComputedStyle(el).transform), originTransform,
+    'opening settings preserves the pushed workspace instead of returning to the home canvas');
+  assert(await page.evaluate(() => window.savedNavigation === document.querySelector('.app-nav-drawer')),
+    'opening settings keeps the same sidebar mounted');
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Tab');
+    assert(await page.getByTestId('settings-modal').evaluate(el => el.contains(document.activeElement)), 'Tab stays in settings, not the underlying navigation');
+  }
+  await page.screenshot({ path: `${out}/settings-over-navigation.png` });
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByTestId('settings-modal').waitFor({ state: 'hidden' });
-  await closed();
+  await page.waitForFunction(() => document.activeElement === document.querySelector('[data-testid="nav-rail-settings"]'));
+  await geometry('after settings');
+  // Esc closes only the top settings layer; a later Esc may dismiss navigation.
+  await page.getByTestId('nav-rail-settings').click();
+  await page.getByTestId('settings-modal').waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByTestId('settings-modal').waitFor({ state: 'hidden' });
+  await geometry('after settings Escape');
+  await page.getByTestId('nav-rail-settings').click();
+  await page.getByTestId('settings-modal').waitFor();
+  await page.touchscreen.tap(40, 40);
+  await page.getByTestId('settings-modal').waitFor({ state: 'hidden' });
+  await geometry('after settings outside dismissal');
+  await page.keyboard.press('Escape');
+  await closed({ focus: true });
   assert.equal(await input.inputValue(), '不要发送：侧栏开合保留草稿');
 
   // Both destinations and Recent preserve existing navigation behavior.
@@ -283,6 +312,14 @@ try {
     await page.setViewportSize({ width, height });
     await open();
     await geometry(`${width}x${height}`);
+    if (width > 760) {
+      await page.getByTestId('nav-rail-settings').click();
+      await page.getByTestId('settings-modal').waitFor();
+      assert.equal(await page.locator('.app-navigation-shell').getAttribute('data-nav-open'), 'true', 'tablet settings Modal also preserves navigation');
+      await page.keyboard.press('Escape');
+      await page.getByTestId('settings-modal').waitFor({ state: 'hidden' });
+      await geometry(`${width}x${height} after settings`);
+    }
     await page.keyboard.press('Escape');
     await closed({ focus: true });
   }

@@ -22,6 +22,10 @@
   "setupSteps": "Setup checklist",
   "stepDone": "Complete",
   "stepPending": "Pending",
+  "wechatPairWelcome": "Send just the linking code in your WeChat direct chat first. No /pair prefix is needed. Once linked, the Bot will greet you and introduce itself. Neither the linking message nor the welcome enters model context.",
+  "wechatPairExplanation": "Signing in and linking yourself are separate steps. Copy the 4-character code below and send it directly in this bot's WeChat direct chat. This page updates automatically when confirmed. Five incorrect attempts within 10 minutes invalidate the code; wait before generating a new one.",
+  "wechatPairWaiting": "Waiting for you to send the linking code in WeChat. Earlier unlinked messages will not run automatically; resend your question after linking.",
+  "wechatPairRenew": "Generate new linking code",
   "steps": { "connection": "Connect platform", "binding": "Link yourself", "bot": "Enable Bot", "model": "Set up model" },
   "readiness": {
     "disabled": "Off", "login_required": "Sign in to continue", "connection_required": "Waiting for connection",

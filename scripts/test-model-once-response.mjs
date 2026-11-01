@@ -57,6 +57,22 @@ const streamedMessage = await chatStream(
 assert.equal(textOf(streamedMessage), '你好', 'CRLF SSE and UTF-8 split across reads must preserve text');
 assert.equal(streamedMessage.finish_reason, 'stop');
 
+let coldStreamAttempts = 0;
+const recoveredStream = await chatStream(
+  target,
+  options,
+  undefined,
+  undefined,
+  undefined,
+  async () => {
+    coldStreamAttempts++;
+    if (coldStreamAttempts === 1) throw new TypeError('Failed to fetch');
+    return streamResponse([event({ choices: [{ delta: { content: '短暂抖动后恢复' }, finish_reason: 'stop' }] }) + 'data: [DONE]\n\n']);
+  },
+);
+assert.equal(coldStreamAttempts, 2, 'a stream transport hiccup before any output is retried');
+assert.equal(textOf(recoveredStream), '短暂抖动后恢复');
+
 await assert.rejects(
   chatStream(target, options, undefined, undefined, undefined, async () => streamResponse(['data: {"choices":\n\n'])),
   /无效的流式 JSON/,
@@ -122,6 +138,7 @@ await assert.rejects(chatStream(target, options, delta => { shown += delta; }, u
   else controller.error(upstream);
 } }), { headers: { 'content-type': 'text/event-stream' } })), error => error === upstream);
 assert.equal(shown, '已输出', 'network failure must leave delivered deltas intact');
+assert.equal(reads, 2, 'a stream is not replayed after visible output has started');
 
 let cancelled = false;
 const terminalMessage = await chatStream(target, options, undefined, undefined, undefined, async () => new Response(new ReadableStream({

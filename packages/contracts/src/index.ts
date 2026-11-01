@@ -2,6 +2,8 @@ export type ConversationMode = 'chat' | 'bot';
 export type { ServerStorageStats, StorageCategoryId } from './storage.js';
 export { parseBotAttachments, parseLegacyBotAttachments, MAX_BOT_ATTACHMENTS, MAX_BOT_MESSAGE_ATTACHMENTS, type BotAttachment } from './bot-attachments.js';
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
+export type BotInputTarget = { kind: 'run'; runId: string } | { kind: 'question'; questionId: string };
+export type BotInputReceipt = { messageId: string; runId: string | null; disposition: 'created' | 'appended' | 'answered' };
 
 export interface ThreadDto {
   id: string;
@@ -42,7 +44,7 @@ export interface RunDto {
   id: string;
   threadId: string;
   mode: ConversationMode;
-  status: 'queued' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled';
+  status: 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled';
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;

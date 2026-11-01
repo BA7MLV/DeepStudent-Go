@@ -48,7 +48,7 @@ export default function PromptCacheUsage({ serverManaged }: { serverManaged: boo
     {report ? <div className="mt-3 grid gap-3">
       <p className="text-sm tabular-nums" data-testid="prompt-cache-total">{t('cacheUsage.summary', { rate: rate(report.total.cacheHitRate), measured: report.total.cacheMeasuredRequests, requests: report.total.requests })}</p>
       {report.byModel.map(group => <div key={JSON.stringify([group.provider, group.model])} className="flex flex-wrap items-baseline justify-between gap-2 text-xs">
-        <span className="min-w-0 break-all">{group.provider} / {group.model}</span>
+        <span className="min-w-0 wrap-anywhere">{group.provider} / {group.model}</span>
         <span className="text-muted tabular-nums">{t('cacheUsage.detail', { rate: rate(group.cacheHitRate), read: group.cacheMeasuredRequests > 0 ? group.cacheReadTokens.toLocaleString(i18n.language) : t('cacheUsage.unknown'), write: group.cacheWriteMeasuredRequests > 0 ? group.cacheWriteTokens.toLocaleString(i18n.language) : t('cacheUsage.unknown'), measured: group.cacheMeasuredRequests, requests: group.requests })}</span>
       </div>)}
       <a className="w-fit text-xs text-accent underline" href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(report, null, 2))}`} download="prompt-cache-baseline.json">{t('cacheUsage.export')}</a>

@@ -160,12 +160,14 @@ try {
   await openMenu(phone);
   await phone.getByTestId('account-menu-settings').click();
   await phone.getByTestId('settings-modal').waitFor();
-  await phone.getByRole('dialog', { name: 'DeepStudent Go', exact: true }).waitFor({ state: 'hidden' });
+  assert.equal(await phone.locator('.app-navigation-shell').getAttribute('data-nav-open'), 'true', '账号菜单打开设置不收起原侧栏');
   await closeSettings(phone);
-  await phone.getByTestId('nav-rail-open').click();
+  await phone.getByRole('dialog', { name: 'DeepStudent Go', exact: true }).waitFor();
+  await phone.waitForFunction(() => document.activeElement === document.querySelector('[data-testid="nav-rail-account"]'));
   await phone.getByTestId('nav-rail-settings').click();
   await phone.getByTestId('settings-modal').waitFor();
   await closeSettings(phone);
+  assert.equal(await phone.locator('.app-navigation-shell').getAttribute('data-nav-open'), 'true', '齿轮关闭设置后仍停留原侧栏');
 
   // 本机资源与云端真实文件资源都必须提供同一个账号 / 设置底栏。
   for (const cloudResources of [false, true]) {
@@ -182,10 +184,14 @@ try {
       if (mobile) await resourcePage.getByTestId('nav-rail-open').click();
       await checkRow(resourcePage);
       if (!mobile) await checkHover(resourcePage, `${cloudResources ? 'cloud' : 'local'}-resources`);
+      const originUrl = resourcePage.url();
       await resourcePage.getByTestId('nav-rail-settings').click();
       await resourcePage.getByTestId('settings-modal').waitFor();
+      assert.equal(resourcePage.url(), originUrl, '资源页打开设置不切回主页');
+      if (mobile) assert.equal(await resourcePage.locator('.app-navigation-shell').getAttribute('data-nav-open'), 'true');
       await closeSettings(resourcePage);
-      if (mobile) await resourcePage.getByTestId('nav-rail-open').click();
+      assert.equal(resourcePage.url(), originUrl, '关闭设置仍是原资源页');
+      if (mobile) await resourcePage.getByRole('dialog', { name: 'DeepStudent Go', exact: true }).waitFor();
       await openMenu(resourcePage);
       assert.equal(await resourcePage.getByTestId('account-menu-logout').getAttribute('aria-disabled'), cloudResources ? null : 'true');
       await resourcePage.keyboard.press('Escape');

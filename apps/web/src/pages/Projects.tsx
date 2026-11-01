@@ -7,6 +7,7 @@ import { serverClient } from '../api/serverClient';
 import { MoreMenu, PageShell, promptDialog, Sym, toast } from '../ui';
 import { projectError } from '../projects/errors';
 import { formatListTime } from './botMessages';
+import { overflowTitleProps } from '../ui/overflowTitle';
 import '../projects/projects.css';
 import './bot.css';
 import './projects-home.css';
@@ -74,7 +75,7 @@ export default function Projects() {
                     <button type="button" className="ph-row__open" onClick={() => navigate(`/projects/${project.id}`)}>
                       <span className="ph-row__icon" aria-hidden="true"><Sym name="folder" /></span>
                       <span className="ph-row__body">
-                        <span className="ph-row__name">{project.name}</span>
+                        <span className="ph-row__name" {...overflowTitleProps}>{project.name}</span>
                         {project.archived && <span className="ph-row__meta">{t('archived')}</span>}
                       </span>
                       <time className="ph-row__time" dateTime={project.updatedAt}>{formatListTime(project.updatedAt, i18n.language)}</time>

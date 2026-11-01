@@ -1,4 +1,5 @@
 import { Suspense, lazy, memo, useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState, type ClipboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ComponentProps } from '@ant-design/x-markdown';
 import { Markdown as XMarkdown } from '../components/markdown/Markdown';
 import { MaterialImage } from '../components/MaterialImage';
@@ -33,6 +34,7 @@ import { useChatScroll } from '../components/useChatScroll';
 import ChatHistorySkeleton from '../components/ChatHistorySkeleton';
 import ChatSyncStatus from '../components/ChatSyncStatus';
 import { db } from '../store/db';
+import { displayChatError, displayChatFailure } from '../utils/chatError';
 import AskCard from '../components/AskCard';
 import FolderPlanCard from '../components/FolderPlanCard';
 import { ArtifactEditProvider } from '../components/ArtifactEditor';
@@ -489,6 +491,7 @@ function QueueBar({
 }
 
 export default function CourseChat() {
+  const { t: chatText } = useTranslation('common');
   const isNarrow = useMediaQuery('(max-width: 900px)');
   const [welcomeGreeting] = useState(() => chatGreeting());
   const [importDismissed, setImportDismissed] = useState(false);
@@ -532,6 +535,12 @@ export default function CourseChat() {
     };
   }, [activeId, loaded, settingsOpen]);
   const messages = useCourseChat((s) => s.messages);
+  // Only the latest unresolved answer needs an inline status. Older rows keep
+  // their retry action, but repeated notices make a long conversation noisy.
+  const latestInterruptedKey = useMemo(
+    () => [...messages].reverse().find((message) => message.role === 'ai' && message.interrupted && !message.streaming)?.key,
+    [messages],
+  );
   /** 新追加的消息（发出去的提问 + 助手占位）播一次上浮淡入，见 useMessageEnter */
   const entering = useMessageEnter(messages.map((m) => m.key), activeId);
   const hasOlder = useCourseChat((s) => s.hasOlder);
@@ -945,9 +954,9 @@ export default function CourseChat() {
             )}
 
             {messages.length > 0 && <div className="chat-history-loader" aria-live="polite">
-              {hasOlder && loadingOlder ? <PendingReply label="正在加载历史消息…" /> : hasOlder && (
+              {hasOlder && loadingOlder ? <PendingReply label={chatText('chat.loadingEarlier')} /> : hasOlder && (
                 <button type="button" onClick={() => void loadOlder()}>
-                  {historyError ?? '加载更早消息'}
+                  {historyError ? chatText('chat.historyLoadFailed') : chatText('chat.loadEarlier')}
                 </button>
               )}
             </div>}
@@ -991,7 +1000,7 @@ export default function CourseChat() {
                         {message.error && !message.streaming && canRetry && (
                           <div className="course-chat__failed" data-testid="chat-answer-failed" role="alert">
                             <Sym name="error" aria-hidden="true" />
-                            <span className="course-chat__failed-text">{message.content}</span>
+                            <span className="course-chat__failed-text">{displayChatFailure(message.content)}</span>
                             <Button
                               size="sm"
                               variant="ghost"
@@ -1030,24 +1039,21 @@ export default function CourseChat() {
                         {/* 中断提示条。正文里**不嵌**「回答中断：xxx」那句（与「已停止生成」
                             不同）—— 这半截内容要能当 assistant 前缀发给模型接着写，
                             正文里夹一句系统口吻的说明会污染它。中断由这条提示条表达。 */}
-                        {!message.streaming && message.interrupted && (
+                        {!message.streaming && message.interrupted && message.key === latestInterruptedKey && (
                           <div className="course-chat__interrupted" data-testid="chat-interrupted">
-                            <Sym name="warning" />
                             <span className="course-chat__interrupted-text">
-                              这条回答写到一半被中断了
-                              {message.interruptReason ? `：${message.interruptReason}` : ''}
+                              {chatText('chat.interrupted')}
+                              {message.interruptReason ? `：${displayChatError(message.interruptReason)}` : ''}
                             </span>
-                            {/* 提示条里直接给入口，不指望用户去 hover 找那颗重试图标 ——
-                                中断是一个「需要你现在决定」的状态，不该藏在悬停里 */}
                             <Button
                               size="sm"
-                              variant="secondary"
+                              variant="tertiary"
                               className="course-chat__interrupted-continue"
                               data-testid="chat-continue"
                               isDisabled={loading}
                               onPress={() => void retryMessage(message.key)}
                             >
-                              继续写
+                              {chatText('chat.continue')}
                             </Button>
                           </div>
                         )}

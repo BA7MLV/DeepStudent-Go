@@ -38,10 +38,12 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   return body as T;
 }
 
-export interface ThreadDetail extends ThreadDto { messages: MessageDto[]; participants?: AgentProfileDto[]; approvals?: ApprovalDto[]; running?: boolean }
+export interface ThreadDetail extends ThreadDto { messages: MessageDto[]; participants?: AgentProfileDto[]; approvals?: ApprovalDto[]; questions?: ThreadQuestionDto[]; runs?: ThreadRunDto[]; running?: boolean }
 export interface Session { authenticated: boolean; user: { id: string; name: string } | null }
 export interface FileDto { id: string; originalName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string }
 export interface ApprovalDto { id: string; messageId: string; threadId: string; runId?: string | null; status: 'pending' | 'approved' | 'rejected'; createdAt: string; resolvedAt: string | null; resolution: string | null }
+export interface ThreadQuestionDto { id: string; runId: string; messageId: string; status: 'pending' | 'answered'; createdAt: string; answeredAt: string | null; answerMessageId: string | null }
+export interface ThreadRunDto { id: string; status: string; errorCode: string | null; wakeAt: string | null }
 
 export const serverClient = {
   bootstrapStatus: () => request<BootstrapStatusDto>('/bootstrap/status'),
@@ -77,9 +79,10 @@ export const serverClient = {
   projectDownloadUrl: (id: string, path: string) => `${API_ROOT}/projects/${encodeURIComponent(id)}/download?path=${encodeURIComponent(path)}`,
   fileDownloadUrl: (id: string) => `${API_ROOT}/files/${encodeURIComponent(id)}`,
   thread: (id: string) => request<ThreadDetail>(`/threads/${encodeURIComponent(id)}`),
+  threadState: (id: string) => request<Pick<ThreadDetail, 'runs' | 'questions' | 'running'>>(`/threads/${encodeURIComponent(id)}/state`),
   stopThread: (id: string) => request<{ stopped: number }>(`/threads/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
-  sendMessage: (id: string, content: string, clientNonce: string) => request<MessageDto & { deduplicated?: boolean }>(`/threads/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ clientNonce, role: 'user', kind: 'text', content }) }),
-  sendAttachment: (id: string, content: string, clientNonce: string) => request<MessageDto & { deduplicated?: boolean }>(`/threads/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ clientNonce, role: 'user', kind: 'attachment', content }) }),
+  sendMessage: (id: string, content: string, clientNonce: string, target?: { kind: 'run' | 'question'; runId?: string; questionId?: string }, replyTo?: string) => request<MessageDto & { deduplicated?: boolean; receipt?: unknown }>(`/threads/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ clientNonce, role: 'user', kind: 'text', content, target, replyTo }) }),
+  sendAttachment: (id: string, content: string, clientNonce: string, target?: { kind: 'run' | 'question'; runId?: string; questionId?: string }, replyTo?: string) => request<MessageDto & { deduplicated?: boolean; receipt?: unknown }>(`/threads/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ clientNonce, role: 'user', kind: 'attachment', content, target, replyTo }) }),
   uploadFile: (file: File) => request<FileDto>('/files', { method: 'POST', body: file, headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), 'X-File-Mime': file.type || 'application/octet-stream' } }),
   deleteFile: (id: string) => request<{ deleted: true }>(`/files/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   react: (messageId: string, reaction: string) => request<{ messageId: string; reaction: string; active: boolean }>(`/messages/${encodeURIComponent(messageId)}/reactions`, { method: 'POST', body: JSON.stringify({ reaction }) }),

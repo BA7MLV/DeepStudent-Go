@@ -29,6 +29,59 @@ export class ApiError extends Error {
   }
 }
 
+/** A short transport hiccup should not immediately become a failed answer. */
+const MAX_TRANSPORT_RETRIES = 2;
+
+function isRetryableTransportError(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status === 'number') return status === 408 || status === 425 || status === 429 || status >= 500;
+  if (error instanceof DOMException && error.name === 'AbortError') return false;
+  const name = (error as { name?: unknown } | null)?.name;
+  if (name === 'AbortError') return false;
+  const message = error instanceof Error ? error.message : String(error);
+  return /failed to fetch|load failed|network|socket|econnreset|econnaborted|etimedout|timed out|socket hang up|terminated|connection reset|connection.*closed|响应流意外结束|无效的流式 JSON|数据不完整|返回为空|没有返回可读取的流|连接.*断开|网络.*失败/i.test(message);
+}
+
+function retryDelay(error: unknown, attempt: number): number {
+  const retryAfterMs = (error as { retryAfterMs?: unknown } | null)?.retryAfterMs;
+  if (typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs)) return Math.min(30_000, Math.max(0, retryAfterMs));
+  // Exponential backoff with jitter avoids a group of clients reconnecting at
+  // the same instant after a provider hiccup.
+  return Math.min(4_000, 250 * 2 ** attempt) + Math.floor(Math.random() * 250);
+}
+
+async function waitForRetry(error: unknown, attempt: number, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const abort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, retryDelay(error, attempt));
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+
+async function withTransportRetry<T>(
+  operation: () => Promise<T>,
+  signal?: AbortSignal,
+  canRetry: () => boolean = () => true,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    signal?.throwIfAborted();
+    try {
+      return await operation();
+    } catch (error) {
+      if (signal?.aborted || attempt >= MAX_TRANSPORT_RETRIES || !canRetry() || !isRetryableTransportError(error)) throw error;
+      await waitForRetry(error, attempt, signal);
+    }
+  }
+}
+
 /** Retry-After 头：秒数或 HTTP 日期，返回毫秒；无法解析返回 undefined */
 function parseRetryAfter(value: string | null): number | undefined {
   if (!value) return undefined;
@@ -507,7 +560,10 @@ async function observeRequest(t: ModelTarget, opts: ChatOptions, operation: (cap
 }
 
 export function chatOnce(t: ModelTarget, opts: ChatOptions, fetcher?: typeof fetch): Promise<ChatMessage> {
-  return observeRequest(t, opts, () => chatOnceInner(t, opts, fetcher));
+  // The whole attempt is retried because no partial assistant content has
+  // been exposed by chatOnce. Each attempt remains separately observable via
+  // onRequest, which keeps usage and failure accounting correct.
+  return withTransportRetry(() => observeRequest(t, opts, () => chatOnceInner(t, opts, fetcher)), opts.signal);
 }
 async function chatOnceInner(t: ModelTarget, opts: ChatOptions, fetcher?: typeof fetch): Promise<ChatMessage> {
   const messages = wire(opts.messages);
@@ -580,7 +636,26 @@ export function chatStream(
   t: ModelTarget, opts: ChatOptions, onDelta?: (content: string) => void,
   onReasoning?: (text: string) => void, onToolCallDelta?: (call: ToolCallDelta) => void, fetcher: typeof fetch = fetch,
 ): Promise<ChatMessage> {
-  return observeRequest(t, opts, capture => chatStreamInner(t, opts, onDelta, onReasoning, onToolCallDelta, fetcher, capture));
+  let attemptProducedOutput = false;
+  return withTransportRetry(
+    () => {
+      // Replaying a request after any streamed token/tool delta could
+      // duplicate visible text or a side-effecting tool call. Only retry an
+      // attempt that failed before it produced anything observable.
+      attemptProducedOutput = false;
+      return observeRequest(t, opts, capture => chatStreamInner(
+        t,
+        opts,
+        onDelta ? text => { attemptProducedOutput = true; onDelta(text); } : undefined,
+        onReasoning ? text => { attemptProducedOutput = true; onReasoning(text); } : undefined,
+        onToolCallDelta ? call => { attemptProducedOutput = true; onToolCallDelta(call); } : undefined,
+        fetcher,
+        capture,
+      ));
+    },
+    opts.signal,
+    () => !attemptProducedOutput,
+  );
 }
 async function chatStreamInner(
   t: ModelTarget,
