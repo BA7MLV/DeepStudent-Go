@@ -438,6 +438,14 @@ const MIGRATIONS: Array<[number, string]> = [
     );
     CREATE INDEX run_waits_active ON run_waits(status,run_id);
   `],
+  [31, `
+    CREATE TABLE bot_artifact_files (
+      artifact_id TEXT PRIMARY KEY REFERENCES bot_artifacts(id) ON DELETE CASCADE,
+      chars INTEGER NOT NULL CHECK(chars >= 0),
+      expires_at TEXT NOT NULL
+    );
+    CREATE INDEX bot_artifact_files_expiry ON bot_artifact_files(expires_at);
+  `],
 ];
 
 // These two migrations were already numbered 14 and 15 on the main branch.
@@ -507,10 +515,12 @@ export class DatabaseStore {
   readonly systemMcp: SystemMcp;
   readonly systemSkills: SystemSkills;
   readonly skillRecords: SystemSkillRecords;
+  readonly artifactFilesDir: string;
 
   constructor(filename = process.env.DB_PATH ?? '/data/db/wangke.sqlite', systemFilesDir = path.join(path.dirname(filename), 'system-files')) {
     fs.mkdirSync(path.dirname(filename), { recursive: true });
     this.db = new Database(filename);
+    this.artifactFilesDir = path.resolve(path.dirname(filename), `${path.basename(filename)}.outputs`);
     this.systemFiles = new SystemFiles(systemFilesDir, this.db);
     this.systemMcp = new SystemMcp(this);
     this.systemSkills = new SystemSkills(systemFilesDir, this.db);
@@ -560,6 +570,7 @@ export class DatabaseStore {
           { version: 27, tables: ['system_skill_bindings'], extra: [], sql: SKILL_RECORDS_MIGRATION },
            { version: 28, tables: ['web_search_config'], extra: [], sql: MIGRATIONS.find(([v]) => v === 24)![1] },
            { version: 29, tables: ['run_inputs', 'run_questions', 'run_waits'], extra: [], sql: MIGRATIONS.find(([v]) => v === 29)![1] },
+           { version: 31, tables: ['bot_artifact_files'], extra: [], sql: MIGRATIONS.find(([v]) => v === 31)![1] },
         ];
         const present = groups.map(group => {
           const markers = [...group.tables.map(table => columns(this.db, table).length > 0), ...group.extra.map(([table, column]) => columns(this.db, table).some(c => c.name === column))];
@@ -608,6 +619,7 @@ export class DatabaseStore {
         apply(25, groups[13], 13);
          apply(26, groups[14], 14);
          apply(29, groups[15], 15);
+         apply(31, groups[16], 16);
         migrateMessageSync(this.db);
       } finally { expected.close(); }
     })();

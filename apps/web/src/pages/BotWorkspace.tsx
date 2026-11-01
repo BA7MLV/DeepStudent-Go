@@ -266,6 +266,12 @@ function plainPreview(text: string) {
     .trim();
 }
 
+/** IM 线程标题只保留联系人标识，避免把通道前缀和超长 peer 展开到顶栏。 */
+function compactThreadTitle(title: string | null | undefined) {
+  const value = (title ?? '').replace(/^IM\s*[·•:]\s*/i, '').trim();
+  return value.length > 28 ? `${value.slice(0, 28)}…` : value;
+}
+
 function lastText(messages: MessageDto[] | undefined) {
   if (!messages) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) if (messages[i].kind === 'text') return messages[i];
@@ -709,7 +715,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   ] : [];
 
   const landing = !activeId && !filesOpen;
-  const chatTitle = filesOpen ? tp('files') : activeSummary?.title && activeSummary.title !== tp('newTitle') ? activeSummary.title : currentAgent?.name ?? '';
+  const chatTitle = filesOpen ? tp('files') : activeSummary?.title && activeSummary.title !== tp('newTitle') ? compactThreadTitle(activeSummary.title) : currentAgent?.name ?? '';
 
   /* ── 对话区（Bot 栏与项目共用） ── */
 
@@ -827,8 +833,8 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
             }}
           >
             {recentThreads.map(({ thread, time }) => (
-              <Dropdown.Item key={thread.id} id={thread.id} textValue={thread.title || tp('newTitle')}>
-                <span className="min-w-0 flex-1 truncate">{thread.title || tp('newTitle')}</span>
+              <Dropdown.Item key={thread.id} id={thread.id} textValue={compactThreadTitle(thread.title) || tp('newTitle')}>
+                <span className="min-w-0 flex-1 truncate">{compactThreadTitle(thread.title) || tp('newTitle')}</span>
                 <time className="shrink-0 text-xs text-muted" dateTime={time}>{formatListTime(time, locale)}</time>
               </Dropdown.Item>
              ))}
@@ -911,7 +917,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
           >
             {listRows.map(({ thread, preview, time }) => {
               const agent = agentOf(thread);
-              const title = thread.title || tp('newTitle');
+              const title = compactThreadTitle(thread.title) || tp('newTitle');
               return (
                 <ListBox.Item key={thread.id} id={thread.id} textValue={title} className="bh-thread" data-archived={thread.archived || undefined}>
                   <BotAvatar agent={agent} size={40} />

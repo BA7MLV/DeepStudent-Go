@@ -22,7 +22,7 @@ export function affectedServices(changed, manifests) {
     if (filename === 'Dockerfile') { affected.add('api'); continue; }
     if (filename === 'infra/docker/web.Dockerfile' || filename === 'infra/docker/web-entrypoint.sh' || filename === 'infra/docker/Caddyfile.web') { affected.add('web'); continue; }
     if (filename === 'infra/sandbox/Dockerfile') { affected.add('sandbox'); continue; }
-    if (['infra/sandbox/broker.Dockerfile', 'infra/sandbox/broker.mjs', 'infra/sandbox/arguments.mjs'].includes(filename)) { affected.add('broker'); continue; }
+    if (['infra/sandbox/broker.Dockerfile', 'infra/sandbox/broker.mjs', 'infra/sandbox/arguments.mjs', 'infra/sandbox/file-read.mjs', 'infra/sandbox/output.mjs', 'infra/sandbox/cleanup.mjs'].includes(filename)) { affected.add('broker'); continue; }
     if (/^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$))/.test(filename)) continue;
     // Root lockfile, toolchain, build scripts, edge configuration and unknown
     // inputs are deliberately conservative. Never guess that a dependency is harmless.

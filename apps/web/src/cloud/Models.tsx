@@ -15,7 +15,7 @@ import { registerSettingsLeaveGuard } from '../components/settingsDialogStore';
 import ModelPresets, { type PresetDraft } from './ModelPresets';
 import ModelGatewayStatus from './ModelGatewayStatus';
 
-function ProviderAccounts({ config, provider, onSaved }: { config: CloudConfig; provider: CloudConfig['providers'][number]; onSaved: (value: CloudConfig) => void }) {
+function ProviderAccounts({ config, provider, onSaved }: { config: CloudConfig; provider: Pick<CloudConfig['providers'][number], 'id' | 'name' | 'accounts' | 'activeAccountId'>; onSaved: (value: CloudConfig) => void }) {
   const [name, setName] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -24,21 +24,24 @@ function ProviderAccounts({ config, provider, onSaved }: { config: CloudConfig; 
   const prefix = `/providers/${encodeURIComponent(provider.id)}/accounts`;
   const run = async (path: string, init: RequestInit) => {
     setBusy(true); setError('');
-    try { onSaved(await cloudRequest<CloudConfig>(path, init)); }
-    catch (e) { setError(modelSettingsError(e)); }
+    try {
+      const saved = await cloudRequest<CloudConfig>(path, init);
+      onSaved(saved);
+      return saved;
+    } catch (e) { setError(modelSettingsError(e)); return undefined; }
     finally { setBusy(false); }
   };
   return <div className="mt-2 flex flex-col gap-2 rounded-lg border border-foreground/10 p-3" data-testid={`provider-accounts-${provider.id}`}>
-    <p className="text-xs font-medium">{provider.name || provider.id} Key 账户</p>
+    <p className="text-xs font-medium">API Key 账户</p>
     {accounts.length ? <div className="flex flex-col gap-1">{accounts.map(account => <div key={account.id} className="flex flex-wrap items-center gap-2 text-xs">
       <span className="min-w-28">{account.name}</span><span className="text-muted">{account.configured ? '已配置' : '未配置'}</span>
       {provider.activeAccountId === account.id ? <span className="text-success">当前使用</span> : <Button size="sm" variant="tertiary" isDisabled={busy} onPress={() => void run(`${prefix}/${encodeURIComponent(account.id)}/active`, { method: 'PUT', body: JSON.stringify({ modelRevision: config.modelRevision }) })}>启用</Button>}
       <Button size="sm" variant="ghost" isDisabled={busy} onPress={() => void run(`${prefix}/${encodeURIComponent(account.id)}`, { method: 'DELETE', body: JSON.stringify({ modelRevision: config.modelRevision }) })}>删除</Button>
-    </div>)}</div> : <p className="text-xs text-muted">暂无已保存 Key，可直接使用服务器环境变量。</p>}
+    </div>)}</div> : <p className="text-xs text-muted">暂无已保存 Key{provider.id === 'opencode-go' ? '，也可使用服务器 OPENCODE_GO_API_KEY' : ''}。</p>}
     <div className="flex flex-wrap gap-2">
       <input className="min-w-32 flex-1 rounded border border-foreground/15 bg-transparent px-2 py-1 text-xs" placeholder="账户名称（可选）" value={name} onChange={e => setName(e.target.value)} />
-      <input className="min-w-48 flex-[2] rounded border border-foreground/15 bg-transparent px-2 py-1 text-xs" type="password" autoComplete="new-password" placeholder="粘贴新的 OpenCode Go Key" value={apiKey} onChange={e => setApiKey(e.target.value)} />
-      <Button size="sm" variant="secondary" isDisabled={busy || !apiKey.trim()} onPress={() => void run(prefix, { method: 'POST', body: JSON.stringify({ name, apiKey, modelRevision: config.modelRevision }) }).then(() => { setName(''); setApiKey(''); })}>添加 Key</Button>
+      <input className="min-w-48 flex-[2] rounded border border-foreground/15 bg-transparent px-2 py-1 text-xs" type="password" autoComplete="new-password" placeholder="粘贴新的 API Key" value={apiKey} onChange={e => setApiKey(e.target.value)} />
+      <Button size="sm" variant="secondary" isDisabled={busy || !apiKey.trim()} onPress={async () => { const saved = await run(prefix, { method: 'POST', body: JSON.stringify({ name, apiKey, modelRevision: config.modelRevision }) }); if (saved) { setName(''); setApiKey(''); } }}>添加 Key</Button>
     </div>
     {error && <p className="text-xs text-danger" role="alert">{error}</p>}
   </div>;
@@ -89,6 +92,15 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
     setConfig(saved);
     setDiscoveryRevision(crypto.randomUUID());
     applyCloudConfig(saved);
+  }
+  function savedAccounts(saved: CloudConfig) {
+    savedConfig(saved);
+    const remote = new Map(saved.providers.map(provider => [provider.id, provider]));
+    const current = store.getState();
+    store.setState({ providers: current.providers.map(provider => {
+      const next = remote.get(provider.id);
+      return next ? { ...provider, accounts: next.accounts, activeAccountId: next.activeAccountId } : provider;
+    }) });
   }
   function showError(error: unknown) {
     setError(modelSettingsError(error));
@@ -158,20 +170,13 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
     finally { operation.current = false; setBusy(false); }
   }
   return <div className="flex min-w-0 flex-col gap-5">
-    <section aria-label="OpenCode Go" className="flex flex-col gap-2 text-sm">
-      <h3 className="font-medium">OpenCode Go</h3>
-       <p className="text-xs text-muted">每个 Provider 都支持单 Key 或多个服务端 Key 账户。OpenCode Go 可直接配置服务器 OPENCODE_GO_API_KEY，也可在下方保存并手动切换多个 Key。模型列表通过官方动态发现；目录不代表账号授权。Google native 暂不支持，可选 Chat/Responses 转换或 Anthropic Deployment。</p>
-      <p className="text-xs text-muted">allowance 是本请求占用套餐的美元值，不是余额或本地预算。月度、5 小时、周限制及 Extra Usage 由供应商 Console 管理；本页不能查询剩余额度。受限模型、区域、训练和保留策略需确认，未知策略默认不进入 fallback。Go 面向 coding-agent 流量，学习业务需先确认适用范围。</p>
-       {!config.providers.some(p => p.id === 'opencode-go') && <Button size="sm" variant="secondary" isDisabled={busy} onPress={() => void saveProvider({ id: 'opencode-go', name: 'OpenCode Go', protocol: 'openai-chat', baseUrl: 'https://opencode.ai/inference/go/openai/v1', apiKey: '', catalogId: '', serves: ['chat'] }).catch(() => {})}>添加 OpenCode Go（服务端环境密钥）</Button>}
-       {config.providers.map(provider => <ProviderAccounts key={provider.id} config={config} provider={provider} onSaved={savedConfig} />)}
-    </section>
     {issues.length > 0 && <div className="rounded-xl bg-danger/10 p-3" role="status">
       <p className="text-sm text-danger">有 {issues.length} 项默认模型配置需要修复。你仍可独立保存连接并获取模型列表。</p>
       <Button variant="tertiary" size="sm" onPress={() => setFocusIssue((value) => value + 1)}>定位并修复</Button>
     </div>}
     <ModelSettingsContext.Provider value={store}>
       <fieldset disabled={busy} className="m-0 flex min-w-0 flex-col gap-5 border-0 p-0">
-        <ModelsModule key={editorGeneration} serverManaged standalone={standalone} discoveryProviders={cloudDiscoveryProviders(settings, config, discoveryRevision)} providerNeedsSave={(provider) => cloudProviderDirty(provider, config)} onSaveProvider={saveProvider} onDraftChange={setEditingConnection} issues={issues} focusIssue={focusIssue} />
+       <ModelsModule key={editorGeneration} serverManaged standalone={standalone} discoveryProviders={cloudDiscoveryProviders(settings, config, discoveryRevision)} providerNeedsSave={(provider) => cloudProviderDirty(provider, config)} onSaveProvider={saveProvider} onDraftChange={setEditingConnection} renderProviderAccounts={provider => <ProviderAccounts config={config} provider={provider} onSaved={savedAccounts} />} onAddOpenCodeGo={!config.providers.some(p => p.id === 'opencode-go') ? () => void saveProvider({ id: 'opencode-go', name: 'OpenCode Go', protocol: 'openai-chat', baseUrl: 'https://opencode.ai/inference/go/openai/v1', apiKey: '', catalogId: '', serves: ['chat'] }).catch(() => {}) : undefined} addOpenCodeGoDisabled={busy} issues={issues} focusIssue={focusIssue} />
       </fieldset>
     </ModelSettingsContext.Provider>
     <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0"><ModelPresets value={presets} providers={settings.providers} onChange={setPresets} /></fieldset>

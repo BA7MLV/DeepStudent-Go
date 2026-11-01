@@ -609,6 +609,7 @@ function ProviderRow({
   shaking,
   customConnection = false,
   serverManaged = false,
+  accountContent,
   children,
 }: {
   provider: Provider;
@@ -624,6 +625,7 @@ function ProviderRow({
   shaking: boolean;
   customConnection?: boolean;
   serverManaged?: boolean;
+  accountContent?: ReactNode;
   children: ReactNode;
 }) {
   const inputRef = useRef<HTMLDivElement>(null);
@@ -822,6 +824,7 @@ function ProviderRow({
               {note}
             </div>
           )}
+          {accountContent}
           {children}
         </div>
       )}
@@ -834,13 +837,16 @@ function ProviderRow({
  *
  * 供应商优先：展开一家后管理连接及其模型，再设置各用途的默认模型和运行参数。
  */
-export default function ModelsModule({ serverManaged = false, discoveryProviders, standalone = false, onSaveProvider, providerNeedsSave, onDraftChange, issues = [], focusIssue = 0 }: {
+export default function ModelsModule({ serverManaged = false, discoveryProviders, standalone = false, onSaveProvider, providerNeedsSave, onDraftChange, renderProviderAccounts, onAddOpenCodeGo, addOpenCodeGoDisabled = false, issues = [], focusIssue = 0 }: {
   serverManaged?: boolean;
   discoveryProviders?: DiscoveryProvider[];
   standalone?: boolean;
   onSaveProvider?: (provider: Provider) => Promise<void>;
   providerNeedsSave?: (provider: Provider) => boolean;
   onDraftChange?: (editing: boolean) => void;
+  renderProviderAccounts?: (provider: Provider) => ReactNode;
+  onAddOpenCodeGo?: () => void;
+  addOpenCodeGoDisabled?: boolean;
   issues?: ModelSettingsIssue[];
   focusIssue?: number;
 } = {}) {
@@ -1092,6 +1098,9 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
         title={draftProvider ? (draftProvider.name.trim() || '自定义提供商') : selectedProvider ? (selectedProvider.name.trim() || '未命名供应商') : '模型供应商'}
         testId="card-api"
       >
+        {!draftProvider && !selectedProvider && onAddOpenCodeGo && <div className="mb-4 flex justify-end">
+          <Button size="sm" variant="secondary" isDisabled={addOpenCodeGoDisabled} onPress={onAddOpenCodeGo}>添加 OpenCode Go</Button>
+        </div>}
         {draftProvider ? (
           <form className="flex flex-col gap-4" data-testid="provider-draft" onSubmit={(event) => {
             event.preventDefault();
@@ -1151,6 +1160,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
                 settings.update({ providers: settings.providers.map((x) => (x.id === selectedProvider.id ? { ...x, ...patch } : x)) });
               }}
               onRemove={() => void confirmRemove(selectedProvider)}
+              accountContent={renderProviderAccounts?.(selectedProvider)}
             >
               {serverManaged && <p className="text-xs text-muted">{providerNeedsSave?.(selectedProvider) ? '连接有未保存修改，点击“保存连接并获取模型”后生效。' : '连接已保存。获取模型列表不代表模型调用测试通过。'}</p>}
               {providerError && <p role="alert" className="text-sm text-danger">{providerError}</p>}

@@ -6,6 +6,8 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { sandboxArgs, commandTimeoutSeconds, uuid } from './arguments.mjs';
 import { workspacePath, workspaceFileLimit } from './file-read.mjs';
+import { OutputPreview, outputLimitBytes } from './output.mjs';
+import { removeContainer } from './cleanup.mjs';
 export { sandboxArgs } from './arguments.mjs';
 
 const token = process.env.SANDBOX_TOKEN;
@@ -13,9 +15,10 @@ if (!token || token.length < 32) throw new Error('SANDBOX_TOKEN must contain at 
 const active = new Map();
 const executions = new Map();
 const cancelled = new Map();
-const remove = async name => {
-  try { await promisify(execFile)('docker', ['rm', '-f', name], { timeout: 10_000 }); }
-  catch (error) { if (!/No such container/i.test(String(error.stderr))) throw error; }
+const removals = new Map();
+const remove = name => {
+  if (!removals.has(name)) removals.set(name, removeContainer(name).finally(() => removals.delete(name)));
+  return removals.get(name);
 };
 
 let hostRoot;
@@ -74,7 +77,7 @@ const server = http.createServer(async (req, res) => {
     cancelled.set(body.executionId, Date.now() + 300_000);
     const execution = executions.get(body.executionId);
     if (execution) { execution.cancelled = true; execution.stop?.(); await execution.done; }
-    try { await remove(`wangke-exec-${body.executionId}`); return reply(200, { cancelled: true }); }
+    try { await remove(`wangke-exec-${body.executionId}`); execution?.finish(); return reply(200, { cancelled: true }); }
     catch { return reply(503, { error: 'sandbox_cleanup_pending' }); }
   }
   if (cancelled.has(body.executionId)) return reply(409, { error: 'execution_cancelled' });
@@ -83,34 +86,56 @@ const server = http.createServer(async (req, res) => {
   const name = `wangke-exec-${body.executionId}`;
   let resolveDone;
   const execution = { name, cancelled: false, stop: null, done: new Promise(resolve => { resolveDone = resolve; }) };
-  const finish = () => { active.delete(scope); executions.delete(body.executionId); resolveDone(); };
+  const finish = () => {
+    if (active.get(scope) === execution) active.delete(scope);
+    if (executions.get(body.executionId) === execution) executions.delete(body.executionId);
+    resolveDone();
+  };
+  execution.finish = finish;
   active.set(scope, execution); executions.set(body.executionId, execution);
   let args;
   try { args = sandboxArgs(body, body.projectId ? await projectRoot(body.projectId) : undefined, readingFile ? undefined : await systemFilesRoot()); }
   catch { finish(); return reply(400, { error: 'invalid_project_workspace' }); }
   if (res.destroyed || execution.cancelled) { finish(); return reply(409, { error: 'execution_cancelled' }); }
-  let stdout = ''; let stderr = ''; let size = 0; let timer;
+  const streaming = !readingFile && req.headers.accept === 'application/x-ndjson';
+  const stdout = new OutputPreview(), stderr = new OutputPreview();
+  let size = 0; let timer; let terminationReason; let spawnError = false; let backpressure = false;
+  const send = value => { if (!res.destroyed) return res.write(`${JSON.stringify(value)}\n`); return false; };
+  if (streaming) res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
   const fileChunks = []; let fileBytes = 0; let fileOverflow = false;
   const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let removing;
-  const stop = () => { child.kill('SIGKILL'); removing ??= remove(name).catch(() => {}); };
-  execution.stop = stop;
-  const disconnected = () => { if (!res.writableEnded) stop(); };
+  const stop = reason => {
+    terminationReason ??= reason;
+    removing ??= remove(name).catch(() => {}).finally(() => { child.kill('SIGKILL'); child.stdout.resume(); child.stderr.resume(); });
+  };
+  execution.stop = () => stop('cancelled');
+  const disconnected = () => { if (!res.writableEnded) stop('cancelled'); };
   res.on('close', disconnected);
-  timer = setTimeout(stop, (readingFile ? 120 : body.timeoutSeconds) * 1000 + 10_000);
+  res.on('error', disconnected);
+  timer = setTimeout(() => stop('command_timeout'), (readingFile ? 120 : body.timeoutSeconds) * 1000 + 10_000);
   const collect = (kind, chunk) => {
     if (readingFile && kind === 'stdout') {
       fileBytes += chunk.length;
-      if (fileBytes > workspaceFileLimit) { fileOverflow = true; stop(); return; }
+      if (fileBytes > workspaceFileLimit) { fileOverflow = true; stop('output_limit_exceeded'); return; }
       fileChunks.push(chunk); return;
     }
+    const remaining = Math.max(0, outputLimitBytes - size);
     size += chunk.length;
-    if (size > 128_000) { stop(); return; }
-    if (kind === 'stdout') stdout += chunk.toString(); else stderr += chunk.toString();
+    const accepted = chunk.subarray(0, remaining);
+    (kind === 'stdout' ? stdout : stderr).push(accepted);
+    if (streaming && accepted.length && !res.destroyed) {
+      if (!send({ type: kind, data: accepted.toString('base64') }) && !backpressure) {
+        backpressure = true;
+        child.stdout.pause(); child.stderr.pause();
+        res.once('drain', () => { backpressure = false; child.stdout.resume(); child.stderr.resume(); });
+      }
+    }
+    if (size > outputLimitBytes) stop('output_limit_exceeded');
   };
   child.stdout.on('data', (chunk) => collect('stdout', chunk));
   child.stderr.on('data', (chunk) => collect('stderr', chunk));
-  child.on('error', () => { stderr = 'Unable to start sandbox'; });
+  child.on('error', () => { spawnError = true; });
   child.on('close', async (code) => {
     clearTimeout(timer);
     try {
@@ -122,8 +147,25 @@ const server = http.createServer(async (req, res) => {
         if (code === 2) return reply(404, { error: 'workspace_file_not_found' });
         if (code !== 0 || !fileBytes) return reply(400, { error: 'workspace_file_unavailable' });
         if (!res.destroyed) { res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': fileBytes }); res.end(Buffer.concat(fileChunks)); }
-      } else reply(200, { stdout: stdout.slice(0, 60_000), stderr: stderr.slice(0, 60_000), exitCode: code ?? 137 });
-    } catch { finish(); reply(503, { error: 'sandbox_cleanup_pending' }); }
+      } else {
+        const out = stdout.result(), err = stderr.result();
+        const result = { stdout: out.text, stderr: err.text, exitCode: code ?? 137,
+          output: { stdoutBytes: out.bytes, stderrBytes: err.bytes, stdoutTruncated: out.truncated, stderrTruncated: err.truncated, complete: size <= outputLimitBytes, limitBytes: outputLimitBytes },
+          ...(terminationReason ? { terminationReason } : {}), ...(spawnError ? { error: 'sandbox_start_failed' } : {}) };
+        console.info(JSON.stringify({ event: 'sandbox.finished', executionId: body.executionId, exitCode: result.exitCode, ...result.output, terminationReason }));
+        if (streaming) { send({ type: 'result', ...result }); res.end(); }
+        else reply(spawnError ? 503 : 200, result);
+      }
+    } catch {
+      // Keep both broker scope and API project lease blocked until Docker has
+      // actually confirmed removal. A failed cleanup must never unlock them.
+      resolveDone();
+      console.error(JSON.stringify({ event: 'sandbox.cleanup_pending', executionId: body.executionId, terminationReason }));
+      const retry = () => { const retryTimer = setTimeout(() => remove(name).then(finish, retry), 1000); retryTimer.unref(); };
+      retry();
+      if (streaming) { send({ type: 'error', error: 'sandbox_cleanup_pending', terminationReason }); res.end(); }
+      else reply(503, { error: 'sandbox_cleanup_pending', terminationReason });
+    }
   });
 });
 server.listen(Number(process.env.PORT ?? 3001), process.env.HOST || '0.0.0.0');

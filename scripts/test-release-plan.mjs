@@ -20,6 +20,8 @@ assert.deepEqual(selected('package-lock.json'), ['api', 'web', 'sandbox', 'broke
 assert.deepEqual(selected('scripts/build-task-runtime.mjs'), ['api', 'web', 'sandbox', 'broker']);
 assert.deepEqual(selected('infra/docker/web-entrypoint.sh'), ['web']);
 assert.deepEqual(selected('infra/sandbox/broker.mjs'), ['broker']);
+assert.deepEqual(selected('infra/sandbox/output.mjs'), ['broker']);
+assert.deepEqual(selected('infra/sandbox/cleanup.mjs'), ['broker']);
 assert.deepEqual(selected('infra/sandbox/Dockerfile'), ['sandbox']);
 assert.deepEqual(selected('docs/deployment.md'), []);
 // No hardcoded knowledge of new shared workspaces: reverse closure is transitive.

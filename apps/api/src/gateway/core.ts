@@ -491,7 +491,7 @@ export class GatewayCore {
             }
             // One owner identity per account. Rebinding requires explicit revocation first.
             if (this.store.db.prepare('SELECT 1 FROM gateway_bindings WHERE account_id=? AND revoked=0').get(row.account_id) && (!b || b.revoked)) return;
-            const thread = b ? { id: b.thread_id } : this.bot.create(row.owner_id, 'bot', `IM · ${m.peer.slice(0, 60)}`, row.agent_id);
+            const thread = b ? { id: b.thread_id } : this.bot.create(row.owner_id, 'bot', m.peer.replace(/^IM\s*[·•:]\s*/i, '').slice(0, 28), row.agent_id);
             this.store.db.prepare('DELETE FROM thread_participants WHERE thread_id=?').run(thread.id);
             this.store.db.prepare('INSERT INTO thread_participants(thread_id,agent_id,joined_at) VALUES(?,?,?)').run(thread.id, row.agent_id, stamp());
             this.store.db.prepare(`INSERT INTO gateway_bindings(id,account_id,tenant,peer,chat,topic,thread_id,context) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account_id,tenant,peer,chat,topic) DO UPDATE SET revoked=0,context=excluded.context`).run(crypto.randomUUID(), row.account_id, m.tenant, m.peer, m.chat, m.topic, thread.id, b && !b.revoked ? b.context : m.context ? this.secrets.seal(m.context) : null);

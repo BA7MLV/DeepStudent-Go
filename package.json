@@ -52,6 +52,7 @@
     "test:web-search:e2e": "tsx scripts/e2e-web-search.mjs",
     "test:mcp:e2e": "tsx scripts/e2e-mcp-files.mjs",
     "test:sandbox": "node scripts/test-sandbox.mjs",
+    "test:sandbox-output": "tsx --test scripts/test-sandbox-output.mjs",
     "test:cloud": "tsx scripts/test-cloud.mjs",
     "test:cloud:transactions": "tsx --test scripts/test-cloud-transactions.mjs",
     "test:storage": "tsx --test scripts/test-storage-usage.mjs",
