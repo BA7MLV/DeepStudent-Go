@@ -5,6 +5,7 @@ import type {
   SseEvent,
   ThreadDto,
   ProjectDto, ProjectDetailDto, ProjectPolicy, ProjectRole, ProjectFileDto, ProjectTextDto,
+  BotSnapshot, BotMessagePage, BotSyncState, BotThreadPage,
 } from '@wangke/contracts';
 import type {
   AuthenticationResponseJSON,
@@ -15,10 +16,12 @@ import type {
 import { apiUrl } from './base';
 
 const API_ROOT = apiUrl('/api/v1');
+let authenticatedIdentity: string | null | undefined;
 
 export class ServerApiError extends Error {
   status: number;
   code: string;
+  retryAfterMs?: number;
   constructor(status: number, code: string) {
     super(code);
     this.name = 'ServerApiError';
@@ -55,12 +58,25 @@ export const serverClient = {
   passkeyLoginVerify: (response: AuthenticationResponseJSON) => request<{ verified: true; user: Session['user'] }>('/auth/passkey/login/verify', { method: 'POST', body: JSON.stringify(response) }),
   passkeyRegisterOptions: () => request<PublicKeyCredentialCreationOptionsJSON>('/auth/passkey/register/options', { method: 'POST' }),
   passkeyRegisterVerify: (response: RegistrationResponseJSON) => request<{ verified: true }>('/auth/passkey/register/verify', { method: 'POST', body: JSON.stringify(response) }),
-  session: () => request<Session>('/auth/session'),
-  logout: () => request<{ ok: true }>('/auth/logout', { method: 'POST' }),
+  session: async () => {
+    const result = await request<Session>('/auth/session');
+    const identity = result.authenticated ? result.user?.id ?? null : null;
+    if (!identity || authenticatedIdentity !== undefined && authenticatedIdentity !== identity) window.dispatchEvent(new Event('wangke:bot-session-ended'));
+    authenticatedIdentity = identity;
+    return result;
+  },
+  logout: async () => {
+    const result = await request<{ ok: true }>('/auth/logout', { method: 'POST' });
+    window.dispatchEvent(new Event('wangke:bot-session-ended'));
+    authenticatedIdentity = null;
+    return result;
+  },
   resetAccount: (password: string) => request<{ reset: true; initialized: false; bootstrapSecret: string; expiresAt: string }>('/account/reset', { method: 'POST', body: JSON.stringify({ password }) }),
   agents: () => request<{ agents: AgentProfileDto[] }>('/agents'),
   createAgent: (profile: { name: string; role?: string; systemPrompt?: string; avatar?: string }) => request<AgentProfileDto>('/agents', { method: 'POST', body: JSON.stringify(profile) }),
   threads: (projectId?: string) => request<{ threads: ThreadDto[] }>(`/threads${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`),
+  threadPage: (projectId?: string, cursor?: string) => request<BotThreadPage>(`/threads/page?${new URLSearchParams({ ...(projectId ? { projectId } : {}), ...(cursor ? { cursor } : {}) })}`),
+  threadSummary: (id: string) => request<ThreadDto>(`/threads/${encodeURIComponent(id)}/summary`),
   createThread: (title?: string, scope: { projectId?: string; agentId?: string } = {}) => request<ThreadDto>('/threads', { method: 'POST', body: JSON.stringify({ mode: 'bot', title, ...scope }) }),
   updateThread: (id: string, value: { title?: string; archived?: boolean }) => request<ThreadDto>(`/threads/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(value) }),
   deleteThread: (id: string) => request<{ deleted: true }>(`/threads/${encodeURIComponent(id)}`, { method: 'DELETE' }),
@@ -79,6 +95,9 @@ export const serverClient = {
   projectDownloadUrl: (id: string, path: string) => `${API_ROOT}/projects/${encodeURIComponent(id)}/download?path=${encodeURIComponent(path)}`,
   fileDownloadUrl: (id: string) => `${API_ROOT}/files/${encodeURIComponent(id)}`,
   thread: (id: string) => request<ThreadDetail>(`/threads/${encodeURIComponent(id)}`),
+  threadSnapshot: (id: string, signal?: AbortSignal, beforeSeq?: number) => request<BotSnapshot>(`/threads/${encodeURIComponent(id)}/snapshot${beforeSeq ? `?beforeSeq=${beforeSeq}` : ''}`, { signal }),
+  threadMessages: (id: string, beforeSeq: number, signal?: AbortSignal) => request<BotMessagePage>(`/threads/${encodeURIComponent(id)}/messages?beforeSeq=${beforeSeq}`, { signal }),
+  threadSyncState: (id: string, fromSeq?: number, signal?: AbortSignal, toSeq?: number) => request<BotSyncState>(`/threads/${encodeURIComponent(id)}/sync-state?${new URLSearchParams({ ...(fromSeq ? { fromSeq: String(fromSeq) } : {}), ...(toSeq ? { toSeq: String(toSeq) } : {}) })}`, { signal }),
   threadState: (id: string) => request<Pick<ThreadDetail, 'runs' | 'questions' | 'running'>>(`/threads/${encodeURIComponent(id)}/state`),
   stopThread: (id: string) => request<{ stopped: number }>(`/threads/${encodeURIComponent(id)}/stop`, { method: 'POST' }),
   sendMessage: (id: string, content: string, clientNonce: string, target?: { kind: 'run' | 'question'; runId?: string; questionId?: string }, replyTo?: string) => request<MessageDto & { deduplicated?: boolean; receipt?: unknown }>(`/threads/${encodeURIComponent(id)}/messages`, { method: 'POST', body: JSON.stringify({ clientNonce, role: 'user', kind: 'text', content, target, replyTo }) }),
@@ -88,32 +107,56 @@ export const serverClient = {
   react: (messageId: string, reaction: string) => request<{ messageId: string; reaction: string; active: boolean }>(`/messages/${encodeURIComponent(messageId)}/reactions`, { method: 'POST', body: JSON.stringify({ reaction }) }),
   approvals: (id: string) => request<ApprovalDto>(`/approvals/${encodeURIComponent(id)}`),
   resolveApproval: (id: string, approved: boolean, resolution?: string) => request<ApprovalDto>(`/approvals/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ approved, resolution }) }),
-  async events(id: string, after: number, onEvent: (event: SseEvent, id: number) => void, signal?: AbortSignal) {
-    const response = await fetch(`${API_ROOT}/threads/${encodeURIComponent(id)}/events?after=${after}`, { credentials: 'include', headers: { Accept: 'text/event-stream', 'Last-Event-ID': String(after) }, signal });
-    if (!response.ok || !response.body) throw new ServerApiError(response.status, `events_${response.status}`);
-    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let eventId = after; let eventType = '';
+  async events(id: string, after: number, onEvent: (event: SseEvent, id: number) => void, signal?: AbortSignal, live = false, onOpen?: () => void) {
+    const response = await fetch(`${API_ROOT}/threads/${encodeURIComponent(id)}/${live ? 'stream' : 'events'}?after=${after}`, { credentials: 'include', headers: { Accept: 'text/event-stream', 'Last-Event-ID': String(after) }, signal });
+    if (!response.ok || !response.body) {
+      const error = new ServerApiError(response.status, `events_${response.status}`);
+      const retry = response.headers.get('retry-after');
+      if (retry) error.retryAfterMs = /^\d+$/.test(retry) ? Number(retry) * 1000 : Math.max(0, Date.parse(retry) - Date.now());
+      throw error;
+    }
+    onOpen?.();
+    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let eventId = after;
     const consume = (block: string) => {
       let data = '';
       let nextType = '';
       let nextId = eventId;
+      let hasId = false;
       for (const line of block.split('\n')) {
         if (line.startsWith('id:')) {
           const parsed = Number(line.slice(3).trim());
-          if (Number.isSafeInteger(parsed) && parsed >= 0) nextId = parsed;
+          if (Number.isSafeInteger(parsed) && parsed > 0) { nextId = parsed; hasId = true; }
         } else if (line.startsWith('event:')) nextType = line.slice(6).trim();
         else if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).trim();
       }
       if (!data || !nextType) return;
-      try {
-        const parsed = JSON.parse(data);
-        eventId = nextId;
-        eventType = nextType;
-        onEvent({ type: eventType, ...parsed } as SseEvent, eventId);
-      } catch {
-        // Reconnect from the last valid cursor if a malformed event is received.
+      let parsed;
+      try { parsed = JSON.parse(data); } catch { throw new Error('invalid_sync_event'); }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid_sync_event');
+      const event = { ...parsed, type: nextType } as SseEvent;
+      if (!['message.pending', 'message.accepted', 'message.updated', 'message.reaction', 'run.started', 'run.progress', 'run.waiting_user', 'run.completed', 'run.failed', 'thread.state_invalidated', 'resync.required'].includes(nextType)) {
+        onEvent({ type: nextType } as SseEvent, nextId); eventId = nextId; return;
       }
+      if (nextType !== 'resync.required' && !hasId) throw new Error('invalid_sync_event');
+      if (['message.pending', 'message.accepted', 'message.updated'].includes(nextType)) {
+        const message = 'message' in event ? event.message : null;
+        if (nextId <= 0 || !message || typeof message.id !== 'string' || message.threadId !== id || !Number.isSafeInteger(message.seq) || message.seq < 1 || typeof message.content !== 'string' || typeof message.createdAt !== 'string' || !Number.isFinite(Date.parse(message.createdAt)) || !['user', 'assistant', 'tool', 'system'].includes(message.role) || !['text', 'progress', 'attachment', 'widget', 'question', 'approval', 'web_sources'].includes(message.kind)) throw new Error('invalid_sync_event');
+      }
+      // Only advance after the consumer successfully validated/applied the event.
+      onEvent(event, nextId);
+      eventId = nextId;
     };
-    for (;;) { const part = await reader.read(); if (part.done) break; buffer += decoder.decode(part.value, { stream: true }); const blocks = buffer.split('\n\n'); buffer = blocks.pop() ?? ''; blocks.forEach(consume); }
-    if (buffer.trim()) consume(buffer);
+    try {
+      for (;;) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const part = await Promise.race([reader.read(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('sync_timeout')), 45_000); })]).finally(() => clearTimeout(timer));
+        if (part.done) break;
+        buffer = (buffer + decoder.decode(part.value, { stream: true })).replace(/\r\n/g, '\n');
+        if (buffer.length > 2 * 1024 * 1024) throw new Error('sync_event_too_large');
+        const blocks = buffer.split('\n\n'); buffer = blocks.pop() ?? ''; blocks.forEach(consume);
+      }
+      buffer += decoder.decode();
+      // An incomplete frame is replayed from the last applied ID, never applied partially.
+    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   },
 };

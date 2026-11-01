@@ -1,4 +1,4 @@
-export type ModelRequestOptions = { attempts?: number; timeoutMs?: number; chainMs?: number };
+export type ModelRequestOptions = { attempts?: number; timeoutMs?: number; chainMs?: number; ordinary?: boolean };
 
 function setting(value: string | undefined, fallback: number, min: number, max: number) {
   const parsed = value?.trim() ? Number(value) : NaN;

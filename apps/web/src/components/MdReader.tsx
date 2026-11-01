@@ -243,7 +243,7 @@ export default function MdReader({ blob, materialId, initialUnit, handleRef, onU
    */
   const enterEdit = useCallback(() => {
     if (text === null) return;
-    ink.setTool('read');
+    ink.setTool('pan');
     draftRef.current = text;
     setEditing(true);
   }, [text, ink.setTool]);

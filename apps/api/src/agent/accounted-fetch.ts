@@ -1,34 +1,35 @@
 import type { CloudProvider } from '@wangke/contracts/cloud';
 import { BudgetBlocked, UsageLedger, type RequestAttribution } from './budget.js';
-import { modelUsage } from './model-client.js';
+import { modelUsage, abortable, limitedJson } from './model-client.js';
 import { boundedRequest, checkRequestCapacity } from './request-budget.js';
 import { usageCollector } from '@wangke/study-core/model/usage';
 import { observeModelFetch } from './model-observations.js';
 
 /** Instrument the existing learning/proxy protocol implementation rather than
  * adding a second converter or counting parent and child requests twice. */
-export function accountedFetch(ledger: UsageLedger, base: Omit<RequestAttribution, 'provider' | 'model'>, providers: CloudProvider[], fetcher: typeof fetch): typeof fetch {
+export function accountedFetch(ledger: UsageLedger, base: Omit<RequestAttribution, 'provider' | 'model'>, providers: CloudProvider[], fetcher: typeof fetch, native?: { model: string; reserveTokens: number }): typeof fetch {
   let attempt = 0;
   return async (url, init) => {
     const endpoint = String(url);
-    const modelEndpoint = /\/(chat\/completions|responses|messages)$/.test(new URL(endpoint).pathname);
+    const modelEndpoint = /\/(chat\/completions|responses|messages)$/.test(new URL(endpoint).pathname) || Boolean(native);
     const provider = providers.find(p => endpoint.startsWith(`${p.baseUrl}/`) && modelEndpoint);
     if (!provider) { if (modelEndpoint && base.run) throw new Error('model_attribution_missing'); return fetcher(url, init); }
-    const body = typeof init?.body === 'string' ? JSON.parse(init.body) as { model?: string; max_tokens?: number; max_output_tokens?: number } : undefined;
+    const body = native ? { model: native.model } : typeof init?.body === 'string' ? JSON.parse(init.body) as { model?: string; max_tokens?: number; max_output_tokens?: number } : undefined;
     if (!body || typeof body.model !== 'string') throw new Error('model_attribution_missing');
     if (!base.run) return observeModelFetch(ledger.store, base.owner, provider.id, body.model, fetcher, url, init);
     const model = ledger.model(base.owner, { providerId: provider.id, model: body.model });
-    const request = boundedRequest(body, endpoint, model.outputTokens);
+    const request = native ? { total: native.reserveTokens, body: undefined } : boundedRequest(body, endpoint, model.outputTokens);
     checkRequestCapacity(request.total, Math.min(model.contextTokens, ledger.limits(base.owner, base.run).contextTokens));
     const attribution = { ...base, provider: provider.id, model: body.model };
     const id = ledger.reserve(attribution, ++attempt, request.total);
     try {
-      const response = await fetcher(url, { ...init, body: JSON.stringify(request.body) });
+      const pendingResponse = fetcher(url, { ...init, body: native ? init?.body : JSON.stringify(request.body) });
+      const response = await (init?.signal ? abortable(pendingResponse, init.signal) : pendingResponse);
       ledger.checkAdmission(attribution);
       if (!response.ok) { ledger.settle(id, `http_${response.status}`); return response; }
       if (!response.headers.get('content-type')?.includes('text/event-stream')) {
         let usage;
-        try { usage = modelUsage(await response.clone().json()); } catch { /* unknown remains reserved */ }
+        try { const pending = limitedJson(response.clone()); usage = modelUsage(await (init?.signal ? abortable(pending, init.signal) : pending)); } catch { /* unknown remains reserved */ }
         if (ledger.settle(id, 'completed', usage)) throw new BudgetBlocked('model_usage_exceeded_reservation');
         ledger.checkAdmission(attribution);
         return response;

@@ -20,10 +20,6 @@
   padding: 0 16px max(16px, env(safe-area-inset-bottom));
   border-radius: var(--radius-dialog) var(--radius-dialog) 0 0;
   background: var(--background);
-  --drawer-enter-duration: var(--duration-slow);
-  --drawer-exit-duration: var(--duration-medium);
-  --drawer-enter-ease: var(--ease-smooth-out);
-  --drawer-exit-ease: var(--ease-smooth-out);
 }
 
 .composer-sheet__header,

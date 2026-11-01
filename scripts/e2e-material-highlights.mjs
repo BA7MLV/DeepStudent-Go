@@ -37,7 +37,7 @@ async function importFile(file) {
   await page.locator('input[type=file]').setInputFiles(file);
   const id = await (await page.waitForFunction((old) => [...document.querySelectorAll('[data-testid="video-item"]')].find((e) => !old.includes(e.dataset.videoId))?.dataset.videoId, old)).jsonValue();
   await page.goto(`${BASE}/#/player/${id}`);
-  await page.waitForFunction(() => document.querySelector('[data-testid="ink-smart"]')?.disabled === false);
+  await page.waitForFunction(() => document.querySelector('[data-testid="ink-pan"]')?.disabled === false);
   assert.equal(await byId('ink-toggle').getAttribute('aria-expanded'), 'false', '工具栏默认收起');
   assert.equal(await byId('ink-text-highlight').isVisible(), false);
   await byId('ink-toggle').click();
@@ -78,14 +78,14 @@ async function highlight(target, start, end, reverse = false) {
   await touch('touchStart', a.x, a.y);
   for (let i = 1; i <= 8; i++) { await touch('touchMove', a.x + (b.x - a.x) * i / 8, a.y + (b.y - a.y) * i / 8); await delay(16); }
   await touch('touchEnd');
-  assert.equal(await byId('ink-smart').getAttribute('aria-checked'), 'true', '高亮后恢复智能批注');
+  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '高亮后恢复拖动');
   return points.text;
 }
 
 try {
   const paragraph = '监督学习使用带标签的数据训练模型。验证集用于评估泛化能力，训练误差降低并不代表真实效果更好。'.repeat(5);
   const mdId = await importFile({ name: '文字高亮测试.md', mimeType: 'text/markdown', buffer: Buffer.from(`# 高亮测试\n\n${paragraph}\n\n第二段包含 **加粗文字** 和 x < y & z，用于测试转义与独立来源。\n`) });
-  assert.equal(await byId('ink-smart').getAttribute('aria-checked'), 'true');
+  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true');
   const para = page.locator('.mr-md__block p').filter({ hasText: '监督学习' }).first();
   const expected = await highlight(para, 3, 95, true);
   await saved(mdId, 1);
@@ -94,11 +94,14 @@ try {
   assert.equal(mark.input, 'touch');
   assert.ok(mark.rects.length >= 2, '按行生成多块高亮');
   assert.equal(await para.locator('mark').count(), 0, '正文 DOM 没有被 mark 包裹改写');
-  // 智能态仍允许鼠标选字，不把鼠标拖选变成笔迹。
+  // 显式切换到选字，不把鼠标拖选变成笔迹。
+  await byId('ink-read').click();
   const mouseText = await endpoints(para, 0, 8);
   await page.mouse.move(mouseText.a.x - 3, mouseText.a.y); await page.mouse.down();
   await page.mouse.move(mouseText.b.x + 3, mouseText.b.y, { steps: 8 }); await page.mouse.up();
-  assert.ok(await page.evaluate(() => getSelection()?.toString().length > 3), '智能态鼠标保留选字');
+  await byId('selection-menu').waitFor();
+  assert.ok(await page.evaluate(async () => (await import('/src/store/selectionAsk.ts')).useSelectionAsk.getState().bar?.cite.text.length > 3), '选字态鼠标拖选投递选区菜单');
+  await page.keyboard.press('Escape');
   assert.equal((await rows(mdId)).length, 1);
   await byId('ink-text-highlight').click();
   await para.evaluate((e) => e.scrollIntoView({ block: 'start', behavior: 'instant' }));
@@ -106,9 +109,10 @@ try {
   await touch('touchStart', cancelled.a.x, cancelled.a.y);
   await touch('touchMove', cancelled.b.x, cancelled.b.y);
   await touch('touchCancel');
-  assert.equal(await byId('ink-smart').getAttribute('aria-checked'), 'true', '触摸取消后退出一次性工具');
+  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '触摸取消后退出一次性工具');
   assert.equal((await rows(mdId)).length, 1, '取消的文字高亮不保存');
-  // 高亮完成后不点任何画笔工具，主动笔直接落墨。
+  // 高亮完成后恢复拖动，显式选择画笔才落墨。
+  await byId('ink-pen').click();
   const penAt = await endpoints(para, 100, 105);
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...penAt.a, button: 'left', buttons: 1, pointerType: 'pen', force: .5 });
   await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: penAt.a.x + 30, y: penAt.a.y + 10, button: 'left', buttons: 1, pointerType: 'pen', force: .7 });
@@ -139,7 +143,7 @@ try {
   await page.reload();
   await path.waitFor();
   await byId('ink-toggle').click();
-  assert.equal(await byId('ink-smart').getAttribute('aria-checked'), 'true');
+  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true');
   assert.deepEqual((await rows(mdId))[0], mark, '刷新恢复高亮');
   await page.setViewportSize({ width: 1100, height: 1100 });
   await byId('ink-erase').click();
@@ -148,7 +152,7 @@ try {
   await page.mouse.click(eraseAt.a.x, eraseAt.a.y);
   await saved(mdId, 0);
   await byId('ink-undo').click(); await saved(mdId, 1);
-  await byId('ink-smart').click();
+  await byId('ink-pan').click();
 
   // 同一锚点不能在重复正文中猜位置；原文删除后应停止显示。
   const anchors = await page.evaluate(async () => {
@@ -173,6 +177,7 @@ try {
   for (const key of ['catalog', 'read', 'grep']) assert.ok(integration[key].includes(`<mark>${expected}</mark>`), `${key} 包含高亮原文`);
   assert.match(integration.denied, /只能访问当前课程/);
   assert.match(integration.escaped, /<mark>&lt;mark&gt; &amp; 原文<\/mark>/);
+  await byId('ink-more').click();
   await byId('ink-excerpts').click();
   assert.equal(await byId('ink-excerpt-list').locator('mark').innerText(), expected);
   await byId('ink-excerpt-ask').click();
@@ -184,6 +189,7 @@ try {
   assert.ok(requests.some((r) => r.messages.some((m) => m.role === 'user' && JSON.stringify(m.content).includes(`<mark>${expected}</mark>`))), '实际模型请求收到高亮引用');
   assert.ok(requests.some((r) => r.messages.some((m) => m.role === 'tool' && m.content.includes(`<mark>${expected}</mark>`))), '模型调用 read 后收到高亮工具结果');
   await byId('study-assistant-toggle').click();
+  await byId('ink-more').click();
   await byId('ink-excerpts').click();
   console.log('✓ 跨行反向触摸高亮、重排定位、撤销/重做、刷新、引用发送和模型工具链');
 
@@ -228,6 +234,7 @@ try {
   await page.goto(`${BASE}/#/player/${mdId}`);
   await page.locator('[data-ink-stroke]').waitFor();
   await byId('ink-toggle').click();
+  await byId('ink-more').click();
   await byId('ink-excerpts').click();
   await mkdir('e2e-shots', { recursive: true });
   await page.locator('[data-slot="toast"]').first().waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});

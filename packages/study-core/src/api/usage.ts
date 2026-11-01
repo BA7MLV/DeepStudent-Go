@@ -6,6 +6,8 @@ export interface ModelUsage {
   cache?: number;
   cacheCreation?: number;
   reasoning?: number;
+  /** Provider-reported dollars, never local budget estimates or balance. */
+  billing?: { allowanceUsd?: number; chargedUsd?: number; listCostUsd?: number; source?: string; estimated?: boolean };
 }
 export interface ModelRequestRecord {
   id: string;
@@ -32,7 +34,16 @@ export function modelUsage(body: unknown): ModelUsage | undefined {
   // Anthropic excludes reads and writes from input_tokens; OpenAI includes them.
   if (usage.prompt_tokens === undefined && (usage.cache_read_input_tokens !== undefined || cacheCreation !== undefined)) input += (cache as number | undefined ?? 0) + (cacheCreation as number | undefined ?? 0);
   if (!count(input) || (cache as number ?? 0) + (cacheCreation as number ?? 0) > input || (reasoning as number ?? 0) > output) return;
-  return { input, output, ...(cache === undefined ? {} : { cache: cache as number }), ...(cacheCreation === undefined ? {} : { cacheCreation: cacheCreation as number }), ...(reasoning === undefined ? {} : { reasoning: reasoning as number }) };
+  const metadata = object(usage.opencode), billing: NonNullable<ModelUsage['billing']> = {};
+  const dollar = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+  if (metadata) {
+    if (dollar(metadata.allowance)) billing.allowanceUsd = metadata.allowance;
+    if (dollar(usage.cost)) billing.chargedUsd = usage.cost;
+    if (dollar(metadata.list_cost)) billing.listCostUsd = metadata.list_cost;
+    if (['free', 'balance', 'go', 'go-plus', 'byok'].includes(String(metadata.billing_source))) billing.source = String(metadata.billing_source);
+    if (typeof metadata.estimated === 'boolean') billing.estimated = metadata.estimated;
+  }
+  return { input, output, ...(cache === undefined ? {} : { cache: cache as number }), ...(cacheCreation === undefined ? {} : { cacheCreation: cacheCreation as number }), ...(reasoning === undefined ? {} : { reasoning: reasoning as number }), ...(Object.keys(billing).length ? { billing } : {}) };
 }
 
 /** SSE usage events are cumulative snapshots, not token deltas. */

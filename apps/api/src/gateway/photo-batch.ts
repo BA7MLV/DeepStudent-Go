@@ -10,7 +10,7 @@ export const PHOTO_QUIET_MS = 10000;
  * the normal quiet window; this is only an internal safety cap. */
 export const PHOTO_MAX_WAIT_MS = 5 * 60 * 1000;
 export type PhotoInboxItem = { id: number; received_at: number; message: GatewayEnvelope & { approvalReply?: unknown } };
-const control = (m: PhotoInboxItem['message']) => Boolean(m.approvalReply) || /^(?:\/|(?:同意|不同意|批准|允许|不允许|确认|拒绝|approve|reject)(?:\s|[。！!]*$))/i.test(m.text.trim());
+const control = (m: PhotoInboxItem['message']) => Boolean(m.approvalReply) || /^(?:\/|(?:同意|不同意|批准|允许|不允许|确认|拒绝|可以|不可以|不用了|不用|approve|reject)(?:\s|[。！!]*$))/i.test(m.text.trim());
 const images = (m: GatewayEnvelope) => Boolean(m.attachments?.length) && m.attachments!.every(a => a.mime.startsWith('image/'));
 const ordinary = (m: GatewayEnvelope) => !m.attachments?.length || images(m);
 // A caption is not necessarily the end of an album: users commonly send a

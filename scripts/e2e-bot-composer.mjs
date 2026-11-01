@@ -29,7 +29,7 @@ const output = process.env.SCREENSHOT_DIR ?? path.join(directory, 'screenshots')
 fs.mkdirSync(output, { recursive: true });
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
-  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
+  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { hmr: false, watch: null, host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
   await web.listen();
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 900 } });
@@ -41,23 +41,26 @@ try {
   assert.equal((await context.request.put(`${origin}/api/v1/cloud/config`, { headers: { origin }, data: { ...config, providers: [{ id: 'offline', name: 'Offline', baseUrl: 'https://offline.invalid/v1', protocol: 'openai-chat', apiKey: 'test', serves: ['chat'] }], llmModel: { providerId: 'offline', model: 'scripted' } } })).status(), 200);
   const thread = await (await post('/threads', { mode: 'bot', title: 'IM · 图片与输入框' })).json();
   const other = await (await post('/threads', { mode: 'bot', title: '另一段对话' })).json();
+  const longThread = await (await post('/threads', { mode: 'bot', title: `IM · ${'0123456789abcdef'.repeat(4)}@im.wechat` })).json();
   const png = await sharp({ create: { width: 400, height: 220, channels: 3, background: '#79a8d1' } }).png().toBuffer();
   const file = await (await post('/files', png, { 'content-type': 'application/octet-stream', 'x-file-name': 'image.png', 'x-file-mime': 'image/png' })).json();
   store = new DatabaseStore(path.join(directory, 'db.sqlite'));
   const bot = new BotApplicationService(store, { enqueue() {} });
+  for (let index = 0; index < 40; index++) bot.append(longThread.id, index % 2 ? 'assistant' : 'user', 'text', `渐进模糊滚动检查 ${index}：消息经过顶部时逐渐虚化，按钮保持清晰。`);
   bot.append(thread.id, 'user', 'text', `这张图\nAttachment fileId=${file.id}, name=image.png, mime=image/png. Use study_file to read/understand it.`);
   bot.append(thread.id, 'assistant', 'attachment', JSON.stringify({ fileId: file.id, name: 'image.png', mimeType: 'image/png', caption: '这是收到的图片。' }));
   const page = await context.newPage(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`${origin}/`);
   const open = async id => {
+    const title = [thread, other, longThread].find(item => item.id === id).title;
     await page.evaluate(async () => {
       const { applyLocale } = await import('/src/i18n/index.ts'); applyLocale('zh-CN');
       const { useBotPanel } = await import('/src/store/botPanel.ts'); useBotPanel.getState().setOpen(true);
     });
     await page.getByTestId('bot-panel-history').click();
-    await page.getByRole('menu').getByText(id === thread.id ? thread.title : other.title, { exact: true }).click();
-    await page.getByTestId('bot-panel-history').filter({ hasText: id === thread.id ? thread.title : other.title }).waitFor();
+    await page.getByRole('menu').getByText(title, { exact: true }).click();
+    await page.getByTestId('bot-panel-history').filter({ hasText: title }).waitFor();
   };
   await open(thread.id);
   const panel = page.getByTestId('bot-panel');
@@ -192,8 +195,43 @@ try {
   await viewer.getByRole('heading', { name: 'first.png', exact: true }).waitFor();
   await viewer.getByRole('button', { name: '关闭图片预览', exact: true }).click();
   await page.screenshot({ path: path.join(output, 'bot-image-stack-mobile.png'), fullPage: true, animations: 'disabled' });
+  // Long IM peer IDs must never cover actions, including around the drawer breakpoint.
+  for (const width of [1440, 901, 760, 390, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    await open(longThread.id);
+    await panel.locator('[data-chat-positioned="true"]').waitFor();
+    const geometry = await panel.evaluate(element => {
+      const bar = element.querySelector('.bot-panel__bar');
+      const title = element.querySelector('.bot-panel__switcher-name');
+      const switcher = element.querySelector('.bot-panel__switcher');
+      const actions = element.querySelector('.bot-panel__actions');
+      const messages = element.querySelector('.bot-messages');
+      const rect = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+      return {
+        bar: rect(bar), switcher: rect(switcher), actions: rect(actions), messages: rect(messages),
+        titleTruncated: title.scrollWidth > title.clientWidth,
+        fullTitle: title.title,
+        padding: parseFloat(getComputedStyle(messages).paddingTop),
+        layers: [...bar.querySelectorAll('.page-app-bar__blur > span')].map(span => getComputedStyle(span).backdropFilter),
+      };
+    });
+    assert.ok(geometry.titleTruncated, `long IM title is truncated at ${width}px`);
+    assert.equal(geometry.fullTitle, longThread.title, 'full title remains available on hover');
+    assert.ok(geometry.switcher.right <= geometry.actions.left + 1, 'title never overlaps actions');
+    assert.ok(geometry.actions.right <= geometry.bar.right, 'all action buttons stay inside header');
+    assert.equal(Math.round(geometry.messages.top), Math.round(geometry.bar.top), 'messages scroll behind the header');
+    assert.ok(geometry.padding >= geometry.bar.bottom - geometry.bar.top, 'first message clears the header');
+    assert.equal(geometry.layers.length, 4, 'four progressive blur layers are present');
+    const radii = geometry.layers.map(value => Number(/^blur\(([\d.]+)px\)$/.exec(value)?.[1]));
+    assert.ok(radii.every((radius, index) => radius > (radii[index - 1] ?? 0)), 'blur layers increase in strength on desktop and mobile');
+    await panel.locator('.bot-messages').evaluate(element => { element.scrollTop = 120; });
+    await page.screenshot({ path: path.join(output, `bot-header-${width}.png`), animations: 'disabled' });
+    await panel.getByTestId('bot-panel-more').click();
+    await page.getByRole('menu').waitFor();
+    await page.keyboard.press('Escape');
+  }
   assert.deepEqual(errors, []);
-  console.log(`Bot composer passed: legacy/new image previews, draft isolation, explicit send, model hints, paste/drop, expand, desktop/mobile. Screenshots: ${output}`);
+  console.log(`Bot composer/header passed: image previews, draft isolation, send, paste/drop, expand, progressive blur and long IM titles at 1440/901/760/390/320px. Screenshots: ${output}`);
   if (process.env.BOT_UI_REVIEW) {
     console.log(`Review: ${origin} (isolated fixture; login password composer-test-password-12345)`);
     await new Promise(resolve => process.once('SIGTERM', resolve));

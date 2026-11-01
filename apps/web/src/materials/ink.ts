@@ -30,7 +30,7 @@ export interface InkStroke {
   /** PDF 裁图使用的规范化矩形快照；屏幕显示按 anchor 实时重算。 */
   rects?: InkRect[];
 }
-export type InkTool = 'smart' | 'read' | 'pen' | 'highlight' | 'text-highlight' | 'erase';
+export type InkTool = 'pan' | 'smart' | 'read' | 'pen' | 'highlight' | 'text-highlight' | 'erase';
 
 const n = (value: number) => Math.round(value * 100) / 100;
 const radius = (stroke: InkStroke, point: InkPoint) =>

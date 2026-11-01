@@ -42,6 +42,8 @@ import type { SandboxCleanup, SandboxExecutor } from './agent/sandbox.js';
 import { settleWithin } from './lifecycle.js';
 import { inspectDatabase } from './storage/release.js';
 import { storageUsageReader } from './storage/usage.js';
+import { BotMessageHistory } from './agent/message-history.js';
+import { BotMessageStreams } from './agent/message-stream.js';
 
 const defaultDataDir = process.env.DATA_DIR ?? path.resolve(process.cwd(), 'data');
 const messageKinds = new Set(['text', 'progress', 'attachment', 'widget', 'question', 'approval']);
@@ -113,6 +115,8 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   const maxFileBytes = Number.isFinite(configuredMaxFileBytes) ? Math.max(1, Math.min(512 * 1024 * 1024, Math.floor(configuredMaxFileBytes))) : 512 * 1024 * 1024;
   fs.mkdirSync(filesDir, { recursive: true });
   const store = new DatabaseStore(dbPath, path.join(filesDir, 'system-files'));
+  const messageHistory = new BotMessageHistory(store);
+  const messageStreams = new BotMessageStreams(store);
   const systemMaterials = new SystemMaterials(store);
   systemMaterials.migrate();
   const cloudRecords = new CloudRecords(store);
@@ -330,7 +334,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     }
     if (request.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
   });
-   app.get('/api/v1/bootstrap/status', async () => { const initialized = repo.isInitialized(); const available = !initialized && Date.now() < bootstrap.createdAt + bootstrapTtlMs; return { initialized, bootstrapAvailable: available, expiresAt: available ? new Date(bootstrap.createdAt + bootstrapTtlMs).toISOString() : null }; });
+   app.get('/api/v1/bootstrap/status', async () => { const initialized = repo.isInitialized(); const available = !initialized && Date.now() < bootstrap.createdAt + bootstrapTtlMs; return { initialized, bootstrapAvailable: available, expiresAt: available ? new Date(bootstrap.createdAt + bootstrapTtlMs).toISOString() : null, botSyncVersion: 1 }; });
   app.post<{ Body: BootstrapInitializeRequest }>('/api/v1/bootstrap/initialize', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
     if (repo.isInitialized()) return bad(reply, 410, 'bootstrap_closed');
@@ -517,6 +521,33 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   });
 
   const threadFields = 'id,mode,title,project_id AS projectId,agent_id AS agentId,archived,created_at AS createdAt,updated_at AS updatedAt';
+  app.get<{ Querystring: { projectId?: string; cursor?: string; limit?: string } }>('/api/v1/threads/page', async (request, reply) => {
+    const user = requireAuth(request, reply); if (!user) return;
+    const { projectId, cursor } = request.query;
+    if (projectId) projects.get(user.id, projectId);
+    const limit = request.query.limit === undefined ? 50 : Number(request.query.limit);
+    let before: { at: string; id: string } | undefined;
+    if (cursor !== undefined) {
+      try {
+        if (cursor.length > 1000) throw new Error('invalid_cursor');
+        const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+        if (!value || typeof value.at !== 'string' || value.at.length > 100 || typeof value.id !== 'string' || !value.id || value.id.length > 200) throw new Error('invalid_cursor');
+        before = value;
+      } catch { return bad(reply, 400, 'invalid_thread_cursor'); }
+    }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) return bad(reply, 400, 'invalid_thread_cursor');
+    const preview = "(SELECT substr(content,1,160) FROM messages WHERE thread_id=threads.id AND kind='text' ORDER BY seq DESC LIMIT 1) AS preview";
+    const rows = store.db.prepare(`SELECT ${threadFields},${preview} FROM threads WHERE owner_id=? AND mode='bot'
+      AND ${projectId ? 'project_id=?' : 'project_id IS NULL'} ${before ? 'AND (updated_at<? OR (updated_at=? AND id>?))' : ''}
+      ORDER BY updated_at DESC,id LIMIT ?`).all(user.id, ...(projectId ? [projectId] : []), ...(before ? [before.at, before.at, before.id] : []), limit + 1) as Array<{ id: string; updatedAt: string; archived: number }>;
+    const page = rows.slice(0, limit), last = page.at(-1);
+    return { threads: page.map(row => ({ ...row, archived: Boolean(row.archived) })), nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify({ at: last.updatedAt, id: last.id })).toString('base64url') : null };
+  });
+  app.get<{ Params: { id: string } }>('/api/v1/threads/:id/summary', async (request, reply) => {
+    const user = requireAuth(request, reply); if (!user) return;
+    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
+    return { ...store.db.prepare(`SELECT ${threadFields} FROM threads WHERE id=?`).get(thread.id) as object, archived: Boolean(thread.archived) };
+  });
   app.get<{ Querystring: { projectId?: string; agentId?: string } }>('/api/v1/threads', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     const { projectId, agentId } = request.query;
@@ -652,6 +683,29 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     fs.rmSync(path.join(filesDir, file.storage_name), { force: true });
     return { deleted: true };
   });
+  app.get<{ Params: { id: string }; Querystring: { beforeSeq?: string } }>('/api/v1/threads/:id/snapshot', async (request, reply) => {
+    const user = requireAuth(request, reply); if (!user) return;
+    if (!ownedThread(user.id, request.params.id)) return bad(reply, 404, 'thread_not_found');
+    const beforeSeq = request.query.beforeSeq === undefined ? Number.MAX_SAFE_INTEGER : Number(request.query.beforeSeq);
+    if (!Number.isSafeInteger(beforeSeq) || beforeSeq < 1) return bad(reply, 400, 'invalid_message_cursor');
+    return messageHistory.snapshot(request.params.id, beforeSeq);
+  });
+  app.get<{ Params: { id: string }; Querystring: { beforeSeq?: string; limit?: string } }>('/api/v1/threads/:id/messages', async (request, reply) => {
+    const user = requireAuth(request, reply); if (!user) return;
+    if (!ownedThread(user.id, request.params.id)) return bad(reply, 404, 'thread_not_found');
+    const before = request.query.beforeSeq === undefined ? Number.MAX_SAFE_INTEGER : Number(request.query.beforeSeq);
+    const limit = request.query.limit === undefined ? 50 : Number(request.query.limit);
+    if (!Number.isSafeInteger(before) || before < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) return bad(reply, 400, 'invalid_message_cursor');
+    return store.db.transaction(() => messageHistory.page(request.params.id, before, limit))();
+  });
+  app.get<{ Params: { id: string }; Querystring: { fromSeq?: string; toSeq?: string } }>('/api/v1/threads/:id/sync-state', async (request, reply) => {
+    const user = requireAuth(request, reply); if (!user) return;
+    if (!ownedThread(user.id, request.params.id)) return bad(reply, 404, 'thread_not_found');
+    const from = request.query.fromSeq === undefined ? Number.MAX_SAFE_INTEGER : Number(request.query.fromSeq);
+    const to = request.query.toSeq === undefined ? Number.MAX_SAFE_INTEGER : Number(request.query.toSeq);
+    if (!Number.isSafeInteger(from) || from < 1 || !Number.isSafeInteger(to) || to < from) return bad(reply, 400, 'invalid_message_cursor');
+    return messageHistory.state(request.params.id, from, to);
+  });
   app.get<{ Params: { id: string } }>('/api/v1/threads/:id', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
@@ -777,6 +831,22 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     return resolved;
   });
 
+  app.get<{ Params: { id: string }; Querystring: { after?: string } }>('/api/v1/threads/:id/stream', async (request, reply) => {
+    const user = requireAuth(request, reply); if (!user) return;
+    const id = request.params.id;
+    if (!ownedThread(user.id, id)) return bad(reply, 404, 'thread_not_found');
+    const after = Number(request.query.after ?? request.headers['last-event-id'] ?? 0);
+    if (!Number.isSafeInteger(after) || after < 0) return bad(reply, 400, 'invalid_event_cursor');
+    if (draining) return reply.header('retry-after', '5').code(503).send({ error: 'api_draining' });
+    const cursor = messageHistory.cursor(id);
+    reply.header('content-type', 'text/event-stream; charset=utf-8').header('cache-control', 'no-cache, no-transform').header('x-accel-buffering', 'no');
+    // Keep CORS/security headers installed by the normal hooks when taking over raw.
+    reply.hijack();
+    for (const [name, value] of Object.entries(reply.getHeaders())) if (value !== undefined) reply.raw.setHeader(name, value);
+    reply.raw.writeHead(200);
+    if (after > cursor) { reply.raw.end('event: resync.required\ndata: {}\n\n'); return; }
+    messageStreams.add(id, after, reply.raw, () => !draining && session(request)?.id === user.id && Boolean(ownedThread(user.id, id)));
+  });
   app.get<{ Params: { id: string }; Querystring: { after?: string } }>('/api/v1/threads/:id/events', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
@@ -825,6 +895,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if (!Number.isFinite(milliseconds) || milliseconds < 0) return Promise.reject(new Error('invalid_drain_deadline'));
     if (drainTask) return drainTask;
     draining = true;
+    messageStreams.close();
     // Calling each operation before awaiting closes all admission paths at once.
     // A false deadline result is NOT a snapshot or proof that writers stopped.
     const bot = runner.quiesce(milliseconds);

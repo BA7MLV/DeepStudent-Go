@@ -69,6 +69,9 @@ export const SLOT_LABEL: Record<ModelSlot, string> = {
  * 用途由具体模型配置决定；连接只负责地址、凭据与请求协议。
  */
 export interface Provider {
+  gatewayManaged?: boolean;
+  /** Non-secret server deployment codec selection; never connection URLs/keys. */
+  deploymentProtocols?: Record<string, ApiProtocol>;
   /** 本机唯一短 id；槽位与收藏夹靠它引用，改名等于换一家（所以 UI 不提供改名） */
   id: string;
   /** 显示名 */
@@ -81,6 +84,9 @@ export interface Provider {
   apiKey: string;
   /** 云端编辑器只接收凭据是否存在，不接收服务器保存的明文。 */
   configured?: boolean;
+  /** OpenCode Go saved accounts; only metadata reaches the browser. */
+  accounts?: Array<{ id: string; name: string; configured?: boolean }>;
+  activeAccountId?: string;
   /** 旧版供应商用途，仅保留用于兼容持久化/同步，不再限制模型用途。 */
   serves: ModelSlot[];
   /**
@@ -613,7 +619,8 @@ export function targetOfSlot(s: Settings, slot: ModelSlot): ModelTarget {
     apiKey: p.apiKey.trim(),
     model: ref.model,
     catalogId: providerCatalogId(p),
-    protocol: p.protocol ?? 'openai-chat',
+    protocol: p.gatewayManaged ? p.deploymentProtocols?.[ref.model] ?? p.protocol ?? 'openai-chat' : p.protocol ?? 'openai-chat',
+    gatewayManaged: p.gatewayManaged,
     capabilities: modelOverridesOf(s, ref),
   };
 }
@@ -631,7 +638,8 @@ export function targetOrNull(s: Settings, ref: ModelRef): ModelTarget | null {
     apiKey: p.apiKey,
     model: ref.model,
     catalogId: providerCatalogId(p),
-    protocol: p.protocol ?? 'openai-chat',
+    protocol: p.gatewayManaged ? p.deploymentProtocols?.[ref.model] ?? p.protocol ?? 'openai-chat' : p.protocol ?? 'openai-chat',
+    gatewayManaged: p.gatewayManaged,
     capabilities: modelOverridesOf(s, ref),
   };
 }

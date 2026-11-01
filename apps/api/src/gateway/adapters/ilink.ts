@@ -215,7 +215,15 @@ export class IlinkPlugin implements ChannelPlugin {
       const media = { encrypt_query_param: param, aes_key: Buffer.from(key.toString('hex')).toString('base64'), encrypt_type: 1 };
       items = [image ? { type: 2, image_item: { media, mid_size: encrypted.length } } : { type: 4, file_item: { media, file_name: f.name, len: String(f.bytes.length) } }];
     }
-    await this.request(c, '/ilink/bot/sendmessage', { msg: { from_user_id: '', to_user_id: peer.peer, client_id: id, message_type: 2, message_state: 2, context_token: peer.context, item_list: items } }, signal);
+    try {
+      await this.request(c, '/ilink/bot/sendmessage', { msg: { from_user_id: '', to_user_id: peer.peer, client_id: id, message_type: 2, message_state: 2, context_token: peer.context, item_list: items } }, signal);
+    } catch (error) {
+      // -2 can mean an expired reply window, exhausted reply quota or throttling.
+      // The send was explicitly rejected: wait for new user context instead of
+      // repeatedly sending with the same context or invalidating the bot login.
+      if (error instanceof IlinkRequestError && error.code === 'platform_rejected' && error.details.platformCode === -2) throw new DeliveryError('context_required', false, 0, false);
+      throw error;
+    }
     return id;
   }
   async download(_c: Record<string, string>, _m: GatewayEnvelope, attachment: NonNullable<GatewayEnvelope['attachments']>[number], signal: AbortSignal) {

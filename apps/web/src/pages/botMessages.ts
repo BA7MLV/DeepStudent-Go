@@ -35,8 +35,18 @@ export const timeOf = (message: MessageDto) => {
 const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
 const yesterdayOf = (now: Date) => { const d = new Date(now); d.setDate(now.getDate() - 1); return d; };
 /** 「今天 / 昨天」交给 Intl，不在代码里写死某一种语言。 */
-const relativeDay = (locale: string, offset: 0 | -1) => new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(offset, 'day');
-const clock = (date: Date, locale: string) => date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
+const formatters = new Map<string, { relative: Intl.RelativeTimeFormat; clock: Intl.DateTimeFormat }>();
+function formats(locale: string) {
+  let value = formatters.get(locale);
+  if (!value) {
+    value = { relative: new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }), clock: new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false }) };
+    if (formatters.size >= 4) formatters.delete(formatters.keys().next().value!);
+    formatters.set(locale, value);
+  }
+  return value;
+}
+const relativeDay = (locale: string, offset: 0 | -1) => formats(locale).relative.format(offset, 'day');
+const clock = (date: Date, locale: string) => formats(locale).clock.format(date);
 
 export function formatDay(time: number, locale: string, now = new Date()): string {
   const date = new Date(time);
@@ -89,4 +99,22 @@ export function groupMessages(messages: MessageDto[], locale = 'zh-CN', options:
       lastMine: index === lastMineIndex || undefined,
     };
   });
+}
+
+/** Stable rows let memoized bubbles skip work for draft typing, progress and
+ * unaffected group members. Only changed messages/boundaries receive new rows. */
+export function createMessageGrouper() {
+  let previous = new Map<string, Row>();
+  return (messages: MessageDto[], locale: string) => {
+    const rows = groupMessages(messages, locale);
+    const next = new Map<string, Row>();
+    const result = rows.map(row => {
+      const old = previous.get(row.key);
+      const stable = old && old.message === row.message && old.first === row.first && old.last === row.last && old.stamp === row.stamp && old.day === row.day && old.time === row.time && old.status === row.status && old.lastMine === row.lastMine ? old : row;
+      next.set(row.key, stable);
+      return stable;
+    });
+    previous = next;
+    return result;
+  };
 }

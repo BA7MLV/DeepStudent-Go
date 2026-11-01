@@ -83,10 +83,6 @@
   background: var(--background);
   padding-top: 0;
   padding-inline: 0;
-  --drawer-enter-duration: var(--duration-slow);
-  --drawer-exit-duration: var(--duration-medium);
-  --drawer-enter-ease: var(--ease-smooth-out);
-  --drawer-exit-ease: var(--ease-smooth-out);
 }
 
 /* ── 手机：iOS 设置式的「列表 → 推入模块」 ── */

@@ -7,6 +7,7 @@ import { Sym } from '../ui';
 import ImagePreview from './ImagePreview';
 import ImageGallery from './ImageGallery';
 import './chat-attachments.css';
+import { acquireBotImage, invalidateBotImage } from './botImageCache';
 
 export interface BotDraftFile {
   id: string;
@@ -29,24 +30,24 @@ function useAttachmentImage(url?: string, local?: File) {
   useEffect(() => {
     const controller = new AbortController();
     let objectUrl = '';
+    let release: (() => void) | undefined;
     setSource(''); setFailed(false);
     const load = async () => {
-      let blob: Blob;
-      if (local) blob = local;
+      if (local) {
+        objectUrl = URL.createObjectURL(local);
+        setSource(objectUrl);
+      }
       else {
         if (!url) throw new Error('file_not_found');
-        const response = await fetch(url, { credentials: 'include', signal: controller.signal });
-        if (!response.ok) throw new Error('file_not_found');
-        blob = await response.blob();
+        const handle = acquireBotImage(url); release = handle.release;
+        const source = await handle.promise;
+        if (!controller.signal.aborted) setSource(source);
       }
-      if (controller.signal.aborted) return;
-      objectUrl = URL.createObjectURL(blob);
-      setSource(objectUrl);
     };
     void load().catch(() => { if (!controller.signal.aborted) setFailed(true); });
-    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+    return () => { controller.abort(); release?.(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [url, local, attempt]);
-  return { source, failed, attempt, setFailed, retry: () => setAttempt(value => value + 1) };
+  return { source, failed, attempt, setFailed, retry: () => { if (url) invalidateBotImage(url); setAttempt(value => value + 1); } };
 }
 
 type ImageItem = { name: string; url?: string; local?: File };

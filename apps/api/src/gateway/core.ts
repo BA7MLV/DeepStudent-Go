@@ -11,6 +11,7 @@ import { GATEWAY_CONNECTION_ERRORS, type GatewayConnectionDiagnostics, type Gate
 import { splitGatewayMarkdown } from './chunk.js';
 import { photoBatch, type PhotoInboxItem } from './photo-batch.js';
 import { MAX_BOT_MESSAGE_ATTACHMENTS } from '@wangke/contracts';
+import { readableApprovalText } from '../agent/approval-copy.js';
 
 const stamp = () => new Date().toISOString();
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
@@ -28,10 +29,9 @@ const barePairCode = (text: string) => {
 };
 type ApprovalReply = { id?: string; approved: boolean };
 type InboundEnvelope = GatewayEnvelope & { approvalReply?: ApprovalReply };
-const approvalPrompt = (content: string, number: number) => {
-  // Old shell approval records contain source code; only show their purpose.
-  const text = content.startsWith('请求执行命令') ? '需要你的确认：在工作区运行程序，处理当前任务。是否允许这次操作？' : content;
-  return `待确认 ${number}\n${text}\n只有这一项时，回复“同意”或“拒绝”即可。也可回复“同意 ${number}”或“拒绝 ${number}”。`;
+const approvalPrompt = (content: string, number?: number) => {
+  const text = readableApprovalText(content);
+  return number === undefined ? text : `${text}\n这项请回复“同意 ${number}”或“拒绝 ${number}”。`;
 };
 export type PluginFactory = (account?: { id: string; owner_id: string }) => ChannelPlugin;
 /** Single-instance durable gateway. ACK only includes the synchronous receive transaction. */
@@ -339,9 +339,11 @@ export class GatewayCore {
         const envelope: InboundEnvelope = { ...message, approvalReply: b && !b.revoked && !message.attachments?.length ? this.approvalReply(b, message.text) : undefined };
         const inserted = this.store.db.prepare('INSERT OR IGNORE INTO gateway_inbox(account_id,external_id,envelope,received_at) VALUES(?,?,?,?)').run(id, external, this.secrets.seal(JSON.stringify(envelope)), Date.now());
         if (!inserted.changes) continue;
+        // Refresh in the durable receive transaction, not behind attachment I/O.
+        // Duplicates, strangers and revoked bindings cannot revive deliveries.
+        if (b && !b.revoked && message.context) this.refreshContext(b.id, message.context, a.channel);
         // Control path never waits behind media, model, or another inbox item.
         if (b && !b.revoked && message.text.trim() === '/stop') {
-          if (message.context) this.store.db.prepare('UPDATE gateway_bindings SET context=? WHERE id=?').run(this.secrets.seal(message.context), b.id);
           this.bot.stop(a.owner_id, b.thread_id);
           for (const pending of this.store.db.prepare("SELECT id,envelope FROM gateway_inbox WHERE account_id=? AND status='pending' AND id<?").all(id, inserted.lastInsertRowid) as any[]) {
             const envelope: GatewayEnvelope = JSON.parse(this.secrets.open(pending.envelope));
@@ -357,10 +359,15 @@ export class GatewayCore {
   private binding(id: string, m: GatewayEnvelope): any {
     return this.store.db.prepare('SELECT * FROM gateway_bindings WHERE account_id=? AND tenant=? AND peer=? AND chat=? AND topic=?').get(id, m.tenant, m.peer, m.chat, m.topic);
   }
+  private refreshContext(binding: string, context: string, channel: string) {
+    this.store.db.prepare('UPDATE gateway_bindings SET context=? WHERE id=? AND revoked=0').run(this.secrets.seal(context), binding);
+    if (channel === 'ilink') this.store.db.prepare(`UPDATE gateway_outbox SET status='pending',attempts=0,next_at=0,error=NULL
+      WHERE binding_id=? AND status IN ('pending','failed') AND error='context_required'`).run(binding);
+  }
   private approvalReply(binding: any, text: string): ApprovalReply | undefined {
-    const exact = /^(\/?approve|\/?reject|批准|同意|拒绝)\s+([\w-]{1,100})$/i.exec(text.trim().replace(/[。！!]+$/, ''));
+    const exact = /^(\/?approve|\/?reject|批准|同意|拒绝|可以|不可以|不用了|不用)\s+([\w-]{1,100})$/i.exec(text.trim().replace(/[。！!]+$/, ''));
     if (exact) {
-      const approved = !/reject|拒绝/i.test(exact[1]);
+      const approved = !/reject|拒绝|不可以|不用/i.test(exact[1]);
       if (!/^\d+$/.test(exact[2])) return { id: exact[2], approved }; // Legacy full IDs remain supported.
       // Message sequence numbers are stable within a thread, never a changing list index.
       const a = this.store.db.prepare(`SELECT a.id FROM approvals a JOIN messages m ON m.id=a.message_id
@@ -368,19 +375,28 @@ export class GatewayCore {
       return { id: a?.id ?? 'unknown-approval-number', approved };
     }
     const word = text.trim().replace(/[。！!]+$/, '').toLowerCase();
-    const yes = ['同意', '批准', '允许', '确认', 'approve', '/approve'];
-    const no = ['拒绝', '不同意', '不允许', 'reject', '/reject'];
+    const yes = ['同意', '批准', '允许', '确认', '可以', 'approve', '/approve'];
+    const no = ['拒绝', '不同意', '不允许', '不可以', '不用', '不用了', 'reject', '/reject'];
     if (!yes.includes(word) && !no.includes(word)) return undefined;
-    const pending = this.store.db.prepare(`SELECT a.id,m.content,m.seq,e.event_id FROM approvals a JOIN messages m ON m.id=a.message_id
+    const pending = this.store.db.prepare(`SELECT a.id,e.event_id FROM approvals a JOIN messages m ON m.id=a.message_id
       JOIN message_events e ON e.thread_id=m.thread_id AND e.seq=m.seq AND e.type='message.accepted'
-       WHERE a.thread_id=? AND a.status='pending' ORDER BY m.seq LIMIT 2`).all(binding.thread_id) as { id: string; content: string; seq: number; event_id: number }[];
+       WHERE a.thread_id=? AND a.status='pending' ORDER BY m.seq LIMIT 2`).all(binding.thread_id) as { id: string; event_id: number }[];
     if (!pending.length && !word.startsWith('/')) return undefined;
     const approved = yes.includes(word);
     if (pending.length !== 1) return { approved };
-    const lastPart = Math.ceil(Array.from(approvalPrompt(pending[0].content, pending[0].seq)).length / 1500) - 1;
-    const promptId = hash(`${binding.id}:event:${pending[0].event_id}:${lastPart}`).slice(0, 32);
-    const delivered = this.store.db.prepare("SELECT 1 FROM gateway_outbox WHERE id=? AND status='sent'").get(promptId);
+    const delivered = this.approvalDelivered(binding.id, pending[0].event_id);
     return { approved, ...(delivered ? { id: pending[0].id } : {}) };
+  }
+  private approvalDelivered(binding: string, event: number): boolean {
+    // Projection enqueues all parts atomically. Inspect those durable parts,
+    // not a re-render: wording and chunk sizes may change across deployments.
+    const delivery = this.store.db.prepare('SELECT status FROM gateway_outbox WHERE id=? AND binding_id=?');
+    for (let part = 0; ; part++) {
+      const id = hash(`${binding}:event:${event}:${part}`).slice(0, 32);
+      const row = delivery.get(id, binding) as { status: string } | undefined;
+      if (!row) return part > 0;
+      if (row.status !== 'sent') return false;
+    }
   }
   async tick() {
     if (this.stopped || this.busy) return;
@@ -478,7 +494,16 @@ export class GatewayCore {
             const thread = b ? { id: b.thread_id } : this.bot.create(row.owner_id, 'bot', `IM · ${m.peer.slice(0, 60)}`, row.agent_id);
             this.store.db.prepare('DELETE FROM thread_participants WHERE thread_id=?').run(thread.id);
             this.store.db.prepare('INSERT INTO thread_participants(thread_id,agent_id,joined_at) VALUES(?,?,?)').run(thread.id, row.agent_id, stamp());
-            this.store.db.prepare(`INSERT INTO gateway_bindings(id,account_id,tenant,peer,chat,topic,thread_id,context) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account_id,tenant,peer,chat,topic) DO UPDATE SET revoked=0,context=excluded.context`).run(crypto.randomUUID(), row.account_id, m.tenant, m.peer, m.chat, m.topic, thread.id, m.context ? this.secrets.seal(m.context) : null);
+            this.store.db.prepare(`INSERT INTO gateway_bindings(id,account_id,tenant,peer,chat,topic,thread_id,context) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(account_id,tenant,peer,chat,topic) DO UPDATE SET revoked=0,context=excluded.context`).run(crypto.randomUUID(), row.account_id, m.tenant, m.peer, m.chat, m.topic, thread.id, b && !b.revoked ? b.context : m.context ? this.secrets.seal(m.context) : null);
+            if (!b || b.revoked) {
+              // Messages accepted alongside the pairing code had no active
+              // binding at receive time. Preserve their newest context too.
+              const binding = this.binding(row.account_id, m);
+              for (const pending of this.store.db.prepare("SELECT envelope FROM gateway_inbox WHERE account_id=? AND id>? AND status='pending' ORDER BY id").all(row.account_id, row.id) as { envelope: string }[]) {
+                const next: GatewayEnvelope = JSON.parse(this.secrets.open(pending.envelope));
+                if (next.context && next.tenant === m.tenant && next.peer === m.peer && next.chat === m.chat && next.topic === m.topic) this.refreshContext(binding.id, next.context, row.channel);
+              }
+            }
             this.store.db.prepare('DELETE FROM gateway_pairings WHERE account_id=?').run(row.account_id);
             if (row.channel === 'ilink') {
               const binding = this.binding(row.account_id, m);
@@ -492,15 +517,14 @@ export class GatewayCore {
             this.secrets.audit(row.owner_id, 'gateway.paired', { account: row.account_id, peer: m.peer });
           });
         } else if (b && !b.revoked) {
-          if (m.context) this.store.db.prepare('UPDATE gateway_bindings SET context=? WHERE id=?').run(this.secrets.seal(m.context), b.id);
           const legacyApproval = /^\/(approve|reject) ([\w-]{1,100})$/.exec(m.text.trim());
           const approval = m.approvalReply ?? (legacyApproval ? { id: legacyApproval[2], approved: legacyApproval[1] === 'approve' } : undefined);
           if (approval) {
             this.store.transaction(() => {
               const result = approval.id ? this.bot.resolve(row.owner_id, approval.id, approval.approved, m.text.trim(), b.thread_id) : { error: 'approval_selection_required' };
-              const text = result.error === 'approval_selection_required' ? '请查看待确认消息中的编号，回复“同意 编号”或“拒绝 编号”。发送 /status 可查看待确认项。'
-                : result.error ? '这项确认已失效或已处理，请以最新的确认消息为准。'
-                : result.status === 'approved' ? '已同意，将继续处理。' : '已拒绝这次操作。';
+              const text = result.error === 'approval_selection_required' ? '我还不能确定你指的是哪项操作，暂时不会执行。可以发 /status 查看列表，再回复“同意 编号”或“拒绝 编号”。'
+                : result.error ? '这条确认已经处理过或失效了，请以最新的确认消息为准。'
+                : result.status === 'approved' ? '好，我会继续处理。' : '好，这次不执行。';
               this.bot.append(b.thread_id, 'assistant', 'text', text, `im:${row.id}:approval`);
               this.store.db.prepare("UPDATE gateway_inbox SET status='done' WHERE id=?").run(row.id);
             });
@@ -510,7 +534,7 @@ export class GatewayCore {
              this.bot.append(b.thread_id, 'assistant', 'text', latest ? `最近的任务：${labels[latest.status] ?? latest.status}。` : '当前没有任务。');
              const pending = this.store.db.prepare(`SELECT m.seq,m.content FROM approvals a JOIN messages m ON m.id=a.message_id
                WHERE a.thread_id=? AND a.status='pending' ORDER BY m.seq LIMIT 10`).all(b.thread_id) as { seq: number; content: string }[];
-             if (pending.length) this.bot.append(b.thread_id, 'assistant', 'text', `待确认（最多显示 10 项）：\n${pending.map(a => `${a.seq}：${a.content.startsWith('请求执行命令') ? '在工作区运行程序' : a.content.split('\n')[0].slice(0, 160)}`).join('\n')}\n回复“同意 编号”或“拒绝 编号”。`);
+             if (pending.length) this.bot.append(b.thread_id, 'assistant', 'text', `这些操作还在等你确认（最多显示 10 项）：\n${pending.map(a => `${a.seq}：${readableApprovalText(a.content).split('\n')[0].slice(0, 160)}`).join('\n')}\n请带上编号回复，例如“同意 ${pending[0].seq}”或“拒绝 ${pending[0].seq}”。`);
           } else {
             const batch = row.channel === 'ilink' ? this.incomingPhotos(row, m) : { items: [{ id: row.id, received_at: row.received_at, message: m }], ready: true };
             // No sleeps and no model run while the user is still sending a
@@ -562,8 +586,6 @@ export class GatewayCore {
             this.store.transaction(() => {
               checkActive();
               const caption = selected.map(i => i.message.text).filter(Boolean).join('\n');
-              const context = [...selected].reverse().find(i => i.message.context)?.message.context;
-              if (context) this.store.db.prepare('UPDATE gateway_bindings SET context=? WHERE id=?').run(this.secrets.seal(context), b.id);
               this.bot.send(row.owner_id, b.thread_id, { clientNonce: `im:${row.id}`, ...(attachments.length ? { kind: 'attachment' } : {}), content: attachments.length ? JSON.stringify({ ...attachments[0], attachments, caption }) : caption });
               for (const item of selected) this.store.db.prepare("UPDATE gateway_inbox SET status='done' WHERE id=?").run(item.id);
             });
@@ -606,7 +628,8 @@ export class GatewayCore {
                 this.store.db.prepare('DELETE FROM gateway_projection_failures WHERE binding_id=? AND event_id=?').run(b.id, event.event_id);
                 return;
               }
-              text = approvalPrompt(text, a.seq);
+              const pending = this.store.db.prepare("SELECT COUNT(*) n FROM approvals WHERE thread_id=? AND status='pending'").get(b.thread_id) as { n: number };
+              text = approvalPrompt(text, pending.n > 1 ? a.seq : undefined);
             }
             const maxMessageLength = this.live.get(b.account_id)?.plugin.manifest.capabilities.maxMessageLength ?? 1500;
             const parts = splitGatewayMarkdown(String(text), maxMessageLength);
@@ -637,8 +660,9 @@ export class GatewayCore {
     for (const row of rows) {
       const live = this.live.get(row.account_id); if (!live || live.controller.signal.aborted) continue;
       if (!this.store.db.prepare("UPDATE gateway_outbox SET status='sending',attempts=attempts+1 WHERE id=? AND status='pending'").run(row.id).changes) continue;
+      const context = (this.store.db.prepare('SELECT context FROM gateway_bindings WHERE id=?').get(row.binding_id) as { context: string | null }).context;
       try {
-        const platformId = await live.plugin.send(this.config(row), { messageId: '', tenant: row.tenant, peer: row.peer, chat: row.chat, topic: row.topic, direct: true, human: true, text: '', context: row.context ? this.secrets.open(row.context) : undefined }, JSON.parse(row.payload), row.id, AbortSignal.any([live.controller.signal, AbortSignal.timeout(30_000)]));
+        const platformId = await live.plugin.send(this.config(row), { messageId: '', tenant: row.tenant, peer: row.peer, chat: row.chat, topic: row.topic, direct: true, human: true, text: '', context: context ? this.secrets.open(context) : undefined }, JSON.parse(row.payload), row.id, AbortSignal.any([live.controller.signal, AbortSignal.timeout(30_000)]));
         this.store.db.prepare("UPDATE gateway_outbox SET status='sent',platform_id=?,error=NULL WHERE id=? AND status='sending'").run(platformId, row.id);
         publishBotEvent(this.store, { owner: row.owner_id, type: 'delivery.finished', status: 'sent' });
       } catch (e) {
@@ -646,8 +670,13 @@ export class GatewayCore {
         if (error.code === 'login_required') this.store.db.prepare("UPDATE gateway_accounts SET health='login_required' WHERE id=?").run(row.account_id);
         const window = live.plugin.manifest.capabilities.deduplicationWindowMs;
         const retrySafe = !error.uncertain || (window > 0 && Date.now() - row.created_at < window - 60_000);
+        // A fresh inbound may commit while sendmessage is still in flight.
+        // Do not let its later rejection undo that recovery. Compare sealed
+        // revisions, since even an unchanged token can get a new reply quota.
+        const current = this.store.db.prepare('SELECT context FROM gateway_bindings WHERE id=? AND revoked=0').get(row.binding_id) as { context: string | null } | undefined;
+        const refreshed = row.channel === 'ilink' && error.code === 'context_required' && !error.uncertain && Boolean(current?.context && current.context !== context);
         const state = error.code === 'context_required' || error.code === 'login_required' ? 'failed' : !retrySafe ? 'uncertain' : !error.retryable || row.attempts >= 7 ? 'failed' : 'pending';
-        this.store.db.prepare("UPDATE gateway_outbox SET status=?,error=?,next_at=? WHERE id=? AND status='sending'").run(state, error.code, Date.now() + Math.max(error.retryAfterMs, Math.min(300_000, 1000 * 2 ** row.attempts)), row.id);
+        this.store.db.prepare("UPDATE gateway_outbox SET status=?,error=?,next_at=?,attempts=CASE WHEN ? THEN 0 ELSE attempts END WHERE id=? AND status='sending'").run(refreshed ? 'pending' : state, refreshed ? null : error.code, refreshed ? 0 : Date.now() + Math.max(error.retryAfterMs, Math.min(300_000, 1000 * 2 ** row.attempts)), Number(refreshed), row.id);
       }
     }
   }

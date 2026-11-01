@@ -154,10 +154,15 @@ try {
   put('chatSessions', 12, { id: 12, videoId, title: '中断历史', createdAt: Date.now() });
   scripted = [
     { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'interrupted-read', type: 'function', function: { name: 'read', arguments: '{"start":0,"end":10}' } }] }, finish_reason: 'tool_calls' }], usage },
-    new Error('simulated disconnect'),
+    // Exhaust the Gateway's physical retries while preserving the post-tool failure case.
+    ...Array.from({ length: 3 }, () => new Error('simulated disconnect')),
   ];
   const failedQa = enqueue('qa', { videoId, sessionId: 12, text: '读取这段字幕' }, 'session:12');
   await until(() => get(failedQa).status === 'failed');
+  assert.equal(scripted.length, 0, 'the transport retry budget was exhausted');
+  const failedAttempts = requests.slice(-3).map(r => JSON.parse(r.init.body));
+  assert.deepEqual(failedAttempts[1], failedAttempts[0], 'retry only the same post-tool model request');
+  assert.deepEqual(failedAttempts[2], failedAttempts[0]);
   const interruptedPrefix = JSON.parse(requests.at(-1).init.body).messages;
   const snapshots = store.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='chats' AND value IS NOT NULL").all(owner).map(r => JSON.parse(r.value)).filter(r => r.sessionId === 12);
   assert.equal(snapshots.length, 2);

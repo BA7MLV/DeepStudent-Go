@@ -11,6 +11,8 @@ export interface ModelTarget {
   catalogId: string;
   protocol: ApiProtocol;
   capabilities?: ModelOverrides;
+  /** Transport policy, credentials and retries belong to the server Gateway. */
+  gatewayManaged?: boolean;
 }
 
 export interface ModelListConnection {

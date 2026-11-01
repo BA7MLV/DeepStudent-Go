@@ -141,12 +141,28 @@
 /* ── Bot 栏 ───────────────────────────────────────────── */
 
 .bot-panel {
+  --app-edge-color: var(--background-secondary);
+  --app-edge-solid-height: max(env(safe-area-inset-top, 0px), 4px);
+  --bot-bar-h: 60px;
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
   background: var(--background-secondary);
   color: var(--foreground);
+}
+
+/* 和 PageShell 共用四层模糊，消息可真正滚入顶栏背后。 */
+.bot-top-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+}
+
+.bot-panel > .bot-center,
+.bot-panel > .bot-access {
+  padding-top: calc(var(--bot-bar-h) + 24px);
 }
 
 /* 顶栏：左边标题即会话切换器，右边三颗 44pt 圆形按钮（新对话 / 更多 / 关闭） */
@@ -170,6 +186,13 @@
   font-weight: 600;
 }
 
+.bot-panel__title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bot-panel__identity {
   display: grid;
   min-width: 0;
@@ -179,10 +202,15 @@
 }
 
 .bot-panel__switcher {
+  max-width: 100%;
+  min-width: 0;
+  justify-content: flex-start;
   height: 44px;
   padding: 0 8px 0 4px;
   border-radius: 999px;
 }
+
+.bot-panel__switcher > svg { flex: none; }
 
 .bot-panel__switcher--static { padding-left: 4px; }
 
@@ -195,6 +223,7 @@
 
 .bot-panel__actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 4px;
   margin-left: auto;
@@ -218,7 +247,7 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
-  max-width: min(48vw, 360px);
+  max-width: min(100%, 360px);
   color: var(--muted);
   font-size: 0.72rem;
   font-weight: 400;
@@ -379,6 +408,10 @@
 }
 
 .bh-chat {
+  --app-edge-color: var(--background);
+  --app-edge-solid-height: 4px;
+  --bot-bar-h: 0px;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -397,7 +430,6 @@
   gap: 8px;
   min-height: 52px;
   padding: 4px 8px 4px 16px;
-  border-bottom: 1px solid var(--border);
 }
 
 .bh-chat__who {
@@ -414,6 +446,7 @@
 .bh-chat__identity {
   display: grid;
   min-width: 0;
+  flex: 1;
   gap: 1px;
 }
 
@@ -424,6 +457,7 @@
 }
 
 .bh-files {
+  padding-top: var(--bot-bar-h);
   min-height: 0;
   flex: 1;
   overflow: auto;
@@ -454,7 +488,8 @@
   flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 12px 16px 16px;
+  padding: calc(var(--bot-bar-h, 0px) + 12px) 16px 16px;
+  scroll-padding-top: calc(var(--bot-bar-h, 0px) + 12px);
 }
 
 .bh-hello {
@@ -712,3 +747,7 @@
   .bot-activity__text { animation: none; }
   .imsg-typing i { animation-duration: 0s; }
 }
+.bot-history-control { display: flex; justify-content: center; min-height: 36px; }
+.bot-message-fallback { white-space: pre-wrap; overflow-wrap: anywhere; }
+.bot-jump-latest { position: absolute; bottom: 16px; right: 20px; z-index: 3; }
+.bot-sync-status { position: absolute; top: calc(var(--bot-bar-h, 0px) + 8px); left: 16px; right: 16px; z-index: 2; padding: 4px 8px; text-align: center; font-size: .8rem; color: var(--muted); background: var(--surface); border-radius: 12px; pointer-events: none; }

@@ -4,7 +4,8 @@ import type { DatabaseStore } from '../storage/database.js';
 import { cancelSandbox, executeSandbox, readSandboxFile, shellToolTimeoutMs, type SandboxCleanup, type SandboxExecutor, type SandboxFileReader } from './sandbox.js';
 import type { CloudConfiguration } from '../cloud/config.js';
 import { DEFAULT_AGENT_POLICY, type AgentPolicy } from '@wangke/contracts/cloud';
-import { botRequest, botReply, responseContinuation, type ModelMessage as Message, type ModelCall as Call } from './model.js';
+import { type ModelMessage as Message, type ModelCall as Call } from './model.js';
+import { createModelGateway } from './model-gateway-factory.js';
 import type { StudyTools } from './study.js';
 import { McpManager, mcpError } from '../mcp/manager.js';
 import { WebSearchService, webError } from '../web-search/service.js';
@@ -13,19 +14,19 @@ import { mcpToolDefinition } from '@wangke/contracts/mcp';
 import { ToolRegistry } from './tools/registry.js';
 import { BudgetBlocked, UsageLedger } from './budget.js';
 import { botPauseMessage } from '@wangke/contracts/cloud';
-import { ModelClient, ModelFailure } from './model-client.js';
+import { ModelFailure } from './model-client.js';
 import { ContextGovernor } from './context-governor.js';
 import { BotArtifacts } from './artifacts.js';
 import { BotSkills } from './skills.js';
 import { BotMemory } from './memory.js';
 import { publishBotEvent, type BotEventHook } from './events.js';
-import { boundedRequest } from './request-budget.js';
 import { ProjectRepository, type ProjectThread } from '../projects/repository.js';
 import { ProjectTools } from '../projects/tools.js';
 import { importBotAttachments } from '../projects/attachments.js';
 import { ProjectError } from '../projects/files.js';
 import { BotSettingsTools } from './settings.js';
 import { shellDecision } from './permissions.js';
+import { shellApprovalText } from './approval-copy.js';
 import { CloudRecords } from '../cloud/records.js';
 import { settleWithin } from '../lifecycle.js';
 import { hasWechatLatex, wechatToolHasLatex, WECHAT_REPLY_POLICY, WECHAT_FORMAT_REPAIR } from './wechat-replies.js';
@@ -45,7 +46,7 @@ const tool = (name: string, description: string, properties: object, required: s
 const tools = [
   tool('send_message', 'Deliver one concise, natural message to the current conversation. Keep simple replies together; split fuller answers into a few meaningful parts, not a wall of text or one bubble per sentence. Send useful answers, verified results or necessary questions, not plans, routine status or tool narration. For conversational text, set complete=false for a part when more messages or work follow; complete=true ends the turn (default for legacy callers). Ready parts may be sent in one ordered batch with only the last part completing the turn. Do not repeat the answer in plain assistant text alongside this call. progress is internal and normally hidden; the runtime may project only selected channel-safe milestones. question ends the turn; approval waits for a button or IM text reply. Send actual images/files with study_send_file, not attachment JSON.', { kind: { type: 'string', enum: ['text', 'progress', 'question', 'approval', 'attachment'] }, text: { type: 'string', minLength: 1, maxLength: 12000 }, complete: { type: 'boolean', description: 'For text/legacy attachment messages: false continues the task, true finishes. Defaults to true.' } }, ['kind', 'text']),
   tool('finish_turn', 'Finish after your messages or files have already been sent. Emits no extra message: do not repeat delivered content in a final summary.', {}, []),
-  tool('shell', 'Execute bash privately in your isolated Linux workspace. Read/write files, run Python/Node, test programs. Files in /workspace persist across commands. For another owner resource project, pass its exact projectId from projects list; it is mounted at /workspace for this command. Set systemWrite=true to create/modify ANY owner /system files or install Skills without human approval; this grants a writable mount only for this command, otherwise all /system is read-only. Explicit policy denials still apply. Deleting files/directories ALWAYS requires one-shot approval, even for trusted Bots: set requiresApproval=true for deletions, including those hidden in scripts. Common destructive commands are also detected by the runtime, not a complete shell security boundary. Prefer edit for revision-checked changes to system documents; MCP credentials stay human-managed in Settings. Each command starts a fresh container; keep dependencies in /workspace (venv, node_modules). No other host access. Default deadline 120 seconds; set timeoutSeconds up to 600 for builds, installs or large conversions. All child processes stop with the container; wait cannot resume a killed command. Inspect partial outputs before retrying an interrupted command. Set requiresApproval=true for destructive work or consequential external changes such as publishing, sending to third parties or purchases. Routine web searches/downloads, reading data, creating/editing system files, generating workspace files and local computation do not need this flag merely because they use network or shell. Call this tool directly; the runtime requests approval when needed, so never ask for the same permission with send_message first. Give description as a short user-facing purpose (including important effects), never code. To deliver a generated binary file use study_upload_file then study_send_file.', { command: { type: 'string' }, description: { type: 'string', maxLength: 300 }, projectId: { type: 'string', description: 'Exact owner resource projectId from projects list; defaults to the current/default project.' }, systemWrite: { type: 'boolean', description: 'Writable access to all owner /system files for this command, without approval for creates/edits/installs. Deletion still requires approval. Defaults to false (all /system is read-only).' }, requiresApproval: { type: 'boolean' }, timeoutSeconds: { type: 'integer', minimum: 1, maximum: 600, description: 'Command deadline in seconds; set up to 600 for builds, installs or large conversions.' } }, ['command']),
+  tool('shell', 'Execute bash privately in your isolated Linux workspace. Read/write files, run Python/Node, test programs. Files in /workspace persist across commands. For another owner resource project, pass its exact projectId from projects list; it is mounted at /workspace for this command. Set systemWrite=true to create/modify ANY owner /system files or install Skills without human approval; this grants a writable mount only for this command, otherwise all /system is read-only. Explicit policy denials still apply. Deleting files/directories ALWAYS requires one-shot approval, even for trusted Bots: set requiresApproval=true for deletions, including those hidden in scripts. Common destructive commands are also detected by the runtime, not a complete shell security boundary. Prefer edit for revision-checked changes to system documents; MCP credentials stay human-managed in Settings. Each command starts a fresh container; keep dependencies in /workspace (venv, node_modules). No other host access. Default deadline 120 seconds; set timeoutSeconds up to 600 for builds, installs or large conversions. All child processes stop with the container; wait cannot resume a killed command. Inspect partial outputs before retrying an interrupted command. Set requiresApproval=true for destructive work or consequential external changes such as publishing, sending to third parties or purchases. Routine web searches/downloads, reading data, creating/editing system files, generating workspace files and local computation do not need this flag merely because they use network or shell. Call this tool directly; the runtime requests approval when needed, so never ask for the same permission with send_message first. Write description as the actual conversational request to show if approval is needed, not a tool label or execution summary. To deliver a generated binary file use study_upload_file then study_send_file.', { command: { type: 'string' }, description: { type: 'string', maxLength: 300, description: 'A brief approval question in the user language, continuing the conversation: say what you want to do with their specific material and why if useful. Include important effects and affected files/recipients; never imply an unverified action is harmless or read-only. Example: 我想先看看这份申论 PDF 有多少页、内容分哪几部分，可以吗？ Write the complete request naturally, not a noun phrase like 读取 PDF 页数和正文结构. No code, permission jargon, approval IDs, reply instructions or boilerplate; the runtime handles authorization.' }, projectId: { type: 'string', description: 'Exact owner resource projectId from projects list; defaults to the current/default project.' }, systemWrite: { type: 'boolean', description: 'Writable access to all owner /system files for this command, without approval for creates/edits/installs. Deletion still requires approval. Defaults to false (all /system is read-only).' }, requiresApproval: { type: 'boolean' }, timeoutSeconds: { type: 'integer', minimum: 1, maximum: 600, description: 'Command deadline in seconds; set up to 600 for builds, installs or large conversions.' } }, ['command']),
   tool('wait', 'Persist this task and wake it later, without keeping a model request or browser open.', { seconds: { type: 'integer', minimum: 1, maximum: 86400 }, reason: { type: 'string' } }, ['seconds', 'reason']),
 ];
 
@@ -346,19 +347,17 @@ export class BotRunner {
       this.store.systemSkills.directory(owner);
       if (!thread.project_id && this.projects && this.options.study && thread.agent_id) importBotAttachments(this.projects, this.options.study.filesDir, owner, this.workspaceId(thread));
       publishBotEvent(this.store, { owner, thread: run.thread_id, run: run.id, type: 'run.started' }, this.options.onEvent);
-      const config = this.configuration?.get(owner, true);
+      const config = this.configuration?.get(owner);
       const ledger = new UsageLedger(this.store, this.configuration);
-      const client = new ModelClient(ledger, this.fetcher);
+      const gateway = createModelGateway(this.store, this.configuration, this.fetcher);
       const elapsed = (this.store.db.prepare('SELECT active_ms FROM runs WHERE id=?').get(run.id) as { active_ms: number }).active_ms;
       const activeMs = ledger.limits(owner, run.id).activeMs;
       if (activeMs !== undefined) timeLimit = AbortSignal.timeout(Math.max(1, activeMs - elapsed));
       signal = AbortSignal.any([signal, ...(timeLimit ? [timeLimit] : []), lifecycle.signal]);
       checkActive();
-      const provider = config?.providers.find(p => p.id === config.llmModel.providerId);
-      const model = config?.llmModel.model ?? process.env.MODEL_NAME ?? 'gpt-4o-mini';
+      let selected = gateway.target({ owner, purpose: 'bot' });
       const maxSteps = config?.policy.maxSteps ?? Math.max(1, Math.min(1000, Number(process.env.BOT_MAX_STEPS) || 100));
-      if (!(provider?.baseUrl || process.env.MODEL_API_KEY) || !model) throw new Error('model_not_configured');
-      const modelKey = JSON.stringify([provider?.id ?? 'server', provider?.baseUrl ?? process.env.MODEL_BASE_URL ?? 'https://api.openai.com/v1', provider?.protocol ?? 'openai-chat', model]);
+      const modelKey = JSON.stringify([selected.providerId, selected.protocol, selected.model, config?.modelRevision]);
        context = run.context_json ? JSON.parse(run.context_json) : this.initialContext(run, modelKey);
        this.consumeInputs(run, context);
       // Persisted runs may still carry the previous all-system-writes-ask rule.
@@ -483,7 +482,6 @@ export class BotRunner {
         if (run.step_count >= maxSteps) {
           throw new BudgetBlocked('run_step_budget');
         }
-        const selected = provider ?? { protocol: 'openai-chat' as const, apiKey: process.env.MODEL_API_KEY, baseUrl: process.env.MODEL_BASE_URL ?? 'https://api.openai.com/v1' };
         const scopeRow = this.store.db.prepare('SELECT mcp_server_ids FROM threads WHERE id=? AND owner_id=?').get(run.thread_id, owner) as { mcp_server_ids: string | null };
         const mcpScope = scopeRow.mcp_server_ids === null ? undefined : JSON.parse(scopeRow.mcp_server_ids) as string[];
         const catalog = thread.project_id ? undefined : await this.mcp?.catalog(owner, mcpScope);
@@ -536,10 +534,10 @@ export class BotRunner {
         // results are durable. Include it in the estimate as well as the request
         // so large batches cannot bypass context or usage limits.
         const imageEvidence: Message[] = images.evidence ? [{ role: 'user', runtime_notice: true, content: images.evidence }] : [];
-        let outputTokens = ledger.model(owner).outputTokens;
-        const estimate = (messages: Message[]) => { const r = botRequest(selected, model, [...messages, ...imageEvidence], registry.definitions(), outputTokens, run.thread_id); return boundedRequest(r.body, r.path, outputTokens).total; };
+        let outputTokens = ledger.model(owner, selected).outputTokens;
+        const estimate = (messages: Message[]) => gateway.estimate({ owner, purpose: 'bot', messages: [...messages, ...imageEvidence], tools: registry.definitions(), outputTokens, cacheKey: run.thread_id, continuationRef: selected, signal });
         const governor = new ContextGovernor(this.store);
-        const capacity = Math.min(ledger.model(owner).contextTokens, ledger.limits(owner, run.id).contextTokens);
+        const capacity = Math.min(ledger.model(owner, selected).contextTokens, ledger.limits(owner, run.id).contextTokens);
         let governed: Message[];
         try { governed = governor.view(owner, run.id, context, registry.definitions(), capacity, estimate); }
         catch (error) {
@@ -550,18 +548,17 @@ export class BotRunner {
           governed = governor.view(owner, run.id, context, registry.definitions(), capacity, estimate);
         }
         const modelView = [...governed, ...imageEvidence];
-        const request = botRequest(selected, model, modelView, registry.definitions(), outputTokens, run.thread_id);
         // Prepare every image through the ordinary durable tool pipeline first.
         // This preserves permissions, approvals, bounded concurrency, budgets
         // and cancellation while preventing a model from answering after only
         // the first image. Successful reads are reused after a restart.
-        const body = images.calls.length ? undefined : await client.request(`${provider?.baseUrl ?? process.env.MODEL_BASE_URL ?? 'https://api.openai.com/v1'}/${request.path}`, {
-          method: 'POST', signal,
-          headers: request.headers,
-          redirect: 'error',
-          body: JSON.stringify(request.body),
-        }, { owner, run: run.id, purpose: 'bot', provider: provider?.id ?? 'server', model }, boundedRequest(request.body, request.path, outputTokens).total);
-        const { calls, text } = images.calls.length ? { calls: images.calls, text: '' } : botReply(selected.protocol, body);
+        const result = images.calls.length ? undefined : await gateway.request({ owner, run: run.id, purpose: 'bot', messages: modelView, tools: registry.definitions(), outputTokens, cacheKey: run.thread_id, conversationId: run.thread_id, continuationRef: selected, signal });
+        const { calls, text } = result?.response ?? { calls: images.calls, text: '' };
+        if (result) {
+          if (!result.continuationReusable) context = context.map(({ response_items: _native, ...message }) => message);
+          selected = { ...selected, providerId: result.providerId, model: result.model, protocol: result.protocol };
+          this.store.db.prepare('UPDATE runs SET context_model=? WHERE id=?').run(JSON.stringify([selected.providerId, selected.protocol, selected.model, config?.modelRevision]), run.id);
+        }
         if (images.hasImages && !calls.length) {
           if (imageProgressTimer) { clearTimeout(imageProgressTimer); imageProgressTimer = undefined; }
           if (imageProgressSent) appendActive('progress', '图片已读完，正在整理答复。', `im:status:${run.id}:image-ready`);
@@ -584,7 +581,7 @@ export class BotRunner {
           const blockedByTask = this.pendingForegroundTasks(run.id) &&
            (directReply || batch.some(call => call.function.name === 'finish_turn' || call.function.name === 'send_message'));
         signal.throwIfAborted();
-        context.push({ role: 'assistant', content: text || null, ...(batch.length ? { tool_calls: batch } : {}), response_items: body === undefined ? undefined : responseContinuation(selected.protocol, body) });
+        context.push({ role: 'assistant', content: text || null, ...(batch.length ? { tool_calls: batch } : {}), response_items: result?.response.continuation });
         if (wechat && (directReply && hasWechatLatex(text) || batch.some(call => wechatToolHasLatex(call.function.name, call.function.arguments)))) {
           // Reject before *any* effect in this batch. Return every tool result
           // so Responses/Anthropic/Chat histories remain valid on retry/restart.
@@ -749,12 +746,7 @@ export class BotRunner {
             this.store.transaction(() => {
               scoped.checkActive();
               this.store.db.prepare("UPDATE run_steps SET status='waiting_approval' WHERE id=?").run(call.id);
-                const globalPolicy = this.configuration?.policy(thread.owner_id, thread.id) ?? DEFAULT_AGENT_POLICY;
-                const reason = decision.reason === 'destructive' ? '命令中检测到删除、覆盖或其他破坏性操作，需要单独确认。'
-                  : decision.reason === 'external' ? 'Bot 将此操作标记为会删除数据或对外产生影响，需要单独确认。'
-                  : globalPolicy.shell === 'ask' ? '当前 Bot 的命令权限设为“每次询问”。'
-                  : '当前工作区的命令权限设为“每次询问”，会优先于全局的允许设置。';
-                const message = appendActive('approval', `需要你的确认：${args.description?.trim() || '在工作区运行程序，处理当前任务'}\n${reason}\n仅批准这一次操作。${args.systemWrite === true ? `\n此命令将获得整个 /system 的写权限。审批绑定的完整命令：\n${args.command}` : ''}`);
+                const message = appendActive('approval', shellApprovalText({ description: args.description, reason: decision.reason, command: args.command, systemWrite: args.systemWrite === true }));
               this.store.db.prepare('INSERT INTO approvals(id,thread_id,message_id,run_id,step_id,status,created_at) VALUES(?,?,?,?,?,?,?)').run(crypto.randomUUID(), run.thread_id, message.id, run.id, call.id, 'pending', now());
               this.store.db.prepare("UPDATE runs SET status='waiting_user' WHERE id=?").run(run.id);
               suspended = true;

@@ -5,8 +5,7 @@ import { CloudConfiguration } from './config.js';
 import { CloudRecords } from './records.js';
 import { executeMediaTask } from './media.js';
 import { executorFor, recordMutation, type TaskContext, type TaskExecutor } from './execution.js';
-import { UsageLedger, BudgetBlocked } from '../agent/budget.js';
-import { accountedFetch } from '../agent/accounted-fetch.js';
+import { BudgetBlocked } from '../agent/budget.js';
 import { settleWithin } from '../lifecycle.js';
 import type { WebSearchService } from '../web-search/service.js';
 export { workerIdentity } from './workerAuth.js';
@@ -153,7 +152,7 @@ export class CloudTaskRunner {
         filesDir: this.options.filesDir ?? process.env.FILES_DIR ?? path.join(directory, 'files'),
         signal, fetch: async (url, init) => {
           checkActive();
-          const response = await accountedFetch(new UsageLedger(this.store, context.configuration), { owner: row.owner_id, run: row.parent_run_id ?? undefined, step: row.parent_step_id ?? undefined, task: row.id, purpose: `study:${row.kind}` }, context.configuration.get(row.owner_id, true).providers, this.options.fetch ?? fetch)(url, init);
+          const response = await (this.options.fetch ?? fetch)(url, init);
           checkActive();
           return response;
         }, checkActive,

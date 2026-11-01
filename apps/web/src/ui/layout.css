@@ -178,13 +178,13 @@
   );
 }
 
-/* 与导航抽屉共用 900px 断点；电脑端使用纯色顶栏，不绘制渐变或模糊。 */
+/* PageShell 与导航抽屉共用 900px 断点；电脑端为纯色，Bot 窄面板仍保留模糊。 */
 @media (min-width: 901px) {
-  .page-app-bar__blur {
+  .page-app-bar__blur:not(.page-app-bar__blur--always) {
     display: none;
   }
 
-  .page-app-bar__blur > span {
+  .page-app-bar__blur:not(.page-app-bar__blur--always) > span {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

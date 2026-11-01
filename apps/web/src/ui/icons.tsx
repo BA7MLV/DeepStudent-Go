@@ -49,6 +49,7 @@ import {
   IconFolderPlus,
   IconGitBranch,
   IconGripVertical,
+  IconHandMove,
   IconHelp,
   IconHighlight,
   IconHistory,
@@ -207,6 +208,7 @@ const ICONS: Record<string, Icon> = {
   pin_off: IconPinnedOff,
   play: IconPlayerPlay,
   pointer: IconPointer,
+  pan_tool: IconHandMove,
   redo: IconArrowForwardUp,
   /**
    * 排队（流式期间的「排队 / 插入」切换、排队条标题）。

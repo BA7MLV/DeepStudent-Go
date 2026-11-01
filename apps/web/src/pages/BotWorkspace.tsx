@@ -1,4 +1,4 @@
-import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Avatar, Button, Dropdown, ListBox, Modal, Spinner, cn } from '@heroui/react';
 import { PageShell, Sym, toast, promptDialog, confirmDialog } from '../ui';
@@ -7,16 +7,19 @@ import { cloud } from '../cloud/state';
 import { MoreMenu, type MenuAction } from '../ui';
 import { useBotPanel } from '../store/botPanel';
 import { serverClient, type ApprovalDto, type ThreadDetail, type Session, type ThreadQuestionDto } from '../api/serverClient';
-import type { AgentProfileDto, MessageDto, ProjectDetailDto, SseEvent, ThreadDto } from '@wangke/contracts';
+import type { AgentProfileDto, BootstrapStatusDto, MessageDto, ProjectDetailDto, ThreadDto } from '@wangke/contracts';
 import { parseBotAttachments, parseLegacyBotAttachments, MAX_BOT_ATTACHMENTS, type BotAttachment } from '@wangke/contracts';
 import { BotAttachmentDraft, BotMessageAttachments, type BotDraftFile } from '../components/BotAttachments';
 import { botProgressText } from '@wangke/contracts/cloud';
 import MessageComposer from '../components/MessageComposer';
 import VirtualMessages from '../components/VirtualMessages';
-import { formatListTime, groupMessages, timeOf, type Row } from './botMessages';
+import { formatListTime, createMessageGrouper, timeOf, type Row } from './botMessages';
 import DeliveryReceipt from '../components/DeliveryReceipt';
 import AccessForm from './BotAccess';
 import './bot.css';
+import { useBotHistory } from './useBotHistory';
+import { mergeMessages } from './botMessageCache';
+import BotMessageBoundary from './BotMessageBoundary';
 import BotMcpScope from '../mcp/BotMcpScope';
 import { MODAL_CONTAINER_CLASS } from '../ui/modalContainer';
 import { useTranslation } from 'react-i18next';
@@ -78,6 +81,32 @@ const BotAvatar = memo(function BotAvatar({ agent, size = 40, className }: { age
 });
 
 const ACTIVITY_PHASES = ['scanning', 'connecting', 'checking', 'composing'] as const;
+
+/** 顶栏浮在消息之上；实测高度让首条消息避开安全区和动态状态行。 */
+function BotTopBar({ className, children }: { className: string; children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const bar = ref.current;
+    const parent = bar?.parentElement;
+    if (!bar || !parent) return;
+    const measure = () => parent.style.setProperty('--bot-bar-h', `${bar.offsetHeight}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(bar);
+    return () => {
+      observer.disconnect();
+      parent.style.removeProperty('--bot-bar-h');
+    };
+  }, []);
+  return (
+    <header ref={ref} className={cn('bot-top-bar', className)}>
+      <div className="page-app-bar__blur page-app-bar__blur--always" aria-hidden="true">
+        <span /><span /><span /><span />
+      </div>
+      {children}
+    </header>
+  );
+}
 
 /** Web live work label. Only selected runtime milestones are also projected to IM. */
 function BotActivity({ active, progress, beat }: { active: boolean; progress?: string; beat: number }) {
@@ -200,7 +229,7 @@ const Bubble = memo(function Bubble({
         data-fresh={fresh || undefined}
         data-day={row.day}
       >
-        {body}
+        <BotMessageBoundary key={message.content} content={message.content}>{body}</BotMessageBoundary>
       </div>
       {/* iMessage：只在自己最后一条下面写一次「已读 / 已送达」。 */}
       {row.lastMine && status && <DeliveryReceipt status={status} createdAt={timeOf(message)} />}
@@ -267,19 +296,23 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const [showArchived, setShowArchived] = useState(false);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState('');
-  const [detailError, setDetailError] = useState('');
-  const [detailRevision, setDetailRevision] = useState(0);
+  const [listCursor, setListCursor] = useState<string | null>(null);
+  const [listMoreBusy, setListMoreBusy] = useState(false);
+  const [listMoreError, setListMoreError] = useState(false);
+  const listMoreFlight = useRef(false);
+  const protocol = useRef(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [messageTarget, setMessageTarget] = useState<{ kind: 'run'; runId: string } | { kind: 'question'; questionId: string } | undefined>();
   const sendLock = useRef(false);
   const loadVersion = useRef(0);
-  const [status, setStatus] = useState<{ initialized: boolean } | null>(null);
+  const [status, setStatus] = useState<BootstrapStatusDto | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [connectError, setConnectError] = useState('');
   /** 线程列表只拿摘要；详情（消息）只为当前打开的线程拉。 */
   const [threads, setThreads] = useState<ThreadDto[]>([]);
-  const [details, setDetails] = useState<Record<string, ThreadDetail>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
+  const history = useBotHistory(session?.authenticated ? session.user?.id ?? null : null, activeId, !filesOpen, status?.botSyncVersion === 1);
+  const { details, setDetails, patchActive, detailError } = history;
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const draftKey = activeId ?? `new:${agentId}`;
   const draft = drafts[draftKey] ?? '';
@@ -288,15 +321,23 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const draftFiles = attachmentDrafts[draftKey] ?? [];
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
-  const cursorRef = useRef(0);
+  const positionedThread = useRef(activeId);
+  if (positionedThread.current !== activeId) {
+    positionedThread.current = activeId;
+    stickRef.current = history.reading?.follow ?? true;
+  }
   /** 每个线程有没有任务在跑：决定「正在输入」和已读。 */
   const [running, setRunning] = useState<Record<string, boolean>>({});
   /** 最近一条内部进度用于 Web 顶栏；普通进度不会成为聊天或 IM 回复。 */
-  const [activity, setActivity] = useState<Record<string, string>>({});
   const [activityBeat, setActivityBeat] = useState(0);
   const chatMode = !projectId;
 
   const active = activeId ? details[activeId] ?? null : null;
+  useEffect(() => {
+    if (!active) return;
+    setThreads(old => old.map(thread => thread.id === active.id && (thread.title !== active.title || thread.archived !== active.archived || thread.updatedAt < active.updatedAt)
+      ? { ...thread, title: active.title, archived: active.archived, updatedAt: active.updatedAt } : thread));
+  }, [active?.id, active?.title, active?.archived, active?.updatedAt]);
   const activeSummary = threads.find((thread) => thread.id === activeId) ?? null;
   const availableAgents = agents.filter(agent => agent.enabled && (!projectId || project?.grants.some(g => g.agentId === agent.id)));
   const agentOf = useCallback((thread: ThreadDto | null) => agents.find(a => a.id === (thread?.agentId ?? agents[0]?.id)) ?? null, [agents]);
@@ -307,12 +348,13 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const activeRuns = active?.runs ?? [];
   const activeBusy = Boolean(activeId && (activeRuns.length
     ? activeRuns.some(run => ['queued', 'running', 'waiting_user', 'waiting_event'].includes(run.status))
-    : running[activeId]));
+    : active?.running ?? running[activeId]));
   const activeWaiting = activeRuns.some(run => run.status === 'waiting_event');
   const activeModelRunning = activeRuns.some(run => ['queued', 'running'].includes(run.status));
-  const activeRunning = activeModelRunning || (!activeRuns.length && Boolean(activeId && running[activeId]));
+  const activeRunning = activeModelRunning || (!activeRuns.length && Boolean(activeId && (active?.running ?? running[activeId])));
   const activeRunTarget = activeRuns.find(run => ['queued', 'running', 'waiting_event'].includes(run.status));
-  const activeProgress = activeId ? activity[activeId] : undefined;
+  const activeProgress = history.reading?.progress;
+  const groupMessages = useMemo(() => createMessageGrouper(), [activeId, locale]);
   const rows = useMemo(() => {
     // Optimistic "running" only controls the stop/typing UI, not a read receipt.
     const grouped = groupMessages(messages, locale);
@@ -320,10 +362,10 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     const tail = grouped.at(-1)?.message;
     if (activeRunning && tail) {
       const typing: MessageDto = { id: 'typing', threadId: tail.threadId, clientNonce: null, seq: Number.MAX_SAFE_INTEGER, role: 'assistant', kind: 'progress', content: '', createdAt: new Date().toISOString(), replyTo: null };
-      grouped.push({ key: 'typing', message: typing, first: true, last: true, stamp: null, day: grouped[grouped.length - 1]?.day ?? '', time: '' });
+      return grouped.concat({ key: 'typing', message: typing, first: true, last: true, stamp: null, day: grouped[grouped.length - 1]?.day ?? '', time: '' });
     }
     return grouped;
-  }, [messages, locale, activeRunning]);
+  }, [messages, locale, activeRunning, groupMessages]);
   const approvalByMessage = useMemo(() => {
     const map = new Map<string, ApprovalDto>();
     for (const approval of active?.approvals ?? []) map.set(approval.messageId, approval);
@@ -345,17 +387,20 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     })
     .sort((a, b) => b.time.localeCompare(a.time)), [threads, details, showArchived]);
 
-  const patchActive = useCallback((threadId: string, update: (thread: ThreadDetail) => ThreadDetail) => {
-    setDetails((old) => old[threadId] ? { ...old, [threadId]: update(old[threadId]) } : old);
-  }, []);
-
   const refresh = useCallback(async () => {
     const version = ++loadVersion.current;
     setListError(''); setListLoading(true);
     try {
-      const [result, profiles, nextProject] = await Promise.all([serverClient.threads(projectId), serverClient.agents(), projectId ? serverClient.project(projectId) : Promise.resolve(null)]);
+      const [result, profiles, nextProject] = await Promise.all([protocol.current ? serverClient.threadPage(projectId) : serverClient.threads(projectId), serverClient.agents(), projectId ? serverClient.project(projectId) : Promise.resolve(null)]);
       if (loadVersion.current !== version) return;
       const bots = result.threads.filter(thread => thread.mode === 'bot' && (projectId ? thread.projectId === projectId : !thread.projectId));
+      setListCursor('nextCursor' in result ? result.nextCursor as string | null : null);
+      const requestedId = initialThreadId.current;
+      if (protocol.current && requestedId && !bots.some(thread => thread.id === requestedId)) {
+        const summary = await serverClient.threadSummary(requestedId);
+        if (loadVersion.current !== version) return;
+        if (summary.mode === 'bot' && (projectId ? summary.projectId === projectId : !summary.projectId)) bots.unshift(summary);
+      }
       setThreads(bots); setAgents(profiles.agents); setProject(nextProject);
       const firstAgent = profiles.agents.find(a => a.enabled && (!nextProject || nextProject.grants.some(g => g.agentId === a.id)));
       const requested = bots.find(thread => thread.id === initialThreadId.current);
@@ -377,6 +422,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       .then(([nextStatus, nextSession]) => {
         if (ignore) return;
         setStatus(nextStatus);
+        protocol.current = nextStatus.botSyncVersion === 1;
         setSession(nextSession);
         if (nextSession.authenticated) void refresh();
       })
@@ -384,82 +430,18 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     return () => { ignore = true; loadVersion.current++; };
   }, [refresh, t]);
 
-  // 打开线程时才拉它的消息。
-  useEffect(() => {
-    if (!activeId || details[activeId]) return;
-    let cancelled = false;
-    setDetailError('');
-    void serverClient.thread(activeId).then((detail) => {
-       if (cancelled) return;
-       setDetails((old) => ({ ...old, [activeId]: detail }));
-       const lastProgress = [...detail.messages].reverse().find(message => message.role === 'assistant' && message.kind === 'progress');
-       const lastVisible = [...detail.messages].reverse().find(message => message.kind !== 'progress');
-       const progressIsCurrent = Boolean(lastProgress && (!lastVisible || lastProgress.createdAt > lastVisible.createdAt));
-       setRunning(old => ({ ...old, [activeId]: Boolean(detail.running) || progressIsCurrent }));
-       if (lastProgress?.content && progressIsCurrent) setActivity(old => ({ ...old, [activeId]: lastProgress.content }));
-    }).catch(error => { if (!cancelled) setDetailError(projectError(error)); });
-    return () => { cancelled = true; };
-  }, [activeId, details, detailRevision]);
-
-  const activeLoaded = Boolean(active);
-  // Lifecycle events are persisted separately from message events. Poll only
-  // the compact state endpoint while this thread is open; never reload the
-  // message history on every progress event.
-  useEffect(() => {
-    if (!activeId || !activeLoaded || filesOpen) return;
-    let stopped = false;
-    const refreshState = () => void serverClient.threadState(activeId).then(state => {
-      if (stopped) return;
-      patchActive(activeId, thread => ({ ...thread, runs: state.runs, questions: state.questions, running: state.running }));
-      setRunning(old => ({ ...old, [activeId]: Boolean(state.running) }));
-    }).catch(() => {});
-    refreshState();
-    const timer = window.setInterval(refreshState, 1800);
-    return () => { stopped = true; window.clearInterval(timer); };
-  }, [activeId, activeLoaded, filesOpen, patchActive]);
-
-  // 事件流：每个线程独立游标，切换时从 0 回放（服务端按 message.id 去重）。
-  useEffect(() => {
-    // 等详情到手再开事件流，否则详情请求在路上时到达的事件会被丢掉。
-    if (!activeId || !activeLoaded || !session?.authenticated || filesOpen) return;
-    const controller = new AbortController();
-    let stopped = false;
-    cursorRef.current = 0;
-    const receive = (event: SseEvent, id: number) => {
-      cursorRef.current = Math.max(cursorRef.current, id);
-      if (!('message' in event)) return;
-      if (event.message.role === 'assistant' && event.message.kind === 'progress') {
-        setActivity(old => ({ ...old, [activeId]: event.message.content }));
-        setRunning(old => ({ ...old, [activeId]: true }));
-      }
-      // 对面有了正式回应（回复、提问、审批），就不再显示「正在输入」。
-      if (event.message.role !== 'user' && event.message.kind !== 'progress') {
-        setRunning(old => ({ ...old, [activeId]: false }));
-        setActivity(old => ({ ...old, [activeId]: '' }));
-      }
-      patchActive(activeId, (thread) => thread.messages.some((message) => message.id === event.message.id)
-        ? { ...thread, messages: thread.messages.map((message) => message.id === event.message.id ? event.message : message) }
-        : { ...thread, messages: [...thread.messages, event.message].sort((a, b) => a.seq - b.seq) });
-      if (event.message.kind === 'approval' || event.message.kind === 'question' || event.message.role !== 'user') void serverClient.thread(activeId).then(detail => {
-        if (!controller.signal.aborted) patchActive(activeId, thread => ({ ...thread, approvals: detail.approvals, questions: detail.questions, runs: detail.runs, running: detail.running }));
-      }).catch(() => {});
-    };
-    const run = async () => {
-      while (!stopped) {
-        try {
-          await serverClient.events(activeId, cursorRef.current, receive, controller.signal);
-        } catch {
-          if (controller.signal.aborted) break;
-        }
-        await new Promise((resolve) => window.setTimeout(resolve, 800));
-      }
-    };
-    void run();
-    return () => {
-      stopped = true;
-      controller.abort();
-    };
-  }, [activeId, activeLoaded, session?.authenticated, patchActive, filesOpen]);
+  const loadMoreThreads = async () => {
+    if (!listCursor || listMoreFlight.current) return;
+    listMoreFlight.current = true; setListMoreBusy(true); setListMoreError(false);
+    const version = loadVersion.current;
+    try {
+      const page = await serverClient.threadPage(projectId, listCursor);
+      if (loadVersion.current !== version) return;
+      setThreads(old => { const rows = new Map(old.map(thread => [thread.id, thread])); for (const thread of page.threads) if (!rows.has(thread.id)) rows.set(thread.id, thread); return [...rows.values()]; });
+      setListCursor(page.nextCursor);
+    } catch { setListMoreError(true); }
+    finally { listMoreFlight.current = false; setListMoreBusy(false); }
+  };
 
   // A small rotating phrase keeps the header alive while a model/tool has not
   // emitted a more specific progress update yet.
@@ -475,9 +457,6 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     const scroll = scrollRef.current;
     if (scroll && stickRef.current) scroll.scrollTop = scroll.scrollHeight;
   }, []);
-  useEffect(() => {
-    stickRef.current = true;
-  }, [activeId]);
   useEffect(followEnd, [rows.length, followEnd]);
 
   const create = async () => {
@@ -527,7 +506,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     patchActive(threadId, (thread) => ({
       ...thread,
       messages: accepted
-        ? thread.messages.map((message) => message.id === pendingId ? accepted : message).filter((message, index, list) => list.findIndex((other) => other.id === message.id) === index).sort((a, b) => a.seq - b.seq)
+        ? mergeMessages(thread.messages, [accepted])
         : thread.messages.filter((message) => message.id !== pendingId),
     }));
   };
@@ -547,7 +526,6 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       const target = active ?? await create();
       if (!target) return;
       targetId = target.id;
-      setActivity(old => ({ ...old, [target.id]: '' }));
       // A first send creates a thread; move its draft without touching other conversations.
       if (sourceKey !== target.id) {
         setDrafts(old => { const next = { ...old, [target.id]: old[sourceKey] ?? '' }; delete next[sourceKey]; return next; });
@@ -575,6 +553,9 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       if (failed?.status === 'rejected') throw failed.reason;
       const attachments = uploaded.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const payload = attachments.length ? JSON.stringify({ ...attachments[0], attachments, caption: content }) : content;
+      // Do not append across a trimmed, unloaded gap while the reader is in history.
+      if (target.id === activeId && !await history.jumpLatest()) throw new Error('load_failed');
+      history.setReading(true, scrollRef.current?.scrollTop ?? 0);
       pending = appendPending(target.id, attachments.length ? 'attachment' : 'text', payload, nonce);
       // Keep edits made during upload. A failed send restores the submitted draft.
       if ((drafts[sourceKey] ?? '').trim() === content) {
@@ -676,6 +657,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const reload = () => {
     void Promise.all([serverClient.bootstrapStatus(), serverClient.session()]).then(([nextStatus, nextSession]) => {
       setStatus(nextStatus);
+      protocol.current = nextStatus.botSyncVersion === 1;
       setSession(nextSession);
       if (nextSession.authenticated) return refresh();
       return undefined;
@@ -684,15 +666,15 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
 
   /* 内嵌在主页右侧时，加载 / 登录态也待在这块面板里，不另起一页。 */
   const panelBar = (extra?: ReactNode) => (
-    <header className="bot-panel__bar">
-      <h2 className="bot-panel__title">{currentAgent?.name || 'Bot'}</h2>
+    <BotTopBar className="bot-panel__bar">
+      <h2 className="bot-panel__title" title={currentAgent?.name || 'Bot'}>{currentAgent?.name || 'Bot'}</h2>
       <div className="bot-panel__actions">
         {extra}
         <Button isIconOnly variant="ghost" className="rounded-full" aria-label={t('botHome.close')} data-testid="bot-panel-close" onPress={onClose}>
           <Sym name="close" />
         </Button>
       </div>
-    </header>
+    </BotTopBar>
   );
   const frame = (body: ReactNode, title = 'Bot') => embedded
     ? <section className="bot-panel" aria-label="Bot">{panelBar()}{body}</section>
@@ -736,10 +718,15 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       <div
         ref={scrollRef}
         className="bot-messages"
-        aria-live="polite"
+        data-sync-status={history.syncStatus}
         onScroll={(event) => {
           const el = event.currentTarget;
-          stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+           stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+           if (el.querySelector('[data-chat-positioned="false"]')) return;
+           const top = el.getBoundingClientRect().top;
+           const first = [...el.querySelectorAll<HTMLElement>('[data-message-key]')].find(row => row.getBoundingClientRect().bottom > top + 80);
+           history.setReading(stickRef.current, el.scrollTop, first ? { key: first.dataset.messageKey!, offset: first.getBoundingClientRect().top - top } : undefined);
+           if (!stickRef.current && el.scrollTop < 80 && !history.historyError) void history.loadOlder();
         }}
       >
         {listLoading ? <div className="bot-center"><Spinner color="current" /></div> : landing ? (
@@ -750,9 +737,11 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
             </>}
           </div>
         ) : !active ? (
-          <div className="bot-center">{detailError ? <div className="bh-inline-error" role="alert">{detailError}<Button size="sm" variant="secondary" onPress={() => setDetailRevision(v => v + 1)}>{tp('retry')}</Button></div> : <Spinner color="current" />}</div>
+          <div className="bot-center">{detailError ? <div className="bh-inline-error" role="alert">{projectError(new Error(detailError))}<Button size="sm" variant="secondary" onPress={history.retry}>{tp('retry')}</Button></div> : <Spinner color="current" />}</div>
         ) : (
-          <VirtualMessages items={rows} scrollRef={scrollRef} onResize={followEnd} key={active.id}>
+          <>
+          {history.hasOlder && <div className="bot-history-control"><Button size="sm" variant="ghost" isDisabled={history.loadingOlder} onPress={() => { stickRef.current = false; void history.loadOlder(); }}>{history.loadingOlder ? t('botHome.loadingHistory') : history.historyError ? t('botHome.retryHistory') : t('botHome.loadHistory')}</Button></div>}
+          <VirtualMessages items={rows} scrollRef={scrollRef} onResize={followEnd} key={active.id} positionEmpty initialAnchor={history.reading?.follow ? undefined : history.reading?.anchor}>
             {(row) => (
               <Bubble
                 row={row}
@@ -766,8 +755,13 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
               />
             )}
           </VirtualMessages>
+          </>
         )}
       </div>
+       {(history.hasNewer || !stickRef.current) && <Button size="sm" variant="secondary" className="bot-jump-latest" onPress={() => { void history.jumpLatest().then(ok => { if (ok) { stickRef.current = true; followEnd(); } }); }}>{t('botHome.jumpLatest')}</Button>}
+      {history.syncStatus === 'offline' && <span className="bot-sync-status" role="status">{t('botHome.reconnecting')}</span>}
+      {history.syncStatus === 'error' && <span className="bot-sync-status" role="alert">{t('botHome.syncError')}</span>}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">{history.announcement ? `${history.announcement} · ${t('botHome.newMessage')}` : ''}</span>
     </div>
 
     <MessageComposer
@@ -813,12 +807,12 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   /* ── Bot 栏：标题即会话切换器（HIG pull-down），右侧「新对话」「更多」「关闭」 ── */
 
   if (embedded) {
-    const recentThreads = listRows.filter(row => !row.thread.archived).slice(0, 30);
+    const recentThreads = listRows.filter(row => !row.thread.archived);
     const historyMenu = (
       <Dropdown>
         <Button variant="ghost" className="bot-panel__switcher" aria-label={t('botHome.history')} data-testid="bot-panel-history">
           <BotAvatar agent={currentAgent} size={28} />
-          <span className="bot-panel__switcher-name">{landing ? currentAgent?.name || 'Bot' : chatTitle}</span>
+          <span className="bot-panel__switcher-name" title={landing ? currentAgent?.name || 'Bot' : chatTitle}>{landing ? currentAgent?.name || 'Bot' : chatTitle}</span>
           <Sym name="keyboard_arrow_down" aria-hidden="true" />
         </Button>
         <Dropdown.Popover placement="bottom start" className="bot-panel__history">
@@ -826,7 +820,8 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
             aria-label={t('botHome.history')}
             selectionMode="single"
             selectedKeys={activeId ? [activeId] : []}
-            onAction={(key) => {
+             onAction={(key) => {
+               if (key === 'load-more-threads') { void loadMoreThreads(); return; }
               const hit = threads.find(thread => thread.id === String(key));
               if (hit) openThread(hit);
             }}
@@ -836,19 +831,20 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
                 <span className="min-w-0 flex-1 truncate">{thread.title || tp('newTitle')}</span>
                 <time className="shrink-0 text-xs text-muted" dateTime={time}>{formatListTime(time, locale)}</time>
               </Dropdown.Item>
-            ))}
+             ))}
+             {listCursor && <Dropdown.Item id="load-more-threads" textValue={t('botHome.moreConversations')} isDisabled={listMoreBusy}>{t(listMoreError ? 'botHome.retryHistory' : 'botHome.moreConversations')}</Dropdown.Item>}
           </Dropdown.Menu>
         </Dropdown.Popover>
       </Dropdown>
     );
     return (
       <section className="bot-panel" data-landing={landing || undefined} aria-label="Bot" data-testid="bot-panel">
-        <header className="bot-panel__bar">
+        <BotTopBar className="bot-panel__bar">
           <div className="bot-panel__identity">
-            {recentThreads.length > 0 ? historyMenu : (
+            {recentThreads.length > 0 || listCursor ? historyMenu : (
               <h2 className="bot-panel__switcher bot-panel__switcher--static">
                 <BotAvatar agent={currentAgent} size={28} />
-                <span className="bot-panel__switcher-name">{currentAgent?.name || 'Bot'}</span>
+                <span className="bot-panel__switcher-name" title={currentAgent?.name || 'Bot'}>{currentAgent?.name || 'Bot'}</span>
               </h2>
             )}
             <BotActivity active={activeRunning || activeWaiting} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} beat={activityBeat} />
@@ -863,7 +859,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
               <Sym name="close" />
             </Button>
           </div>
-        </header>
+        </BotTopBar>
         {conversation}
         {modals}
       </section>
@@ -932,6 +928,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
             })}
           </ListBox>
         )}
+        {listCursor && <Button size="sm" variant="ghost" isDisabled={listMoreBusy} onPress={() => void loadMoreThreads()}>{t(listMoreError ? 'botHome.retryHistory' : 'botHome.moreConversations')}</Button>}
       </div>
     </aside>
   );
@@ -939,16 +936,16 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const chatPane = (
     <section className="bh-chat" data-landing={landing || undefined} aria-label={chatTitle ? t('botHome.conversation', { name: chatTitle }) : undefined} inert={narrow && pane === 'list'}>
       {!landing && (
-        <header className="bh-chat__bar">
+        <BotTopBar className="bh-chat__bar">
           <h2 className="bh-chat__who">
             {!filesOpen && <BotAvatar agent={currentAgent} size={28} />}
             <span className="bh-chat__identity">
-              <span className="bh-chat__name">{chatTitle}</span>
+              <span className="bh-chat__name" title={chatTitle}>{chatTitle}</span>
               <BotActivity active={(activeRunning || activeWaiting) && !filesOpen} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} beat={activityBeat} />
             </span>
           </h2>
           {threadMenu.length > 0 && !filesOpen && <MoreMenu label={t('botHome.more')} actions={threadMenu} testId="bh-thread-more" />}
-        </header>
+        </BotTopBar>
       )}
       {conversation}
     </section>

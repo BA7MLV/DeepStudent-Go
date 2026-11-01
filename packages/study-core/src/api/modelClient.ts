@@ -413,6 +413,8 @@ export interface ChatOptions {
   /** 思考预算 tokens（多数推理模型生效），128~32768 */
   thinking_budget?: number;
   cacheKey?: string;
+  /** Logical conversation identity for a server-managed Gateway connection. */
+  conversationId?: string;
   tool_choice?: 'auto' | 'none';
   onRequest?: (record: ModelRequestRecord) => void | Promise<void>;
 }
@@ -421,8 +423,8 @@ function chatPath(t: ModelTarget): string {
   return t.protocol === 'anthropic-messages' ? '/messages' : t.protocol === 'openai-responses' ? '/responses' : '/chat/completions';
 }
 
-function gatewayCacheHeaders(t: ModelTarget, key?: string): Record<string, string> | undefined {
-  return key && /\/api\/v1\/cloud\/models\/[^/]+$/.test(t.baseUrl) ? { 'x-wangke-cache-key': key } : undefined;
+function gatewayCacheHeaders(t: ModelTarget, key?: string, conversationId?: string): Record<string, string> | undefined {
+  return t.gatewayManaged || /\/api\/v1\/cloud\/models\/[^/]+$/.test(t.baseUrl) ? { ...(key ? { 'x-wangke-cache-key': key } : {}), ...(conversationId ? { 'x-wangke-conversation': conversationId } : {}) } : undefined;
 }
 
 function anthropicContent(content: ChatMessage['content']): unknown {
@@ -563,7 +565,7 @@ export function chatOnce(t: ModelTarget, opts: ChatOptions, fetcher?: typeof fet
   // The whole attempt is retried because no partial assistant content has
   // been exposed by chatOnce. Each attempt remains separately observable via
   // onRequest, which keeps usage and failure accounting correct.
-  return withTransportRetry(() => observeRequest(t, opts, () => chatOnceInner(t, opts, fetcher)), opts.signal);
+  return withTransportRetry(() => observeRequest(t, opts, () => chatOnceInner(t, opts, fetcher)), opts.signal, () => !t.gatewayManaged);
 }
 async function chatOnceInner(t: ModelTarget, opts: ChatOptions, fetcher?: typeof fetch): Promise<ChatMessage> {
   const messages = wire(opts.messages);
@@ -571,7 +573,7 @@ async function chatOnceInner(t: ModelTarget, opts: ChatOptions, fetcher?: typeof
     method: 'POST',
     signal: opts.signal,
     body: JSON.stringify(requestBody(t, opts, messages, false)),
-    headers: gatewayCacheHeaders(t, opts.cacheKey),
+    headers: gatewayCacheHeaders(t, opts.cacheKey, opts.conversationId),
   }, messages, fetcher);
   const body = await res.text();
   opts.signal?.throwIfAborted();
@@ -654,7 +656,7 @@ export function chatStream(
       ));
     },
     opts.signal,
-    () => !attemptProducedOutput,
+    () => !t.gatewayManaged && !attemptProducedOutput,
   );
 }
 async function chatStreamInner(
@@ -671,7 +673,7 @@ async function chatStreamInner(
     method: 'POST',
     signal: opts.signal,
     body: JSON.stringify(requestBody(t, opts, messages, true)),
-    headers: gatewayCacheHeaders(t, opts.cacheKey),
+    headers: gatewayCacheHeaders(t, opts.cacheKey, opts.conversationId),
   }, messages, fetcher);
 
   /**

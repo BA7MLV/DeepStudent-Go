@@ -1,0 +1,40 @@
+/* All bottom sheets travel their full height from/to the bottom edge.
+   React Aria measures the Content wrapper, not the animated Dialog child,
+   so data-entering can disappear before that child gets its first style.
+   Supply its native transition's initial style explicitly on every mount. */
+.drawer__content--bottom .drawer__dialog {
+  --drawer-enter-duration: var(--duration-slow);
+  --drawer-exit-duration: var(--duration-medium);
+  --drawer-enter-ease: var(--ease-smooth-out);
+  --drawer-exit-ease: var(--ease-smooth-out);
+}
+
+@starting-style {
+  .drawer__content--bottom .drawer__dialog {
+    translate: 0 100%;
+  }
+}
+
+/* Also preserve exit timing when a sheet adds its own transition shorthand
+   (for example, the table sheet's animated height/snap points). */
+.drawer__content--bottom[data-exiting='true'] .drawer__dialog {
+  transition-duration: var(--drawer-exit-duration);
+  transition-timing-function: var(--drawer-exit-ease);
+}
+
+/* React Aria waits on the backdrop's own transition before unmounting.
+   Keep it alive for the entire panel exit, not HeroUI's shorter fade. */
+.drawer__backdrop:has(> .drawer__content--bottom) {
+  transition: opacity var(--duration-slow) var(--ease-smooth-out);
+}
+
+.drawer__backdrop:has(> .drawer__content--bottom)[data-exiting='true'] {
+  transition-duration: var(--duration-medium);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer__content--bottom .drawer__dialog,
+  .drawer__backdrop:has(> .drawer__content--bottom) {
+    transition: none !important;
+  }
+}

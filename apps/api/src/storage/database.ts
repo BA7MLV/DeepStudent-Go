@@ -5,6 +5,7 @@ import { SystemFiles } from './system-files.js';
 import { SystemMcp } from './system-mcp.js';
 import { SystemSkills } from './system-skills.js';
 import { SystemSkillRecords } from './system-skill-records.js';
+import { migrateMessageSync } from './message-sync-migration.js';
 
 const MIGRATIONS: Array<[number, string]> = [
   [1, `
@@ -607,6 +608,7 @@ export class DatabaseStore {
         apply(25, groups[13], 13);
          apply(26, groups[14], 14);
          apply(29, groups[15], 15);
+        migrateMessageSync(this.db);
       } finally { expected.close(); }
     })();
   }

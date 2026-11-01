@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createCloudModelDraft, cloudModelConfig, cloudModelPreferences, cloudDiscoveryProviders, cloudModelUpdate, cloudModelsDirty, cloudProviderDirty } from '../apps/web/src/cloud/modelSettings.ts';
-import { useSettings } from '../apps/web/src/store/settings.ts';
+import { useSettings, targetOfSlot, targetOrNull } from '../apps/web/src/store/settings.ts';
 import { DEFAULT_AGENT_POLICY } from '../packages/contracts/src/cloud.ts';
 
 const config = {
@@ -37,3 +37,7 @@ assert.deepEqual(cloudDiscoveryProviders(store.getState(), config), [], 'unsaved
 store.getState().update({ providers: [{ ...before.providers[0], protocol: 'anthropic-messages' }] });
 assert.deepEqual(cloudDiscoveryProviders(store.getState(), config), [], 'unsaved protocol changes do not reuse old discovery');
 console.log('PASS: cloud draft isolation, credential retention, server-only discovery, endpoint/protocol changes and policy preservation');
+const deployed = { ...before, providers: [{ ...before.providers[0], apiKey: 'server-managed', gatewayManaged: true, deploymentProtocols: { model: 'anthropic-messages' } }] };
+assert.equal(targetOfSlot(deployed, 'chat').protocol, 'anthropic-messages');
+assert.equal(targetOrNull(deployed, config.llmModel).protocol, 'anthropic-messages');
+assert.equal(targetOrNull(deployed, { providerId: 'p1', model: 'other' }).protocol, 'openai-chat');

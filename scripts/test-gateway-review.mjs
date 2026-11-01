@@ -217,7 +217,7 @@ try {
     const vision = new StudyTools(store, config, files, async (_url, init) => {
       assert.match(init.body, protocol === 'anthropic-messages' ? /"media_type":"image\/jpeg"/ : /data:image\/jpeg;base64/);
       return Response.json(protocol === 'anthropic-messages' ? { content: [{ type: 'text', text: 'Image received' }] }
-        : protocol === 'openai-responses' ? { output: [{ content: [{ type: 'output_text', text: 'Image received' }] }] }
+        : protocol === 'openai-responses' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Image received' }] }] }
         : { choices: [{ message: { content: 'Image received' } }] });
     });
     await vision.plugins.get('study_file').execute({ fileId: image.id }, c);

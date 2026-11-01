@@ -4,9 +4,9 @@ export const MODEL_FIELDS = ['llmModel', 'visionModel', 'asrModel', 'decisionMod
 export type ModelField = typeof MODEL_FIELDS[number];
 export interface ModelSettingsIssue {
   path: string;
-  reason: 'invalid_reference' | 'model_too_long' | 'provider_not_found' | 'invalid_provider' | 'invalid_url' | 'invalid_key';
+  reason: 'invalid_reference' | 'model_too_long' | 'provider_not_found' | 'invalid_provider' | 'invalid_url' | 'invalid_key' | 'invalid_preset' | 'preset_not_found';
 }
-export type ModelSettingsUpdate = Pick<CloudConfig, 'providers' | 'llmModel' | 'visionModel' | 'asrModel' | 'decisionModel'> & { modelRevision: string };
+export type ModelSettingsUpdate = Pick<CloudConfig, 'providers' | 'llmModel' | 'visionModel' | 'asrModel' | 'decisionModel' | 'modelPresets' | 'modelRoutes'> & { modelRevision: string };
 export interface ProviderSettingsUpdate {
   provider: CloudProvider;
   modelRevision: string;

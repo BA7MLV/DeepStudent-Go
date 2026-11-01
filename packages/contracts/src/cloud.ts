@@ -1,5 +1,6 @@
 /** Shared cloud protocol. Table names are an allowlist, never SQL identifiers. */
 export type { ModelUsageSource, ModelUsageCounts, ModelUsageReport } from './model-usage.js';
+export type { ModelProtocol, ModelPurpose, ModelRef, ModelDeployment, ModelErrorClass, ModelCandidate, ModelPreset, ModelRouteDefaults, ModelTool, ModelCall, ModelMessage, ModelImage, ModelAudio, ModelGatewayInput, ModelGatewayRequest, ModelAttemptSummary, ModelGatewayResult } from './model-gateway.js';
 
 export const CLOUD_TABLES: Record<string, string> = {
   videos: 'id', files: 'id', segments: 'id', frames: 'id', handouts: 'id',
@@ -62,6 +63,13 @@ export interface AgentPolicy {
 export const DEFAULT_AGENT_POLICY: AgentPolicy = {
   read: 'allow', write: 'ask', remove: 'ask', shell: 'ask', network: 'allow', maxSteps: 100,
 };
+export interface CloudProviderAccount {
+  id: string;
+  name: string;
+  /** Present only inside the server's decrypted configuration. */
+  apiKey?: string;
+  configured?: boolean;
+}
 export interface CloudProvider {
   id: string;
   name: string;
@@ -71,10 +79,18 @@ export interface CloudProvider {
   configured?: boolean;
   catalogId: string;
   serves: Array<'chat' | 'vision' | 'asr' | 'decision'>;
+  /** Cross-provider fallback cannot cross this explicit data boundary. */
+  dataPolicy?: string;
+  deployments?: import('./model-gateway.js').ModelDeployment[];
+  /** Provider accounts; secrets are stripped from client-facing config. */
+  accounts?: CloudProviderAccount[];
+  activeAccountId?: string;
 }
 export interface CloudConfig {
   /** Opaque version of provider/model settings, independent of account policy. */
   modelRevision?: string;
+  modelPresets?: import('./model-gateway.js').ModelPreset[];
+  modelRoutes?: import('./model-gateway.js').ModelRouteDefaults;
   botBudget?: {
     runTokens?: number; dayTokens?: number; activeMs?: number; contextTokens: number; runCost?: number;
     prices: Array<{ provider: string; model: string; inputPerMillion: number; outputPerMillion: number; source: string }>;

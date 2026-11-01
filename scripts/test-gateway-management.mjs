@@ -11,6 +11,7 @@ import { GatewayCore } from '../apps/api/src/gateway/core.ts';
 import { registerGatewayRoutes } from '../apps/api/src/gateway/routes.ts';
 import { IlinkPlugin } from '../apps/api/src/gateway/adapters/ilink.ts';
 import { FeishuPlugin } from '../apps/api/src/gateway/adapters/feishu.ts';
+import { DeliveryError } from '../apps/api/src/gateway/plugin.ts';
 
 const at = () => new Date().toISOString();
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -44,6 +45,91 @@ function fixture(t) {
   };
   return { store, secrets, bot, gateway, contexts, hooks, sent, bind };
 }
+
+test('fresh WeChat inbound context unblocks rejected deliveries in order, even before inbox processing', async t => {
+  const { gateway, store, secrets, bind, hooks, sent } = fixture(t);
+  const { id } = await gateway.save('owner', input('context-recovery'));
+  const binding = await bind(id);
+  for (let n = 0; n < 3; n++) await gateway.tick();
+  gateway.enqueue(binding.id, 'old-reply', { text: 'yesterday' });
+  gateway.enqueue(binding.id, 'new-reply', { text: 'today' });
+  hooks.set(id, { send: async () => { throw new DeliveryError('context_required', false, 0, false); } });
+  await gateway.tick();
+  const delivery = () => store.db.prepare("SELECT * FROM gateway_outbox WHERE binding_id=? AND payload LIKE '%yesterday%'").get(binding.id);
+  assert.equal(delivery().status, 'failed');
+  const attempts = sent.length;
+  await gateway.tick();
+  assert.equal(sent.length, attempts, 'no timer retries while waiting for a user message');
+  store.db.exec("CREATE TRIGGER fail_context_commit BEFORE UPDATE OF cursor ON gateway_accounts WHEN NEW.cursor='rollback-context' BEGIN SELECT RAISE(ABORT,'rollback'); END");
+  assert.throws(() => gateway.receive(id, [message('rollback-day', 'hello', { context: 'rolled-back-context' })], 'rollback-context'), /rollback/);
+  assert.equal(delivery().status, 'failed');
+  assert.equal(secrets.open(store.db.prepare('SELECT context FROM gateway_bindings WHERE id=?').get(binding.id).context), 'private-context');
+  store.db.exec('DROP TRIGGER fail_context_commit');
+  gateway.receive(id, [message('new-day', '今天继续学习', { context: 'fresh-context' })]);
+  assert.equal(secrets.open(store.db.prepare('SELECT context FROM gateway_bindings WHERE id=?').get(binding.id).context), 'fresh-context');
+  assert.equal(delivery().status, 'pending');
+  assert.equal(delivery().attempts, 0);
+  assert.equal(delivery().next_at, 0);
+  hooks.delete(id);
+  for (let n = 0; n < 4; n++) await gateway.tick();
+  assert.equal(delivery().status, 'sent');
+  assert.deepEqual(sent.slice(attempts, attempts + 2).map(s => [s.payload.text, s.peer.context]), [['yesterday', 'fresh-context'], ['today', 'fresh-context']]);
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM messages WHERE thread_id=? AND role='user' AND content='今天继续学习'").get(binding.thread_id).n, 1);
+});
+
+test('only new authorized WeChat messages with context recover context failures, never uncertain or unrelated failures', async t => {
+  const { gateway, store, bind } = fixture(t);
+  const { id } = await gateway.save('owner', input('guarded-recovery'));
+  const binding = await bind(id);
+  for (let n = 0; n < 3; n++) await gateway.tick();
+  const failures = [
+    ['context', 'failed', 'context_required'], ['unknown', 'uncertain', 'context_required'],
+    ['login', 'failed', 'login_required'], ['other', 'failed', 'platform_rejected'],
+    ['discarded', 'cancelled', 'context_required'],
+  ];
+  for (const [source, status, error] of failures) {
+    gateway.enqueue(binding.id, source, { text: source });
+    store.db.prepare('UPDATE gateway_outbox SET status=?,error=? WHERE binding_id=? AND payload=?').run(status, error, binding.id, JSON.stringify({ text: source }));
+  }
+  const statuses = () => store.db.prepare('SELECT status FROM gateway_outbox WHERE binding_id=? ORDER BY seq DESC LIMIT 5').all(binding.id).reverse().map(r => r.status);
+  const original = failures.map(f => f[1]);
+  gateway.receive(id, [message('pair', 'duplicate', { context: 'replayed-context' }), message('outsider', 'hi', { peer: 'stranger' }), message('group', 'hi', { direct: false }), message('robot', 'hi', { human: false }), message('no-context', 'hi', { context: undefined })]);
+  assert.deepEqual(statuses(), original);
+  gateway.receive(id, [message('authorized', 'hi', { context: 'fresh' })]);
+  assert.deepEqual(statuses(), ['pending', ...original.slice(1)]);
+  store.db.prepare("UPDATE gateway_outbox SET status='failed',error='context_required' WHERE binding_id=? AND payload=?").run(binding.id, JSON.stringify({ text: 'context' }));
+  gateway.revoke('owner', id, binding.id);
+  gateway.receive(id, [message('revoked', 'hi', { context: 'revoked-context' })]);
+  assert.equal(statuses()[0], 'failed');
+});
+
+test('inbound context received during a rejected send is used on the next attempt', async t => {
+  const { gateway, store, bind, hooks, sent } = fixture(t);
+  const { id } = await gateway.save('owner', input('inflight-recovery'));
+  const binding = await bind(id);
+  for (let n = 0; n < 3; n++) await gateway.tick();
+  gateway.enqueue(binding.id, 'in-flight', { text: 'reply' });
+  const sending = deferred();
+  hooks.set(id, { send: () => sending.promise });
+  const work = gateway.tick();
+  gateway.receive(id, [message('during-send', '/stop', { context: 'latest-context' })]);
+  hooks.delete(id);
+  sending.resolve(Promise.reject(new DeliveryError('context_required', false, 0, false)));
+  await work;
+  await gateway.tick();
+  const delivery = store.db.prepare('SELECT status FROM gateway_outbox WHERE binding_id=? ORDER BY seq DESC LIMIT 1').get(binding.id);
+  assert.equal(delivery.status, 'sent');
+  assert.equal(sent.at(-1).peer.context, 'latest-context');
+});
+
+test('queued older inbox messages never overwrite the newest received context', async t => {
+  const { gateway, store, secrets, bind } = fixture(t);
+  const { id } = await gateway.save('owner', input('context-order'));
+  const binding = await bind(id);
+  gateway.receive(id, Array.from({ length: 12 }, (_, n) => message(`queued-${n}`, '/status', { context: n === 11 ? 'newest-context' : `older-context-${n}` })));
+  await gateway.tick();
+  assert.equal(secrets.open(store.db.prepare('SELECT context FROM gateway_bindings WHERE id=?').get(binding.id).context), 'newest-context');
+});
 
 test('readiness distinguishes transport, owner binding, model, Bot and actionable failures', async t => {
   const { gateway, store, secrets, bot, bind } = fixture(t);

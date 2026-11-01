@@ -39,6 +39,8 @@ export function cloudModelConfig(settings: Settings, latest: CloudConfig): Cloud
       apiKey: p.apiKey.trim() || undefined,
       catalogId: providerCatalogId(p),
       serves: [...p.serves],
+      ...(latest.providers.find(saved => saved.id === p.id)?.deployments ? { deployments: latest.providers.find(saved => saved.id === p.id)!.deployments } : {}),
+      ...(latest.providers.find(saved => saved.id === p.id)?.dataPolicy ? { dataPolicy: latest.providers.find(saved => saved.id === p.id)!.dataPolicy } : {}),
     })),
     llmModel: settings.llmModel, visionModel: settings.visionModel, asrModel: settings.asrModel, decisionModel: settings.decisionModel,
   };
@@ -73,6 +75,7 @@ export function modelSettingsError(error: unknown): string {
     invalid_provider: '供应商信息不完整或格式无效，请检查名称与连接协议。',
     invalid_provider_url: 'API 地址必须是 HTTP 或 HTTPS 地址，且不能包含账号、密码、查询参数或片段。',
     invalid_provider_key: 'API Key 格式无效或长度超出限制，请检查后重试。',
+    invalid_model_presets: 'Preset 配置无效：请检查用途、候选模型和已删除的供应商。草稿已保留。',
   };
   return messages[message] ?? `保存失败：${message}`;
 }

@@ -238,9 +238,10 @@ export default function PdfReader({ fileUrl, initialUnit, handleRef, onUnitChang
         },
         { x: Math.round(window.innerWidth / 2), y: Math.round(window.innerHeight * 0.6) },
       );
-      setAreaMode(false); // 框完自动退出，避免用户困惑于「为什么选不了字」
+      setAreaMode(false);
+      ink.setTool('pan');
     },
-    [showBar],
+    [showBar, ink.setTool],
   );
 
   if (error) {
@@ -349,19 +350,21 @@ export default function PdfReader({ fileUrl, initialUnit, handleRef, onUnitChang
             </Dropdown.Popover>
           </Dropdown>
         )}
-        {/* 框选开关：显式工具态，避免和「拖选文字」抢同一个手势 */}
+        <ReaderProgress current={current} total={numPages} />
+      </div>
+      <InkToolbar disabled={!doc} onActivate={() => setAreaMode(false)} actions={
         <Button
           variant={areaMode ? 'primary' : 'secondary'}
           data-testid="reader-tool-areaselect"
           aria-label="框选一块区域当图片提问"
-          onPress={() => { ink.setTool('read'); setAreaMode((v) => !v); }}
+          aria-pressed={areaMode}
+          isDisabled={!doc}
+          onPress={() => { ink.setTool(areaMode ? 'pan' : 'read'); setAreaMode((v) => !v); }}
         >
           <Sym name="crop_free" />
           {areaMode ? '框选中…' : '框选'}
         </Button>
-        <ReaderProgress current={current} total={numPages} />
-      </div>
-      <InkToolbar disabled={!doc} onActivate={() => setAreaMode(false)} />
+      } />
 
       {areaMode && (
         <div className="mr-hint" data-testid="reader-area-hint">

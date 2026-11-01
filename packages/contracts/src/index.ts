@@ -1,4 +1,5 @@
 export type ConversationMode = 'chat' | 'bot';
+export type { BotApprovalDto, BotQuestionDto, BotRunDto, BotSyncState, BotMessagePage, BotSnapshot, BotThreadPage } from './bot-sync.js';
 export type { ServerStorageStats, StorageCategoryId } from './storage.js';
 export { parseBotAttachments, parseLegacyBotAttachments, MAX_BOT_ATTACHMENTS, MAX_BOT_MESSAGE_ATTACHMENTS, type BotAttachment } from './bot-attachments.js';
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
@@ -52,6 +53,8 @@ export interface RunDto {
 }
 
 export type SseEvent =
+  | { type: 'thread.state_invalidated' }
+  | { type: 'resync.required' }
   | { type: 'message.pending'; message: MessageDto }
   | { type: 'message.accepted'; message: MessageDto }
   | { type: 'message.updated'; message: MessageDto }
@@ -63,6 +66,7 @@ export type SseEvent =
   | { type: 'run.failed'; run: RunDto; error: string };
 
 export interface BootstrapStatusDto {
+  botSyncVersion?: 1;
   initialized: boolean;
   bootstrapAvailable: boolean;
   expiresAt: string | null;

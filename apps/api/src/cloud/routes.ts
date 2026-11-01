@@ -8,9 +8,10 @@ import { CloudTaskRunner, taskDto, TASK_KINDS, workerIdentity } from './tasks.js
 import { workerTokens, workerTokenHash, renewWorker } from './workerAuth.js';
 import type { CloudConfig, CloudMutation } from '@wangke/contracts/cloud';
 import type { ModelSettingsUpdate, ProviderSettingsUpdate } from '@wangke/contracts/model-settings';
-import { accountedFetch } from '../agent/accounted-fetch.js';
-import { UsageLedger, BudgetBlocked } from '../agent/budget.js';
-import { applyPromptCache } from '@wangke/study-core/model/cache';
+import { BudgetBlocked } from '../agent/budget.js';
+import { createModelGateway } from '../agent/model-gateway-factory.js';
+import { ModelGatewayFailure } from '../agent/model-errors.js';
+import { gatewayDisabledPurposes } from '../agent/model-rollout.js';
 import { modelUsageReport } from '../agent/model-observations.js';
 import type { WebSearchService } from '../web-search/service.js';
 
@@ -88,6 +89,26 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     try { return configuration.saveProvider(user.id, request.params.id, request.body); }
     catch (e) { return configurationError(reply, e); }
   });
+  app.get<{ Params: { id: string } }>('/api/v1/cloud/providers/:id/accounts', async (request, reply) => {
+    const user = authorize(request, reply); if (!user) return;
+    try { return configuration.providerAccounts(user.id, request.params.id); }
+    catch (e) { return configurationError(reply, e); }
+  });
+  app.post<{ Params: { id: string }; Body: { name?: string; apiKey?: string; modelRevision?: string } }>('/api/v1/cloud/providers/:id/accounts', async (request, reply) => {
+    const user = authorize(request, reply, true); if (!user) return;
+    try { return configuration.addProviderAccount(user.id, request.params.id, request.body); }
+    catch (e) { return configurationError(reply, e); }
+  });
+  app.put<{ Params: { id: string; accountId: string }; Body: { modelRevision?: string } }>('/api/v1/cloud/providers/:id/accounts/:accountId/active', async (request, reply) => {
+    const user = authorize(request, reply, true); if (!user) return;
+    try { return configuration.activateProviderAccount(user.id, request.params.id, request.params.accountId, request.body?.modelRevision ?? ''); }
+    catch (e) { return configurationError(reply, e); }
+  });
+  app.delete<{ Params: { id: string; accountId: string }; Body: { modelRevision?: string } }>('/api/v1/cloud/providers/:id/accounts/:accountId', async (request, reply) => {
+    const user = authorize(request, reply, true); if (!user) return;
+    try { return configuration.removeProviderAccount(user.id, request.params.id, request.params.accountId, request.body?.modelRevision ?? ''); }
+    catch (e) { return configurationError(reply, e); }
+  });
   app.get<{ Querystring: { after?: string } }>('/api/v1/cloud/records', async (request, reply) => {
     const user = authorize(request, reply); if (!user) return;
     const after = Number(request.query.after ?? 0);
@@ -145,36 +166,23 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
 
   // Gateway credentials come exclusively from saved configuration. No caller-controlled URL,
   // Authorization forwarding or redirects (which could leak a provider credential).
-  app.route<{ Params: { provider: string; '*': string } }>({
-    method: ['GET', 'POST'], url: '/api/v1/cloud/models/:provider/*',
+  for (const route of ['/api/v1/cloud/models/:provider/*', '/api/v1/cloud/model-gateway/providers/:provider/*']) app.route<{ Params: { provider: string; '*': string } }>({
+    method: ['GET', 'POST'], url: route,
     onRequest: async (request, reply) => { authorize(request, reply); },
     handler: async (request, reply) => {
       const user = authorize(request, reply); if (!user) return;
-      const provider = configuration.get(user.id, true).providers.find(p => p.id === request.params.provider);
+      const provider = configuration.get(user.id).providers.find(p => p.id === request.params.provider);
       const endpoint = request.params['*'];
       if (!provider || !['models', 'chat/completions', 'responses', 'messages', 'audio/transcriptions', 'systemone'].includes(endpoint)) return fail(reply, 404, 'model_endpoint_not_found');
       if ((endpoint === 'models') !== (request.method === 'GET')) return fail(reply, 405, 'method_not_allowed');
-      const headers: Record<string, string> = {};
-      if (provider.apiKey) {
-        if (provider.protocol === 'anthropic-messages') headers['x-api-key'] = provider.apiKey;
-        else headers.authorization = `Bearer ${provider.apiKey}`;
-      }
-      if (provider.protocol === 'anthropic-messages') headers['anthropic-version'] = '2023-06-01';
-      if (request.headers['content-type']) headers['content-type'] = request.headers['content-type'];
       const disconnected = new AbortController();
       request.raw.once('aborted', () => disconnected.abort());
       reply.raw.once('close', () => { if (!reply.raw.writableEnded) disconnected.abort(); });
-      const init: RequestInit & { duplex?: 'half' } = { method: request.method, headers, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(endpoint === 'models' ? 20000 : 300000), disconnected.signal]) };
+      const init: RequestInit & { duplex?: 'half' } = { signal: AbortSignal.any([AbortSignal.timeout(endpoint === 'models' ? 20000 : 300000), disconnected.signal]) };
       if (request.method === 'POST') {
         if (request.body instanceof Readable) { init.body = request.body as any; init.duplex = 'half'; }
         else {
-          let body = request.body as Record<string, unknown>;
-          if (['chat/completions', 'responses', 'messages'].includes(endpoint) && body && typeof body.model === 'string') {
-            const key = request.headers['x-wangke-cache-key'];
-            const scopedKey = typeof key === 'string' && key.length <= 200 ? crypto.createHash('sha256').update(`${user.id}:${key}`).digest('hex') : undefined;
-            body = applyPromptCache(body, { ...provider, model: body.model }, scopedKey);
-          }
-          init.body = JSON.stringify(body);
+          init.body = JSON.stringify(request.body);
         }
       }
       try {
@@ -188,8 +196,15 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
         }
         const worker = workerIdentity(request);
         const task = worker ? ownedTask(user.id, worker.taskId) : undefined;
-        const fetcher = accountedFetch(new UsageLedger(store, configuration), { owner: user.id, run: task?.parent_run_id ?? undefined, step: task?.parent_step_id ?? undefined, task: task?.id, purpose: task ? `study:${task.kind}` : 'chat' }, [provider], deps.fetch ?? fetch);
-        const response = await fetcher(`${provider.baseUrl}/${endpoint}${pagination.size ? `?${pagination}` : ''}`, init);
+        const cacheKey = request.headers['x-wangke-cache-key'];
+        const scopedKey = typeof cacheKey === 'string' && cacheKey.length <= 200 ? crypto.createHash('sha256').update(`${user.id}:${cacheKey}`).digest('hex') : undefined;
+        const model = endpoint === 'models' ? '' : typeof request.body === 'object' && request.body && 'model' in request.body && typeof request.body.model === 'string' ? request.body.model
+          : endpoint === 'audio/transcriptions' ? configuration.get(user.id).asrModel.model : endpoint === 'systemone' ? configuration.get(user.id).decisionModel?.model ?? '' : '';
+        const response = await createModelGateway(store, configuration, deps.fetch ?? fetch).forward({ owner: user.id,
+          purpose: endpoint === 'audio/transcriptions' ? 'asr' : endpoint === 'systemone' ? 'decision' : 'chat', modelRef: { providerId: provider.id, model }, endpoint,
+          body: init.body, contentType: request.headers['content-type'], signal: init.signal!, pagination, cacheKey: scopedKey,
+          conversationId: typeof request.headers['x-wangke-conversation'] === 'string' ? request.headers['x-wangke-conversation'] : task ? `task:${task.id}` : undefined,
+          attribution: { run: task?.parent_run_id ?? undefined, step: task?.parent_step_id ?? undefined, task: task?.id, purpose: task ? `study:${task.kind}` : 'chat' } });
         if (!response.ok) {
           const retryAfter = response.headers.get('retry-after');
           if (retryAfter) reply.header('retry-after', retryAfter);
@@ -208,6 +223,65 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
         return fail(reply, 502, 'model_connection_failed');
       }
     },
+  });
+
+  app.post<{ Body: import('@wangke/contracts/cloud').ModelGatewayInput }>('/api/v1/cloud/model-gateway/request', async (request, reply) => {
+    const user = authorize(request, reply); if (!user) return;
+    const input = request.body;
+    const allowed = ['purpose', 'presetId', 'modelRef', 'messages', 'tools', 'image', 'audio', 'outputTokens', 'cacheKey', 'conversationId', 'idempotencyKey', 'continuationRef', 'sideEffectsOccurred'];
+    if (!input || typeof input !== 'object' || Object.keys(input).some(k => !allowed.includes(k)) || !['chat', 'bot', 'vision', 'asr', 'decision', 'memory'].includes(input.purpose)) return fail(reply, 400, 'invalid_gateway_request');
+    const disconnected = new AbortController();
+    request.raw.once('aborted', () => disconnected.abort());
+    reply.raw.once('close', () => { if (!reply.raw.writableEnded) disconnected.abort(); });
+    const worker = workerIdentity(request), task = worker ? ownedTask(user.id, worker.taskId) : undefined;
+    try {
+      return await createModelGateway(store, configuration, deps.fetch ?? fetch).request({ ...input, owner: user.id, signal: disconnected.signal,
+         ...(task ? { task: task.id, run: task.parent_run_id ?? undefined, step: task.parent_step_id ?? undefined } : {}) }, { ...(task ? { attributionPurpose: `study:${task.kind}` } : {}) });
+    } catch (error) {
+      if (error instanceof BudgetBlocked) return fail(reply, 429, error.code);
+      if (error instanceof ModelGatewayFailure) return reply.code(502).send({ error: error.code, errorClass: error.errorClass, traceId: error.traceId, attempts: error.attempts });
+      return fail(reply, 400, 'invalid_gateway_request');
+    }
+  });
+
+  app.get('/api/v1/cloud/model-gateway/status', async (request, reply) => {
+    const user = authorize(request, reply, true); if (!user) return;
+    const config = configuration.get(user.id);
+    return {
+      circuits: createModelGateway(store, configuration, deps.fetch ?? fetch).health(user.id),
+      providers: config.providers.map(p => ({ id: p.id, configured: p.configured, protocol: p.protocol, dataPolicy: p.dataPolicy ?? 'default' })),
+      presets: (config.modelPresets ?? []).map(p => ({ id: p.id, purposes: p.purposes, candidates: p.candidates.map(c => ({ ref: c.ref, enabled: c.enabled !== false, providerExists: config.providers.some(provider => provider.id === c.ref.providerId) })) })),
+      recentRoutes: (store.db.prepare("SELECT action,detail,created_at AS createdAt FROM cloud_audit WHERE owner_id=? AND action LIKE 'model.route.%' ORDER BY id DESC LIMIT 50").all(user.id) as Array<{ action: string; detail: string; createdAt: string }>).map(r => ({ ...r, detail: JSON.parse(r.detail) })),
+      recentUsage: (store.db.prepare("SELECT detail,created_at AS createdAt FROM cloud_audit WHERE owner_id=? AND action='model.metric' ORDER BY id DESC LIMIT 50").all(user.id) as Array<{ detail: string; createdAt: string }>).map(r => ({ ...JSON.parse(r.detail), createdAt: r.createdAt })),
+      disabledPurposes: gatewayDisabledPurposes(),
+    };
+  });
+  app.get('/api/v1/cloud/model-presets', async (request, reply) => {
+    const user = authorize(request, reply, true); if (!user) return;
+    const { modelRevision, modelPresets, modelRoutes } = configuration.get(user.id);
+    return { modelRevision, modelPresets, modelRoutes };
+  });
+  // Atomic collection replacement supports create/edit/delete/default changes in one CAS.
+  app.put<{ Body: Pick<import('@wangke/contracts/cloud').CloudConfig, 'modelPresets' | 'modelRoutes'> & { modelRevision: string } }>('/api/v1/cloud/model-presets', async (request, reply) => {
+    const user = authorize(request, reply, true); if (!user) return;
+    const input = request.body;
+    if (!input || typeof input.modelRevision !== 'string' || !input.modelRevision || !Array.isArray(input.modelPresets) || !input.modelRoutes || Object.keys(input).some(k => !['modelRevision', 'modelPresets', 'modelRoutes'].includes(k))) return fail(reply, 400, 'invalid_model_presets');
+    try {
+      const saved = configuration.saveModels(user.id, { ...configuration.get(user.id), modelRevision: input.modelRevision, modelPresets: input.modelPresets, modelRoutes: input.modelRoutes });
+      return { modelRevision: saved.modelRevision, modelPresets: saved.modelPresets, modelRoutes: saved.modelRoutes };
+    } catch (error) {
+      if (error instanceof ModelConfigurationError) return reply.code(error.status).send({ error: error.message, issues: error.issues });
+      return fail(reply, 400, 'invalid_model_presets');
+    }
+  });
+  app.post<{ Body: { purpose: import('@wangke/contracts/cloud').ModelPurpose; presetId?: string; modelRef?: import('@wangke/contracts/cloud').ModelRef } }>('/api/v1/cloud/model-gateway/preview', async (request, reply) => {
+    const user = authorize(request, reply, true); if (!user) return;
+    const input = request.body;
+    if (!input || !['chat', 'bot', 'vision', 'asr', 'decision', 'memory'].includes(input.purpose) || Object.keys(input).some(k => !['purpose', 'presetId', 'modelRef'].includes(k))) return fail(reply, 400, 'invalid_gateway_request');
+    try {
+      const { preset, candidates } = createModelGateway(store, configuration, deps.fetch ?? fetch).resolver.resolve({ ...input, owner: user.id });
+      return { presetId: preset?.id, candidates: candidates.map(({ adapter, privacy, allowFallback }, index) => ({ ...adapter.target, candidateIndex: index, dataPolicy: privacy, fallbackAllowed: index === 0 || allowFallback && candidates[0].allowFallback && privacy === candidates[0].privacy && (adapter.target.providerId === candidates[0].adapter.target.providerId || preset?.policy?.allowCrossProvider !== false) })), discoveryIsAuthorization: false };
+    } catch { return fail(reply, 400, 'invalid_model_route'); }
   });
 
   app.get('/api/v1/cloud/tasks', async (request, reply) => {

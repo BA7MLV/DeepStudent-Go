@@ -2,11 +2,10 @@ import type { CloudProvider } from '@wangke/contracts/cloud';
 import { applyPromptCache, stableTools } from '@wangke/study-core/model/cache';
 import { groupToolResults } from '@wangke/study-core/model/tool-messages';
 
-export type ModelCall = { id: string; provider_id?: string; type: 'function'; function: { name: string; arguments: string } };
-export type ModelMessage = { role: string; content: string | null; tool_call_id?: string; tool_calls?: ModelCall[]; response_items?: object[]; checkpoint_id?: string; runtime_notice?: boolean };
-type Tool = { type: string; function: { name: string; description: string; parameters: object } };
+import type { ModelCall, ModelMessage, ModelTool as Tool } from '@wangke/contracts/cloud';
+export type { ModelCall, ModelMessage } from '@wangke/contracts/cloud';
 
-/** The Bot uses the same configured protocol as ordinary cloud chat. */
+/** @internal Compatibility codec. New business callers must use ModelGateway. */
 export function botRequest(provider: Pick<CloudProvider, 'protocol' | 'apiKey'> & Partial<Pick<CloudProvider, 'baseUrl'>>, model: string, messages: ModelMessage[], tools: Tool[], outputTokens = 4096, cacheKey?: string) {
   tools = stableTools(tools);
   const ids = new Map(messages.flatMap(m => (m.tool_calls ?? []).map(c => [c.id, c.provider_id ?? c.id] as const)));

@@ -20,7 +20,7 @@ export function applyCloudConfig(config: CloudConfig) {
   configCheckedAt = Date.now();
   cloud.maxSteps = config.policy.maxSteps;
   useSettings.setState({
-    providers: config.providers.map(p => ({ ...p, baseUrl: apiUrl(`/api/v1/cloud/models/${encodeURIComponent(p.id)}`), apiKey: p.configured ? 'server-managed' : 'server-local' })),
+    providers: config.providers.map(p => ({ id: p.id, name: p.name, catalogId: p.catalogId, protocol: p.protocol, serves: p.serves, deploymentProtocols: Object.fromEntries((p.deployments ?? []).map(d => [d.model, d.protocol])), baseUrl: apiUrl(`/api/v1/cloud/model-gateway/providers/${encodeURIComponent(p.id)}`), apiKey: p.configured ? 'server-managed' : 'server-local', gatewayManaged: true })),
     llmModel: config.llmModel, visionModel: config.visionModel, asrModel: config.asrModel,
     ...decisionPatch(config),
     syncEnabled: false,

@@ -188,6 +188,19 @@ test('send ambiguity is not auto-retryable; explicit 4xx failures are terminal; 
   await assert.rejects(new IlinkPlugin(noFile, async () => new Response('', { status: 429, headers: { 'retry-after': '5' } })).send(config, peer, { text: 'hi' }, 'id', signal), e => !e.uncertain && e.retryable && e.retryAfterMs === 5000);
 });
 
+test('sendmessage -2 waits for fresh user context, without expiring the bot login or changing poll errors', async () => {
+  for (const body of [{ ret: -2, errcode: 0 }, { errcode: -2 }]) {
+    let rejected = true;
+    const plugin = new IlinkPlugin(noFile, async () => Response.json(rejected ? body : { ret: 0 }));
+    await assert.rejects(plugin.send(config, peer, { text: 'hi' }, 'id', new AbortController().signal),
+      e => e.code === 'context_required' && !e.uncertain && !e.retryable);
+    rejected = false;
+    assert.equal(await plugin.send(config, { ...peer, context: 'fresh' }, { text: 'hi' }, 'id', new AbortController().signal), 'id');
+    const result = await observe(async () => Response.json(body), { stop: (_s, d) => !!d?.error });
+    assert.equal(result.health.at(-1).error.code, 'platform_rejected');
+  }
+});
+
 test('stop cancels poll/backoff promptly and a late response never reaches receive', async () => {
   for (const phase of ['poll', 'backoff', 'late-response']) {
     const controller = new AbortController(); let called = 0, received = 0, ready;
@@ -248,6 +261,41 @@ function fixture(t, factory) {
   t.after(async () => { await gateway.close(); store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   return { store, secrets, bot, gateway };
 }
+
+test('real send rejection survives gateway restart and a new user text restores ordered delivery', async t => {
+  let rejected = false;
+  const sends = [];
+  const { store, gateway } = fixture(t, () => {
+    const plugin = new IlinkPlugin(noFile, async (url, init) => {
+      assert.ok(String(url).endsWith('/sendmessage'));
+      const { msg } = JSON.parse(init.body);
+      sends.push(msg);
+      return Response.json(rejected ? { ret: -2, errcode: 0 } : { ret: 0 });
+    });
+    plugin.start = async (_config, ctx) => { ctx.health('connected'); };
+    return plugin;
+  });
+  const { id } = await gateway.save('owner', { channel: 'ilink', agentId: 'agent', enabled: true, config });
+  gateway.receive(id, [{ ...peer, messageId: 'pair', text: gateway.pair('owner', id).command }, { ...peer, messageId: 'after-pair', text: 'hello', context: 'pair-batch-latest' }]);
+  for (let n = 0; n < 3; n++) await gateway.tick();
+  assert.ok(sends.every(m => m.context_token === 'pair-batch-latest'));
+  const binding = store.db.prepare('SELECT * FROM gateway_bindings WHERE account_id=?').get(id);
+  rejected = true;
+  gateway.enqueue(binding.id, 'yesterday', { text: 'yesterday' });
+  gateway.enqueue(binding.id, 'today', { text: 'today' });
+  await gateway.tick();
+  assert.equal(store.db.prepare("SELECT error FROM gateway_outbox WHERE status='failed'").get().error, 'context_required');
+  const attempts = sends.length;
+  await gateway.close();
+  gateway.start(false);
+  await gateway.tick();
+  assert.equal(sends.length, attempts, 'restart must not retry the rejected context');
+  rejected = false;
+  gateway.receive(id, [{ ...peer, messageId: 'next-day', text: '今天继续', context: 'next-day-context' }]);
+  for (let n = 0; n < 3; n++) await gateway.tick();
+  assert.deepEqual(sends.slice(attempts).map(m => [m.item_list[0].text_item.text, m.context_token]), [['yesterday', 'next-day-context'], ['today', 'next-day-context']]);
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM gateway_outbox WHERE status!='sent'").get().n, 0);
+});
 
 test('durable end-to-end: uint64 pair + message, SQL rollback/replay, stable cursor and dedupe across restart', async t => {
   let wire, requests = 0, sent = 0, recovered = false;

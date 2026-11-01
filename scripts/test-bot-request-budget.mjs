@@ -52,7 +52,7 @@ try {
       if (protocol === 'openai-chat') assert.equal(body.messages[0].content[0].image_url.detail, 'high');
       if (protocol === 'openai-responses') assert.equal(body.input[0].content[0].detail, 'high');
       assert.equal(record.reserved_tokens, estimate.total); assert.ok(estimate.total < DEFAULT_BOT_BUDGET.contextTokens, 'small image is not treated as unbounded base64 text');
-      return Response.json(protocol === 'anthropic-messages' ? { content: [{ type: 'text', text: 'image' }] } : protocol === 'openai-responses' ? { output: [{ content: [{ type: 'output_text', text: 'image' }] }] } : { choices: [{ message: { content: 'image' } }] });
+      return Response.json(protocol === 'anthropic-messages' ? { content: [{ type: 'text', text: 'image' }] } : protocol === 'openai-responses' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'image' }] }] } : { choices: [{ message: { content: 'image' } }] });
     });
     const context = { owner, thread: thread.id, run, step: `vision-${protocol}`, signal: new AbortController().signal, checkActive() {}, append() {} };
     for (let i = 0; i < 2; i++) assert.equal((await tools.plugins.get('study_file').execute({ fileId: file.id, question: '这张图片是什么？' }, context)).description, 'image');

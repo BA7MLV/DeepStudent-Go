@@ -22,6 +22,7 @@ import '@fontsource/roboto/latin-500.css';
 // 在 theme.css 的同一个 CSS 入口先引入 HeroUI，再覆盖圆角主题令牌。
 import './theme.css';
 import './transitions.css';
+import './ui/sheet-motion.css';
 import './handout-doc.css';
 // Markdown 内容表格的三线表口径（与讲义 .hd-table 一致）。必须排在 x-markdown
 // 自带样式之后：它给 .x-markdown 定的 --td-th-padding 是同等权重，靠顺序取胜。

@@ -15,6 +15,7 @@ import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { readDocxUnits } from '@wangke/study-core/materials/docx';
 import { receiveFile } from '../apps/api/src/cloud/files.ts';
 import { GatewayCore } from '../apps/api/src/gateway/core.ts';
+import { readableApprovalText, shellApprovalText } from '../apps/api/src/agent/approval-copy.ts';
 import { DeliveryError } from '../apps/api/src/gateway/plugin.ts';
 import { normalizeFeishu, FeishuPlugin } from '../apps/api/src/gateway/adapters/feishu.ts';
 import { normalizeIlink, IlinkPlugin, tencentUrl } from '../apps/api/src/gateway/adapters/ilink.ts';
@@ -43,6 +44,18 @@ const countRuns = () => store.db.prepare('SELECT COUNT(*) n FROM runs').get().n;
 async function until(fn) { for (let i = 0; i < 500; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); } throw new Error('timeout'); }
 const response = (name, args) => new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name, arguments: JSON.stringify(args) } }] } }], usage: { prompt_tokens: 100, completion_tokens: 50 } }));
 try {
+  const legacyShell = '需要你的确认：读取申论 PDF 的页数和正文结构\n当前工作区的命令权限设为“每次询问”，会优先于全局的允许设置。\n仅批准这一次操作。';
+  assert.equal(readableApprovalText(legacyShell), shellApprovalText({ description: '读取申论 PDF 的页数和正文结构', command: '' }));
+  const legacyDanger = '需要你的确认：删除旧文件\n命令中检测到删除、覆盖或其他破坏性操作，需要单独确认。\n仅批准这一次操作。';
+  const systemWarning = '\n此命令将获得整个 /system 的写权限。审批绑定的完整命令：\nrm /system/memory/old.md';
+  assert.match(readableApprovalText(legacyDanger + systemWarning), /删除或覆盖数据/);
+  assert.ok(readableApprovalText(legacyDanger + systemWarning).endsWith(systemWarning), 'historical risk details and exact commands stay intact');
+  assert.match(readableApprovalText('需要你的确认：发布报告\nBot 将此操作标记为会删除数据或对外产生影响，需要单独确认。\n仅批准这一次操作。'), /向外部发送、发布内容/);
+  assert.doesNotMatch(readableApprovalText('请求执行命令\npython private.py'), /python|private.py/);
+  const customApproval = '需要你的确认：转发文档\n收件人和文档内容请仔细核对。';
+  assert.equal(readableApprovalText(customApproval), customApproval, 'unknown and custom confirmations are not rewritten');
+  const conversationalRequest = '我想先看看这份申论 PDF 有多少页、内容分哪几部分，可以吗？';
+  assert.equal(shellApprovalText({ description: conversationalRequest, command: '' }), conversationalRequest, 'a complete request is shown directly without a canned prefix or footer');
   gateway.start(false);
   const { id: account } = await gateway.save(owner, { channel: 'feishu', agentId: 'agent', enabled: true, preset: 'autonomous', config: { appSecret: 'SUPER-SECRET' } });
   assert.throws(() => gateway.account(other, account), /account_not_found/);
@@ -123,35 +136,58 @@ try {
   bot.append(ilinkBinding.thread_id, 'assistant', 'question', '你需要哪种格式？');
   gateway.project();
   assert.equal(outboxCount(), beforeProcess + 2);
-  const ask = id => {
-    const m = bot.append(ilinkBinding.thread_id, 'assistant', 'approval', '需要确认生成文档。');
+  const ask = (id, content = '需要确认生成文档。') => {
+    const m = bot.append(ilinkBinding.thread_id, 'assistant', 'approval', content);
     store.db.prepare('INSERT INTO approvals(id,thread_id,message_id,status,created_at) VALUES(?,?,?,?,?)').run(id, ilinkBinding.thread_id, m.id, 'pending', at);
     return m.seq;
   };
   const flush = async () => { for (let i = 0; i < 15; i++) await gateway.tick(); };
   const decision = id => store.db.prepare('SELECT status FROM approvals WHERE id=?').get(id).status;
-  ask('text-approval');
-  gateway.receive(ilink, [envelope('before-prompt', '同意')]);
+  ask('text-approval', conversationalRequest);
+  gateway.receive(ilink, [envelope('before-prompt', '可以')]);
   await flush();
   assert.equal(decision('text-approval'), 'pending', 'plain replies cannot approve a prompt that was not delivered');
-  assert.ok(sent.some(s => /待确认 \d+[\s\S]*同意 \d+/.test(s.payload.text)));
+  const friendlyPrompt = sent.find(s => s.payload.text?.startsWith('我想先看看这份申论 PDF'))?.payload.text;
+  assert.equal(friendlyPrompt, conversationalRequest);
+  assert.doesNotMatch(friendlyPrompt, /待确认|每次询问|全局|只有这一项|确认编号|回复|权限设置/);
   const runsBeforeReply = countRuns();
-  gateway.receive(ilink, [envelope('natural-yes', '同意。')]); await flush();
+  gateway.receive(ilink, [envelope('natural-yes', '可以。')]); await flush();
   assert.equal(decision('text-approval'), 'approved');
+  assert.ok(sent.some(s => s.payload.text === '好，我会继续处理。'));
   assert.equal(countRuns(), runsBeforeReply, 'approval reply resumes authorization instead of creating a new task');
-  gateway.receive(ilink, [envelope('natural-yes', '同意。')]); await gateway.tick();
+  gateway.receive(ilink, [envelope('natural-yes', '可以。')]); await gateway.tick();
   assert.equal(countRuns(), runsBeforeReply, 'duplicate inbound approval stays one-shot');
   ask('text-reject'); await flush();
-  gateway.receive(ilink, [envelope('natural-no', '拒绝')]); await flush();
+  gateway.receive(ilink, [envelope('natural-no', '不用了')]); await flush();
   assert.equal(decision('text-reject'), 'rejected');
+  assert.ok(sent.some(s => s.payload.text === '好，这次不执行。'));
+  // A pre-upgrade prompt may have more delivery parts than today's wording.
+  // Plain approval must wait for all of the persisted parts, not a re-render.
+  const priorNumber = ask('prior-format');
+  const priorEvent = store.db.prepare("SELECT event_id FROM message_events WHERE thread_id=? AND seq=? AND type='message.accepted'").get(ilinkBinding.thread_id, priorNumber).event_id;
+  gateway.enqueue(ilinkBinding.id, `event:${priorEvent}:0`, { text: '旧版确认消息的第一段' });
+  gateway.enqueue(ilinkBinding.id, `event:${priorEvent}:1`, { text: '旧版确认消息的风险说明' });
+  const priorPart = part => crypto.createHash('sha256').update(`${ilinkBinding.id}:event:${priorEvent}:${part}`).digest('hex').slice(0, 32);
+  gateway.project();
+  store.db.prepare("UPDATE gateway_outbox SET status='sent' WHERE id=?").run(priorPart(0));
+  store.db.prepare("UPDATE gateway_outbox SET status='failed' WHERE id=?").run(priorPart(1));
+  gateway.receive(ilink, [envelope('partial-prompt-yes', '同意')]); await flush();
+  assert.equal(decision('prior-format'), 'pending', 'an undelivered risk paragraph cannot be skipped after a copy update');
+  store.db.prepare("UPDATE gateway_outbox SET status='pending' WHERE id=?").run(priorPart(1));
+  await flush();
+  gateway.receive(ilink, [envelope('full-prompt-yes', '同意')]); await flush();
+  assert.equal(decision('prior-format'), 'approved');
   const numberA = ask('choice-a'), numberB = ask('choice-b'); await flush();
-  gateway.receive(ilink, [envelope('ambiguous-yes', '同意')]); await flush();
+  assert.ok(sent.some(s => s.payload.text?.includes(`这项请回复“同意 ${numberA}”或“拒绝 ${numberA}”。`)));
+  assert.ok(sent.some(s => s.payload.text?.includes(`这项请回复“同意 ${numberB}”或“拒绝 ${numberB}”。`)));
+  gateway.receive(ilink, [envelope('ambiguous-yes', '可以')]); await flush();
   assert.equal(decision('choice-a'), 'pending'); assert.equal(decision('choice-b'), 'pending');
+  assert.ok(sent.some(s => s.payload.text?.includes('我还不能确定你指的是哪项操作，暂时不会执行。')));
   gateway.receive(ilink, [envelope('approval-status', '/status')]); await flush();
   assert.ok(sent.some(s => s.payload.text.includes(`${numberA}：需要确认生成文档。`) && s.payload.text.includes(`${numberB}：需要确认生成文档。`)));
-  gateway.receive(ilink, [envelope('choose-a', `同意 ${numberA}。`)]); await flush();
+  gateway.receive(ilink, [envelope('choose-a', `可以 ${numberA}。`)]); await flush();
   assert.equal(decision('choice-b'), 'pending', 'resolving one number does not renumber another approval');
-  gateway.receive(ilink, [envelope('choose-b', `拒绝 ${numberB}`)]); await flush();
+  gateway.receive(ilink, [envelope('choose-b', `不可以 ${numberB}`)]); await flush();
   assert.equal(decision('choice-a'), 'approved'); assert.equal(decision('choice-b'), 'rejected');
   ask('number-new'); await flush();
   gateway.receive(ilink, [envelope('stale-number', `同意 ${numberA}`), envelope('unknown-number', '同意 999999999')]); await flush();
@@ -272,7 +308,7 @@ try {
     cfg.save(owner, { ...cfg.get(owner, true), providers: [{ ...cfg.get(owner, true).providers[0], protocol }], visionModel: { providerId: 'mock', model: 'vision' } });
     const vision = new StudyTools(store, cfg, files, async (_url, init) => {
       const body = JSON.parse(init.body); assert.equal(body.model, 'vision'); assert.match(init.body, /\/9j\//, 'vision uses the normalized JPEG, not the unvalidated original');
-      return Response.json(protocol === 'anthropic-messages' ? { content: [{ type: 'text', text: 'Cell diagram' }] } : protocol === 'openai-responses' ? { output: [{ content: [{ type: 'output_text', text: 'Cell diagram' }] }] } : { choices: [{ message: { content: 'Cell diagram' } }] });
+      return Response.json(protocol === 'anthropic-messages' ? { content: [{ type: 'text', text: 'Cell diagram' }] } : protocol === 'openai-responses' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Cell diagram' }] }] } : { choices: [{ message: { content: 'Cell diagram' } }] });
     });
     assert.equal((await vision.plugins.get('study_file').execute({ fileId: image.id, question: 'Read this diagram' }, { ...ctx, run: 'vision-fixture' })).description, 'Cell diagram');
   }

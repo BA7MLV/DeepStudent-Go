@@ -7,7 +7,6 @@ import { chatOnce, chatStream, textOf, type ChatMessage, type ChatOptions, type 
 import { modelTrace, replayTrace, messageTokens, runtimeContext, splitSystemPrompt, historyFingerprint } from '@wangke/study-core/model/transcript';
 import { cachePolicy, stableTools } from '@wangke/study-core/model/cache';
 import type { ModelRequestRecord } from '@wangke/study-core/model/usage';
-import type { ModelOverrides } from '@wangke/study-core/model/meta';
 import type { ModelTarget } from '@wangke/study-core/model/types';
 import { generateText, type TextSegment } from '@wangke/study-core/generation/text';
 import { rewriteBlock, type RewriteContext } from '@wangke/study-core/handout/rewrite';
@@ -27,6 +26,7 @@ import { SHOW_WIDGET_TOOL, SERVER_WIDGET_RULE } from '@wangke/study-core/widget-
 import { readPartialWidgetArguments, widgetReference, type WidgetPayload } from '@wangke/study-core/widgets';
 import { executeServerWidget } from './widgets';
 import { parseWebSearchResult, type WebSearchResult } from '@wangke/contracts/web-search';
+import { gatewayTaskTarget, gatewayTaskFetch } from '../src/agent/model-gateway-runtime.js';
 
 /** Text-source handouts for Bot jobs. Existing video/slide Chromium workflow remains unchanged. */
 async function studyHandout(context: TaskContext) {
@@ -130,25 +130,14 @@ const COURSE_DETAILS_TOOL: ToolDef = {
 };
 
 function targetFor(context: TaskContext): ModelTarget {
-  const config = context.configuration.get(context.owner, true);
-  const input = context.task.input;
-  const ref = context.task.kind === 'modelOnce'
-    ? { providerId: input.providerId, model: input.model }
-    : (input.modelRef as { providerId: string; model: string } | undefined) ?? config.llmModel;
-  const provider = config.providers.find(p => p.id === ref.providerId);
-  if (!provider || typeof ref.model !== 'string' || !ref.model || ref.model.length > 200) throw new Error('model_not_configured');
-  const saved = context.records.get(context.owner, 'preferences', 'savedModels')?.value;
-  const capabilities = Array.isArray(saved)
-    ? saved.find(model => model?.providerId === provider.id && model?.model === ref.model) as ModelOverrides | undefined : undefined;
-  return { providerId: provider.id, baseUrl: provider.baseUrl, apiKey: provider.apiKey ?? '',
-    model: ref.model, protocol: provider.protocol, catalogId: provider.catalogId, capabilities };
+  return gatewayTaskTarget(context);
 }
 
 function modelFetch(context: TaskContext): typeof fetch {
   return async (url, init) => {
     context.checkActive();
     try {
-      const response = await context.fetch(url, { ...init, redirect: 'error',
+      const response = await gatewayTaskFetch(context)(url, { ...init, redirect: 'error',
         signal: AbortSignal.any([context.signal, AbortSignal.timeout(300_000)]) });
       if (!response.ok) {
         await response.body?.cancel();

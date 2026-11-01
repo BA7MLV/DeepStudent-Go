@@ -61,7 +61,12 @@ try {
 
   const all = await page.evaluate(async () => {
     const { useCourseChat } = await import('/src/store/courseChat.ts');
-    while (useCourseChat.getState().hasOlder) await useCourseChat.getState().loadOlder();
+    while (useCourseChat.getState().hasOlder) {
+      // The automatic top loader can already own the request. A tight loop of
+      // resolved no-ops starves IndexedDB's task queue instead of awaiting it.
+      if (useCourseChat.getState().loadingOlder) await new Promise(resolve => setTimeout(resolve, 10));
+      else await useCourseChat.getState().loadOlder();
+    }
     const messages = useCourseChat.getState().messages;
     return { length: messages.length, unique: new Set(messages.map((m) => m.rowId)).size, first: messages[0].content };
   });

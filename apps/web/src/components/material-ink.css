@@ -1,6 +1,12 @@
 .ink-toolbar { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .ink-toolbar__header { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .ink-toolbar__header button { min-height: 44px; gap: 8px; }
+.ink-toolbar__spacer { flex: 1; }
+.ink-options { max-width: calc(100vw - 24px); }
+.ink-options__content { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; max-height: 65dvh; overflow-y: auto; }
+.ink-options__content :is(button, select, input) { min-height: 44px; }
+.ink-options__content :is(.ink-width, .ink-range) { justify-content: space-between; }
+.ink-options__content [data-testid="ink-finger"] { color: var(--muted); }
 .ink-toolbar > [hidden] { display: none; }
 .ink-toolbar__header + div:not([hidden]) { margin-top: 4px; }
 .ink-toolbar__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
@@ -15,6 +21,9 @@
 .ink-range span { min-width: 36px; font-variant-numeric: tabular-nums; }
 .ink-layer { position: absolute; inset: 0; z-index: 10; pointer-events: none; overflow: hidden; }
 .ink-input-root { display: contents; }
+.ink-input-root[data-panning] .mr-scroll { cursor: grab; user-select: none; -webkit-user-select: none; }
+.ink-input-root[data-panning] .mr-scroll[data-dragging] { cursor: grabbing; }
+.ink-input-root[data-panning] .textLayer :is(span, br) { cursor: inherit; }
 /* 笔和手指共享 touch-action；书写态必须在接触前关闭 UA 滚动，不能在 pointerdown 临时改。 */
 .ink-input-root[data-writing] .mr-scroll { touch-action: none; }
 .ink-layer[data-active] { pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: crosshair; }

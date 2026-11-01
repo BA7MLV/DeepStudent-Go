@@ -108,7 +108,8 @@ try {
     }
     const multipart = createRun(`${protocol}: 算一下 6×7，再给我个记忆方法`);
     const narration = '我先运行一下计算。', parts = ['算好了，是 42 🙂', '可以这样记：6 个 7，先算 5 个 7 是 35，再加 7。'];
-    const eventCount = () => store.db.prepare('SELECT COUNT(*) n FROM message_events WHERE thread_id=?').get(multipart.thread_id).n;
+    // Run state invalidations share this log but are not chat message deliveries.
+    const eventCount = () => store.db.prepare("SELECT COUNT(*) n FROM message_events WHERE thread_id=? AND type='message.accepted'").get(multipart.thread_id).n;
     const eventsBefore = eventCount();
     let requests = 0, executions = 0;
     runner = new BotRunner(store, { configuration, sandbox: async () => { executions++; return { stdout: '42', stderr: '', exitCode: 0 }; }, fetch: async (_url, init) => {

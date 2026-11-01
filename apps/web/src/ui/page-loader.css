@@ -1,4 +1,6 @@
 .page-loader {
+  /* A neutral light band brightens the logo without darkening it in either theme. */
+  --shimmer-highlight: #f2f2f2;
   display: grid;
   min-height: var(--vvh, 100dvh);
   place-items: center;
@@ -7,7 +9,7 @@
 
 .page-loader__logo {
   display: block;
-  width: clamp(52px, 8vw, 76px);
+  width: clamp(36px, 5vw, 48px);
   height: auto;
 }
 

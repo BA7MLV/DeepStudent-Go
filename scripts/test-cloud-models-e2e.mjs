@@ -215,6 +215,25 @@ try {
   await page.getByTestId(`provider-summary-${id}`).click();
   assert.equal(await page.getByTestId(`api-key-${id}`).inputValue(), '');
 
+  // Preset drafts share the model-settings CAS and never persist credentials locally.
+  const presets = page.getByTestId('model-presets');
+  await presets.getByRole('button', { name: '创建 Preset', exact: true }).click();
+  await presets.getByLabel('Preset 名称', { exact: true }).fill('Gateway fixture');
+  await presets.getByLabel('精确 Model ID', { exact: true }).fill('private-preset-model');
+  await presets.getByLabel('候选 1 · 供应商', { exact: true }).selectOption(id);
+  await page.getByTestId('cloud-models-save').click();
+  await page.getByText('模型设置已保存到服务器', { exact: true }).waitFor();
+  let presetConfig = await readConfig();
+  assert.ok(presetConfig.modelPresets.some(p => p.name === 'Gateway fixture' && p.candidates[0].ref.model === 'private-preset-model'));
+  await page.reload();
+  await page.getByTestId('model-presets').getByLabel('Preset 名称', { exact: true }).waitFor();
+  assert.equal(await page.getByTestId('model-presets').getByLabel('Preset 名称', { exact: true }).inputValue(), 'Gateway fixture');
+  await page.getByTestId('model-presets').getByRole('button', { name: '删除 Preset', exact: true }).click();
+  await page.getByTestId('cloud-models-save').click();
+  await page.getByText('模型设置已保存到服务器', { exact: true }).waitFor();
+  assert.ok(!(await readConfig()).modelPresets.some(p => p.name === 'Gateway fixture'));
+  await page.getByTestId(`provider-summary-${id}`).click();
+
   // Deleting the active provider clears every default instead of silently changing providers.
   await page.getByTestId(`provider-remove-${id}`).click();
   const deletion = page.getByTestId('confirm-dialog-danger');
@@ -260,6 +279,18 @@ try {
   await page.getByTestId('cloud-models-save').click();
   await page.getByText('模型设置已保存到服务器', { exact: true }).waitFor();
   assert.deepEqual((await readConfig()).decisionModel, { providerId: '', model: '' });
+  await page.getByRole('button', { name: '添加 OpenCode Go（服务端环境密钥）', exact: true }).click();
+  await page.getByText('连接已保存到服务器', { exact: true }).waitFor();
+  const goConfig = await readConfig();
+  assert.equal(goConfig.providers.find(p => p.id === 'opencode-go').configured, false, 'no test credential is installed');
+  await page.getByRole('button', { name: '刷新路由与用量', exact: true }).click();
+  await page.getByText('已停用用途：无；熔断记录：0', { exact: true }).waitFor();
+  const discovery = await context.request.get(`${origin}/api/v1/cloud/model-gateway/providers/opencode-go/models`);
+  assert.equal(discovery.status(), 200);
+  assert.equal(upstream.at(-1).url, 'https://opencode.ai/inference/go/v1/models');
+  assert.equal(upstream.at(-1).headers['user-agent'], 'wangke-model-gateway/0.1');
+  await page.reload();
+  await page.getByRole('region', { name: 'OpenCode Go', exact: true }).waitFor();
   assert.deepEqual(errors, []);
   console.log('PASS: onboarding/settings, paginated discovery, credential safety, completion retry, 404 recovery, concurrent conflicts, deletion, legacy field repair, skip and mobile layout');
 } catch (error) {

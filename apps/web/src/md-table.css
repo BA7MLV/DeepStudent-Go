@@ -289,10 +289,6 @@
   transition:
     height var(--duration-fast) var(--ease-smooth-out),
     translate var(--drawer-enter-duration) var(--drawer-enter-ease);
-  --drawer-enter-duration: var(--duration-slow);
-  --drawer-exit-duration: var(--duration-medium);
-  --drawer-enter-ease: var(--ease-smooth-out);
-  --drawer-exit-ease: var(--ease-smooth-out);
 }
 
 .md-table-sheet__dialog[data-placement='bottom'][data-snap='full'] {

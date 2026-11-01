@@ -116,7 +116,8 @@ try {
   assert.equal(commands, 1);
   await runTool('shell', { command: 'rm -rf /workspace/results' }, { approved: false, beforeResolve: () => {
     const prompt = store.db.prepare("SELECT content FROM messages WHERE thread_id=? AND kind='approval' ORDER BY seq DESC LIMIT 1").get(threadId).content;
-    assert.match(prompt, /破坏性操作/);
+    assert.match(prompt, /删除或覆盖数据/);
+    assert.match(prompt, /可以吗？/);
     assert.doesNotMatch(prompt, /可联网/);
   } });
   assert.equal(commands, 1);
@@ -124,7 +125,7 @@ try {
     const prompt = store.db.prepare("SELECT content FROM messages WHERE thread_id=? AND kind='approval' ORDER BY seq DESC LIMIT 1").get(threadId).content;
     assert.match(prompt, /将生成的报告发布到指定网站/);
     assert.doesNotMatch(prompt, /python|publish.py/);
-    assert.match(prompt, /对外产生影响/);
+    assert.match(prompt, /向外部发送、发布内容/);
   } });
   assert.equal(commands, 1);
   await runTool('shell', { command: 'rm -rf /workspace/results', timeoutSeconds: 600 }, { approved: true, restart: true });
@@ -135,17 +136,25 @@ try {
   }
 
   projects.update(owner, workspace.id, { policy: { shell: 'ask', network: 'allow' } });
-  await runTool('shell', { command: 'echo hello' }, { approved: false, beforeResolve: () => {
+  await runTool('shell', { command: 'echo hello', description: '我想先看看这份申论 PDF 有多少页、内容分哪几部分，可以吗？' }, { approved: false, beforeResolve: () => {
     const prompt = store.db.prepare("SELECT content FROM messages WHERE thread_id=? AND kind='approval' ORDER BY seq DESC LIMIT 1").get(threadId).content;
-    assert.match(prompt, /工作区.*每次询问/);
+    assert.equal(prompt, '我想先看看这份申论 PDF 有多少页、内容分哪几部分，可以吗？');
+    assert.doesNotMatch(prompt, /每次询问|全局|优先于|echo hello|权限设置|同意只对/);
   } });
   projects.update(owner, workspace.id, { policy: { shell: 'allow', network: 'allow' } });
   configuration.save(owner, { ...get(), trustedAgentIds: [], policy: { ...get().policy, shell: 'ask' } });
   await runTool('shell', { command: 'echo hello' }, { approved: false, beforeResolve: () => {
     const prompt = store.db.prepare("SELECT content FROM messages WHERE thread_id=? AND kind='approval' ORDER BY seq DESC LIMIT 1").get(threadId).content;
-    assert.match(prompt, /Bot.*每次询问/);
+    assert.equal(prompt, '我需要运行一个程序才能继续，可以吗？');
   } });
   configuration.save(owner, { ...get(), policy: { ...get().policy, shell: 'allow' } });
+  await runTool('shell', { command: 'rm /system/memory/obsolete.md', description: '删除过期的记忆文件', systemWrite: true }, { approved: false, beforeResolve: () => {
+    const prompt = store.db.prepare("SELECT content FROM messages WHERE thread_id=? AND kind='approval' ORDER BY seq DESC LIMIT 1").get(threadId).content;
+    assert.match(prompt, /删除或覆盖数据/);
+    assert.match(prompt, /整个 \/system 目录的写入权限，不只限于某个文件/);
+    assert.ok(prompt.endsWith('将执行的完整命令：\nrm /system/memory/obsolete.md'));
+  } });
+  assert.equal(commands, 2, 'copy changes never authorize rejected commands');
 
   const projectThread = crypto.randomUUID();
   store.db.prepare("INSERT INTO threads(id,owner_id,agent_id,project_id,mode,title,created_at,updated_at) VALUES(?,?,?,?,'bot','Project',?,?)").run(projectThread, owner, agent, workspace.id, now, now);

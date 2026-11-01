@@ -2,11 +2,14 @@ import crypto from 'node:crypto';
 import type { DatabaseStore } from '../storage/database.js';
 import { modelUsage, usageCollector, type ModelUsage } from '@wangke/study-core/model/usage';
 import type { ModelUsageCounts, ModelUsageReport, ModelUsageSource } from '@wangke/contracts/cloud';
+import { abortable, limitedJson } from './model-client.js';
+import { recordModelMetric } from './model-metrics.js';
 
 /** Ordinary traffic is measured without applying Bot admission/billing quotas.
  * No prompt, response text, URL, credential or cache key is retained here. */
 export async function observeModelFetch(store: DatabaseStore, owner: string, provider: string, model: string, fetcher: typeof fetch, url: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> {
   const id = crypto.randomUUID(), collector = usageCollector();
+  const started = Date.now(); let firstByteMs: number | null = null;
   store.db.prepare('INSERT INTO model_observations(id,owner_id,provider,model,started_at,status) VALUES(?,?,?,?,?,?)').run(id, owner, provider, model, new Date().toISOString(), 'inflight');
   let settled = false;
   const settle = (status: string, usage: ModelUsage | undefined = collector.value) => {
@@ -15,15 +18,17 @@ export async function observeModelFetch(store: DatabaseStore, owner: string, pro
     init?.signal?.removeEventListener('abort', abort);
     store.db.prepare(`UPDATE model_observations SET ended_at=?,status=?,input_tokens=?,output_tokens=?,cache_tokens=?,cache_creation_tokens=?,reasoning_tokens=? WHERE id=?`)
       .run(new Date().toISOString(), status, usage?.input ?? null, usage?.output ?? null, usage?.cache ?? null, usage?.cacheCreation ?? null, usage?.reasoning ?? null, id);
+    recordModelMetric(store, owner, { requestId: id, provider, model, status, durationMs: Date.now() - started, firstByteMs }, usage);
   };
   const abort = () => settle('cancelled');
   init?.signal?.addEventListener('abort', abort, { once: true });
   try {
-    const response = await fetcher(url, init);
+    const pendingResponse = fetcher(url, init);
+    const response = await (init?.signal ? abortable(pendingResponse, init.signal) : pendingResponse);
     if (!response.ok) { settle(`http_${response.status}`); return response; }
     if (!response.headers.get('content-type')?.includes('text/event-stream')) {
       let usage: ModelUsage | undefined;
-      try { usage = modelUsage(await response.clone().json()); } catch { /* unknown, never zero */ }
+      try { const pending = limitedJson(response.clone()); usage = modelUsage(await (init?.signal ? abortable(pending, init.signal) : pending)); } catch { /* unknown, never zero */ }
       settle('completed', usage);
       return response;
     }
@@ -37,10 +42,12 @@ export async function observeModelFetch(store: DatabaseStore, owner: string, pro
     return new Response(new ReadableStream<Uint8Array>({
       async pull(controller) {
         try {
-          const { done, value } = await reader.read();
+          const pendingRead = reader.read();
+          const { done, value } = await (init?.signal ? abortable(pendingRead, init.signal) : pendingRead);
           if (done) { observe(pending + decoder.decode()); settle('completed'); reader.releaseLock(); controller.close(); return; }
+          if (firstByteMs === null && value.byteLength) firstByteMs = Date.now() - started;
           pending += decoder.decode(value, { stream: true });
-          const lines = pending.split('\n'); pending = lines.pop()!;
+          const lines = pending.split('\n'); pending = lines.pop()!.slice(-65536);
           for (const line of lines) observe(line);
           controller.enqueue(value);
         } catch (error) { settle('failed'); controller.error(error); }

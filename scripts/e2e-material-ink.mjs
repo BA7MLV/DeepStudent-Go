@@ -12,6 +12,12 @@ const errors = [];
 page.on('pageerror', (error) => errors.push(error.message));
 const cdp = await context.newCDPSession(page);
 const byId = (id) => page.getByTestId(id);
+async function moreOptions(action) {
+  await byId('ink-more').click();
+  await action();
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog', { name: '更多批注选项' }).waitFor({ state: 'detached' });
+}
 
 async function inkRows() {
   return page.evaluate(async () => {
@@ -83,11 +89,14 @@ try {
   const pdfId = await importFile('scripts/fixtures/sample-zh.pdf');
   assert.equal(await byId('study-assistant-panel').isVisible(), false);
   assert.equal(await byId('chat-input').count(), 1, '收起仍挂载问答');
-  assert.equal(await byId('ink-smart').getAttribute('aria-checked'), 'true', '默认智能批注，无需选画笔');
+  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '默认拖动阅读');
+  await moreOptions(async () => {
+  await byId('ink-smart').click();
   await page.getByLabel('笔型', { exact: true }).selectOption('brush');
   await page.getByLabel('实时字迹美化').selectOption('0.65');
   await page.getByLabel('笔迹浓度').fill('60');
   await page.getByLabel('笔迹粗细').fill('4.5');
+  });
   const first = page.locator('[data-page="1"] [data-testid="ink-layer"]');
   await first.waitFor();
   await page.locator('[data-page="1"] .textLayer span').first().waitFor();
@@ -206,7 +215,7 @@ try {
   await byId('ink-undo').click(); await waitSaved(1);
 
   // 手指绘制兼容电容笔，同时过滤大面积掌触。
-  await byId('ink-finger').click();
+  await moreOptions(() => byId('ink-finger').click());
   await delay(300); // 等待抬笔后的 250ms 掌触保护窗口结束
   await first.evaluate((el) => {
     const r = el.getBoundingClientRect();
@@ -260,7 +269,7 @@ try {
   assert.equal(precision.same, true, '手指抬起不改变预览轮廓');
   await byId('ink-undo').click(); await waitSaved(2);
   await byId('ink-undo').click(); await waitSaved(1);
-  await byId('ink-finger').click();
+  await moreOptions(() => byId('ink-finger').click());
 
   const cancelEvent = { pointerId: 45, pointerType: 'pen', isPrimary: true, button: 0, clientX: box.x + 80, clientY: box.y + 50, pressure: .5 };
   await first.dispatchEvent('pointerdown', cancelEvent);
@@ -269,7 +278,7 @@ try {
   assert.equal(await first.locator('[data-ink-stroke]').count(), 1, '取消手势不提交残笔');
   await byId('ink-highlight').click(); await penStroke(first, 110); await waitSaved(2);
   assert.equal((await inkRows()).find((s) => s.id !== saved.id).tool, 'highlight');
-  assert.equal(await byId('ink-smart').getAttribute('aria-checked'), 'true', '荧光笔一次后回到智能批注');
+  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '荧光笔一次后回到拖动');
   await byId('ink-erase').click(); await penStroke(first, 110); await waitSaved(1);
   await byId('ink-undo').click(); await waitSaved(2);
   await byId('reader-zoom-in').click();
@@ -329,8 +338,10 @@ try {
   await page.setViewportSize({ width: 1024, height: 900 });
   await byId('study-assistant-close').click();
   const text = page.locator('.mr-page .textLayer span').first();
+  await byId('ink-read').click();
   await text.waitFor();
   await text.evaluate((e) => { const range = document.createRange(); range.selectNodeContents(e); const s = getSelection(); s.removeAllRanges(); s.addRange(range); document.dispatchEvent(new Event('selectionchange')); });
+  await text.dispatchEvent('pointerup', { pointerType: 'mouse', button: 0 });
   await byId('ask-compose').click();
   await byId('chat-ref-chip').waitFor();
   assert.equal(await byId('study-assistant-panel').isVisible(), true, '划词提问自动展开助手');
@@ -343,7 +354,7 @@ try {
   await byId('md-edit-toggle').click();
   assert.equal(await byId('ink-toolbar').count(), 0, '编辑正文时退出批注');
   await byId('md-edit-toggle').click(); await byId('ink-toolbar').waitFor();
-  assert.equal(await byId('ink-read').getAttribute('aria-checked'), 'true');
+  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true');
 
   await importFile('scripts/fixtures/sample.docx');
   await byId('ink-pen').click(); await penStroke(byId('ink-layer').first()); await waitSaved(4);
