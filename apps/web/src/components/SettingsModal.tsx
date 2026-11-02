@@ -4,11 +4,12 @@ import { useMediaQuery } from '../utils/useMobile';
 import './settings-sheet.css';
 import { Sym } from '../ui/icons';
 import { MODAL_CONTAINER_CLASS } from '../ui/modalContainer';
-import { allowSettingsLeave, closeSettingsAndClearHash, openSettings, useSettingsDialog, type SettingsModule } from './settingsDialogStore';
+import { allowSettingsLeave, canonicalSettingsModule, closeSettingsAndClearHash, openSettings, useSettingsDialog, type SettingsModule } from './settingsDialogStore';
 import { cloud } from '../cloud/state';
 import { useTranslation } from 'react-i18next';
 import SheetChrome from '../ui/SheetChrome';
 import SidebarAccount from './SidebarAccount';
+import { SettingsActionsScope } from './settings/SettingsActions';
 
 /**
  * 设置模块登记表：桌面左侧导航，移动端顶部横向模块栏，只渲染当前模块。
@@ -20,26 +21,22 @@ import SidebarAccount from './SidebarAccount';
  *     正好符合「关掉设置就当没来过」的预期。
  */
 /*
- * 每个模块按需加载：「模型」一个模块就一千多行，以前打开任何页面都会把十个模块一起打进首屏包。
+ * 每个模块按需加载：「模型」一个模块就一千多行，以前打开任何页面都会把所有模块一起打进首屏包。
  * 现在只有用户真的点进某个模块时才下载它。
  * tint 是手机上 iOS 设置式列表里图标底块的颜色。
  */
 type Module = { key: SettingsModule; icon: string; tint: string; Component: LazyExoticComponent<ComponentType>; cloudOnly?: boolean };
 const ALL_MODULES: Module[] = [
   { key: 'models', icon: 'neurology', tint: '#5e5ce6', Component: lazy(() => import('./settings/ModelsModule')) },
+  { key: 'assistant', icon: 'neurology', tint: '#0a84ff', Component: lazy(() => import('./settings/AssistantModule')) },
   { key: 'websearch', icon: 'search', tint: '#30b0c7', Component: lazy(() => import('../web-search/WebSearchSettings')), cloudOnly: true },
-  { key: 'agent', icon: 'neurology', tint: '#0a84ff', Component: lazy(() => import('./settings/AgentModule')) },
-  // Bot 与消息渠道只在连着自己服务器时存在：本机模式没有 Bot 运行时，也就没有这两屏。
-  { key: 'bot', icon: 'smart_toy', tint: '#5856d6', Component: lazy(() => import('../cloud/BotSettings')), cloudOnly: true },
-  { key: 'gateway', icon: 'forum', tint: '#34c759', Component: lazy(() => import('../cloud/GatewaySettings')), cloudOnly: true },
+  // Bot 与消息渠道只在连着自己服务器时存在：本机模式没有 Bot 运行时，也就没有这一屏。
+  { key: 'botChannels', icon: 'forum', tint: '#34c759', Component: lazy(() => import('./settings/BotChannelsModule')), cloudOnly: true },
   { key: 'usage', icon: 'bar_chart', tint: '#30b0c7', Component: lazy(() => import('./settings/UsageModule')), cloudOnly: true },
-  { key: 'appearance', icon: 'style', tint: '#ff9f0a', Component: lazy(() => import('./settings/AppearanceModule')) },
+  { key: 'experience', icon: 'style', tint: '#ff9f0a', Component: lazy(() => import('./settings/ExperienceModule')) },
   { key: 'sources', icon: 'cloud_upload', tint: '#30b0c7', Component: lazy(() => import('./settings/SourcesModule')) },
   { key: 'live', icon: 'link', tint: '#34c759', Component: lazy(() => import('./settings/LiveModule')) },
-  { key: 'playback', icon: 'play_circle', tint: '#ff375f', Component: lazy(() => import('./settings/PlaybackModule')) },
-  { key: 'shortcuts', icon: 'keyboard', tint: '#8e8e93', Component: lazy(() => import('./settings/ShortcutsModule')) },
   { key: 'study', icon: 'calendar_month', tint: '#ff453a', Component: lazy(() => import('./settings/StudyModule')) },
-  { key: 'skills', icon: 'extension', tint: '#bf5af2', Component: lazy(() => import('./settings/SkillsModule')) },
   { key: 'data', icon: 'folder', tint: '#64d2ff', Component: lazy(() => import('./settings/DataModule')) },
 ];
 const CloudModels = lazy(() => import('../cloud/Models'));
@@ -49,8 +46,11 @@ function ModuleFallback() {
   return <div className="settings-module-fallback"><Spinner size="sm" color="current" /></div>;
 }
 
-/** 模块 key 集合，给 `#/settings/<模块>` 深链做校验（非法值回落到入口模块） */
-export const SETTINGS_MODULE_KEYS = ALL_MODULES.map((m) => m.key);
+/** 模块 key 集合，给 `#/settings/<模块>` 深链做校验（非法值回落到入口模块）。旧 key 继续保留兼容性。 */
+export const SETTINGS_MODULE_KEYS = [
+  ...ALL_MODULES.map((m) => m.key),
+  'agent', 'skills', 'appearance', 'playback', 'shortcuts', 'bot', 'gateway',
+] as const;
 
 /**
  * 全局设置弹窗。挂在 App 根部一次，任何页面都能通过 openSettings() 唤起。
@@ -101,8 +101,15 @@ export default function SettingsModal() {
     setDirection('forward');
   }, [open, module, explicit]);
 
-  const active = MODULES.find((m) => m.key === localModule) ?? MODULES[0];
+  const canonicalModule = canonicalSettingsModule(localModule);
+  const active = MODULES.find((m) => m.key === canonicalModule) ?? MODULES[0];
   const ActiveContent = cloud.enabled && localModule === 'models' ? CloudModels : active.Component;
+  const RenderContent = ActiveContent as unknown as ComponentType<{ initialTab?: string }>;
+  const initialTab = localModule === 'agent' || localModule === 'skills' || localModule === 'appearance' || localModule === 'playback' || localModule === 'shortcuts' || localModule === 'bot' || localModule === 'gateway'
+    ? localModule
+    : undefined;
+  /** 老的深链接进入合并页时，仍让当前导航项保留旧 test id，兼容已有集成入口。 */
+  const activeNavTestId = (key: SettingsModule) => `settings-nav-${key === canonicalModule && localModule !== canonicalModule ? localModule : key}`;
   const close = async () => { if (await allowSettingsLeave()) closeSettingsAndClearHash(); };
   const changeModule = async (next: SettingsModule) => {
     if (next !== localModule && !await allowSettingsLeave()) return;
@@ -128,37 +135,38 @@ export default function SettingsModal() {
                   <Drawer.CloseTrigger aria-label={common('closeSettings')}><Sym name="close" /></Drawer.CloseTrigger>
                 </Drawer.Header>
               </SheetChrome>
-              <Drawer.Body
-                key={pushed ? localModule : 'root'}
-                className="settings-sheet__page mx-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4"
-                data-direction={direction}
-                data-testid={pushed ? `settings-module-${localModule}` : 'settings-root'}
-              >
-                {pushed ? (
-                  <Suspense fallback={<ModuleFallback />}><ActiveContent /></Suspense>
-                ) : (
-                  <ListBox
-                    aria-label={common('settingsModules')}
-                    selectionMode="none"
-                    className="settings-list"
-                    onAction={(key) => {
-                      setLocalModule(key as SettingsModule);
-                      setDirection('forward');
-                      setPushed(true);
-                    }}
-                  >
-                    {MODULES.map((m) => (
-                      <ListBox.Item key={m.key} id={m.key} textValue={t(`modules.${m.key}`)}
-                        className="settings-list__item"
-                        data-testid={`settings-nav-${m.key}`}>
-                        <span className="settings-list__tile" style={{ background: m.tint }} aria-hidden="true"><Sym name={m.icon} /></span>
-                        <span className="settings-list__label">{t(`modules.${m.key}`)}</span>
-                        <Sym name="chevron_right" className="settings-list__chevron" />
-                      </ListBox.Item>
-                    ))}
-                  </ListBox>
-                )}
-              </Drawer.Body>
+              <SettingsActionsScope key={pushed ? localModule : 'root'}>
+                <Drawer.Body
+                  className="settings-sheet__page mx-0 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4"
+                  data-direction={direction}
+                  data-testid={pushed ? `settings-module-${localModule}` : 'settings-root'}
+                >
+                  {pushed ? (
+                    <Suspense fallback={<ModuleFallback />}><RenderContent initialTab={initialTab} /></Suspense>
+                  ) : (
+                    <ListBox
+                      aria-label={common('settingsModules')}
+                      selectionMode="none"
+                      className="settings-list"
+                      onAction={(key) => {
+                        setLocalModule(key as SettingsModule);
+                        setDirection('forward');
+                        setPushed(true);
+                      }}
+                    >
+                      {MODULES.map((m) => (
+                        <ListBox.Item key={m.key} id={m.key} textValue={t(`modules.${m.key}`)}
+                          className="settings-list__item"
+                          data-testid={activeNavTestId(m.key)}>
+                          <span className="settings-list__tile" style={{ background: m.tint }} aria-hidden="true"><Sym name={m.icon} /></span>
+                          <span className="settings-list__label">{t(`modules.${m.key}`)}</span>
+                          <Sym name="chevron_right" className="settings-list__chevron" />
+                        </ListBox.Item>
+                      ))}
+                    </ListBox>
+                  )}
+                </Drawer.Body>
+              </SettingsActionsScope>
             </Drawer.Dialog>
           </Drawer.Content>
         </Drawer.Backdrop>
@@ -206,7 +214,7 @@ export default function SettingsModal() {
                 orientation="vertical"
                 selectionMode="single"
                 disallowEmptySelection
-                selectedKeys={[localModule]}
+                selectedKeys={[canonicalModule]}
                 onSelectionChange={(keys) => {
                   const next = [...keys][0];
                     if (next) void changeModule(next as SettingsModule);
@@ -218,7 +226,7 @@ export default function SettingsModal() {
                     id={m.key}
                     textValue={t(`modules.${m.key}`)}
                     className="settings-module-nav__item"
-                    data-testid={`settings-nav-${m.key}`}
+                     data-testid={activeNavTestId(m.key)}
                   >
                     <span className="settings-list__tile settings-list__tile--sm" style={{ background: m.tint }} aria-hidden="true">
                       <Sym name={m.icon} />
@@ -231,12 +239,15 @@ export default function SettingsModal() {
 
               {/* 最后一张卡的底部留白收掉：卡片之间由 Card 的 mb-4 统一给间距，
                   不收的话内容区末尾会多出一段空白。 */}
-              <div
-                key={localModule}
-                className="settings-desktop-page min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain bg-background px-6 pt-14 pb-6 [&>div:last-of-type]:mb-1"
-                data-testid={`settings-module-${localModule}`}
-              >
-                <Suspense fallback={<ModuleFallback />}><ActiveContent /></Suspense>
+              <div key={localModule} className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <SettingsActionsScope>
+                  <div
+                    className="settings-desktop-page min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-y-contain bg-background px-6 pt-14 pb-6 [&>div:last-of-type]:mb-1"
+                    data-testid={`settings-module-${localModule}`}
+                  >
+                    <Suspense fallback={<ModuleFallback />}><RenderContent initialTab={initialTab} /></Suspense>
+                  </div>
+                </SettingsActionsScope>
               </div>
             </div>
           </Modal.Dialog>

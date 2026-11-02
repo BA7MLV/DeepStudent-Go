@@ -165,17 +165,20 @@ try {
   await page.goto(`${origin}/#/settings/models`);
   await page.reload();
   await page.getByTestId(`provider-summary-${id}`).click();
-  assert.equal(await page.getByTestId('cloud-models-save').count(), 0, 'clean settings do not show a redundant save action');
+  assert.equal(await page.getByTestId('cloud-models-save').isDisabled(), true, 'clean settings retain a stable, disabled save action');
+  assert.equal(await page.getByRole('button', { name: '使用服务器版本…', exact: true }).count(), 0, 'server-version recovery is not a routine action');
   assert.equal(await page.getByTestId(`field-api-key-${id}`).getByTestId(`provider-accounts-${id}`).count(), 1, 'key input and account management belong to the same API Key field');
   assert.equal(await page.getByTestId(`field-api-key-${id}`).locator('input[type="password"]').count(), 0, 'key management has no duplicate always-visible input');
   await page.getByTestId(`provider-name-${id}`).fill('Renamed connection');
   const assertSaveDock = async () => {
     const dock = page.getByTestId('cloud-models-save-actions');
     await dock.waitFor();
-    assert.equal(await dock.evaluate(element => element.parentElement.dataset.testid), 'settings-modal', 'save actions stay inside the modal focus scope, outside its scroll container');
+    assert.ok(await dock.evaluate(element => element.closest('[data-testid="settings-modal"]') && element.parentElement.classList.contains('settings-actions-slot')), 'save actions stay inside the modal focus scope, outside its scroll container');
     const before = await dock.boundingBox();
     await page.getByTestId('settings-module-models').evaluate(element => { element.scrollTop = element.scrollHeight; });
     const after = await dock.boundingBox();
+    const content = await page.getByTestId('settings-module-models').boundingBox();
+    assert.ok(content.y + content.height <= after.y + 1, 'save actions reserve their own space instead of covering fields');
     assert.equal(after.y, before.y, 'scrolling settings never moves the save dock');
     assert.ok(after.x >= 0 && after.y >= 0 && after.x + after.width <= (await page.viewportSize()).width && after.y + after.height <= (await page.viewportSize()).height, 'save actions stay within the viewport');
     await page.getByTestId('settings-module-models').evaluate(element => { element.scrollTop = 0; });
@@ -183,7 +186,7 @@ try {
   await assertSaveDock();
   await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-save-desktop.png') });
   await page.getByTestId(`provider-name-${id}`).fill(saved.providers[0].name);
-  await page.getByTestId('cloud-models-save-actions').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.querySelector('[data-testid="cloud-models-save"]')?.disabled);
   await page.getByTestId(`provider-name-${id}`).fill('Renamed connection');
   assert.equal(await page.getByTestId('btn-check-models').innerText(), '保存连接并获取模型', 'display name changes are not mistaken for a saved connection');
   await page.getByTestId('saved-models').getByText('openai/gpt-4o', { exact: true }).waitFor();
@@ -192,7 +195,7 @@ try {
   await page.getByTestId('model-editor').getByRole('button', { name: '取消', exact: true }).click();
   await page.getByTestId('btn-check-models').click();
   await page.getByText(/2 个可用模型/).first().waitFor();
-  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.querySelector('[data-testid="cloud-models-save"]')?.disabled);
   assert.ok(upstream.every(r => r.headers.authorization === 'Bearer secret-for-server-only'), 'blank editor keys preserve credentials');
   await noBrowserKey();
   await page.mouse.move(0, 0);
@@ -237,11 +240,16 @@ try {
   await page.getByText(/服务器上的模型设置已被其他页面修改/).first().waitFor();
   assert.equal(await page.getByTestId(`api-key-${id}`).inputValue(), 'unsaved-conflict-secret');
   assert.ok(!(await page.evaluate(() => JSON.stringify(localStorage))).includes('unsaved-conflict-secret'));
-  await page.getByRole('button', { name: '重新载入服务器设置', exact: true }).click();
-  await page.getByTestId('confirm-dialog').getByRole('button', { name: '重新载入', exact: true }).click();
+  assert.equal(await page.getByTestId('cloud-models-save').isDisabled(), true, 'conflicts cannot be retried with a stale version');
+  await page.getByRole('button', { name: '使用服务器版本…', exact: true }).click();
+  await page.getByTestId('confirm-dialog-danger').getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(await page.getByTestId(`api-key-${id}`).inputValue(), 'unsaved-conflict-secret', 'cancelling recovery preserves credentials and the draft');
+  await page.getByRole('button', { name: '使用服务器版本…', exact: true }).click();
+  await page.getByTestId('confirm-dialog-danger').getByRole('button', { name: '放弃修改并载入', exact: true }).click();
   await page.getByTestId('provider-add-card').waitFor();
   await page.getByTestId(`provider-summary-${id}`).click();
   assert.equal(await page.getByTestId(`api-key-${id}`).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '使用服务器版本…', exact: true }).count(), 0, 'recovery disappears after loading the latest version');
 
   // Account changes save immediately in the same API Key section, not in the model draft.
   const accounts = page.getByTestId(`provider-accounts-${id}`);
@@ -264,7 +272,7 @@ try {
   const account = (await readConfig()).providers[0].accounts[0];
   assert.equal(account.keyHint, '••••only');
   assert.equal(await accounts.getByTestId(`account-key-hint-${account.id}`).innerText(), '••••only', 'named accounts display their identifying suffix in the key list');
-  assert.equal(await page.getByTestId('cloud-models-save').count(), 0, 'immediately saved accounts do not leave a misleading pending save');
+  assert.equal(await page.getByTestId('cloud-models-save').isDisabled(), true, 'immediately saved accounts do not leave a misleading pending save');
   assert.ok(!(await page.evaluate(() => JSON.stringify(localStorage))).includes('account-secret-for-server-only'));
   await page.getByTestId('field-api-key-' + id).evaluate(element => element.scrollIntoView({ block: 'center' }));
   await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-unified-keys-mobile.png') });
@@ -275,7 +283,7 @@ try {
   await accounts.getByLabel('API Key', { exact: true }).fill('discarded-extra-key');
   await accounts.getByRole('button', { name: '取消', exact: true }).click();
   assert.equal(await accounts.getByLabel('API Key', { exact: true }).count(), 0, 'cancel removes the form and its secret');
-  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.querySelector('[data-testid="cloud-models-save"]')?.disabled);
   await accounts.getByRole('button', { name: '更换 Key', exact: true }).click();
   await accounts.getByLabel('API Key', { exact: true }).fill('replacement-from-unified-form');
   await accounts.getByRole('button', { name: '保存 Key', exact: true }).click();
@@ -285,30 +293,57 @@ try {
   assert.equal(upstream.at(-1).headers.authorization, 'Bearer replacement-from-unified-form');
   assert.equal(await page.getByTestId(`provider-key-hint-${id}`).innerText(), '••••form', 'replacing a credential updates its display suffix');
 
-  // Preset drafts share the model-settings CAS and never persist credentials locally.
+  // Purpose-first main/backup editing uses the saved model library, not raw IDs.
   const presets = page.getByTestId('model-presets');
-  await presets.getByRole('button', { name: '创建 Preset', exact: true }).click();
-  await presets.getByLabel('Preset 名称', { exact: true }).fill('Gateway fixture');
-  await presets.getByLabel('精确 Model ID', { exact: true }).fill('private-preset-model');
-  await presets.getByLabel('候选 1 · 供应商', { exact: true }).selectOption(id);
+  const botRoute = page.getByTestId('model-route-bot');
+  const chatRoute = page.getByTestId('model-route-chat');
+  const refKey = model => JSON.stringify([id, model]);
+  assert.equal(await presets.getByRole('textbox').count(), 0, 'routing needs neither plan names nor hand-entered model IDs');
+  assert.equal(await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).inputValue(), refKey('catalog-model'), 'builtin routes display the actual default');
+  assert.equal(await botRoute.getByRole('button', { name: '添加备用模型', exact: true }).isEnabled(), true);
+  await botRoute.getByRole('button', { name: '添加备用模型', exact: true }).click();
+  await botRoute.getByLabel('Bot 助手 · 选择备用模型', { exact: true }).selectOption(refKey('openai/gpt-4o'));
+  assert.equal(await botRoute.getByLabel('Bot 助手 · 备用模型 1', { exact: true }).inputValue(), refKey('openai/gpt-4o'));
+  assert.equal(await botRoute.getByRole('button', { name: '添加备用模型', exact: true }).isEnabled(), false, 'duplicate backup models cannot be added');
+  await botRoute.getByRole('button', { name: 'Bot 助手 · 备用模型 1优先使用', exact: true }).click();
+  assert.equal(await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).inputValue(), refKey('openai/gpt-4o'));
+  assert.equal(await chatRoute.getByLabel('普通聊天 / 课程问答 · 主模型', { exact: true }).inputValue(), refKey('catalog-model'), 'editing Bot does not change chat');
   await page.route('**/api/v1/cloud/model-settings', route => route.request().method() === 'PUT'
     ? route.fulfill({ status: 503, json: { error: 'test_dock_save_failed' } }) : route.continue());
   await page.getByTestId('cloud-models-save').click();
   await page.getByTestId('cloud-models-save-actions').getByRole('alert').filter({ hasText: 'test_dock_save_failed' }).waitFor();
   await assertSaveDock();
-  assert.equal(await presets.getByLabel('Preset 名称', { exact: true }).inputValue(), 'Gateway fixture', 'failed floating saves keep the draft intact');
+  assert.equal(await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).inputValue(), refKey('openai/gpt-4o'), 'failed floating saves keep priorities intact');
   await page.unroute('**/api/v1/cloud/model-settings');
   await page.getByTestId('cloud-models-save').click();
   await page.getByText('模型设置已保存到服务器', { exact: true }).waitFor();
   let presetConfig = await readConfig();
-  assert.ok(presetConfig.modelPresets.some(p => p.name === 'Gateway fixture' && p.candidates[0].ref.model === 'private-preset-model'));
+  const botPlan = presetConfig.modelPresets.find(p => p.id === presetConfig.modelRoutes.byPurpose.bot);
+  assert.deepEqual(botPlan.candidates.map(c => c.ref.model), ['openai/gpt-4o', 'catalog-model']);
+  assert.equal(botPlan.policy.allowCrossProvider, false);
+  await page.mouse.move(0, 0);
+  await page.waitForFunction(() => !document.querySelector('[data-slot="toast"]'));
+  await botRoute.scrollIntoViewIfNeeded();
+  assert.equal(await botRoute.evaluate(element => element.scrollWidth > element.clientWidth), false, 'main/backup controls fit the mobile card');
+  assert.ok(await botRoute.getByRole('button').evaluateAll(buttons => buttons.every(button => getComputedStyle(button).transform === 'none' && button.getBoundingClientRect().height >= 44)), 'mobile actions avoid clipped GPU layers and retain 44px touch targets');
+  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/model-routes-mobile.png'), animations: 'disabled' });
+  await page.setViewportSize({ width: 1280, height: 1000 });
   await page.reload();
-  await page.getByTestId('model-presets').getByLabel('Preset 名称', { exact: true }).waitFor();
-  assert.equal(await page.getByTestId('model-presets').getByLabel('Preset 名称', { exact: true }).inputValue(), 'Gateway fixture');
-  await page.getByTestId('model-presets').getByRole('button', { name: '删除 Preset', exact: true }).click();
+  await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).waitFor();
+  await botRoute.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/model-routes-desktop.png'), animations: 'disabled' });
+  await botRoute.screenshot({ path: path.join(os.tmpdir(), 'opencode/model-routes-card.png'), animations: 'disabled' });
+  await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).waitFor();
+  assert.equal(await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).inputValue(), refKey('openai/gpt-4o'));
+  await botRoute.getByRole('button', { name: 'Bot 助手 · 移除备用模型 1', exact: true }).click();
+  assert.equal(await botRoute.getByText('未设置备用，失败后不会换模型', { exact: true }).count(), 1);
+  await botRoute.getByRole('button', { name: '恢复跟随默认', exact: true }).click();
+  assert.equal(await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).inputValue(), refKey('catalog-model'));
+  await presets.getByText('未使用的已保存方案（1）', { exact: true }).click();
+  await presets.getByRole('button', { name: `删除未使用方案 ${botPlan.name}`, exact: true }).click();
   await page.getByTestId('cloud-models-save').click();
   await page.getByText('模型设置已保存到服务器', { exact: true }).waitFor();
-  assert.ok(!(await readConfig()).modelPresets.some(p => p.name === 'Gateway fixture'));
+  assert.ok(!(await readConfig()).modelPresets.some(p => p.id === botPlan.id));
   await page.getByTestId(`provider-summary-${id}`).click();
 
   // Deleting the active provider clears every default instead of silently changing providers.

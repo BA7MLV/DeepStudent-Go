@@ -227,6 +227,23 @@ try {
   // ── 手机：Bottom Sheet ───────────────────────────────────────────────────
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(150);
+
+  // 短表（含横溢、恰好 6 行）直接阅读 / 横滚，不显示完整表入口或空工具行。
+  const sixRows = `${header}${rows.slice(0, 6).join('')}`;
+  for (const shortContent of ['| a | b |\n| --- | --- |\n| 1 | 2 |', wide, sixRows]) {
+    await page.evaluate((content) => window.renderTable(content, false), shortContent);
+    await page.waitForTimeout(150);
+    assert.equal(await tableRoot.locator('.md-table-expand').count(), 0);
+    assert.equal(await tableRoot.locator('.md-table-tools').count(), 0);
+    assert.equal(await tableRoot.locator('.md-table-scroll--faded').count(), 0);
+  }
+  assert.equal(await tableRoot.locator('tr[data-md-row="body"]').count(), 6);
+
+  // 第 7 行开始折叠，并提供完整表入口。
+  await page.evaluate((content) => window.renderTable(content, false), `${header}${rows.slice(0, 7).join('')}`);
+  await tableRoot.locator('.md-table-expand').waitFor();
+  assert.equal(await tableRoot.locator('tr[data-md-row="body"]').count(), 6);
+
   const mobileContent = scrollContent;
   await page.evaluate((content) => window.renderTable(content, false), mobileContent);
   await page.waitForTimeout(150);

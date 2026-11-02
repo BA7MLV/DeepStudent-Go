@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Spinner } from '@heroui/react';
-import type { CloudConfig, CloudTask } from '@wangke/contracts/cloud';
+import type { CloudConfig } from '@wangke/contracts/cloud';
 import { cloud, cloudRequest } from './state';
 import { applyCloudConfig } from './sync';
 import { serverClient } from '../api/serverClient';
 import { SectionCard, toast } from '../ui';
-import { SettingRow, SettingSelect, SettingSwitch } from '../components/settings/controls';
+import { SettingSelect, SettingSwitch } from '../components/settings/controls';
 import BotManagement from './BotManagement';
 
 type Policy = CloudConfig['policy'];
@@ -32,17 +32,12 @@ export default function BotSettings() {
   const [config, setConfig] = useState<CloudConfig>();
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [permissions, setPermissions] = useState<Array<{ id: string; capability: string; arguments: string; status: string }>>([]);
-  const [tasks, setTasks] = useState<CloudTask[]>([]);
   const [error, setError] = useState('');
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const loadActivity = useCallback(async () => {
-    const [a, b] = await Promise.all([
-      cloudRequest<{ tasks: CloudTask[] }>('/tasks'),
-      cloudRequest<{ permissions: typeof permissions }>('/permissions'),
-    ]);
-    setTasks(a.tasks);
-    setPermissions(b.permissions.filter((p) => p.status === 'pending'));
+    const result = await cloudRequest<{ permissions: typeof permissions }>('/permissions');
+    setPermissions(result.permissions.filter((p) => p.status === 'pending'));
   }, []);
 
   useEffect(() => {
@@ -80,16 +75,10 @@ export default function BotSettings() {
     try { await cloudRequest(`/permissions/${id}/resolve`, { method: 'POST', body: JSON.stringify({ approved }) }); await loadActivity(); }
     catch (e) { toast.error((e as Error).message); }
   };
-  const cancel = async (id: string) => {
-    try { await cloudRequest(`/tasks/${id}/cancel`, { method: 'POST' }); await loadActivity(); }
-    catch (e) { toast.error((e as Error).message); }
-  };
 
   if (!config) {
     return <div className="grid min-h-40 place-items-center text-muted">{error ? <p role="alert">{error}</p> : <Spinner size="sm" color="current" />}</div>;
   }
-  const running = tasks.filter((task) => ['queued', 'running', 'waiting_user'].includes(task.status));
-  const workstation = config.policy.read === 'allow' && config.policy.write === 'allow' && config.policy.shell === 'allow' && config.policy.remove === 'ask';
 
   return (
     <>
@@ -110,8 +99,6 @@ export default function BotSettings() {
 
       <SectionCard title="权限" testId="bot-policy">
         <p className="text-xs text-muted-foreground">允许后，Bot 会直接完成日常操作；“每次询问”会逐次确认。工作区单独设置的限制仍然生效。</p>
-        <SettingSwitch label="专用工作机" isSelected={workstation}
-          onChange={(on) => setPolicy(on ? { read: 'allow', write: 'allow', shell: 'allow', remove: 'ask' } : { write: 'ask', shell: 'ask', remove: 'ask' })} />
         {CAPABILITIES.map(({ key, label }) => (
           <SettingSelect key={key} label={label} value={config.policy[key]} options={DECISIONS}
             onChange={(value) => setPolicy({ [key]: value } as Partial<Policy>)} />
@@ -126,16 +113,6 @@ export default function BotSettings() {
           {agents.map((agent) => (
             <SettingSwitch key={agent.id} label={agent.name} isSelected={config.trustedAgentIds?.includes(agent.id) ?? false}
               onChange={(on) => persist({ ...config, trustedAgentIds: on ? [...(config.trustedAgentIds ?? []), agent.id] : (config.trustedAgentIds ?? []).filter((id) => id !== agent.id) })} />
-          ))}
-        </SectionCard>
-      )}
-
-      {running.length > 0 && (
-        <SectionCard title="正在运行" testId="bot-tasks">
-          {running.slice(0, 20).map((task) => (
-            <SettingRow key={task.id} label={<span className="block truncate">{String(task.progress?.message ?? task.kind)}</span>}>
-              <Button size="sm" variant="secondary" onPress={() => void cancel(task.id)}>停止</Button>
-            </SettingRow>
           ))}
         </SectionCard>
       )}

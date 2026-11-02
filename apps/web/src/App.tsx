@@ -30,6 +30,7 @@ const pages = {
   bot: () => import('./pages/BotWorkspace'),
   live: () => import('./pages/LiveGuest'),
   widget: () => import('./pages/WidgetPreview'),
+  tasks: () => import('./pages/BackgroundTasks'),
 };
 const Library = lazy(pages.library);
 const Player = lazy(pages.player);
@@ -37,6 +38,7 @@ const Study = lazy(pages.study);
 const BotWorkspace = lazy(pages.bot);
 const LiveGuest = lazy(pages.live);
 const WidgetPreview = lazy(pages.widget);
+const BackgroundTasks = lazy(pages.tasks);
 
 /**
  * #/bot 与 #/bot?thread=… 不再是一个页面：Bot 是对话主页右侧的一项功能。
@@ -133,6 +135,7 @@ export default function App() {
               <Route path="/library" element={<Library />} />
               <Route path="/player/:id" element={<Player />} />
               <Route path="/study" element={<Study />} />
+              <Route path="/tasks" element={<BackgroundTasks />} />
               {/* #/settings 不是独立页面，而是唤起设置弹窗的入口（见上面的 useEffect）。
                   这里仍渲染默认首页，让用户「改完设置就能接着用」。 */}
               <Route path="/settings/*" element={<CourseChat />} />

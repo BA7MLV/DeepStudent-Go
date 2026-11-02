@@ -286,7 +286,15 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
 
   app.get('/api/v1/cloud/tasks', async (request, reply) => {
     const user = authorize(request, reply); if (!user) return;
-    return { tasks: (store.db.prepare("SELECT * FROM cloud_tasks WHERE owner_id=? ORDER BY CASE WHEN status IN ('queued','running','waiting_user') THEN 0 ELSE 1 END, created_at DESC LIMIT 200").all(user.id) as any[]).map(taskDto) };
+    return { tasks: (store.db.prepare(`SELECT t.*, a.name AS bot_name, json_extract(v.value,'$.name') AS resource_name
+      FROM cloud_tasks t
+      LEFT JOIN runs r ON r.id=t.parent_run_id
+      LEFT JOIN threads th ON th.id=r.thread_id AND th.owner_id=t.owner_id
+      LEFT JOIN agent_profiles a ON a.id=th.agent_id AND a.owner_id=t.owner_id
+      LEFT JOIN cloud_records v ON v.owner_id=t.owner_id AND v.table_name='videos'
+        AND v.record_key=json_quote(json_extract(t.input,'$.videoId'))
+      WHERE t.owner_id=?
+      ORDER BY CASE WHEN t.status IN ('queued','running','waiting_user') THEN 0 ELSE 1 END, t.created_at DESC LIMIT 200`).all(user.id) as any[]).map(taskDto) };
   });
   const leaseMs = 30_000;
   app.post('/api/v1/cloud/worker/claim', async (request, reply) => {

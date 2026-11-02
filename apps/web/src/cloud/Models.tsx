@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useStore } from 'zustand';
 import { Button } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
@@ -13,8 +12,10 @@ import { applyCloudConfig, flushCloud } from './sync';
 import { cloudDiscoveryProviders, cloudEditorProviders, cloudModelConfig, cloudModelPreferences, cloudModelUpdate, cloudModelsDirty, cloudProviderDirty, createCloudModelDraft, modelSettingsError } from './modelSettings';
 import { modelReferenceIssues } from '@wangke/contracts/model-settings';
 import { registerSettingsLeaveGuard } from '../components/settingsDialogStore';
-import ModelPresets, { type PresetDraft } from './ModelPresets';
+import ModelPresets from './ModelPresets';
+import { routeDraftIssue, type PresetDraft } from './modelRoutes';
 import ModelGatewayStatus from './ModelGatewayStatus';
+import { SettingsConflictRecovery, SettingsSaveBar } from '../components/settings/SettingsActions';
 
 function ProviderAccounts({ config, provider, onSaved, onReplaceKey, onChangeKey, onDraftChange }: { config: CloudConfig; provider: Provider; onSaved: (value: CloudConfig) => void; onReplaceKey: (provider: Provider) => Promise<void>; onChangeKey: (apiKey: string) => void; onDraftChange: (dirty: boolean) => void }) {
   const [name, setName] = useState('');
@@ -99,11 +100,6 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
   const [editingConnection, setEditingConnection] = useState(false);
   const [addingKey, setAddingKey] = useState(false);
   const [savedPreferences, setSavedPreferences] = useState(() => JSON.stringify(cloudModelPreferences(store.getState())));
-  const editorRef = useRef<HTMLDivElement>(null);
-  const [actionContainer, setActionContainer] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    if (!standalone) setActionContainer(editorRef.current?.closest<HTMLElement>('[data-testid="settings-modal"]') ?? null);
-  }, [standalone]);
   const operation = useRef(false);
   const baseline = useRef(config);
   baseline.current = config;
@@ -168,7 +164,7 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
     finally { operation.current = false; setBusy(false); }
   }
   async function save(complete = false) {
-    if (operation.current) return;
+    if (operation.current || conflict) return;
     if (editingConnection) { setError('当前新连接尚未保存，请先保存连接或取消编辑，再保存模型设置。'); return; }
     if (addingKey) { setError('当前 API Key 尚未保存，请先点击“保存 Key”或取消添加。'); return; }
     if (modelReferenceIssues(store.getState()).length) {
@@ -176,6 +172,8 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
       setFocusIssue((value) => value + 1);
       return;
     }
+    const routeIssue = routeDraftIssue(presets, new Set(store.getState().providers.map(provider => provider.id)));
+    if (routeIssue) { setError(routeIssue); return; }
     operation.current = true;
     setBusy(true); setError(''); setMessage('');
     try {
@@ -201,7 +199,6 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
   }
   async function reload() {
     if (operation.current) return;
-    if (!await confirmDialog({ headline: '重新载入服务器设置？', description: '本页未保存的连接和默认模型编辑将被服务器当前设置替换。', confirmText: '重新载入' })) return;
     operation.current = true; setBusy(true);
     try {
       const saved = await cloudRequest<CloudConfig>('/config');
@@ -214,15 +211,11 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
     } catch (error) { showError(error); }
     finally { operation.current = false; setBusy(false); }
   }
-  const saveActions = (standalone || dirty || busy || error) ? <div className={actionContainer ? 'model-settings-save-dock' : 'flex flex-col gap-3'} data-testid="cloud-models-save-actions" aria-label="模型设置保存操作">
-    <div className="flex flex-wrap items-center justify-end gap-3">
-      <span className="mr-auto text-xs text-muted" data-testid="cloud-models-dirty">{dirty ? '有未保存修改' : '连接与默认模型已保存'}</span>
-      <LoadingButton loading={busy} onPress={() => void save()} data-testid="cloud-models-save">保存模型设置</LoadingButton>
-    </div>
-    {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-    {conflict && <Button variant="secondary" isDisabled={busy} className="self-start" onPress={() => void reload()}>重新载入服务器设置</Button>}
-  </div> : null;
-  return <div ref={editorRef} className={`flex min-w-0 flex-col gap-5 ${actionContainer ? 'pb-32' : ''}`}>
+  const saveActions = <SettingsSaveBar dirty={dirty} busy={busy} disabled={conflict || (!standalone && !dirty)} error={error || (conflict ? modelSettingsError(new Error('model_settings_conflict')) : '')} message={message}
+    saveLabel="保存模型设置" onSave={() => void save()} testId="cloud-models-save-actions" saveTestId="cloud-models-save" statusTestId="cloud-models-dirty">
+    {conflict && <SettingsConflictRecovery busy={busy} onReload={reload} />}
+  </SettingsSaveBar>;
+  return <div className="flex min-w-0 flex-col gap-5">
     {issues.length > 0 && <div className="rounded-xl bg-danger/10 p-3" role="status">
       <p className="text-sm text-danger">有 {issues.length} 项默认模型配置需要修复。你仍可独立保存连接并获取模型列表。</p>
       <Button variant="tertiary" size="sm" onPress={() => setFocusIssue((value) => value + 1)}>定位并修复</Button>
@@ -232,12 +225,11 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
        <ModelsModule key={editorGeneration} serverManaged standalone={standalone} discoveryProviders={cloudDiscoveryProviders(settings, config, discoveryRevision)} providerNeedsSave={(provider) => cloudProviderDirty(provider, config)} onSaveProvider={saveProvider} onDraftChange={setEditingConnection} renderProviderAccounts={provider => <ProviderAccounts config={config} provider={provider} onSaved={savedAccounts} onReplaceKey={saveProvider} onDraftChange={setAddingKey} onChangeKey={apiKey => store.setState(current => ({ providers: current.providers.map(p => p.id === provider.id ? { ...p, apiKey } : p) }))} />} onAddOpenCodeGo={!config.providers.some(p => p.id === 'opencode-go') ? () => void saveProvider({ id: 'opencode-go', name: 'OpenCode Go', protocol: 'openai-chat', baseUrl: 'https://opencode.ai/inference/go/openai/v1', apiKey: '', catalogId: '', serves: ['chat'] }).catch(() => {}) : undefined} addOpenCodeGoDisabled={busy} issues={issues} focusIssue={focusIssue} />
       </fieldset>
     </ModelSettingsContext.Provider>
-    <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0"><ModelPresets value={presets} providers={settings.providers} onChange={setPresets} /></fieldset>
+    <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0"><ModelPresets value={presets} settings={settings} providers={cloudModelConfig(settings, config).providers} onChange={value => { setPresets(value); setError(''); setMessage(''); }} /></fieldset>
     <ModelGatewayStatus />
-    {actionContainer ? createPortal(saveActions, actionContainer) : saveActions}
-    {message && <p role="status" className="text-sm text-success">{message}</p>}
+    {saveActions}
     {onDone && <div className="ob__actions">
-      <LoadingButton className="ob__primary" size="lg" loading={busy} onPress={() => void save(true)} data-testid="onboarding-models-done">
+      <LoadingButton className="ob__primary" size="lg" loading={busy} isDisabled={conflict} onPress={() => void save(true)} data-testid="onboarding-models-done">
         {busy ? t('onboarding.models.saving') : t('onboarding.models.done')}
       </LoadingButton>
       <Button className="ob__skip" variant="ghost" isDisabled={busy} onPress={onDone}>{t('onboarding.models.skip')}</Button>

@@ -9,6 +9,7 @@ import { confirmDialog } from '../ui';
 import WebSources from './WebSources';
 import './web-search.css';
 import settingsMessages from '../i18n/locales/zh-CN/settings.json';
+import { SettingsConflictRecovery, SettingsSaveBar } from '../components/settings/SettingsActions';
 
 const kinds: SearchProviderKind[] = ['tavily', 'brave', 'searxng'];
 const names = { tavily: 'Tavily', brave: 'Brave Search', searxng: 'SearXNG' };
@@ -18,6 +19,8 @@ export default function WebSearchSettings() {
   const [saved, setSaved] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState(false);
   const [query, setQuery] = useState('');
   const [result, setResult] = useState<WebSearchResult>();
   const [notice, setNotice] = useState('');
@@ -31,21 +34,33 @@ export default function WebSearchSettings() {
     void cloudRequest<WebSearchConfig>('/web-search/config', { signal: controller.signal }).then(value => { setConfig(value); setSaved(JSON.stringify(value)); }).catch(e => { if (!controller.signal.aborted) setError(message(e)); });
     return () => controller.abort();
   }, []);
-  useEffect(() => registerSettingsLeaveGuard(async () => !dirty || await confirmDialog({ headline: t('webSearch.discard') })), [dirty, t]);
+  useEffect(() => registerSettingsLeaveGuard(async () => !busy && (!dirty || await confirmDialog({
+    headline: t('webSearch.discard'),
+    description: t('saveBar.leaveDescription'),
+    confirmText: t('saveBar.discardChanges'),
+    danger: true,
+  }))), [busy, dirty, t]);
   const update = (patch: Partial<WebSearchConfig>) => { setConfig(current => current ? { ...current, ...patch } : current); setNotice(''); setResult(undefined); };
   const provider = (id: string, patch: Partial<SearchProvider>) => update({ providers: config!.providers.map(p => p.id === id ? { ...p, ...patch } : p) });
   async function act(work: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('');
-    try { await work(); } catch (e) { setError(message(e)); } finally { setBusy(false); }
+    try { await work(); }
+    catch (e) {
+      setError(message(e));
+      if (e instanceof Error && e.message === 'web_config_conflict') setConflict(true);
+    } finally { setBusy(false); }
   }
   async function reload() {
-    const next = await cloudRequest<WebSearchConfig>('/web-search/config'); setConfig(next); setSaved(JSON.stringify(next)); setResult(undefined);
+    const next = await cloudRequest<WebSearchConfig>('/web-search/config');
+    setConfig(next); setSaved(JSON.stringify(next)); setResult(undefined); setConflict(false);
   }
   return <section className="web-settings" data-testid="web-search-settings">
     <div><h3 className="text-base font-semibold">{t('webSearch.title')}</h3><p className="mt-2 text-sm text-muted">{t('webSearch.description')}</p></div>
-    {error ? <p role="alert" className="text-danger">{error}</p> : null}
-    {notice ? <p role="status" className="text-success">{notice}</p> : null}
-    {!config ? <Button isDisabled={busy} variant="secondary" onPress={() => void act(reload)}>{t('webSearch.reload')}</Button> : <>
+    {!config && error ? <p role="alert" className="text-danger">{error}</p> : null}
+    {!config ? error
+      ? <Button isDisabled={busy} variant="secondary" onPress={() => void act(reload)}>{t('saveBar.retry')}</Button>
+      : <p role="status" className="text-sm text-muted">{t('saveBar.loading')}</p>
+      : <>
       <fieldset disabled={busy} className="web-settings border-0 p-0">
         <Switch isSelected={config.enabled} onChange={enabled => update({ enabled })}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{t('webSearch.enabled')}</span></Switch.Content></Switch>
         <Switch isSelected={config.fetchEnabled} onChange={fetchEnabled => update({ fetchEnabled })}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{t('webSearch.fetchEnabled')}</span></Switch.Content></Switch>
@@ -65,10 +80,16 @@ export default function WebSearchSettings() {
           update({ providers: [...config.providers, { id, kind, name: names[kind], enabled: false, ...(kind === 'searxng' ? { baseUrl: '' } : {}) }] });
         }}>{t('webSearch.add', { name: names[kind] })}</Button>)}</div>
       </fieldset>
-      <div className="web-settings__row"><Button isDisabled={busy || !dirty} onPress={() => void act(async () => {
-        const next = await cloudRequest<WebSearchConfig>('/web-search/config', { method: 'PUT', body: JSON.stringify(config) });
-        setConfig(next); setSaved(JSON.stringify(next)); setNotice(t('webSearch.saved'));
-      })}>{busy ? t('webSearch.working') : t('webSearch.save')}</Button><Button variant="ghost" isDisabled={busy} onPress={() => void act(async () => { if (!dirty || await confirmDialog({ headline: t('webSearch.discard') })) await reload(); })}>{t('webSearch.reload')}</Button></div>
+      <SettingsSaveBar dirty={dirty} busy={saving} disabled={busy || !dirty || conflict} error={error || (conflict ? t('webSearch.errors.web_config_conflict') : '')} message={notice}
+        saveLabel={t('webSearch.save')} testId="web-search-save-actions" saveTestId="web-search-save" onSave={() => void act(async () => {
+          setSaving(true);
+          try {
+            const next = await cloudRequest<WebSearchConfig>('/web-search/config', { method: 'PUT', body: JSON.stringify(config) });
+            setConfig(next); setSaved(JSON.stringify(next)); setNotice(t('webSearch.saved')); setConflict(false);
+          } finally { setSaving(false); }
+        })}>
+        {conflict && <SettingsConflictRecovery busy={busy} onReload={() => act(reload)} />}
+      </SettingsSaveBar>
       <div className="web-settings__provider"><label className="web-settings__label">{t('webSearch.testQuery')}<Input value={query} maxLength={1000} onChange={e => setQuery(e.target.value)} /></label><p className="text-sm text-muted">{t('webSearch.testHint')}</p><Button variant="secondary" isDisabled={busy || dirty || !config.enabled || !query.trim()} onPress={() => void act(async () => {
         setResult(undefined);
         setResult(await cloudRequest<WebSearchResult>('/web-search/test', { method: 'POST', body: JSON.stringify({ arguments: { query: query.trim(), limit: 4 } }) }));

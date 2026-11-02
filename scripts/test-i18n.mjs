@@ -81,7 +81,7 @@ test('store + system-language sync updates HTML and title, with explicit prefere
   try {
     assert.equal(document.documentElement.lang, 'en-US');
     assert.equal(document.documentElement.dir, 'ltr');
-    assert.equal(document.title, 'Wangke Learning Assistant');
+    assert.equal(document.title, 'DeepStudent Go');
     navigator.languages = ['zh-CN'];
     window.dispatchEvent(new Event('languagechange'));
     assert.equal(document.documentElement.lang, 'zh-CN');

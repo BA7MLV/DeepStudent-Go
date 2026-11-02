@@ -1,4 +1,18 @@
 {
+  "saveBar": {
+    "label": "保存设置",
+    "unsaved": "有未保存修改",
+    "saving": "正在保存…",
+    "saved": "所有修改已保存",
+    "loading": "正在读取设置…",
+    "retry": "重试",
+    "useServerVersion": "使用服务器版本…",
+    "replaceTitle": "使用服务器版本？",
+    "replaceDescription": "这会用服务器上的最新设置替换本页内容，尚未保存的修改将被丢弃，无法撤销。",
+    "replaceDraft": "放弃修改并载入",
+    "discardChanges": "放弃修改",
+    "leaveDescription": "离开会丢弃本页尚未保存的修改。已保存的设置不受影响。"
+  },
   "webSearch": {
     "title": "联网搜索与网页读取",
     "description": "让 Bot、资料库助手和课程问答查询互联网。搜索与网页读取可独立开启，保存后生效；联网总开关仍然适用。",
@@ -31,7 +45,7 @@
     "empty": "没有找到相关网页，可换一个关键词再试。",
     "errors": {
       "generic": "联网服务暂时不可用，请重试。",
-      "web_config_conflict": "设置已在其他位置修改，请重新加载后再保存。",
+      "web_config_conflict": "设置已在其他位置修改。当前草稿已保留，请使用服务器版本后重新编辑。",
       "web_invalid_config": "请检查供应商名称与配置。",
       "web_invalid_url": "请输入有效的 HTTP 或 HTTPS 地址。",
       "web_key_required": "请为启用的供应商填写密钥。",
@@ -62,10 +76,13 @@
   "modules": {
     "websearch": "联网搜索",
     "models": "模型",
+    "assistant": "AI 能力",
     "agent": "Agent",
     "bot": "Bot",
     "gateway": "消息渠道",
+    "botChannels": "Bot 与渠道",
     "usage": "用量",
+    "experience": "界面与播放",
     "appearance": "外观",
     "sources": "内容源",
     "live": "实时",

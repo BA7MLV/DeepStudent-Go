@@ -71,12 +71,12 @@ export function modelSettingsError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   const messages: Record<string, string> = {
     invalid_model_slot: '部分默认模型配置需要修复，请检查对应的模型选择。',
-    model_settings_conflict: '服务器上的模型设置已被其他页面修改。你的草稿已保留，请重新载入服务器设置后再编辑。',
+    model_settings_conflict: '服务器上的模型设置已被其他页面修改。你的草稿已保留，请使用服务器版本后重新编辑。',
     model_revision_required: '模型设置版本已过期，请重新载入后再保存。',
     invalid_provider: '供应商信息不完整或格式无效，请检查名称与连接协议。',
     invalid_provider_url: 'API 地址必须是 HTTP 或 HTTPS 地址，且不能包含账号、密码、查询参数或片段。',
     invalid_provider_key: 'API Key 格式无效或长度超出限制，请检查后重试。',
-    invalid_model_presets: 'Preset 配置无效：请检查用途、候选模型和已删除的供应商。草稿已保留。',
+    invalid_model_presets: '主备模型设置无效：请检查各用途的模型选择，以及已保存方案中是否有被删除的供应商。草稿已保留。',
   };
   return messages[message] ?? `保存失败：${message}`;
 }

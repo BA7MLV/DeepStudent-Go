@@ -1133,7 +1133,9 @@ export default function CourseChat() {
               onSendNow={(id) => void sendQueuedNow(id)}
               onClear={clearQueue}
             />
-            {generating && hasDraft && (
+            {/* 生成期间保持模式栏挂载。之前把它绑在 `hasDraft` 上，用户开始输入或发送后
+                会整块挂载/卸载，造成输入区跳动并让「插入 / 排队」像闪出来一样。 */}
+            {generating && (
               <div className="course-chat__delivery-bar" data-testid="chat-delivery-bar" data-mode={sendMode}>
                 <ToggleButtonGroup
                   className="course-chat__send-mode"
@@ -1151,7 +1153,7 @@ export default function CourseChat() {
                   <ToggleButton id="steer" data-testid="chat-send-mode-steer" aria-describedby="chat-delivery-hint"><Sym name="arrow_upward" />插入</ToggleButton>
                 </ToggleButtonGroup>
                 <p id="chat-delivery-hint" className="course-chat__send-hint" role="status">
-                  {sendMode === 'queue' ? '发送后排队，本轮结束自动发出' : '发送后停止当前回复，立即回答新消息'}
+                  {sendMode === 'queue' ? '输入后按 Enter 排队，等本轮结束自动发出' : '输入后按 Enter 插入，立即切换到新消息'}
                 </p>
               </div>
             )}

@@ -44,11 +44,32 @@ try {
   const config = await api('GET', '/config');
   await api('PUT', '/config', { ...config, providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://model.example', apiKey: 'fixture', protocol: 'openai-chat', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture' } });
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'zh-CN', serviceWorkers: 'block' });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'zh-CN', serviceWorkers: 'block', reducedMotion: 'reduce' });
   await context.addCookies([{ name: 'wangke_session', value: cookie.slice('wangke_session='.length), url: web.origin }]);
   const page = await context.newPage(), errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  const assertSaveBar = async () => {
+    const bar = page.getByTestId('web-search-save-actions');
+    await bar.waitFor();
+    // React Aria updates its visual viewport variable after a resize event.
+    await page.waitForFunction(() => {
+      const bounds = document.querySelector('[data-testid="settings-modal"]')?.getBoundingClientRect();
+      return bounds && bounds.top >= 0 && bounds.bottom <= innerHeight;
+    });
+    const before = await bar.boundingBox();
+    const content = page.getByTestId('settings-module-websearch');
+    await content.evaluate(element => { element.scrollTop = element.scrollHeight; });
+    const after = await bar.boundingBox(), body = await content.boundingBox();
+    assert.equal(after.y, before.y, 'save bar never moves with settings content');
+    assert.ok(body.y + body.height <= after.y + 1, 'the bar does not obscure the final field');
+    assert.ok(after.x >= 0 && after.y >= 0 && after.x + after.width <= page.viewportSize().width && after.y + after.height <= page.viewportSize().height, 'save actions fit the visible viewport');
+    assert.ok(await page.getByTestId('web-search-save').evaluate(element => element.getBoundingClientRect().height >= 44), 'save has a touch-sized target');
+    await content.evaluate(element => { element.scrollTop = 0; });
+  };
   await page.goto(web.origin + '/#/settings/websearch');
+  await page.getByTestId('web-search-save').waitFor();
+  assert.equal(await page.getByTestId('web-search-save').isDisabled(), true);
+  assert.equal(await page.getByTestId('web-search-save-actions').getByRole('button').count(), 1, 'normal settings expose only the save action');
   await page.getByRole('button', { name: '添加 Tavily', exact: true }).click();
   await page.getByLabel('API Key', { exact: true }).fill('test-provider-secret');
   await page.getByText('启用此供应商', { exact: true }).click();
@@ -56,8 +77,28 @@ try {
   await page.getByRole('option', { name: 'Tavily', exact: true }).click();
   await page.getByText('启用联网搜索', { exact: true }).click();
   await page.getByText('启用网页正文读取', { exact: true }).click();
+  await assertSaveBar();
+  // A failed save retains the draft and reports the error next to the retry action.
+  let releaseSave;
+  const pendingSave = new Promise(resolve => { releaseSave = resolve; });
+  await page.route('**/api/v1/cloud/web-search/config', async route => {
+    if (route.request().method() !== 'PUT') return route.continue();
+    await pendingSave;
+    return route.fulfill({ status: 503, json: { error: 'web_request_failed' } });
+  });
+  await page.getByTestId('web-search-save').click();
+  await page.getByRole('button', { name: '正在保存…', exact: true }).waitFor();
+  assert.equal(await page.getByTestId('web-search-save').isDisabled(), true, 'saving prevents repeat submissions');
+  releaseSave();
+  await page.getByTestId('web-search-save-actions').getByRole('alert').waitFor();
+  assert.equal(await page.getByRole('button', { name: '使用服务器版本…', exact: true }).count(), 0, 'network failures do not offer destructive draft replacement');
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), 'test-provider-secret');
+  await assertSaveBar();
+  await page.unroute('**/api/v1/cloud/web-search/config');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await page.getByText('设置已保存', { exact: true }).waitFor();
+  assert.equal(await page.locator('[data-testid^="confirm-dialog"]').count(), 0, 'successful saves need no extra confirmation');
+  assert.equal(await page.getByTestId('web-search-save').isDisabled(), true);
   assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
   assert.ok(!JSON.stringify(await api('GET', '/web-search/config')).includes('test-provider-secret'));
   await page.getByLabel('测试搜索词', { exact: true }).fill('间隔练习 研究');
@@ -73,11 +114,63 @@ try {
   await page.getByRole('button', { name: '测试搜索', exact: true }).click();
   await page.getByTestId('web-sources').waitFor();
   await page.getByTestId('web-sources').scrollIntoViewIfNeeded();
+  await assertSaveBar();
+  await page.setViewportSize({ width: 390, height: 430 });
+  await assertSaveBar();
+  await page.setViewportSize({ width: 390, height: 844 });
+  // Changing a field near the top must not require scrolling to save or discard.
+  await page.getByLabel('显示名称', { exact: true }).fill('Tavily mobile');
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  const confirm = page.getByTestId('confirm-dialog-danger');
+  await confirm.getByRole('button', { name: '放弃修改', exact: true }).waitFor();
+  await confirm.getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(await page.getByTestId('web-search-save').isEnabled(), true);
+  await assertSaveBar();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.screenshot({ path: 'test-results/web-search/mobile.png', fullPage: true });
+  // A concurrent update is the only reason to offer server-version recovery.
+  await page.getByLabel('API Key', { exact: true }).fill('unsaved-recovery-secret');
+  const currentWeb = await api('GET', '/web-search/config');
+  await api('PUT', '/web-search/config', { ...currentWeb, providers: currentWeb.providers.map(provider => ({ ...provider, name: 'Tavily server' })) });
+  await page.getByTestId('web-search-save').click();
+  await page.getByTestId('web-search-save-actions').getByRole('alert').filter({ hasText: '当前草稿已保留' }).waitFor();
+  assert.equal(await page.getByTestId('web-search-save').isDisabled(), true);
+  assert.equal(await page.getByLabel('显示名称', { exact: true }).inputValue(), 'Tavily mobile');
+  const recovery = page.getByRole('button', { name: '使用服务器版本…', exact: true });
+  await recovery.click();
+  await page.getByTestId('confirm-dialog-danger').getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), 'unsaved-recovery-secret', 'cancelling recovery does not discard credentials');
+  // A failed reload must also preserve the draft and offer another recovery attempt.
+  await page.route('**/api/v1/cloud/web-search/config', route => route.request().method() === 'GET'
+    ? route.fulfill({ status: 503, json: { error: 'web_request_failed' } }) : route.continue());
+  await recovery.click();
+  await page.getByTestId('confirm-dialog-danger').getByRole('button', { name: '放弃修改并载入', exact: true }).click();
+  await page.getByTestId('web-search-save-actions').getByRole('alert').filter({ hasText: '联网请求失败' }).waitFor();
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), 'unsaved-recovery-secret');
+  await page.unroute('**/api/v1/cloud/web-search/config');
+  await recovery.click();
+  await page.getByTestId('confirm-dialog-danger').getByRole('button', { name: '放弃修改并载入', exact: true }).click();
+  await recovery.waitFor({ state: 'detached' });
+  assert.equal(await page.getByLabel('显示名称', { exact: true }).inputValue(), 'Tavily server');
+  assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
+  assert.equal(await page.getByTestId('web-search-save').isDisabled(), true);
+  await assertSaveBar();
   await page.reload();
   await page.getByLabel('API Key', { exact: true }).waitFor();
   assert.equal(await page.getByLabel('API Key', { exact: true }).inputValue(), '');
+  await page.goto(web.origin + '/#/settings/appearance');
+  await page.getByTestId('card-appearance').waitFor();
+  assert.equal(await page.locator('.settings-save-bar').count(), 0, 'instant-save settings do not gain a redundant save bar');
+  // Initial load failures offer a retry, never a draft-replacement action.
+  await page.route('**/api/v1/cloud/web-search/config', route => route.fulfill({ status: 503, json: { error: 'web_request_failed' } }));
+  await page.goto(web.origin + '/#/settings/websearch');
+  await page.getByRole('button', { name: '重试', exact: true }).waitFor();
+  assert.equal(await page.getByTestId('web-search-save-actions').count(), 0);
+  assert.equal(await recovery.count(), 0);
+  await page.unroute('**/api/v1/cloud/web-search/config');
+  await page.getByRole('button', { name: '重试', exact: true }).click();
+  await page.getByTestId('web-search-save').waitFor();
+  assert.equal(await page.getByTestId('web-search-save-actions').getByRole('button').count(), 1);
   await page.close();
 
   store = new DatabaseStore(path.join(dir, 'app.sqlite'));

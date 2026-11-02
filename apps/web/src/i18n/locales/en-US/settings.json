@@ -1,4 +1,18 @@
 {
+  "saveBar": {
+    "label": "Save settings",
+    "unsaved": "Unsaved changes",
+    "saving": "Saving…",
+    "saved": "All changes saved",
+    "loading": "Loading settings…",
+    "retry": "Retry",
+    "useServerVersion": "Use Server Version…",
+    "replaceTitle": "Use the server version?",
+    "replaceDescription": "This replaces this page with the latest server settings. Unsaved changes will be discarded and can't be undone.",
+    "replaceDraft": "Discard and Load",
+    "discardChanges": "Discard Changes",
+    "leaveDescription": "Leaving discards unsaved changes on this page. Saved settings aren't affected."
+  },
   "webSearch": {
     "title": "Web search and page reading",
     "description": "Let Bots, the library assistant and course chats look up the web. Enable search and page reading independently, then save. The network policy still applies.",
@@ -31,7 +45,7 @@
     "empty": "No relevant pages found. Try a different query.",
     "errors": {
       "generic": "The web service is unavailable. Please try again.",
-      "web_config_conflict": "Settings changed elsewhere. Reload before saving.",
+      "web_config_conflict": "Settings changed elsewhere. Your draft is preserved. Use the server version before editing again.",
       "web_invalid_config": "Check the provider names and configuration.",
       "web_invalid_url": "Enter a valid HTTP or HTTPS URL.",
       "web_key_required": "Enter a key for each enabled provider.",
@@ -62,10 +76,13 @@
   "modules": {
     "websearch": "Web search",
     "models": "Models",
+    "assistant": "AI capabilities",
     "agent": "Agent",
     "bot": "Bot",
     "gateway": "Messaging",
+    "botChannels": "Bot & channels",
     "usage": "Usage",
+    "experience": "Interface & playback",
     "appearance": "Appearance",
     "sources": "Sources",
     "live": "Live sharing",

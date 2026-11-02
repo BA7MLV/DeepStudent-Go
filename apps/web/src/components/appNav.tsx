@@ -3,6 +3,7 @@ import { Sym, type NavConfig, type NavItem } from '../ui';
 import { useCourseChat } from '../store/courseChat';
 import { useBotPanel } from '../store/botPanel';
 import { focusChatComposer } from './chatComposerFocus';
+import { useTranslation } from 'react-i18next';
 
 /**
  * 应用级导航的唯一来源：宽屏常驻左侧栏，窄屏由顶栏汉堡按钮弹成 Drawer
@@ -13,6 +14,7 @@ import { focusChatComposer } from './chatComposerFocus';
  * 「设置」也不在这里：它是全局弹窗，入口在侧栏底部。
  */
 export function useAppNav(): NavConfig {
+  const { t } = useTranslation('common');
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const createSession = useCourseChat((s) => s.createSession);
@@ -20,7 +22,7 @@ export function useAppNav(): NavConfig {
   const botOpen = useBotPanel((s) => s.open);
   const chatPage = ['/', '/chat', '/course-chat'].includes(pathname) || pathname.startsWith('/settings');
   const value = chatPage ? (botOpen ? 'bot' : activeId == null ? 'home' : '')
-    : /^\/(library|player)(\/|$)/.test(pathname) ? 'resources' : '';
+    : /^\/(library|player)(\/|$)/.test(pathname) ? 'resources' : pathname === '/tasks' ? 'tasks' : '';
   const items: NavItem[] = [
     {
       // 主页就是待输入的新会话；后台生成和已有草稿仍沿用会话 store 的保留规则。
@@ -51,6 +53,13 @@ export function useAppNav(): NavConfig {
         navigate('/');
       },
       testId: 'nav-rail-bot',
+    },
+    {
+      value: 'tasks',
+      label: t('backgroundTasks.title'),
+      icon: <Sym name="list" />,
+      to: '/tasks',
+      testId: 'nav-rail-tasks',
     },
   ];
   return { value, items };

@@ -626,10 +626,10 @@ export function MarkdownTable({
   const showProgress = isStreaming && canPreview && rowCount > PREVIEW_ROWS;
   const showControls = !isStreaming && rowCount > 0 && isLong;
   /**
-   * 桌面端只有「行数多」才需要展开按钮；纯横溢的表已经能横滚，展开没有意义。
-   * 手机端保留 Sheet 入口（完整表 + 复制），但单列表也不给。
+    * 只有「行数多」才需要展开按钮；短表即使横溢也能直接横滚，不再给完整表入口。
+    * 桌面端内联展开，手机端进 Sheet；单列表不折叠，也不给入口。
    */
-  const showExpand = showControls && parsed.columns > 1 && (needsCollapse || isMobile);
+  const showExpand = showControls && needsCollapse;
   /** 手机端如果既没有 Sheet 入口、复制也收在 Sheet 里，这一行只剩一个空 meta，干脆不画 */
   const showTools = showControls && (!isMobile || showExpand);
   const faded = !isStreaming && needsCollapse && !expanded;
@@ -708,7 +708,7 @@ export function MarkdownTable({
         </div>
       ) : null}
 
-      {isMobile && isLong && parsed.columns > 1 ? (
+      {isMobile && needsCollapse ? (
         <TableSheet
           open={sheetOpen}
           onOpenChange={setSheetOpen}

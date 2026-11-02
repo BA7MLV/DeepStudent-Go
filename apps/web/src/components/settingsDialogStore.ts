@@ -11,6 +11,9 @@ import { useSyncExternalStore } from 'react';
  */
 
 export type SettingsModule =
+  | 'assistant'
+  | 'experience'
+  | 'botChannels'
   | 'websearch'
   | 'models'
   | 'agent'
@@ -25,6 +28,14 @@ export type SettingsModule =
   | 'study'
   | 'skills'
   | 'data';
+
+/** Modules that were previously separate but now live under a shared settings page. */
+export function canonicalSettingsModule(module: SettingsModule): SettingsModule {
+  if (module === 'agent' || module === 'skills') return 'assistant';
+  if (module === 'appearance' || module === 'playback' || module === 'shortcuts') return 'experience';
+  if (module === 'bot' || module === 'gateway') return 'botChannels';
+  return module;
+}
 
 let openState = false;
 let moduleState: SettingsModule = 'models';
@@ -71,7 +82,10 @@ export function closeSettings(): void {
   emit();
 }
 
-const VALID_MODULES: readonly SettingsModule[] = ['models', 'agent', 'bot', 'gateway', 'usage', 'appearance', 'sources', 'live', 'playback', 'shortcuts', 'study', 'skills', 'data', 'websearch'];
+const VALID_MODULES: readonly SettingsModule[] = [
+  'models', 'assistant', 'experience', 'botChannels', 'agent', 'skills', 'bot', 'gateway',
+  'usage', 'appearance', 'sources', 'live', 'playback', 'shortcuts', 'study', 'data', 'websearch',
+];
 
 /** 根据当前 URL hash 打开设置弹窗（#/settings 或 #/settings/<module>） */
 export function openSettingsFromHash(): void {

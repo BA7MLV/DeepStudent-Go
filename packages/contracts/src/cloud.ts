@@ -110,6 +110,10 @@ export interface CloudConfig {
 }
 export type CloudTaskKind = 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce';
 export interface CloudTask {
+  /** Server-derived provenance; absent on older servers. */
+  source?: { kind: 'app' | 'bot'; name?: string };
+  /** Display name of the owned course, when available in task listings. */
+  resourceName?: string;
   /** Persisted execution backend; absent for jobs created before executor routing. */
   executor?: 'node' | 'media' | 'browser';
   id: string;

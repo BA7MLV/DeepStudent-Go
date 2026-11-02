@@ -5,6 +5,7 @@ import { reflectCloudTasks } from '../store/courseChat';
 import { useLibraryRevision } from '../pipelines/folderPlan';
 import type { CloudTask } from '@wangke/contracts/cloud';
 import { useJobStore } from '../store/jobs';
+import { useCloudActivity } from './activityStore';
 
 export default function CloudActivity() {
   const error = useCloudSync(s => s.error);
@@ -18,6 +19,7 @@ export default function CloudActivity() {
       try {
         const { tasks } = await cloudRequest<{ tasks: CloudTask[] }>('/tasks');
         if (stopped) return;
+        useCloudActivity.setState({ tasks, unavailable: false });
         const changedData = dirty; dirty = false;
         window.dispatchEvent(new CustomEvent('cloud-tasks-changed', { detail: { tasks, dataChanged: changedData } }));
         await reflectCloudTasks(tasks, changedData);
@@ -31,7 +33,10 @@ export default function CloudActivity() {
             message: task.error ?? String(task.progress?.message ?? task.status), resume: false,
           });
         }
-      } catch { /* Session expiry/sync feedback is handled by the shared transport. */ }
+      } catch {
+        if (!stopped) useCloudActivity.setState({ unavailable: true });
+        /* Session expiry/sync feedback is handled by the shared transport. */
+      }
       finally { busy = false; }
     };
     window.addEventListener('cloud-data-changed', changed);
@@ -39,7 +44,12 @@ export default function CloudActivity() {
     // than the old one-second cadence so that the durable task stream still
     // feels live without opening a second transport channel.
     const timer = setInterval(() => void refresh(), 250); void refresh();
-    return () => { stopped = true; clearInterval(timer); window.removeEventListener('cloud-data-changed', changed); };
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener('cloud-data-changed', changed);
+      useCloudActivity.setState({ tasks: null, unavailable: false });
+    };
   }, []);
   return cloud.enabled && error ? <p role="alert" className="bg-surface p-3 text-danger">{error}</p> : null;
 }

@@ -14,7 +14,9 @@ export const TASK_KINDS: CloudTaskKind[] = ['chat', 'qa', 'transcribe', 'handout
 export function taskDto(row: any): CloudTask {
   return { id: row.id, kind: row.kind, resource: row.resource, status: row.status, input: JSON.parse(row.input),
     progress: row.progress ? JSON.parse(row.progress) : null, result: row.result ? JSON.parse(row.result) : null,
-    error: row.error, createdAt: row.created_at, executor: row.executor ?? undefined };
+    error: row.error, createdAt: row.created_at, executor: row.executor ?? undefined,
+    source: row.parent_run_id ? { kind: 'bot', ...(typeof row.bot_name === 'string' ? { name: row.bot_name } : {}) } : { kind: 'app' },
+    ...(typeof row.resource_name === 'string' ? { resourceName: row.resource_name } : {}) };
 }
 
 let nativeRuntime: Promise<{ executeNodeTask: TaskExecutor }> | undefined;
