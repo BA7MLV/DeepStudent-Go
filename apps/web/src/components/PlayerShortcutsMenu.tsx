@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { Menu, type MenuInstance } from '@vidstack/react';
 import { useDefaultLayoutContext } from '@vidstack/react/player/layouts/default';
 import { useSettings } from '../store/settings';
-import { Sym } from '../ui/icons';
+import { playerIcons } from '../ui/player-icons';
 import { SHORTCUT_ACTIONS, formatShortcut } from '../utils/shortcutSettings';
 
 /** 始终展示当前配置，而不是另存一份可能过期的快捷键说明。 */
@@ -18,7 +18,7 @@ export default function PlayerShortcutsMenu() {
       menuRef.current.close(event.nativeEvent);
     }}>
       <Menu.Button className="vds-menu-button vds-button" aria-label="播放器快捷键" title="快捷键">
-        <Sym name="keyboard" />
+        <playerIcons.Keyboard />
       </Menu.Button>
       <Menu.Content className="vds-menu-items player-shortcuts-content" placement={isSmallLayout ? 'bottom end' : 'top end'} offset={8}>
         <h3>播放器快捷键</h3>

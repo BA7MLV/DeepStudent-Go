@@ -53,6 +53,23 @@ try {
   const box = await player.boundingBox();
   const speedBox = await page.locator('.player-speed-trigger').boundingBox();
   assert.ok(speedBox.y > box.y + box.height * .8, '倍速入口位于底栏');
+  for (const selector of ['.vds-play-button', '.vds-mute-button', '.player-dm-toggle', '.player-speed-trigger', '.vds-fullscreen-button', '.theater-mode-btn', '.player-webfullscreen-button']) {
+    const target = await player.locator(selector).boundingBox();
+    assert.ok(target.width >= 44 && target.height >= 44, `${selector} 触控区域至少 44×44`);
+  }
+  for (const selector of ['.vds-play-button', '.vds-mute-button', '.player-dm-toggle', '.vds-fullscreen-button', '.theater-mode-btn', '.player-webfullscreen-button', '.player-shortcuts-menu']) {
+    const icon = player.locator(`${selector} svg`).first();
+    assert.match(await icon.getAttribute('class'), /\bplayer-icon\b/);
+    assert.match(await icon.getAttribute('class'), /\btabler-icon\b/);
+    const bounds = await icon.boundingBox();
+    assert.equal(bounds.width, 22, `${selector} 图标统一为 22px`);
+    assert.equal(bounds.height, 22, `${selector} 图标统一为 22px`);
+    if (await icon.getAttribute('fill') !== 'currentColor') {
+      assert.equal(await icon.getAttribute('stroke-width'), '1.75', `${selector} 描边统一`);
+    }
+    assert.equal(await icon.getAttribute('aria-hidden'), 'true');
+  }
+  assert.equal(await page.getByTestId('player-big-play').locator('.tabler-icon-player-play-filled').count(), 1);
   await page.locator('.player-speed-trigger').hover();
   await page.locator('.player-speed-options').waitFor({ state: 'visible' });
   await page.locator('.player-speed-option').filter({ hasText: '1.25x' }).click();
@@ -67,14 +84,23 @@ try {
   await page.keyboard.press('Enter');
   await page.locator('.player-speed-options').waitFor({ state: 'visible' });
   assert.match(await page.locator('.player-speed-option[data-checked]').innerText(), /2\.5x/);
+  assert.equal(await page.locator('.player-speed-option[data-checked] svg.tabler-icon-check').count(), 1);
+  assert.equal(await page.locator('.player-speed-option[data-checked] svg').evaluate((el) => getComputedStyle(el).visibility), 'visible');
   await page.keyboard.press('Escape');
   await page.locator('.player-speed-options').waitFor({ state: 'hidden' });
   console.log('✓ 底栏、右下角暂停标记、悬停倍速菜单、自定义档位');
 
   await player.getByRole('button', { name: '设置', exact: true }).click();
-  await page.locator('.player-caption-size').click();
+  await page.locator('.player-caption-size').first().waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.player-caption-size').count(), 4);
+  await page.locator('.player-caption-size').filter({ hasText: /^小$/ }).click();
+  assert.equal(await page.locator('.video-pane').evaluate((el) => el.style.getPropertyValue('--media-user-font-size')), '0.8');
+  await page.locator('.player-caption-size').filter({ hasText: /^大$/ }).focus();
+  await page.keyboard.press('Enter');
+  assert.equal(await page.locator('.player-caption-size[data-checked]').innerText(), '大');
   assert.equal(await page.locator('.video-pane').evaluate((el) => el.style.getPropertyValue('--media-user-font-size')), '1.35');
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('wangke-settings')).state.captionScale), 1.35);
+  await page.screenshot({ path: 'e2e-shots/player-settings-desktop.png' });
   await page.keyboard.press('Escape');
   console.log('✓ 设置菜单中的字幕字号与持久化');
 
@@ -127,16 +153,20 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-media-provider] video').muted);
   await page.keyboard.press('d');
   await page.waitForFunction(() => document.querySelector('.player-dm-toggle')?.getAttribute('aria-pressed') === 'false');
+  assert.equal(await page.locator('.player-dm-toggle .tabler-icon-message-2-off').count(), 1);
   await page.keyboard.press('d');
   await page.waitForFunction(() => document.querySelector('.player-dm-toggle')?.getAttribute('aria-pressed') === 'true');
+  assert.equal(await page.locator('.player-dm-toggle .tabler-icon-message-2').count(), 1);
   await page.keyboard.press('t');
   await page.locator('.player-layout--theater').waitFor();
+  assert.equal(await page.locator('.theater-mode-btn .tabler-icon-viewport-narrow').count(), 1);
   await page.keyboard.press('t');
   await page.locator('.player-layout--theater').waitFor({ state: 'detached' });
   console.log('✓ 音量 10% 步长、静音、弹幕与宽屏快捷键');
 
   await page.keyboard.press('w');
   await page.locator('.player-web-fullscreen').waitFor();
+  assert.equal(await page.locator('.player-webfullscreen-button .tabler-icon-window-minimize').count(), 1);
   const fullBox = await player.boundingBox();
   assert.ok(fullBox.x <= 1 && fullBox.y <= 1 && fullBox.width >= 1438 && fullBox.height >= 998, JSON.stringify(fullBox));
   assert.equal(await page.evaluate(() => document.body.style.overflow), 'hidden');
@@ -193,6 +223,24 @@ try {
   assert.ok(Math.abs((await state()).time - beforeDoubleClick.time) < .2, '桌面双击左侧也应全屏而不是快退');
   await page.evaluate(() => document.exitFullscreen());
   await wake();
+  // 短暂路过进度条不启用解码器；持续悬停后取帧，离开时立即释放。
+  const slider = player.locator('.vds-time-slider');
+  const sliderBox = await slider.boundingBox();
+  await page.mouse.move(sliderBox.x + sliderBox.width * .2, sliderBox.y + sliderBox.height / 2);
+  assert.equal(await page.locator('.player-preview-video').count(), 0);
+  await page.locator('.player-preview-video[data-ready]').waitFor({ state: 'visible' });
+  await page.mouse.move(sliderBox.x + sliderBox.width * .8, sliderBox.y + sliderBox.height / 2, { steps: 40 });
+  await page.waitForFunction(() => {
+    const preview = document.querySelector('.player-preview-video');
+    const main = document.querySelector('[data-media-provider] video');
+    return preview && main && !preview.seeking && Math.abs(preview.currentTime - main.duration * .8) < 1;
+  });
+  await page.screenshot({ path: 'e2e-shots/player-preview-desktop.png' });
+  await wake();
+  await page.locator('.player-preview-video').waitFor({ state: 'detached' });
+  await page.waitForFunction(() => getComputedStyle(document.querySelector('.vds-time-slider .vds-slider-preview')).opacity === '0');
+  await mainVideo().evaluate(video => video.pause());
+  await page.getByTestId('player-big-play').waitFor({ state: 'visible' });
   await page.screenshot({ path: 'e2e-shots/player-bilibili-desktop.png' });
   console.log('✓ 桌面双击任意区域切全屏、不误跳转');
 
@@ -213,9 +261,21 @@ try {
   await mobilePage.locator('[data-media-player] .vds-video-layout[data-sm]').waitFor({ state: 'attached' });
   assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await mobilePage.getByTestId('player-big-play').isVisible(), false, '小屏不叠加第二个播放键');
+  assert.equal(await mobilePage.locator('.player-dm-toggle svg.player-icon.tabler-icon').count(), 1);
+  for (const selector of ['.player-dm-toggle', '.player-speed-trigger', '.vds-fullscreen-button']) {
+    const target = await mobilePage.locator(selector).boundingBox();
+    assert.ok(target.width >= 44 && target.height >= 44, `手机 ${selector} 触控区域至少 44×44`);
+  }
   await mobilePage.locator('.player-speed-trigger').tap();
   await mobilePage.locator('.player-speed-option').filter({ hasText: '1.25x' }).tap();
   await mobilePage.waitForFunction(() => document.querySelector('[data-media-provider] video').playbackRate === 1.25);
+  await mobilePage.locator('.vds-video-layout[data-sm]').getByRole('button', { name: '设置', exact: true }).tap();
+  await mobilePage.locator('.player-caption-size').filter({ hasText: /^大$/ }).tap();
+  const captionBox = await mobilePage.locator('.player-caption-size').first().boundingBox();
+  assert.ok(captionBox.width >= 44 && captionBox.height >= 44, '手机字号选项触控区域');
+  await mobilePage.screenshot({ path: 'e2e-shots/player-settings-mobile.png' });
+  await mobilePage.keyboard.press('Escape');
+  await mobilePage.locator('.player-caption-size').first().waitFor({ state: 'hidden' });
   await mainVideo(mobilePage).evaluate((v) => { v.currentTime = 20; });
   await mobilePage.waitForFunction(() => Array.from(document.querySelectorAll('.vds-time')).some((el) => el.textContent === '0:20'));
   const mobileBox = await mobilePage.locator('[data-media-player]').boundingBox();
@@ -232,6 +292,15 @@ try {
   assert.equal(await mobilePage.evaluate(() => !!document.fullscreenElement), false, '触屏两侧双击跳转、不进入全屏');
   await mobilePage.waitForFunction(() => !document.querySelector('.seek-pulse'));
   await mobilePage.screenshot({ path: 'e2e-shots/player-bilibili-mobile.png' });
+  for (const width of [320, 768, 1024]) {
+    await mobilePage.setViewportSize({ width, height: 844 });
+    assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${width}px 无横向溢出`);
+    const bounds = await mobilePage.locator('[data-media-player]').boundingBox();
+    for (const selector of ['.player-dm-toggle', '.player-speed-trigger', '.vds-fullscreen-button']) {
+      const target = await mobilePage.locator(selector).boundingBox();
+      assert.ok(target.x >= bounds.x - 1 && target.x + target.width <= bounds.x + bounds.width + 1, `${width}px 控件未被裁切：${selector}`);
+    }
+  }
   await mobile.close();
   assert.deepEqual(errors, []);
   console.log('✓ 手机布局、触屏倍速菜单、无横向溢出、无运行错误');

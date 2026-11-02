@@ -3,6 +3,7 @@ import { Menu, useMediaState, usePlaybackRateOptions, type MenuInstance } from '
 import { useDefaultLayoutContext } from '@vidstack/react/player/layouts/default';
 import { useSettings } from '../store/settings';
 import { PRESET_RATES, formatRate, mergeRates } from '../utils/rate';
+import { playerIcons } from '../ui/player-icons';
 
 /** 底栏单入口倍速菜单：鼠标悬停或点击打开，键盘与触屏交给 Vidstack。 */
 export default function RateButtons() {
@@ -20,6 +21,7 @@ export default function RateButtons() {
     <Menu.Root
       ref={menuRef}
       className="player-speed-menu"
+      onKeyDown={() => clearTimeout(hoverTimer.current)}
       onPointerEnter={(event) => {
         if (event.pointerType !== 'mouse') return;
         clearTimeout(hoverTimer.current);
@@ -35,6 +37,7 @@ export default function RateButtons() {
         {rate === 1 ? '倍速' : formatRate(rate)}
       </Menu.Button>
       <Menu.Content className="vds-menu-items player-speed-options" placement={isSmallLayout ? 'bottom end' : 'top end'} offset={8}>
+        <div className="player-menu-heading" aria-hidden>播放速度</div>
         <Menu.RadioGroup value={options.selectedValue} aria-label="播放速度">
           {options.map(({ label, value, select, rate: optionRate }) => (
             <Menu.Radio
@@ -47,7 +50,7 @@ export default function RateButtons() {
               }}
             >
               <span>{optionRate === 1 ? '1.0x 正常' : label}</span>
-              <span className="player-speed-check" aria-hidden>✓</span>
+              <playerIcons.Check className="player-speed-check" />
             </Menu.Radio>
           ))}
         </Menu.RadioGroup>

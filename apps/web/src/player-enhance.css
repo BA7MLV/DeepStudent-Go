@@ -1,29 +1,40 @@
 /* B 站式播放器：底部操作栏、蓝色细进度条、暗色浮层与右下角暂停标记。
    播放管道、ARIA、菜单焦点和触屏手势仍由 Vidstack 负责。 */
-.bili-player {
+.bili-player,
+.vds-video-layout:has(.player-caption-setting) {
   --video-border-radius: 0;
   --video-brand: #00aeec;
   --video-focus-ring-color: #00aeec;
   --video-font-family: inherit;
   --bili-blue: #00aeec;
+  --player-control-size: 44px;
+  --player-icon-size: 22px;
+  --player-control-radius: 8px;
+  --player-control-hover: rgb(255 255 255 / 0.12);
+  color: #fff;
+  color-scheme: dark;
 }
 
-.bili-player .vds-video-layout {
+.bili-player .vds-video-layout,
+.vds-video-layout:has(.player-caption-setting) {
   --media-slider-track-height: 3px;
   --media-slider-focused-track-height: 5px;
   --media-slider-thumb-size: 12px;
   --media-slider-track-bg: rgb(255 255 255 / 0.25);
   --media-slider-track-fill-bg: var(--bili-blue);
   --media-slider-track-border-radius: var(--radius-xs);
-  --media-button-size: 36px;
-  --media-button-icon-size: 62%;
-  --media-button-hover-bg: transparent;
-  --media-button-border-radius: 4px;
+  --media-button-size: var(--player-control-size);
+  --media-button-icon-size: var(--player-icon-size);
+  --media-button-hover-bg: var(--player-control-hover);
+  --media-button-border-radius: var(--player-control-radius);
   --media-time-font-size: 13px;
   --media-time-padding: 0;
   --media-time-letter-spacing: 0;
-  --media-menu-bg: rgb(28 29 32 / 0.96);
-  --media-menu-border: 1px solid rgb(255 255 255 / 0.1);
+  --media-menu-bg: rgb(25 27 32 / 0.98);
+  --media-menu-border: 1px solid rgb(255 255 255 / 0.12);
+  --media-menu-border-radius: 12px;
+  --media-menu-font-size: 14px;
+  --media-tooltip-bg: rgb(25 27 32 / 0.98);
   --media-controls-in-transition: opacity var(--duration-quick, 150ms) var(--ease-out, ease-out);
   --media-controls-out-transition: opacity var(--duration-quick, 150ms) var(--ease-out, ease-out);
 }
@@ -43,32 +54,30 @@
   visibility: visible !important;
 }
 
-/* 整层保持穿透，只有控件行接收指针；否则键盘聚焦后会挡住画面单双击。 */
-.bili-player:focus-visible .vds-controls-group,
-.bili-player:has(:focus-visible) .vds-controls-group {
-  pointer-events: auto !important;
-}
+/* 保留 Vidstack 对中央控件行的 pointer-events:none：键盘退出菜单后也不能挡住画面双击。 */
 
 .bili-player .vds-video-layout:not([data-sm]) .vds-controls-group:first-child {
   display: none;
 }
 
 .bili-player .vds-video-layout:not([data-sm]) .vds-controls-group:last-child {
-  padding: 4px 16px 8px;
-  gap: 4px;
+  padding: 0 12px 8px;
+  gap: 2px;
 }
 
 .bili-player .vds-video-layout:not([data-sm]) .vds-controls-group:nth-last-child(2) {
   padding: 0 20px;
-  margin-bottom: -10px;
+  margin-bottom: -6px;
 }
 
 .bili-player .vds-time-slider {
-  --media-slider-height: 28px;
+  --media-slider-height: 36px;
+  --media-slider-thumb-bg: #fff;
 }
 
 .bili-player .vds-time {
   font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 0.9);
 }
 
 .bili-player .vds-time-divider {
@@ -81,10 +90,40 @@
 
 .bili-player .vds-button {
   margin-right: 0;
+  flex-shrink: 0;
+  color: #fff;
 }
 
 .bili-player .vds-button:is(:hover, [data-hocus], [aria-expanded="true"]) {
+  background-color: var(--player-control-hover);
+}
+
+.bili-player .vds-button:is([aria-pressed="true"], [aria-expanded="true"]) {
   color: var(--bili-blue);
+}
+
+.bili-player .vds-button:active {
+  background-color: rgb(255 255 255 / 0.2);
+}
+
+.player-icon {
+  width: var(--player-icon-size, 22px);
+  height: var(--player-icon-size, 22px);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.bili-player .vds-menu-items,
+.vds-video-layout:has(.player-caption-setting) .vds-menu-items {
+  text-shadow: none;
+  box-shadow: 0 8px 32px rgb(0 0 0 / 0.28);
+}
+
+.player-control-divider {
+  flex: 0 0 1px;
+  height: 16px;
+  margin: 0 6px;
+  background: rgb(255 255 255 / 0.22);
 }
 
 /* 桌面双击任意画面均切全屏；触屏保留两侧双击 ±10 秒。 */
@@ -97,12 +136,14 @@
 /* 播放器内自研按钮用透明底，与相邻 Vidstack 按钮保持同一视觉重量。 */
 .bili-player .player-ctl {
   --button-bg: transparent;
-  --button-bg-hover: rgb(255 255 255 / 0.08);
-  --button-bg-pressed: rgb(255 255 255 / 0.12);
+  --button-bg-hover: var(--player-control-hover);
+  --button-bg-pressed: rgb(255 255 255 / 0.2);
   --button-fg: #fff;
-  border-radius: 4px;
-  min-width: 32px;
-  height: 32px;
+  border-radius: var(--player-control-radius);
+  min-width: var(--player-control-size);
+  height: var(--player-control-size);
+  padding: 0 10px;
+  flex-shrink: 0;
 }
 
 .bili-player .player-ctl[data-active] {
@@ -110,30 +151,71 @@
 }
 
 .bili-player .player-dm-toggle {
-  font-size: 16px;
-  font-weight: 600;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.bili-player .player-dm-toggle:not([data-active]) {
-  opacity: 0.55;
+.player-dm-state {
+  color: rgb(255 255 255 / 0.75);
+  font-size: 11px;
 }
 
-.bili-player .player-caption-size {
-  font-size: 18px;
+.bili-player .player-dm-toggle[data-active] .player-dm-state {
+  color: var(--bili-blue);
 }
 
 .player-caption-setting {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 8px 12px;
+  padding: 8px 8px 12px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.1);
   font-size: 14px;
+}
+
+.player-setting-label,
+.player-menu-heading {
+  display: block;
+  padding: 4px 8px 8px;
+  color: rgb(255 255 255 / 0.65);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.player-caption-sizes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(44px, 1fr));
+  gap: 4px;
+}
+
+.player-caption-setting .player-caption-size {
+  display: grid;
+  place-items: center;
+  justify-content: center;
+  padding: 0;
+  text-align: center;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #fff;
+  background: rgb(255 255 255 / 0.06);
+  cursor: pointer;
+}
+
+.player-caption-setting .player-caption-size[data-checked] {
+  color: var(--bili-blue);
+  background: rgb(0 174 236 / 0.14);
+  border-color: var(--bili-blue);
+}
+
+.player-caption-setting .player-caption-size[data-hocus] {
+  background: var(--player-control-hover);
 }
 
 .bili-player .player-ctl:focus-visible,
 .bili-player .player-big-play:focus-visible,
-.bili-player .vds-button:focus-visible {
+.bili-player .vds-button:focus-visible,
+.bili-player .vds-radio:focus-visible,
+.player-caption-setting .vds-radio:focus-visible {
   outline: 2px solid var(--bili-blue);
   outline-offset: 2px;
 }
@@ -145,7 +227,7 @@
 
 .bili-player .player-speed-trigger {
   width: auto;
-  min-width: 52px;
+  min-width: 60px;
   padding: 0 8px;
   font-size: 14px;
   font-weight: 500;
@@ -153,7 +235,7 @@
 }
 
 .bili-player .player-speed-options {
-  min-width: 124px;
+  min-width: 152px;
   padding: 8px;
   max-height: min(320px, calc(var(--player-height, 400px) - 76px));
   overflow-y: auto;
@@ -165,17 +247,20 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 40px;
   padding: 8px 12px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 13px;
   cursor: pointer;
 }
 
 .bili-player .player-speed-option[data-checked] {
   color: var(--bili-blue);
+  background: rgb(0 174 236 / 0.12);
 }
 
 .player-speed-check {
+  --player-icon-size: 18px;
   visibility: hidden;
 }
 
@@ -235,12 +320,13 @@
 /* 暂停时右下角出现大播放标记，不遮住课件中心。 */
 .bili-player .player-big-play {
   position: absolute;
-  right: 28px;
-  bottom: 88px;
+  right: 24px;
+  bottom: 100px;
   z-index: 14;
-  width: 60px;
-  height: 52px;
-  border-radius: var(--radius-control);
+  width: 56px;
+  height: 56px;
+  border: 1px solid rgb(255 255 255 / 0.2);
+  border-radius: 50%;
   --button-bg: rgb(0 0 0 / 0.45);
   --button-bg-hover: rgb(0 0 0 / 0.65);
   --button-bg-pressed: rgb(0 0 0 / 0.75);
@@ -250,7 +336,9 @@
 .bili-player .player-big-play__icon {
   width: 30px;
   height: 30px;
-  fill: currentColor;
+}
+
+.bili-player .player-big-play__icon.tabler-icon-player-play-filled {
   margin: 0 0 0 3px;
 }
 
@@ -265,7 +353,7 @@
   z-index: 60;
   max-width: calc(100% - 48px);
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: 8px;
   background: rgb(0 0 0 / 0.72);
   color: #fff;
   font-size: 14px;
@@ -359,6 +447,12 @@
   pointer-events: none;
 }
 
+/* 延迟取帧/不支持预览时仍有清晰的纯时间提示。 */
+.bili-player .vds-slider-preview:not(:has(.player-preview-frame)) .vds-slider-value {
+  position: static;
+  transform: none;
+}
+
 /* 小屏顶栏保持克制，给字幕和画面让位。 */
 .bili-player:not([data-started]) .vds-video-layout[data-sm] .vds-controls[data-visible] .vds-controls-group,
 .bili-player:not([data-started]) .vds-video-layout[data-sm] .vds-time-group {
@@ -371,9 +465,27 @@
 }
 
 .bili-player .vds-video-layout[data-sm] .player-speed-trigger {
-  min-width: 44px;
-  padding: 0 4px;
+  min-width: 48px;
+  padding: 0 6px;
   font-size: 13px;
+}
+
+.bili-player .vds-video-layout[data-sm] .vds-controls-group:first-child {
+  gap: 0;
+  padding: 4px 8px 0;
+}
+
+.bili-player .vds-video-layout[data-sm] .vds-controls-group:nth-last-child(2) {
+  padding-inline: 12px;
+}
+
+@media (pointer: coarse) {
+  .bili-player .vds-time-slider { --media-slider-height: 44px; }
+  .bili-player .player-speed-option { min-height: 44px; }
+}
+
+.bili-player:is([data-fullscreen], .player-web-fullscreen) .vds-controls-group:last-child {
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
 }
 
 .bili-player:has(.vds-video-layout[data-sm]) .player-feedback:not([data-boost]) {
@@ -483,7 +595,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .bili-player .vds-controls,
-  .bili-player .vds-menu-items { transition: none !important; }
+  .bili-player .vds-menu-items,
+  .bili-player .vds-slider-preview,
+  .vds-video-layout:has(.player-caption-setting) .vds-menu-items { transition: none !important; }
   .dm-item { animation-name: dm-pop-fade; animation-duration: 7s; }
   .seek-pulse {
     transform: translateY(-50%);

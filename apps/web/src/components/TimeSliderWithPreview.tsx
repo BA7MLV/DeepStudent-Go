@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { TimeSlider, useMediaState, useSliderState } from '@vidstack/react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { TimeSlider, useMediaState, useSliderState, type TimeSliderInstance } from '@vidstack/react';
 import { useDefaultLayoutContext, useDefaultLayoutWord } from '@vidstack/react/player/layouts/default';
+import { createPreviewSeeker } from '../utils/previewSeeker';
 
 interface Props {
   /**
@@ -13,16 +14,13 @@ interface Props {
 /** 预览卡片的目标尺寸：横屏按宽度封顶、竖屏按高度封顶 */
 const PREVIEW_MAX = 160;
 
-/** 两次取帧之间的最小时间间隔，防止指针每动 1px 就把解码器排满 */
-const MIN_FRAME_DELTA = 0.5;
-
 /**
  * 预览帧。
  *
  * 为什么不用官方的 `<TimeSlider.Video>`：那个组件自己维护「就绪 / 出错」状态，
  * 未就绪时给元素打 `data-hidden`，而默认样式对 `[data-hidden]` 是 `display: none; width: 0`
  * —— 实测在本地 blob 源上它一直停在 `data-hidden`（视频其实已经 readyState=4 解码好了），
- * 缩略图根本出不来。自己驱动还有一个好处：能节流（见 MIN_FRAME_DELTA），
+ * 缩略图根本出不来。自己驱动还能合并和限频 seek（见 previewSeeker），
  * 官方实现是指针一动就写一次 `currentTime`。
  *
  * 它是 `<TimeSlider.Root>` 的后代，所以 `useSliderState` 拿得到指针位置。
@@ -30,7 +28,15 @@ const MIN_FRAME_DELTA = 0.5;
 function PreviewFrame({ src }: { src: string }) {
   const pointing = useSliderState('pointing');
   const dragging = useSliderState('dragging');
-  return pointing || dragging ? <ActivePreviewFrame key={src} src={src} /> : null;
+  const active = pointing || dragging;
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    if (!active) { setEnabled(false); return; }
+    // 路过进度条时只显示时间，不为短暂悬停启动第二个视频解码器。
+    const timer = setTimeout(() => setEnabled(true), 160);
+    return () => clearTimeout(timer);
+  }, [active]);
+  return active && enabled ? <ActivePreviewFrame key={src} src={src} /> : null;
 }
 
 function ActivePreviewFrame({ src }: { src: string }) {
@@ -42,36 +48,39 @@ function ActivePreviewFrame({ src }: { src: string }) {
   const pointerRate = useSliderState('pointerRate');
   const duration = useMediaState('duration');
   const videoRef = useRef<HTMLVideoElement>(null);
-  const lastSeekRef = useRef(Number.NaN);
+  const seekerRef = useRef<ReturnType<typeof createPreviewSeeker> | null>(null);
   // 素材宽高比要等元数据到；先按 16:9 占位，避免卡片在首帧之前高度为 0
   const [ratio, setRatio] = useState(16 / 9);
   const [ready, setReady] = useState(false);
   const [metadataReady, setMetadataReady] = useState(false);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el || !metadataReady || !Number.isFinite(pointerRate) || !Number.isFinite(duration) || duration <= 0) return;
-    // 别正好停在时长上：那一帧在多数编码里是空的（只有音频尾帧）
-    const target = Math.min(pointerRate * duration, duration - 0.05);
-    if (Number.isFinite(lastSeekRef.current) && Math.abs(target - lastSeekRef.current) < MIN_FRAME_DELTA) {
-      return;
-    }
-    lastSeekRef.current = target;
-    el.currentTime = Math.max(0, target);
-  }, [pointerRate, duration, metadataReady]);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
-    // StrictMode replays setup after cleanup without recreating the DOM node.
-    if (video && video.getAttribute('src') !== src) video.src = src;
+    if (!video) return;
+    // StrictMode 会重放 effect，此时 DOM 节点不会重建。
+    if (video.getAttribute('src') !== src) video.src = src;
+    const seeker = createPreviewSeeker(video, () => setReady(true));
+    seekerRef.current = seeker;
     return () => {
-      if (video) { video.removeAttribute('src'); video.load(); }
+      seeker.dispose();
+      seekerRef.current = null;
+      video.removeAttribute('src');
+      video.load();
     };
   }, [src]);
+
+  useEffect(() => {
+    if (!metadataReady || !Number.isFinite(pointerRate) || !Number.isFinite(duration) || duration <= 0) return;
+    // 别正好停在时长上：那一帧在多数编码里是空的（只有音频尾帧）
+    const target = Math.max(0, Math.min(pointerRate * duration, duration - 0.05));
+    seekerRef.current?.request(target);
+  }, [pointerRate, duration, metadataReady]);
 
   // 横向封顶宽度、纵向封顶高度，竖屏素材（手机录的课）才不会被拉成一根长条
   const size = ratio >= 1 ? { width: PREVIEW_MAX, height: PREVIEW_MAX / ratio } : { width: PREVIEW_MAX * ratio, height: PREVIEW_MAX };
 
+  if (failed) return null;
   return (
     <div className="player-preview-frame" style={size}>
       <video
@@ -91,6 +100,7 @@ function ActivePreviewFrame({ src }: { src: string }) {
         }}
         // 第一帧解出来再淡入，否则会先闪一下纯黑
         onLoadedData={() => setReady(true)}
+        onError={() => { seekerRef.current?.dispose(); setFailed(true); }}
       />
     </div>
   );
@@ -111,7 +121,8 @@ export default function TimeSliderWithPreview({ previewSrc }: Props) {
   const label = useDefaultLayoutWord('Seek');
   const { sliderChaptersMinWidth = 325 } = useDefaultLayoutContext();
   const [rootEl, setRootEl] = useState<HTMLElement | null>(null);
-  const [width, setWidth] = useState(0);
+  const [chaptersEnabled, setChaptersEnabled] = useState(false);
+  const onRootRef = useCallback((instance: TimeSliderInstance | null) => setRootEl(instance?.el ?? null), []);
 
   /**
    * 章节轨道在容器太窄时要关掉（官方默认布局同款判断）。
@@ -119,22 +130,20 @@ export default function TimeSliderWithPreview({ previewSrc }: Props) {
    */
   useEffect(() => {
     if (!rootEl) return;
-    const onResize = () => setWidth(rootEl.clientWidth);
+    const onResize = () => setChaptersEnabled(rootEl.clientWidth >= sliderChaptersMinWidth);
     const observer = new ResizeObserver(onResize);
     observer.observe(rootEl);
     onResize();
     return () => observer.disconnect();
-  }, [rootEl]);
+  }, [rootEl, sliderChaptersMinWidth]);
 
   return (
     <TimeSlider.Root
       className="vds-time-slider vds-slider"
       aria-label={label}
-      ref={(instance) => {
-        setRootEl(instance?.el ?? null);
-      }}
+      ref={onRootRef}
     >
-      <TimeSlider.Chapters className="vds-slider-chapters" disabled={width < sliderChaptersMinWidth}>
+      <TimeSlider.Chapters className="vds-slider-chapters" disabled={!chaptersEnabled}>
         {(cues, forwardRef) =>
           cues.map((cue) => (
             <div className="vds-slider-chapter" key={cue.startTime} ref={forwardRef}>

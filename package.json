@@ -75,6 +75,8 @@
     "test:cloud:backup": "tsx scripts/test-cloud-backup.mjs",
     "test:wrongbook": "tsx --test scripts/test-wrongbook.mjs",
     "test:ime": "tsx --test scripts/test-ime-enter.mjs",
+    "test:player": "tsx scripts/test-player-shortcuts.mjs && tsx --test scripts/test-preview-seeker.mjs",
+    "test:player:e2e": "node scripts/e2e-player-enhance.mjs && node scripts/e2e-player-performance.mjs",
     "test:bot-ui": "tsx --test scripts/test-bot-messages.mjs scripts/test-bot-attachments.mjs",
     "test:bot-sync": "tsx --test scripts/test-bot-sync.mjs",
     "test:bot-sync:e2e": "tsx scripts/e2e-bot-sync.mjs",

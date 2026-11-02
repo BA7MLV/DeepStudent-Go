@@ -1,6 +1,6 @@
 import { Button } from '@heroui/react';
 import { useMediaPlayer, useMediaState } from '@vidstack/react';
-import { Sym } from '../ui/icons';
+import { playerIcons } from '../ui/player-icons';
 
 /** B 站式右下角暂停播放标记；小屏沿用布局内的中央播放键。 */
 export default function PlayerBigPlayButton() {
@@ -26,7 +26,7 @@ export default function PlayerBigPlayButton() {
         void player?.play().catch(() => {});
       }}
     >
-      <Sym name="play" filled className="player-big-play__icon" />
+      {ended ? <playerIcons.Replay className="player-big-play__icon" /> : <playerIcons.Play className="player-big-play__icon" />}
     </Button>
   );
 }

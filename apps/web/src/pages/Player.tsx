@@ -81,6 +81,7 @@ const PANEL_KEYS = STUDY_PANEL_KEYS;
  * 属于**看起来能用、实际是错的**入口，必须挡掉。
  */
 const MATERIAL_PANEL_KEYS: readonly PanelKey[] = ['chat'];
+const isSmallPlayerLayout = ({ width, height }: { width: number; height: number }) => width < 760 || height < 300;
 
 export default function Player() {
   const { id } = useParams<{ id: string }>();
@@ -105,7 +106,6 @@ function PlayerResource({ id }: { id: string | undefined }) {
   const [fileMissing, setFileMissing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [segments, setSegments] = useState<Cue[]>([]);
-  const [currentTime, setCurrentTime] = useState(0);
   const playerRef = useRef<MediaPlayerInstance>(null);
   const { webFullscreen, setWebFullscreen, toggleWebFullscreen } = usePlayerWebFullscreen(playerRef);
   const captionScale = useSettings((s) => s.captionScale);
@@ -313,19 +313,6 @@ function PlayerResource({ id }: { id: string | undefined }) {
     return () => clearTimeout(timeout);
   }, [videoUrl, sourcePending, playbackError]);
 
-  // 订阅播放进度
-  useEffect(() => {
-    const player = playerRef.current;
-    if (!player || !videoUrl) return;
-    let last = 0;
-    return player.subscribe(({ currentTime: t }) => {
-      if (Math.abs(t - last) >= 0.25) {
-        last = t;
-        setCurrentTime(t);
-      }
-    });
-  }, [videoUrl]);
-
   // 增量字幕：一条常驻字幕轨 + 每完成一段就往轨里 addCue（不重建轨、不重拉整份 VTT）。
   // 详见 docs/plans/2026-09-10-live-subtitle-design.md「实测结论」。
   const [subsRunning, setSubsRunning] = useState(false);
@@ -464,7 +451,8 @@ function PlayerResource({ id }: { id: string | undefined }) {
       chapterTitle: <div className="vds-controls-spacer" />,
       beforeCaptionButton: <><DanmakuToggleButton /><RateButtons /></>,
       beforeSettingsMenu: <PlayerShortcutsMenu />,
-      settingsMenuItemsStart: <div className="player-caption-setting"><span>字幕大小</span><CaptionSizeButton /></div>,
+      settingsMenuItemsStart: <CaptionSizeButton />,
+      beforePipButton: <span className="player-control-divider" aria-hidden />,
       timeSlider: <TimeSliderWithPreview previewSrc={videoUrl} />,
       beforeFullscreenButton: <><TheaterModeButton active={theaterMode} onToggle={toggleTheaterMode} /><WebFullscreenButton active={webFullscreen} onToggle={toggleWebFullscreen} /></>,
       // 小屏保留中央播放键与顶部工具区，不把桌面整条底栏硬塞进手机。
@@ -480,6 +468,9 @@ function PlayerResource({ id }: { id: string | undefined }) {
     }),
     [theaterMode, toggleTheaterMode, videoUrl, webFullscreen, toggleWebFullscreen],
   );
+
+  // 与 UI 状态解耦，展开助手/菜单不必让媒体层重新解析同一份源配置。
+  const mediaSource = useMemo(() => ({ src: videoUrl, type: toPlayerMime(video?.mimeType ?? '') }), [videoUrl, video?.mimeType]);
 
   if (loading) {
     // 首载形状与真实布局**同形**：左视频区（16:9）+ 右侧面板栏（复用 .side-pane 的卡片）。
@@ -552,7 +543,8 @@ function PlayerResource({ id }: { id: string | undefined }) {
             videoId={id}
             biliSource={video.biliSource}
             playerRef={playerRef}
-            currentTime={currentTime}
+            playbackSource={videoUrl}
+            followPlayback={assistantOpen && activeTab === 'subs'}
             onSegmentsChange={onSegmentsChange}
             onRunningChange={setSubsRunning}
             onLoadedChange={onSubsLoadedChange}
@@ -628,7 +620,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
               ref={playerRef}
               className={`bili-player${webFullscreen ? ' player-web-fullscreen' : ''}`}
               title={video.name}
-              src={{ src: videoUrl, type: toPlayerMime(video.mimeType) }}
+              src={mediaSource}
               storage={resumeStorage}
               playsInline
               crossOrigin={videoCrossOrigin}
@@ -690,7 +682,8 @@ function PlayerResource({ id }: { id: string | undefined }) {
               {/* 滑块方向键跟随小幅跳转步长。映射改变时重挂布局，刷新 vidstack 在控件
                   挂载时生成的 aria-keyshortcuts，避免旧映射反向覆盖新配置。只重挂控制栏，不重载视频。 */}
               <DefaultVideoLayout key={JSON.stringify(shortcuts.bindings)} icons={playerLayoutIcons} slots={layoutSlots}
-                translations={PLAYER_TRANSLATIONS} colorScheme="dark" showTooltipDelay={350} seekStep={shortcuts.arrowSeek} />
+                translations={PLAYER_TRANSLATIONS} colorScheme="dark" showTooltipDelay={350} seekStep={shortcuts.arrowSeek}
+                smallLayoutWhen={isSmallPlayerLayout} />
             </MediaPlayer>
           )}
 

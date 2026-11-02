@@ -1,5 +1,5 @@
 import { Button, Tooltip } from '@heroui/react';
-import { Sym } from '../ui/icons';
+import { playerIcons } from '../ui/player-icons';
 import { IconSwap } from './motion';
 
 interface TheaterModeButtonProps {
@@ -34,8 +34,8 @@ export default function TheaterModeButton({ active, onToggle }: TheaterModeButto
           {/* 保留原有的交叉淡入淡出，只替换图标字形。 */}
           <IconSwap
             active={active ? 'b' : 'a'}
-            a={<Sym name="theater" />}
-            b={<Sym name="theater_exit" />}
+            a={<playerIcons.EnterTheater />}
+            b={<playerIcons.ExitTheater />}
           />
         </Button>
       </Tooltip.Trigger>

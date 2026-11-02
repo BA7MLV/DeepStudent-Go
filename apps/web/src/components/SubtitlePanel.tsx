@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, ListBox, Select } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { liveQuery } from 'dexie';
@@ -39,7 +39,9 @@ interface Props {
   videoId: string;
   biliSource?: BiliVideoSource;
   playerRef: React.RefObject<MediaPlayerInstance | null>;
-  currentTime: number;
+  /** 源就绪/重试后重新连接订阅，不把高频时间状态提升到整页。 */
+  playbackSource: string;
+  followPlayback: boolean;
   onSegmentsChange: (cues: Cue[]) => void;
   /** 转写是否进行中：上游据此门控讲义/弹幕/卡片（避免拿半份字幕去生成） */
   onRunningChange?: (running: boolean) => void;
@@ -70,7 +72,24 @@ function download(filename: string, content: string, type: string) {
  */
 const NO_COMPARE_LANG = '__none__';
 
-export default function SubtitlePanel({ videoId, biliSource, playerRef, currentTime, onSegmentsChange, onRunningChange, onLoadedChange }: Props) {
+// 一次换句只更新旧/新两行，不重新解析和渲染整份长字幕。
+const SubtitleCueRow = memo(function SubtitleCueRow({ cue, active, playerRef }: {
+  cue: Cue;
+  active: boolean;
+  playerRef: React.RefObject<MediaPlayerInstance | null>;
+}) {
+  return (
+    <CueRow time={fmtTime(cue.start)} active={active} testId="subs-row"
+      ask={{ source: 'subtitle', time: cue.start, label: fmtTime(cue.start) }}
+      onClick={() => { if (playerRef.current) playerRef.current.currentTime = cue.start + 0.01; }}>
+      {splitCueLines(cue.text).map((line, index) => (
+        <Fragment key={index}>{index > 0 && <br />}{line}</Fragment>
+      ))}
+    </CueRow>
+  );
+});
+
+export default function SubtitlePanel({ videoId, biliSource, playerRef, playbackSource, followPlayback, onSegmentsChange, onRunningChange, onLoadedChange }: Props) {
   const [segments, setSegments] = useState<SegmentRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   /**
@@ -228,7 +247,22 @@ export default function SubtitlePanel({ videoId, biliSource, playerRef, currentT
     if (!biliBusy.current) startTranscription(videoId);
   };
 
-  const activeIdx = cues.findIndex((c) => currentTime >= c.start && currentTime < c.end);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player || !playbackSource || !followPlayback || cues.length === 0) {
+      setActiveIdx(-1);
+      return;
+    }
+    let lastIndex = -2;
+    return player.subscribe(({ currentTime }) => {
+      const index = cues.findIndex(c => currentTime >= c.start && currentTime < c.end);
+      // 只在换句时渲染；助手收起/切到其他 tab 时完全取消进度订阅。
+      if (index === lastIndex) return;
+      lastIndex = index;
+      setActiveIdx(index);
+    });
+  }, [playerRef, playbackSource, followPlayback, cues]);
 
   // 自动滚动到当前字幕
   useEffect(() => {
@@ -236,7 +270,7 @@ export default function SubtitlePanel({ videoId, biliSource, playerRef, currentT
     // 用 `.sub-item` 而不是 `children[activeIdx]`：列表外多了一层 SkeletonReveal 容器，
     // 直接取 children 会数到那一层。骨架行用的是 `.skel-cue__row`，不会被选中。
     const el = listRef.current.querySelectorAll<HTMLElement>('.sub-item')[activeIdx];
-    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    el?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
   }, [activeIdx]);
 
   const pct =
@@ -368,24 +402,7 @@ export default function SubtitlePanel({ videoId, biliSource, playerRef, currentT
             </PanelPlaceholder>
           )}
           {cues.map((c, i) => (
-            <CueRow
-              key={c.start}
-              time={fmtTime(c.start)}
-              active={i === activeIdx}
-              testId="subs-row"
-              // 划词提问契约：在字幕行里选中文字后，全局浮层据此知道「选的是哪一句」
-              ask={{ source: 'subtitle', time: c.start, label: fmtTime(c.start) }}
-              onClick={() => {
-                if (playerRef.current) playerRef.current.currentTime = c.start + 0.01;
-              }}
-            >
-              {splitCueLines(c.text).map((line, li) => (
-                <Fragment key={li}>
-                  {li > 0 && <br />}
-                  {line}
-                </Fragment>
-              ))}
-            </CueRow>
+            <SubtitleCueRow key={c.id ?? c.start} cue={c} active={i === activeIdx} playerRef={playerRef} />
           ))}
         </SkeletonReveal>
       </PanelBody>
