@@ -1,4 +1,5 @@
 import type { DatabaseStore } from '../storage/database.js';
+import { BOARD_PATH, boardPath } from '@wangke/contracts/board';
 import { SystemMaterials } from '../storage/system-materials.js';
 import { AGENTS_PATH, MCP_PATH, MEMORY_PATH, SKILLS_PATH, diaryDate, memoryName } from '@wangke/contracts/system';
 import type { StudyToolPlugin } from './study.js';
@@ -32,7 +33,7 @@ export function notebookTools(store: DatabaseStore): StudyToolPlugin[] {
       c.checkActive();
       const time = new Date().toISOString();
       let listing;
-      if (a.path.startsWith(`${SKILLS_PATH}/`)) {
+      if (a.path.startsWith(`${SKILLS_PATH}/`) || boardPath(a.path)) {
         try { listing = files.list(c.owner, a.path, a.offset ?? 0); }
         catch { return notebookRead(files.read(c.owner, a.path), a); }
       } else if (a.path !== '/system' && a.path !== MEMORY_PATH && a.path !== SKILLS_PATH) return notebookRead(files.read(c.owner, a.path), a);
@@ -54,7 +55,7 @@ export function notebookTools(store: DatabaseStore): StudyToolPlugin[] {
     } },
       { name: 'edit', description: 'Edit system documents with exact literal edits without human approval; explicit policy denials still apply. First read and pass its revision. Supports AGENTS.md, existing Skill files/references and Markdown notes. /system/mcp.json is the same MCP configuration used by Settings and resources: use edits to add/change/remove servers, never include token/headers/env; credentials are human-managed in Settings. Choose exactly one of edits (old_string/new_string; ambiguous matches fail), append (diaries get a UTC timestamp heading), or create=true + content + revision=0 for a NEW note. Use /system/memory/preferences.md or YYYY-MM-DD.md. Existing files are never overwritten by create. For other system files, installing Skills or directory creation use shell with systemWrite=true, also without approval. File/directory deletion always requires one-shot approval: use shell with systemWrite=true and requiresApproval=true. Preserve sources, distinguish facts from guesses, and never store credentials or grant permissions. No automatic daily scheduling.', properties: { path, revision: { type: 'integer', minimum: 0 }, create: { type: 'boolean' }, content: { type: 'string', maxLength: 100000 }, append: { type: 'string', minLength: 1, maxLength: 100000 }, edits: { type: 'array', minItems: 1, maxItems: 30, items: { type: 'object', additionalProperties: false, properties: { old_string: { type: 'string', minLength: 1, maxLength: 100000 }, new_string: { type: 'string', maxLength: 100000 }, replace_all: { type: 'boolean' } }, required: ['old_string', 'new_string'] } } }, required: ['path', 'revision'], capability: () => 'write', permissions: () => ['read', 'write'], execute: async (a, c) => {
       c.checkActive();
-      if (a.path !== AGENTS_PATH && a.path !== MCP_PATH && !a.path.startsWith(`${SKILLS_PATH}/`) && !memoryName(a.path)) throw new Error('invalid_system_path');
+      if (a.path !== AGENTS_PATH && a.path !== MCP_PATH && !a.path.startsWith(`${SKILLS_PATH}/`) && !boardPath(a.path) && !memoryName(a.path)) throw new Error('invalid_system_path');
       if (a.path === MCP_PATH) {
         const thread = store.db.prepare("SELECT id FROM threads WHERE id=? AND owner_id=? AND mode='bot'").get(c.thread, c.owner);
         if (!thread) throw new Error('mcp_context_denied');
@@ -64,7 +65,7 @@ export function notebookTools(store: DatabaseStore): StudyToolPlugin[] {
       const date = diaryDate(a.path), time = new Date().toISOString();
       let current: ReturnType<SystemMaterials['read']> | undefined;
       try { current = files.read(c.owner, a.path); }
-      catch (error) { if (!(error instanceof Error) || error.message !== 'memory_not_found' || !a.create) throw error; }
+      catch (error) { if (!(error instanceof Error) || !['memory_not_found', 'board_file_not_found'].includes(error.message) || !a.create) throw error; }
       if (a.create && (current || a.revision !== 0 || typeof a.content !== 'string')) throw new Error('system_revision_conflict');
       if (!a.create && (!current || current.revision !== a.revision)) throw new Error('system_revision_conflict');
       const content = a.create ? date ? `# ${date}\n\n## ${time}\n\n${a.content}` : a.content
@@ -76,5 +77,5 @@ export function notebookTools(store: DatabaseStore): StudyToolPlugin[] {
       return { path: saved.path, revision: saved.revision, kind: saved.kind, updatedAt: saved.updatedAt, saved: true };
     } },
   ];
-  return tools.map(plugin => ({ ...plugin, systemResource: true }));
+  return tools.map(plugin => ({ ...plugin, description: `${plugin.description} Board plugins are real files in ${BOARD_PATH}/plugins/<id>/. Read ${BOARD_PATH}/README.md for the fixed manifest/HTML/state template and scheduling contract. read lists board directories; edit can create and modify board files using revisions. They are shared with Chat and the Board UI; explicit policy denials still apply.`, systemResource: true }));
 }

@@ -1,7 +1,7 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Avatar, Button, Dropdown, ListBox, Modal, Spinner, cn } from '@heroui/react';
-import { PageShell, Sym, toast, promptDialog, confirmDialog } from '../ui';
+import { PageLoader, PageShell, Sym, toast, promptDialog, confirmDialog } from '../ui';
 import { openSettings } from '../components/settingsDialogStore';
 import { cloud } from '../cloud/state';
 import { MoreMenu, type MenuAction } from '../ui';
@@ -685,7 +685,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       <div className="bot-center">
         {connectError
           ? <div className="bot-center__error" role="alert"><p>{connectError}</p><Button size="sm" variant="secondary" onPress={reload}>{tp('retry')}</Button></div>
-          : <Spinner size="lg" color="current" />}
+          : embedded ? <Spinner size="lg" color="current" /> : <PageLoader contained />}
       </div>,
     );
   }
@@ -730,7 +730,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
            if (!stickRef.current && el.scrollTop < 80 && !history.historyError) void history.loadOlder();
         }}
       >
-        {listLoading ? <div className="bot-center"><Spinner color="current" /></div> : landing ? (
+        {listLoading ? <div className="bot-center">{embedded ? <Spinner color="current" /> : <PageLoader contained />}</div> : landing ? (
           <div className="bh-hello">
             {projectId && !availableAgents.length ? <p className="bh-hello__note">{tp('noAgent')}</p> : <>
               <BotAvatar agent={currentAgent} size={72} className="bh-hello__avatar" />
@@ -738,7 +738,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
             </>}
           </div>
         ) : !active ? (
-          <div className="bot-center">{detailError ? <div className="bh-inline-error" role="alert">{projectError(new Error(detailError))}<Button size="sm" variant="secondary" onPress={history.retry}>{tp('retry')}</Button></div> : <Spinner color="current" />}</div>
+          <div className="bot-center">{detailError ? <div className="bh-inline-error" role="alert">{projectError(new Error(detailError))}<Button size="sm" variant="secondary" onPress={history.retry}>{tp('retry')}</Button></div> : embedded ? <Spinner color="current" /> : <PageLoader contained />}</div>
         ) : (
           <>
           {history.hasOlder && <div className="bot-history-control"><Button size="sm" variant="ghost" isDisabled={history.loadingOlder} onPress={() => { stickRef.current = false; void history.loadOlder(); }}>{history.loadingOlder ? t('botHome.loadingHistory') : history.historyError ? t('botHome.retryHistory') : t('botHome.loadHistory')}</Button></div>}

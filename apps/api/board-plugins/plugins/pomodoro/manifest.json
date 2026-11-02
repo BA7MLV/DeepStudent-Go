@@ -1,0 +1,12 @@
+{
+  "apiVersion": 1,
+  "id": "pomodoro",
+  "name": "番茄钟",
+  "description": "持久化专注计时，刷新后继续",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "enabled": true,
+  "order": 30,
+  "height": 320,
+  "capabilities": ["state"]
+}

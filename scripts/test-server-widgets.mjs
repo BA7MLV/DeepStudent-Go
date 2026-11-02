@@ -69,7 +69,7 @@ try {
     const source = '<section><button>点击</button></section><script>throw new Error("must not execute on server")</script>';
     script = [body => {
       const tools = body.tools.map(tool => tool.function?.name ?? tool.name);
-      assert.deepEqual(tools, ['show_widget'], 'empty libraries still register the visualization tool');
+      assert.deepEqual(tools, ['board', 'show_widget'], 'empty libraries register visualization and shared board resources');
       return { calls: [widgetCall(`work-${i}`, source)] };
     }, body => {
       const row = answer(sid);
@@ -93,6 +93,18 @@ try {
   console.log('Empty-library registration, all 3 model protocols, save-before-receipt, identities, progress/result/record payloads passed');
 
   configuration.save(owner, { ...configuration.get(owner, true), llmModel: { providerId: 'p0', model: 'test-model' } });
+  session(150);
+  script = [() => ({ calls: [{ id: 'board-docs', name: 'board', args: { action: 'read', path: '/system/board/README.md' } }] }), body => {
+    const result = JSON.parse(body.messages.find(message => message.tool_call_id === 'board-docs').content);
+    assert.match(result.content, /manifest.json/);
+    assert.equal(result.nextOffset, null);
+    return { calls: [{ id: 'board-create', name: 'board', args: { action: 'write', path: '/system/board/chat-note.json', content: '{"from":"chat"}', expected: '', revision: 0 } }] };
+  }, body => {
+    assert.equal(JSON.parse(body.messages.find(message => message.tool_call_id === 'board-create').content).saved, true);
+    return { text: '看板资源已保存。' };
+  }];
+  await completed(enqueue(150));
+  assert.equal(store.systemFiles.read(owner, '/system/board/chat-note.json'), '{"from":"chat"}', 'bundled native Chat writes the same real system file');
   session(200);
   const invalid = [
     widgetCall('bad-document', '<html><body>not a fragment</body></html>'),

@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { BOARD_PATH, boardPath } from '@wangke/contracts/board';
+import { BoardFiles } from '../board/files.js';
 import type { DatabaseStore } from './database.js';
 import { CloudRecords, CloudConflict } from '../cloud/records.js';
 import { BotMemory, type MemoryRow } from '../agent/memory.js';
@@ -28,6 +30,7 @@ export class SystemMaterials {
   }
 
   read(owner: string, path: string): SystemDocument {
+    if (boardPath(path)) return new BoardFiles(this.store).read(owner, path);
     if (path === MCP_PATH) return this.store.systemMcp.read(owner);
     if (path === AGENTS_PATH) {
       const content = this.records.agentInstructions(owner);
@@ -52,12 +55,13 @@ export class SystemMaterials {
     if (path === '/system') {
       const files = [AGENTS_PATH, MCP_PATH].map(path => { const { content: _content, ...file } = this.read(owner, path); return file; });
       const matches = (value: string) => !query || value.toLocaleLowerCase().includes(query.toLocaleLowerCase());
-      return { files: offset === 0 ? files.filter(file => matches(file.name)) : [], directories: offset === 0 ? [MEMORY_PATH, SKILLS_PATH].filter(matches) : [], nextOffset: null };
+      return { files: offset === 0 ? files.filter(file => matches(file.name)) : [], directories: offset === 0 ? [MEMORY_PATH, SKILLS_PATH, BOARD_PATH].filter(matches) : [], nextOffset: null };
     }
     if (path === SKILLS_PATH || path.startsWith(`${SKILLS_PATH}/`)) {
       this.store.skillRecords.sync(owner);
       return this.store.systemSkills.listDirectory(owner, path, offset, query);
     }
+    if (boardPath(path)) return new BoardFiles(this.store).list(owner, path, offset, query);
     if (path !== MEMORY_PATH) throw new Error('invalid_system_path');
     const rows = this.memory.list(owner, query, offset);
     return { files: rows.map(row => { const { content: _content, ...file } = this.document(row); return file; }), nextOffset: rows.length === 50 ? offset + 50 : null };
@@ -73,6 +77,7 @@ export class SystemMaterials {
 
   save(owner: string, path: string, content: string, expected: string, revision: number, source = 'user:notebook') {
     if (typeof content !== 'string' || typeof expected !== 'string' || !Number.isSafeInteger(revision) || revision < 0 || content.length > 100000) throw new Error('invalid_system_document');
+    if (boardPath(path)) return new BoardFiles(this.store).save(owner, path, content, expected, revision);
     if (path === MCP_PATH) return this.store.systemMcp.save(owner, content, expected, revision);
     if (path === SKILLS_PATH || path.startsWith(`${SKILLS_PATH}/`)) {
       this.store.skillRecords.sync(owner);

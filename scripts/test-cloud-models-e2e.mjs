@@ -362,6 +362,7 @@ try {
   await page.reload();
   await page.getByTestId('provider-add-card').click();
   assert.equal(await page.getByTestId('card-models').count(), 0, 'new connections do not show default-model selection');
+  assert.equal(await page.getByTestId('model-presets').count(), 0, 'custom providers do not show main/backup model settings');
   await page.getByTestId('provider-name-draft').fill('Discarded provider');
   await page.getByTestId('base-url-draft').fill('https://discard.example/v1');
   await page.getByTestId('api-key-draft').fill('discard-this-secret');

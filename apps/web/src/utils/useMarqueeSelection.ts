@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 
 /** Desktop blank-space selection; item drags and touch scrolling remain native. */
-export function useMarqueeSelection(selection: Set<string>, onChange: (keys: Set<string>) => void) {
+export function useMarqueeSelection(
+  selection: Set<string>,
+  onChange: (keys: Set<string>) => void,
+  options: { itemSelector?: string } = {},
+) {
+  const itemSelector = options.itemSelector ?? '.finder-item';
   const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const cleanup = useRef<(() => void) | null>(null);
   const suppressClick = useRef(false);
@@ -9,7 +14,7 @@ export function useMarqueeSelection(selection: Set<string>, onChange: (keys: Set
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.pointerType !== 'mouse' || event.button !== 0 ||
-      (event.target as HTMLElement).closest('.finder-item, button, input, a, [role="button"]')) return;
+      (event.target as HTMLElement).closest(`${itemSelector}, button, input, a, [role="button"]`)) return;
     const canvas = event.currentTarget;
     const bounds = canvas.getBoundingClientRect();
     // Do not intercept the native scrollbars.
@@ -38,13 +43,13 @@ export function useMarqueeSelection(selection: Set<string>, onChange: (keys: Set
       const right = Math.max(originX, endX);
       const bottom = Math.max(originY, endY);
       const next = new Set(base);
-      for (const item of canvas.querySelectorAll<HTMLElement>('.finder-item')) {
+      for (const item of canvas.querySelectorAll<HTMLElement>(itemSelector)) {
         const itemRect = item.getBoundingClientRect();
         const itemLeft = itemRect.left - rect.left + canvas.scrollLeft;
         const itemTop = itemRect.top - rect.top + canvas.scrollTop;
         if (itemLeft < right && itemLeft + itemRect.width > left && itemTop < bottom && itemTop + itemRect.height > top) {
           const key = item.dataset.selectionKey ?? (item.dataset.videoId ? `file:${item.dataset.videoId}` : `folder:${item.dataset.groupKey}`);
-          next.add(key);
+          if (item.dataset.selectionKey || item.dataset.videoId || item.dataset.groupKey) next.add(key);
         }
       }
       if (next.size !== lastSelection.size || [...next].some((key) => !lastSelection.has(key))) {

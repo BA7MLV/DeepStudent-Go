@@ -97,6 +97,7 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
   const [conflict, setConflict] = useState(false);
   const [focusIssue, setFocusIssue] = useState(0);
   const [editorGeneration, setEditorGeneration] = useState(0);
+  const [hideModelPresets, setHideModelPresets] = useState(false);
   const [editingConnection, setEditingConnection] = useState(false);
   const [addingKey, setAddingKey] = useState(false);
   const [savedPreferences, setSavedPreferences] = useState(() => JSON.stringify(cloudModelPreferences(store.getState())));
@@ -222,10 +223,10 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
     </div>}
     <ModelSettingsContext.Provider value={store}>
       <fieldset disabled={busy} className="m-0 flex min-w-0 flex-col gap-5 border-0 p-0">
-       <ModelsModule key={editorGeneration} serverManaged standalone={standalone} discoveryProviders={cloudDiscoveryProviders(settings, config, discoveryRevision)} providerNeedsSave={(provider) => cloudProviderDirty(provider, config)} onSaveProvider={saveProvider} onDraftChange={setEditingConnection} renderProviderAccounts={provider => <ProviderAccounts config={config} provider={provider} onSaved={savedAccounts} onReplaceKey={saveProvider} onDraftChange={setAddingKey} onChangeKey={apiKey => store.setState(current => ({ providers: current.providers.map(p => p.id === provider.id ? { ...p, apiKey } : p) }))} />} onAddOpenCodeGo={!config.providers.some(p => p.id === 'opencode-go') ? () => void saveProvider({ id: 'opencode-go', name: 'OpenCode Go', protocol: 'openai-chat', baseUrl: 'https://opencode.ai/inference/go/openai/v1', apiKey: '', catalogId: '', serves: ['chat'] }).catch(() => {}) : undefined} addOpenCodeGoDisabled={busy} issues={issues} focusIssue={focusIssue} />
+       <ModelsModule key={editorGeneration} serverManaged standalone={standalone} discoveryProviders={cloudDiscoveryProviders(settings, config, discoveryRevision)} providerNeedsSave={(provider) => cloudProviderDirty(provider, config)} onSaveProvider={saveProvider} onDraftChange={setEditingConnection} onProviderViewChange={setHideModelPresets} renderProviderAccounts={provider => <ProviderAccounts config={config} provider={provider} onSaved={savedAccounts} onReplaceKey={saveProvider} onDraftChange={setAddingKey} onChangeKey={apiKey => store.setState(current => ({ providers: current.providers.map(p => p.id === provider.id ? { ...p, apiKey } : p) }))} />} onAddOpenCodeGo={!config.providers.some(p => p.id === 'opencode-go') ? () => void saveProvider({ id: 'opencode-go', name: 'OpenCode Go', protocol: 'openai-chat', baseUrl: 'https://opencode.ai/inference/go/openai/v1', apiKey: '', catalogId: '', serves: ['chat'] }).catch(() => {}) : undefined} addOpenCodeGoDisabled={busy} issues={issues} focusIssue={focusIssue} />
       </fieldset>
     </ModelSettingsContext.Provider>
-    <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0"><ModelPresets value={presets} settings={settings} providers={cloudModelConfig(settings, config).providers} onChange={value => { setPresets(value); setError(''); setMessage(''); }} /></fieldset>
+     {!hideModelPresets && <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0"><ModelPresets value={presets} settings={settings} providers={cloudModelConfig(settings, config).providers} onChange={value => { setPresets(value); setError(''); setMessage(''); }} /></fieldset>}
     <ModelGatewayStatus />
     {saveActions}
     {onDone && <div className="ob__actions">

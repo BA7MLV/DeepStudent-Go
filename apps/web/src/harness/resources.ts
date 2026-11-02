@@ -4,7 +4,8 @@ import { loadSessionSkillMeta } from '../skills/store';
 import { readHighlightCatalog } from '../materials/highlightContext';
 import { handoutFileOf } from '../materials/handoutFile';
 import { questionBankFileOf } from '../materials/questionBankFile';
-import { systemMaterialPath, listSystemMemory, readSystemDocument } from '../materials/systemFiles';
+import { systemMaterialPath, listSystemMemory, listSystemDirectory, readSystemDocument } from '../materials/systemFiles';
+import { boardPath } from '@wangke/contracts/board';
 import { memoryName } from '@wangke/contracts/system';
 import { parseQuestionBank } from './quiz';
 import type { UnitKind } from '../materials/units';
@@ -23,7 +24,7 @@ export const READ_TOOL: ToolDef = {
     parameters: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: '复制检索或目录返回的资源路径。/courses/{id}/questions.md 是原题题库 Markdown，单课程可用 current，支持 read/grep/edit。/system 列系统目录，全局 Agent 指令为 /system/AGENTS.md，/system/memory 列与 Bot 共用的记忆 Markdown 文件。' },
+        path: { type: 'string', description: '复制检索或目录返回的资源路径。/courses/{id}/questions.md 是原题题库 Markdown，单课程可用 current，支持 read/grep/edit。/system 列系统目录，全局 Agent 指令为 /system/AGENTS.md，/system/memory 列与 Bot 共用的记忆 Markdown 文件。/system/board 是可插拔看板资源，模板、SDK 见 /system/board/README.md，可读写插件及其数据。' },
         raw: { type: 'boolean', description: 'Markdown 原文（含注释），按行读取；offset 从 0 起。根目录 /wrongbook.md 等文件默认读原文。' },
         crop: { type: 'string', enum: ['questions'], description: '仅 PDF images：自动按题号/文字坐标裁题，start/end 一次 1~3 页；返回可直接写入题库 images 的稳定区域引用。不支持可靠定位时回退页面图。' },
         regions: { type: 'array', maxItems: 10, description: '仅 crop=questions：按实际画面修正区域；不是像素。原点是旋转后页面左上角，坐标/宽高为 0~1000 千分比整数。', items: { type: 'object', properties: {
@@ -66,7 +67,7 @@ export const EDIT_TOOL: ToolDef = {
       ...EDIT_MARKDOWN_TOOL.function.parameters,
       properties: {
         ...(EDIT_MARKDOWN_TOOL.function.parameters.properties as Record<string, unknown>),
-        path: { type: 'string', description: 'Markdown 路径；/courses/{id}/questions.md（单课程可用 current）创建为与来源资料同目录的普通题库文件。/system/AGENTS.md 是全局默认提示词，/system/memory 中的文件与 Bot 共用记忆；仅在用户明确要求修改长期偏好或记忆时编辑。' },
+        path: { type: 'string', description: 'Markdown 路径；/courses/{id}/questions.md（单课程可用 current）创建为与来源资料同目录的普通题库文件。/system/AGENTS.md 是全局默认提示词，/system/memory 中的文件与 Bot 共用记忆；仅在用户明确要求修改长期偏好或记忆时编辑。支持 /system/board 下的插件 JSON、HTML、文档，create=true 创建文件；先 read /system/board/README.md 获取固定模板，数据与 Bot、看板共用。' },
         create: { type: 'boolean', description: '创建 Markdown 文件；记忆可用 /system/memory/preferences.md 等具名笔记，或 YYYY-MM-DD.md 日期日记。/system/AGENTS.md 仅允许初始化空指令，不能覆盖已有内容。' }, content: { type: 'string' },
         edits: { type: 'array', items: { type: 'object', properties: {
           old_string: { type: 'string' }, new_string: { type: 'string' },
@@ -91,7 +92,7 @@ type RootResource = 'courses' | 'skills' | 'overview' | 'folders' | 'context';
 type Resource = { [K in RootResource]: { type: K } }[RootResource]
   | { type: 'course'; id: string; leaf?: string }
   | { type: 'markdown'; id: string }
-  | { type: 'system'; leaf?: 'AGENTS.md' | 'mcp.json' | 'memory'; id?: string }
+  | { type: 'system'; leaf?: 'AGENTS.md' | 'mcp.json' | 'memory' | 'board'; id?: string }
   | { type: 'skill'; name: string; reference?: string };
 
 export function parseResource(path: unknown): Resource | undefined {
@@ -101,6 +102,7 @@ export function parseResource(path: unknown): Resource | undefined {
     const p = parts.map(decodeURIComponent);
     if (p.some((s) => !s || s === '.' || s === '..')) return;
     if (p.length === 1 && p[0] === 'system') return { type: 'system' };
+    if (boardPath(path)) return { type: 'system', leaf: 'board' };
     if (p.length === 2 && p[0] === 'system' && p[1] === 'AGENTS.md') return { type: 'system', leaf: 'AGENTS.md' };
     if (p.length === 2 && p[0] === 'system' && p[1] === 'mcp.json') return { type: 'system', leaf: 'mcp.json' };
     if (p.length === 2 && p[0] === 'system' && p[1] === 'memory') return { type: 'system', leaf: 'memory' };
@@ -215,10 +217,14 @@ export function createResourceExecutor(options: ResourceExecutorOptions = {}) {
     if (resource.type === 'system') {
       if (!resource.leaf) {
         if (name !== 'read') return '系统目录只支持 read 列出文件；请对 /system/AGENTS.md 使用 read、grep、edit。';
-        const entries = ['/system/AGENTS.md — 全局 Agent 指令，与「设置 → Agent」共用原文。', '/system/mcp.json — MCP 配置，与设置及主 Bot 共用；不含密钥。学习任务不能修改全局连接，请在主 Bot 中操作。', '/system/memory — Bot 长期记忆目录，与 Bot 共用内容。'];
+        const entries = ['/system/AGENTS.md — 全局 Agent 指令，与「设置 → Agent」共用原文。', '/system/mcp.json — MCP 配置，与设置及主 Bot 共用；不含密钥。学习任务不能修改全局连接，请在主 Bot 中操作。', '/system/memory — Bot 长期记忆目录，与 Bot 共用内容。', '/system/board — 可插拔看板；先 read /system/board/README.md，按模板创建插件，read/grep/edit 与 Bot 共用插件及数据文件。'];
         return `path=/system\n${entries.slice(Number(args.offset ?? 0), Number(args.offset ?? 0) + Number(args.limit ?? 50)).join('\n') || '目录已到末尾。'}`;
       }
       try {
+        if (resource.leaf === 'board' && name === 'read') {
+          try { return JSON.stringify(await listSystemDirectory(String(path), Number(args.offset ?? 0))); }
+          catch { /* A file is read through the revision-aware resource below. */ }
+        }
         if (resource.leaf === 'memory' && !resource.id) {
           if (name === 'edit') return '请指定笔记路径，如 /system/memory/preferences.md 或 /system/memory/YYYY-MM-DD.md，用 create=true、content 创建，再用 edits 修改。';
           const page = await listSystemMemory(Number(args.offset ?? 0), name === 'grep' ? String(args.query) : '');

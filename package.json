@@ -64,6 +64,8 @@
     "test:model-settings:e2e": "tsx scripts/test-cloud-models-e2e.mjs",
     "test:tasks": "npm run build:api && tsx scripts/test-task-executors.mjs",
     "test:background-tasks": "tsx scripts/test-background-tasks.mjs",
+    "test:board": "tsx scripts/test-board-plugins.mjs",
+    "test:board:e2e": "tsx scripts/e2e-board-plugins.mjs",
     "test:background-tasks:e2e": "tsx scripts/e2e-background-tasks.mjs",
     "test:server-widgets": "npm run build:api && tsx scripts/test-server-widgets.mjs",
     "test:server-widgets:e2e": "npm run build:api && npm run build:web && tsx scripts/e2e-server-widgets.mjs",

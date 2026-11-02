@@ -13,6 +13,7 @@ import './material-ink.css';
 interface Change { add: InkStroke[]; remove: InkStroke[] }
 interface InkContextValue {
   toolbarActions?: ReactNode;
+  defaultTool: 'pan' | 'read';
   materialId: string;
   tool: InkTool;
   setTool: (tool: InkTool) => void;
@@ -46,8 +47,8 @@ const InkContext = createContext<InkContextValue | null>(null);
 export const useMaterialInk = () => useContext(InkContext)!;
 const EMPTY: InkStroke[] = [];
 
-export function MaterialInkProvider({ materialId, children, toolbarActions }: { materialId: string; children: ReactNode; toolbarActions?: ReactNode }) {
-  const [tool, setTool] = useState<InkTool>('pan');
+export function MaterialInkProvider({ materialId, children, toolbarActions, defaultTool = 'pan' }: { materialId: string; children: ReactNode; toolbarActions?: ReactNode; defaultTool?: 'pan' | 'read' }) {
+  const [tool, setTool] = useState<InkTool>(defaultTool);
   const [penColor, setPenColor] = useState('#dc2626');
   const [highlightColor, setHighlightColor] = useState('#facc15');
   const [width, setWidth] = useState(3);
@@ -160,7 +161,7 @@ export function MaterialInkProvider({ materialId, children, toolbarActions }: { 
     }
     return bySurface;
   }, [rows]);
-  return <InkContext value={{ materialId, toolbarActions, tool, setTool, highlightColor, highlightOpacity, color: highlighting ? highlightColor : penColor,
+  return <InkContext value={{ materialId, toolbarActions, defaultTool, tool, setTool, highlightColor, highlightOpacity, color: highlighting ? highlightColor : penColor,
     setColor: highlighting ? setHighlightColor : setPenColor, width, setWidth, finger, setFinger,
     nib, setNib, opacity: highlighting ? highlightOpacity : penOpacity,
     setOpacity: highlighting ? setHighlightOpacity : setPenOpacity, smoothing, setSmoothing,
@@ -249,7 +250,7 @@ export function InkToolbar({ disabled = false, onActivate, actions }: { disabled
             setExpanded(!expanded);
             if (expanded) {
               setShowHighlights(false);
-              select('pan');
+              select(ink.defaultTool);
             }
           }}>
           <Sym name="edit" size={18} /><span>批注工具</span><Sym name={expanded ? 'chevron_up' : 'keyboard_arrow_down'} size={16} />
@@ -262,7 +263,7 @@ export function InkToolbar({ disabled = false, onActivate, actions }: { disabled
           <Popover.Content placement="bottom end" className="ink-options">
             <Popover.Dialog aria-label="更多批注选项" className="ink-options__content">
               <ToggleButton isSelected={ink.tool === 'smart'} isDisabled={disabled || !ink.ready} onChange={(selected) => {
-                select(selected ? 'smart' : 'pan');
+                select(selected ? 'smart' : ink.defaultTool);
                 if (selected) setExpanded(true);
               }} data-testid="ink-smart">智能批注：笔写字，手指滚动</ToggleButton>
               {!['pan', 'read', 'erase'].includes(ink.tool) && !disabled && <>
@@ -293,8 +294,8 @@ export function InkToolbar({ disabled = false, onActivate, actions }: { disabled
           <ToggleButton id="pan" aria-label="拖动阅读" data-testid="ink-pan"><Sym name="pan_tool" size={18} /><span>拖动</span></ToggleButton>
           <ToggleButton id="read" aria-label="选字模式" data-testid="ink-read"><Sym name="text_cursor" size={18} /><span>选字</span></ToggleButton>
           <ToggleButton id="pen" aria-label="画笔" data-testid="ink-pen"><Sym name="edit" size={18} /><span>画笔</span></ToggleButton>
-          <ToggleButton id="text-highlight" aria-label="文字荧光笔：拖过文字，一次后返回拖动" data-testid="ink-text-highlight"><Sym name="text_cursor" size={18} /><span>文字荧光笔</span></ToggleButton>
-          <ToggleButton id="highlight" aria-label="自由荧光笔（画一笔后返回拖动）" data-testid="ink-highlight"><Sym name="highlighter" size={18} /><span>自由荧光笔</span></ToggleButton>
+          <ToggleButton id="text-highlight" aria-label={`文字荧光笔：拖过文字，一次后返回${ink.defaultTool === 'read' ? '选字' : '拖动'}`} data-testid="ink-text-highlight"><Sym name="text_cursor" size={18} /><span>文字荧光笔</span></ToggleButton>
+          <ToggleButton id="highlight" aria-label={`自由荧光笔（画一笔后返回${ink.defaultTool === 'read' ? '选字' : '拖动'}）`} data-testid="ink-highlight"><Sym name="highlighter" size={18} /><span>自由荧光笔</span></ToggleButton>
           <ToggleButton id="erase" aria-label="橡皮擦（整笔）" data-testid="ink-erase"><Sym name="eraser" size={18} /></ToggleButton>
         </ToggleButtonGroup>
         <Button isIconOnly variant="tertiary" aria-label="撤销批注" data-testid="ink-undo" isDisabled={!ink.canUndo || disabled} onPress={ink.undo}><Sym name="undo" size={18} /></Button>
@@ -421,7 +422,7 @@ export function InkLayer({ surface, disabled = false }: { surface: string; disab
     const host = layer.current!.parentElement!;
     const index = ink.tool === 'text-highlight' ? indexText(host) : undefined;
     const hit = index ? hitText(index, e.clientX, e.clientY) : null;
-    if (index && !hit) { ink.setTool('pan'); return; }
+    if (index && !hit) { ink.setTool(ink.defaultTool); return; }
     const p = point(e, rect);
     const stroke: InkStroke = {
       id: uuid(), materialId: ink.materialId, surface,
@@ -487,7 +488,7 @@ export function InkLayer({ surface, disabled = false }: { surface: string; disab
     ink.commit(g.tool === 'erase' ? { add: [], remove: saved.filter((s) => g.erased.has(s.id)) } : { add: [g.stroke], remove: [] });
     cancel();
     // 荧光笔是一次性动作：否则用户画完后继续滑页，会不断留下新的荧光笔迹。
-    if (oneShotHighlight) ink.setTool('pan');
+    if (oneShotHighlight) ink.setTool(ink.defaultTool);
   };
   // 智能态覆盖层不拦截鼠标选字；在正文父节点接收笔事件并捕获后续笔画。
   useEffect(() => {
@@ -497,7 +498,7 @@ export function InkLayer({ surface, disabled = false }: { surface: string; disab
       if (gesture.current?.id !== e.pointerId) return;
       const oneShot = gesture.current.tool === 'highlight' || gesture.current.tool === 'text-highlight';
       cancel();
-      if (oneShot) ink.setTool('pan');
+      if (oneShot) ink.setTool(ink.defaultTool);
     };
     host.addEventListener('pointerdown', down);
     host.addEventListener('pointermove', move);

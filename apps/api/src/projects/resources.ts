@@ -90,11 +90,13 @@ export class ResourceFiles {
   /** Lazy, resumable migration: no startup move, no deletion of original data. */
   migrate(owner: string) {
     const root = this.root(owner);
+    const trashed = new Set((this.db.prepare('SELECT project_id FROM resource_trash WHERE owner_id=?').all(owner) as { project_id: string }[]).map(row => row.project_id));
     // Old clients remove courseFiles before marking the learning row deleted.
     // Consume that request once, using the last observed disk revision so a
     // concurrent Bot edit is never silently unlinked. Empty revision is a
     // tombstone, not a request to delete a future file at the same path.
     for (const mapped of this.db.prepare('SELECT * FROM resource_files WHERE owner_id=?').all(owner) as Placement[]) {
+      if (trashed.has(mapped.project_id)) continue;
       const course = this.records.get(owner, 'videos', mapped.course_id);
       const reference = this.records.get(owner, 'courseFiles', mapped.course_id);
       if (course && !course.fileDeleted && reference) continue;
@@ -140,10 +142,14 @@ export class ResourceFiles {
       this.db.prepare('INSERT INTO resource_folders(owner_id,folder_id,project_id,path) VALUES(?,?,?,?)').run(owner, id, location.project_id, location.path);
       visiting.delete(id); return location;
     };
-    for (const id of folders.keys()) locate(id);
+    for (const id of folders.keys()) {
+      const mapped = this.folder(owner, id);
+      if (!mapped || !trashed.has(mapped.project_id)) locate(id);
+    }
     for (const course of this.rows(owner, 'videos')) {
       if (course.fileDeleted) continue;
       let mapped = this.placement(owner, course.id);
+      if (mapped && trashed.has(mapped.project_id)) continue;
       if (mapped) {
         const parent = course.folderId != null ? this.folder(owner, course.folderId) : undefined;
         const targetId = parent?.project_id ?? root;
@@ -187,6 +193,56 @@ export class ResourceFiles {
     const entry = this.projects.files.list(projectId, parent).find(f => f.path === filename);
     if (!entry) throw new ProjectError('project_file_not_found', 404);
     return entry;
+  }
+
+  trashList(owner: string) {
+    return (this.db.prepare('SELECT project_id,deleted_at FROM resource_trash WHERE owner_id=? ORDER BY deleted_at DESC').all(owner) as { project_id: string; deleted_at: string }[])
+      .map(row => ({ ...this.projects.get(owner, row.project_id, true), deletedAt: row.deleted_at }));
+  }
+
+  trash(owner: string, id: string) {
+    const project = this.projects.get(owner, id);
+    if (id === this.root(owner) || this.db.prepare('SELECT 1 FROM bot_workspaces WHERE project_id=?').get(id)) throw new ProjectError('protected_resource_folder', 409);
+    this.projects.assertIdle(id);
+    if (this.db.prepare("SELECT 1 FROM runs r JOIN threads t ON t.id=r.thread_id WHERE t.project_id=? AND r.status IN ('queued','running','waiting_user','paused')").get(id)) throw new ProjectError('project_busy', 409);
+    this.projects.store.transaction(() => {
+      this.db.prepare('INSERT INTO resource_trash(project_id,owner_id,archived,deleted_at) VALUES(?,?,?,?)').run(id, owner, Number(project.archived), new Date().toISOString());
+      this.db.prepare('UPDATE projects SET archived=1 WHERE id=?').run(id);
+    });
+  }
+
+  restoreTrash(owner: string, id: string) {
+    const row = this.db.prepare('SELECT archived FROM resource_trash WHERE owner_id=? AND project_id=?').get(owner, id) as { archived: number } | undefined;
+    if (!row) throw new ProjectError('project_not_found', 404);
+    this.projects.store.transaction(() => {
+      this.db.prepare('UPDATE projects SET archived=0 WHERE id=?').run(id);
+      this.db.prepare('DELETE FROM resource_trash WHERE owner_id=? AND project_id=?').run(owner, id);
+    });
+  }
+
+  deleteTrash(owner: string, id: string) {
+    if (!this.db.prepare('SELECT 1 FROM resource_trash WHERE owner_id=? AND project_id=?').get(owner, id)) throw new ProjectError('project_not_found', 404);
+    this.projects.assertIdle(id);
+    if (this.db.prepare("SELECT 1 FROM cloud_tasks c JOIN runs r ON r.id=c.parent_run_id JOIN threads t ON t.id=r.thread_id WHERE t.project_id=? AND c.status IN ('queued','running','waiting_user')").get(id)) throw new ProjectError('project_busy', 409);
+    const courses = new Set((this.db.prepare('SELECT course_id FROM resource_files WHERE owner_id=? AND project_id=?').all(owner, id) as { course_id: string }[]).map(row => row.course_id));
+    this.projects.files.removeWorkspace(id, () => this.projects.store.transaction(() => {
+      for (const table of learningTables) for (const row of this.rows(owner, table)) {
+        if (courses.has(row.id) || courses.has(row.videoId) || courses.has(row.materialId)) this.put(owner, table, table === 'covers' ? row.videoId : row.id, null);
+      }
+      for (const row of this.db.prepare('SELECT folder_id FROM resource_folders WHERE owner_id=? AND project_id=?').all(owner, id) as { folder_id: number }[]) this.put(owner, 'folders', row.folder_id, null);
+      for (const row of this.db.prepare('SELECT id FROM threads WHERE project_id=? AND owner_id=?').all(id, owner) as { id: string }[]) {
+        const thread = row.id;
+        this.db.prepare('DELETE FROM approvals WHERE thread_id=?').run(thread);
+        this.db.prepare('DELETE FROM bot_operations WHERE step_id IN (SELECT id FROM run_steps WHERE run_id IN (SELECT id FROM runs WHERE thread_id=?))').run(thread);
+        this.db.prepare('UPDATE bot_requests SET run_id=NULL,step_id=NULL WHERE run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread);
+        this.db.prepare('DELETE FROM bot_artifacts WHERE run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread);
+        this.db.prepare('DELETE FROM bot_summaries WHERE run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread);
+        this.db.prepare('DELETE FROM cloud_tasks WHERE parent_run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread);
+        this.db.prepare('DELETE FROM threads WHERE id=?').run(thread);
+      }
+      for (const table of ['resource_files', 'resource_folders', 'resource_attachments', 'resource_trash']) this.db.prepare(`DELETE FROM ${table} WHERE owner_id=? AND project_id=?`).run(owner, id);
+      this.db.prepare('DELETE FROM projects WHERE owner_id=? AND id=?').run(owner, id);
+    }));
   }
   private invalidate(owner: string, id: string) {
     for (const block of this.rows(owner, 'materialBlocks').filter(b => b.materialId === id)) this.put(owner, 'materialBlocks', block.id, null);

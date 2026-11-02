@@ -7,6 +7,7 @@ import ReaderProgress from './ReaderProgress';
 import DocSkeleton from './DocSkeleton';
 import { InkLayer, InkToolbar } from './MaterialInk';
 import type { MaterialReaderHandle } from '../materials/types';
+import { toReadingUnit, trackReadingUnit } from '../materials/readingUnit';
 import '../materials/material-reader.css';
 
 /**
@@ -43,7 +44,7 @@ export default function DocxReader({ blob, materialId, initialUnit, handleRef, o
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
-  const [current, setCurrent] = useState(1);
+  const [current, setCurrent] = useState(() => toReadingUnit(initialUnit));
   const [pages, setPages] = useState<HTMLElement[]>([]);
   // null 表示自动适配；手动缩放后不被窗口尺寸变化覆盖。
   const [zoom, setZoom] = useState<number | null>(null);
@@ -178,22 +179,11 @@ export default function DocxReader({ blob, materialId, initialUnit, handleRef, o
     for (const page of pages) page.style.zoom = String(scale);
   }, [pages, scale]);
 
-  // ── 当前位置跟踪（顶部窄带命中法，与 PdfReader 一致） ────────────────────
+  // ── 当前位置跟踪（根据实际滚动位置，兼容窄高 / 宽矮面板） ────────────────
   useEffect(() => {
     const root = scrollRef.current;
     if (!root || !ready || unitEls.current.size === 0) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (!e.isIntersecting) continue;
-          const n = Number((e.target as HTMLElement).dataset.unit);
-          if (n > 0) setCurrent(n);
-        }
-      },
-      { root, rootMargin: '-8px 0px -88% 0px' },
-    );
-    for (const el of unitEls.current.values()) io.observe(el);
-    return () => io.disconnect();
+    return trackReadingUnit(root, () => unitEls.current, setCurrent);
   }, [ready]);
 
   useEffect(() => {
@@ -211,9 +201,6 @@ export default function DocxReader({ blob, materialId, initialUnit, handleRef, o
   return (
     <div className="mr-root" data-testid="material-reader">
       <div className="mr-bar">
-        <span className="mr-bar__pos" data-testid="reader-page-indicator">
-          {ready ? `第 ${current} / ${total} 段` : <span className="skel-bar reader-pos-skel" aria-hidden="true" />}
-        </span>
         <div className="mr-bar__spacer" />
         <Button isIconOnly variant="tertiary" aria-label="缩小" data-testid="reader-zoom-out"
           isDisabled={!ready || !!error} onPress={() => setZoom(Math.max(0.1, scale - 0.1))}>

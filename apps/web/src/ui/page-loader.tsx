@@ -8,13 +8,13 @@ const EYE_PATH = 'M735.686 358.247C735.686 394.974 705.673 424.747 668.65 424.74
 const PUPIL_PATH = 'M726.807 358.359C726.807 372.386 715.344 383.757 701.203 383.757C687.063 383.757 675.6 372.386 675.6 358.359C675.6 344.332 687.063 332.961 701.203 332.961C715.344 332.961 726.807 344.332 726.807 358.359Z';
 
 /** SVG adaptation of transitions.dev shimmer: a fixed logo mask over two monochrome layers. */
-export function PageLoader({ label = '正在加载页面…' }: { label?: string }) {
+export function PageLoader({ label = '正在加载页面…', contained = false }: { label?: string; contained?: boolean }) {
   const id = useId();
   const gradientId = `page-loader-gradient-${id}`;
   const maskId = `page-loader-mask-${id}`;
 
   return (
-    <div className="page-loader" role="status" aria-label={label} aria-busy="true">
+    <div className="page-loader" data-contained={contained || undefined} role="status" aria-label={label} aria-busy="true">
       <svg className="page-loader__logo" viewBox="182 192 650 650" aria-hidden="true" focusable="false">
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">

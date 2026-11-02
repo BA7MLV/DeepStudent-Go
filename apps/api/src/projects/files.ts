@@ -195,4 +195,17 @@ export class ProjectFiles {
       if (stat.isDirectory()) fs.rmdirSync(file); else fs.unlinkSync(file);
     });
   }
+
+  removeWorkspace(id: string, commit: () => void) {
+    this.checkId(id);
+    const source = path.join(this.root, id);
+    const staging = path.join(path.dirname(this.root), '.deleted-projects');
+    fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
+    const target = path.join(staging, crypto.randomUUID());
+    fs.renameSync(source, target);
+    try { commit(); }
+    catch (error) { fs.renameSync(target, source); throw error; }
+    // Never follow symlinks inside the removed tree.
+    fs.rmSync(target, { recursive: true, force: true });
+  }
 }

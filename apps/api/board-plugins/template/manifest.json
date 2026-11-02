@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "id": "my-plugin",
+  "name": "我的插件",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "enabled": false,
+  "order": 50,
+  "height": 260,
+  "capabilities": ["state"]
+}

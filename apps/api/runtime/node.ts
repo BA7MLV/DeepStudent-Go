@@ -23,6 +23,7 @@ import { Document, Paragraph, TextRun, HeadingLevel, Packer } from 'docx';
 import { receiveFile } from '../src/cloud/files';
 import { Readable } from 'node:stream';
 import { SHOW_WIDGET_TOOL, SERVER_WIDGET_RULE } from '@wangke/study-core/widget-tool';
+import { BOARD_TOOL, executeBoardTool } from './board.js';
 import { readPartialWidgetArguments, widgetReference, type WidgetPayload } from '@wangke/study-core/widgets';
 import { executeServerWidget } from './widgets';
 import { parseWebSearchResult, type WebSearchResult } from '@wangke/contracts/web-search';
@@ -281,7 +282,7 @@ async function runServerAgent(
   const builtin = executeTool;
   executeTool = async (name, args) => webNames.has(name) && context.webSearch
     ? JSON.stringify(await context.webSearch.call(context.owner, name, args, context.signal, webPermitted)) : builtin(name, args);
-  tools = stableTools([...tools, ...webTools, SHOW_WIDGET_TOOL]);
+  tools = stableTools([...tools, ...webTools, SHOW_WIDGET_TOOL, ...(['chat', 'qa'].includes(context.task.kind) ? [BOARD_TOOL] : [])]);
   const requests: ModelRequestRecord[] = [];
   const cacheKey = `study:${context.owner}:${context.task.input.sessionId}`;
   const onRequest = (record: ModelRequestRecord) => { requests.push(record); };
@@ -421,6 +422,7 @@ async function runServerAgent(
               // and remount an already opened preview when the model echoes ref.
               deliveredContent += `${widgetReference(payload.ref!)}\n\n`;
             })
+            : call.function.name === 'board' && ['chat', 'qa'].includes(context.task.kind) ? executeBoardTool(context, args)
             : await executeTool(call.function.name, args);
           trace.status = 'done';
         } catch (error) {

@@ -607,7 +607,7 @@ await check('点 [第5段] 引用 → Word 阅读器滚动到第 5 段', async (
   await link.waitFor({ timeout: 10000 });
   await link.click();
   await page.waitForFunction(
-    () => document.querySelector('[data-testid="reader-page-indicator"]')?.textContent.trim() === '第 5 / 10 段',
+    () => Number(document.querySelector('[data-testid="reader-progress"]')?.getAttribute('data-ratio')) === 0.5,
     { timeout: 10000 },
   );
 });
@@ -929,7 +929,7 @@ await check('切回原样：位置回到第 3 段，视图选择改回 raw', asy
   // 位置必须**原样带过来**。原样视图的 iframe 装得下整份 fixture（约 250px 内容 / 704px 视口，
   // 根本没有滚动条），若在进入视图时按「视口顶部所在单元」重算，这里必然读到第 1 段。
   // 判据与取舍理由见 HtmlReader 里那段「落位即位置」注释。
-  assert.equal(saved.indicator, '第 3 / 5 段', `切回原样后指示器=${saved.indicator}（应保持第 3 段）`);
+  assert.equal(saved.indicator, '', '不再显示顶部段号');
   assert.equal(saved.htmlView, 'raw', `入库的 htmlView=${saved.htmlView}（切回原样后应写回 raw）`);
   assert.equal(saved.lastUnit, 3, `切回原样后 lastUnit=${saved.lastUnit}（应保持 3）`);
 });
@@ -942,17 +942,13 @@ await check('重开：落在原样视图且回到第 3 段（「选择会记住�
   await page.click(`[data-video-id="${htmlId}"] [data-testid="btn-play"]`);
   await page.waitForSelector('[data-testid="html-view"]', { timeout: 20000 });
   await page.waitForSelector('[data-testid="html-frame"]', { timeout: 20000 });
-  // 「等稳定 → 精确断言」而不是直接 waitForFunction 等那个精确值：
-  // 后者超时只会说「Timeout 15000ms exceeded」，把实况值（第几段）埋在诊断里；
-  // 前者失败时 assert 会把读到的值写进消息，一眼能看出是回到第 1 段还是根本没渲染。
-  // 位置本身是**立即**就对的（`current` 初值取库里的 lastUnit），所以这里没有等待窗口。
+   // 顶部段号已移除；进度仍与断点续读使用同一个位置。
   await page.waitForFunction(
-    () => /^第 \d+ \/ \d+ 段$/.test(document.querySelector('[data-testid="reader-page-indicator"]')?.textContent.trim() ?? ''),
+    () => Number(document.querySelector('[data-testid="reader-progress"]')?.getAttribute('data-ratio')) === 3 / 5,
     null,
     { timeout: 20000 },
   );
-  const ind = (await page.textContent('[data-testid="reader-page-indicator"]')).trim();
-  assert.equal(ind, '第 3 / 5 段', '重开后应回到第 3 段（断点续读）');
+  assert.equal(await page.getByTestId('reader-page-indicator').count(), 0, '不再显示顶部段号');
 });
 
 await check('「本次离线」后，远程资源不再加载', async () => {
@@ -1013,10 +1009,7 @@ await check('长文档（内容高于容器）：切视图后两个视图都落�
   await page.click(`[data-video-id="${longId}"] [data-testid="btn-play"]`);
   await page.waitForSelector('.mr-html .mr-html__block', { timeout: 20000 });
 
-  const total = await page.evaluate(() => {
-    const m = /\/ (\d+) 段/.exec(document.querySelector('[data-testid="reader-page-indicator"]')?.textContent ?? '');
-    return m ? Number(m[1]) : 0;
-  });
+  const total = await page.locator('.mr-html__block').count();
   assert.ok(total > MID, `长文档至少要解析出 ${MID + 1} 段，实得 ${total}`);
 
   const readBlocks = () =>
@@ -1033,7 +1026,7 @@ await check('长文档（内容高于容器）：切视图后两个视图都落�
 
   // ⓪ 开局：断点续读把分段容器落在第 3 段（等落位 effect 跑完再读，读到的就是实况）
   const open = await until(readBlocks, (s) => s.scrollTop > 0);
-  assert.equal(open.indicator, `第 ${MID} / ${total} 段`, `打开后指示器=${open.indicator}`);
+   assert.equal(open.indicator, '', '不再显示顶部段号');
   assert.ok(open.scrollTop > 0, `打开后分段容器停在顶部（scrollTop=${open.scrollTop}）—— 断点续读没生效`);
   assert.ok(
     open.top !== null && Math.abs(open.top - open.rootTop) <= 16,
@@ -1061,7 +1054,7 @@ await check('长文档（内容高于容器）：切视图后两个视图都落�
   }, MID);
   assert.ok(raw.top !== null, `原样视图里找不到第 ${MID} 段`);
   assert.ok(raw.top <= 72, `切到原样后第 ${MID} 段不在视口顶部（top=${raw.top}）`);
-  assert.equal(raw.indicator, `第 ${MID} / ${total} 段`, `切到原样后指示器=${raw.indicator}`);
+   assert.equal(raw.indicator, '', '不再显示顶部段号');
 
   // ② 原样 → 分段：容器重挂、滚动位置归零，必须**重新落位**。
   //    落位原来只做一次，切回来就不再落位。实测过它的后果 —— 把容器的元素类型从 `div`
@@ -1075,7 +1068,7 @@ await check('长文档（内容高于容器）：切视图后两个视图都落�
   await page.click('[data-testid="html-view"] mdui-segmented-button[value="blocks"]');
   await page.waitForSelector('.mr-html .mr-html__block', { timeout: 20000 });
   const back = await until(readBlocks, (s) => s.scrollTop > 0);
-  assert.equal(back.indicator, `第 ${MID} / ${total} 段`, `切回分段后指示器=${back.indicator}`);
+   assert.equal(back.indicator, '', '不再显示顶部段号');
   assert.ok(back.scrollTop > 0, `切回分段后容器停在顶部（scrollTop=${back.scrollTop}）—— 位置丢了`);
   assert.ok(
     back.top !== null && Math.abs(back.top - back.rootTop) <= 16,

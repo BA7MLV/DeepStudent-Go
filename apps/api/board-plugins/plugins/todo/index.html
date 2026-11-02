@@ -1,0 +1,36 @@
+<form class="row"><input id="title" maxlength="300" required><button id="add" type="submit"></button></form>
+<p id="error" class="error" role="alert"></p><div id="items"></div>
+<script>
+const title = document.getElementById('title'), error = document.getElementById('error'), items = document.getElementById('items');
+title.placeholder = board.t('添加一件待办…', 'Add a task…'); title.setAttribute('aria-label', board.t('待办内容', 'Task title'));
+document.getElementById('add').textContent = board.t('添加', 'Add');
+let snapshot, busy = false;
+async function load() {
+  if (busy) return;
+  try { snapshot = await board.read(); render(); } catch (e) { error.textContent = e.message; }
+}
+function render() {
+  items.replaceChildren();
+  if (!snapshot.data.items.length) { const p = document.createElement('p'); p.className = 'muted'; p.textContent = board.t('暂无待办，开始记录吧。', 'Your list is clear. Add something to do.'); items.append(p); }
+  for (const item of snapshot.data.items) {
+    const label = document.createElement('label'); label.className = 'row item';
+    const check = document.createElement('input'); check.type = 'checkbox'; check.checked = item.done;
+    const span = document.createElement('span'); span.textContent = item.title; if (item.done) span.style.textDecoration = 'line-through';
+    check.onchange = () => save(snapshot.data.items.map(row => row.id === item.id ? {...row, done: check.checked} : row));
+    label.append(check, span); items.append(label);
+  }
+}
+async function save(rows) {
+  if (busy) return;
+  busy = true; document.getElementById('add').disabled = true;
+  try { snapshot = await board.write({...snapshot.data, items: rows}, snapshot); error.textContent = ''; render(); return true; }
+  catch (e) { error.textContent = e.message; }
+  finally { busy = false; document.getElementById('add').disabled = false; await load(); }
+}
+document.querySelector('form').onsubmit = async event => {
+  event.preventDefault(); if (!snapshot || !title.value.trim() || busy) return;
+  if (await save([...snapshot.data.items, {id: crypto.randomUUID(), title: title.value.trim(), done: false}])) title.value = '';
+};
+load(); setInterval(load, 5000);
+</script>
+<style>.item{padding:12px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}.item span{flex:1}.item input{flex:none;width:18px}</style>

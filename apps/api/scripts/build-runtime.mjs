@@ -1,8 +1,10 @@
 import { build } from 'esbuild';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+fs.cpSync(path.join(root, 'board-plugins'), path.join(root, 'dist/apps/api/board-plugins'), { recursive: true });
 const result = await build({
   absWorkingDir: root,
   entryPoints: ['runtime/node.ts'],

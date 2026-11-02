@@ -62,10 +62,11 @@ export class ProjectRepository {
   workspaceId(thread: ProjectThread) { return thread.project_id ?? (thread.agent_id ? this.botWorkspace(thread.owner_id) : undefined); }
 
   list(owner: string): ProjectDto[] {
-    return (this.store.db.prepare('SELECT * FROM projects WHERE owner_id=? ORDER BY updated_at DESC,id').all(owner) as ProjectRow[]).map(dto);
+    return (this.store.db.prepare('SELECT * FROM projects WHERE owner_id=? AND id NOT IN (SELECT project_id FROM resource_trash) ORDER BY updated_at DESC,id').all(owner) as ProjectRow[]).map(dto);
   }
 
-  get(owner: string, id: string): ProjectDetailDto {
+  get(owner: string, id: string, includeTrash = false): ProjectDetailDto {
+    if (!includeTrash && this.store.db.prepare('SELECT 1 FROM resource_trash WHERE project_id=? AND owner_id=?').get(id, owner)) throw new ProjectError('project_trashed', 409);
     const row = this.store.db.prepare('SELECT * FROM projects WHERE id=? AND owner_id=?').get(id, owner) as ProjectRow | undefined;
     if (!row) throw new ProjectError('project_not_found', 404);
     const grants = this.store.db.prepare('SELECT agent_id AS agentId,role FROM project_agents WHERE project_id=? ORDER BY agent_id').all(id) as ProjectGrantDto[];

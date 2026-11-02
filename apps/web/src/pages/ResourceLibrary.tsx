@@ -16,10 +16,12 @@ import { SkeletonReveal, useSkeletonGate } from '../ui/skeleton';
 import { overflowTitleProps } from '../ui/overflowTitle';
 import { projectError } from '../projects/errors';
 import ProjectSettings from '../projects/ProjectSettings';
+import ResourceTrash from '../projects/ResourceTrash';
 import ImagePreview from '../components/ImagePreview';
 import { formatSize } from '../utils/format';
 import { probeDuration } from '../utils/mediaDuration';
 import { useIsMobile } from '../utils/useMobile';
+import { useMarqueeSelection } from '../utils/useMarqueeSelection';
 import { canDropResourceInto, createFolderSpringLoader, RESOURCE_DRAG_TYPE } from '../utils/resourceDrag';
 import './library.css';
 import '../projects/projects.css';
@@ -29,6 +31,7 @@ const join = (parent: string, name: string) => parent ? `${parent}/${name}` : na
 const keyOf = (entry: ResourceEntry) => `${entry.projectId}:${entry.path}:${entry.courseId ?? ''}`;
 const isImage = (name: string) => /\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(name);
 const validName = (value: string) => !value.trim() || value === '.' || value === '..' || /[\\/\u0000-\u001f\u007f]/.test(value) || new TextEncoder().encode(value).length > 255;
+type ResourceDragPayload = { entries: ResourceEntry[] };
 
 function ResourceSkeleton({ view, count }: { view: 'icons' | 'list'; count: number }) {
   return <ul className="resource-grid resource-skeleton" data-view={view} data-testid="resource-skeleton" aria-hidden="true">
@@ -57,32 +60,42 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const showSkeleton = useSkeletonGate(loading);
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
-  const [archived, setArchived] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [view, setView] = useState<'icons' | 'list'>('icons');
   const [settings, setSettings] = useState<{ project: ProjectDetailDto; agents: AgentProfileDto[] } | null>(null);
   const [editor, setEditor] = useState<{ projectId: string; path: string; text: string; revision: string | null } | null>(null);
   const [image, setImage] = useState<ResourceEntry | null>(null);
-  const [draggedEntry, setDraggedEntry] = useState<ResourceEntry | null>(null);
+  const [draggedEntries, setDraggedEntries] = useState<ResourceEntry[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [springLoader] = useState(createFolderSpringLoader);
-  const dragSession = useRef<{ entry: ResourceEntry; search: string; query: string; opened: boolean } | null>(null);
+  const [selection, setSelection] = useState<Set<string>>(new Set());
+  const marquee = useMarqueeSelection(selection, setSelection, { itemSelector: '.resource-tile' });
+  const dragSession = useRef<{ entries: ResourceEntry[]; search: string; query: string; opened: boolean } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const locationKey = `${projectId ?? ''}:${directory}`;
   const loadedLocation = useRef('');
   const refresh = () => setRevision(n => n + 1);
+  useEffect(() => { setSelection(new Set()); }, [locationKey, query]);
+  useEffect(() => {
+    const available = new Set((data?.entries ?? []).map(keyOf));
+    setSelection(current => {
+      const next = new Set([...current].filter(key => available.has(key)));
+      return next.size === current.size && [...next].every(key => current.has(key)) ? current : next;
+    });
+  }, [data]);
   useEffect(() => {
     if (projectId) useLibraryNavigation.getState().setFolderHistory(h => h.entries[h.index]?.startsWith('system') ? { entries: [null], index: 0 } : h);
   }, [projectId]);
   useEffect(() => {
     let ignore = false;
     if (loadedLocation.current !== locationKey) { setLoading(true); setData(null); }
-    const params = new URLSearchParams({ path: directory, archived: String(archived) });
+    const params = new URLSearchParams({ path: directory, archived: 'true' });
     if (projectId) params.set('projectId', projectId);
     request<ResourceDirectory>(`/resources?${params}`).then(result => {
       if (!ignore) { setData(result); setError(''); loadedLocation.current = locationKey; }
     }).catch(error => { if (!ignore) setError(projectError(error)); }).finally(() => { if (!ignore) setLoading(false); });
     return () => { ignore = true; };
-  }, [projectId, directory, archived, revision, locationKey]);
+  }, [projectId, directory, revision, locationKey]);
   useEffect(() => {
     const update = () => { if (!document.hidden) setRevision(n => n + 1); };
     const timer = setInterval(update, 5000);
@@ -101,7 +114,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     springLoader.cancel();
     setDropTarget(null);
     dragSession.current = null;
-    setDraggedEntry(null);
+    setDraggedEntries([]);
     if (session.opened && !committed) {
       setQuery(session.query);
       setSearch(new URLSearchParams(session.search), { replace: true });
@@ -196,7 +209,10 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   };
   const remove = async (entry: ResourceEntry) => {
     if (entry.scope) {
-      await perform(() => serverClient.updateProject(entry.projectId, { archived: !entry.scope!.archived }));
+      await perform(async () => {
+        await request(`/resources/folders/${encodeURIComponent(entry.projectId)}/trash`, { method: 'POST' });
+        toast.success(t('movedToTrash'));
+      });
       return;
     }
     if (!await confirmDialog({ headline: t('deleteConfirm', { name: entry.name }), description: t('removeHint'), confirmText: t('delete'), cancelText: t('cancel'), danger: true })) return;
@@ -209,10 +225,15 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     springLoader.cancel();
     if (event.dataTransfer.files.length) { if (id === (projectId ?? data?.rootId) && path === directory) void uploadFiles([...event.dataTransfer.files]); return; }
     try {
-      const entry = JSON.parse(event.dataTransfer.getData(RESOURCE_DRAG_TYPE)) as ResourceEntry;
-      if (!canDropResourceInto(entry, id, path)) { finishResourceDrag(); return; }
+      const raw = JSON.parse(event.dataTransfer.getData(RESOURCE_DRAG_TYPE)) as ResourceEntry | ResourceDragPayload;
+      const entries = Array.isArray(raw) ? raw : 'entries' in raw ? raw.entries : [raw];
+      if (!entries.length || entries.some(entry => !canDropResourceInto(entry, id, path))) { finishResourceDrag(); return; }
       finishResourceDrag(true);
-      void perform(() => request('/resources/move', { method: 'POST', body: JSON.stringify({ projectId: entry.projectId, path: entry.path, targetProjectId: id, target: join(path, entry.name), revision: entry.revision }) }));
+      void perform(async () => {
+        for (const entry of entries) {
+          await request('/resources/move', { method: 'POST', body: JSON.stringify({ projectId: entry.projectId, path: entry.path, targetProjectId: id, target: join(path, entry.name), revision: entry.revision }) });
+        }
+      });
     } catch { /* Unrelated drag payload. */ }
   };
   const entries = (data?.entries ?? []).filter(entry => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -225,7 +246,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     if (entry.kind !== 'directory' || !event.dataTransfer.types.includes(RESOURCE_DRAG_TYPE)) return;
     event.preventDefault(); event.stopPropagation();
     const session = dragSession.current;
-    if (!session || busy || loading || readOnly || entry.scope?.archived || !canDropResourceInto(session.entry, entry.projectId, entry.path)) {
+    if (!session || busy || loading || readOnly || entry.scope?.archived || session.entries.some(source => !canDropResourceInto(source, entry.projectId, entry.path))) {
       springLoader.cancel(); setDropTarget(null); event.dataTransfer.dropEffect = 'none'; return;
     }
     event.dataTransfer.dropEffect = 'move';
@@ -244,9 +265,10 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   // Keep the actual native drag source mounted across directory loads. Removing it
   // ends the browser's drag session before the user can descend to another level.
   const visibleEntries = loading || showSkeleton ? [] : entries;
-  const retainedKey = draggedEntry && !visibleEntries.some(entry => keyOf(entry) === keyOf(draggedEntry)) ? keyOf(draggedEntry) : null;
-  const renderedEntries = retainedKey && draggedEntry ? [...visibleEntries, draggedEntry] : visibleEntries;
+  const retainedKeys = new Set(draggedEntries.filter(entry => !visibleEntries.some(visible => keyOf(visible) === keyOf(entry))).map(keyOf));
+  const renderedEntries = [...visibleEntries, ...draggedEntries.filter(entry => retainedKeys.has(keyOf(entry)))];
   return <PageShell title={t('resources')} fill rootClassName="page-library">
+    {trashOpen && <ResourceTrash onClose={() => setTrashOpen(false)} onChange={refresh} />}
     <ImagePreview isOpen={Boolean(image)} onOpenChange={open => { if (!open) setImage(null); }} title={image?.name ?? ''} content={image ? { kind: 'image', src: serverClient.projectDownloadUrl(image.projectId, image.path) } : undefined} onDownload={image ? () => download(image) : undefined} downloadLabel={t('download')} />
     <section className="finder-window resource-window" data-mobile={mobile || undefined} aria-label={t('resources')}
       onDragOver={e => { springLoader.cancel(); setDropTarget(null); if (!busy && !loading && !readOnly) e.preventDefault(); }}
@@ -256,6 +278,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
         <div className="finder-navigation"><Button isIconOnly variant="ghost" aria-label={t('back')} isDisabled={!projectId} onPress={() => openDirectory(directory ? projectId : undefined, breadcrumbs.slice(0, -1).join('/'))}><Sym name="chevron_left" /></Button></div>
         <h2 className="finder-title">{breadcrumbs.at(-1) ?? data?.project?.name ?? t('resources')}</h2>
         <div className="finder-tools">
+          <Button isIconOnly variant="ghost" aria-label={t('trash')} onPress={() => setTrashOpen(true)}><Sym name="delete" /></Button>
           <Button isIconOnly variant="ghost" aria-label={t('changeView')} onPress={() => setView(v => v === 'icons' ? 'list' : 'icons')}><Sym name={view === 'icons' ? 'list' : 'grid_view'} /></Button>
           <Button isIconOnly variant="ghost" data-testid="btn-new-folder" aria-label={t('newFolder')} isDisabled={busy || readOnly || loading} onPress={() => void createFolder()}><Sym name="create_new_folder" /></Button>
           <Button isIconOnly variant="ghost" aria-label={t('upload')} isDisabled={busy || readOnly || loading} onPress={() => input.current?.click()}><Sym name="upload" /></Button>
@@ -266,7 +289,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
             ...(projectId ? [
               { key: 'chat', label: t('botChat'), icon: <Sym name="chat" />, onAction: () => navigate(`/library/folders/${projectId}/chat`) },
               { key: 'settings', label: t('settings'), icon: <Sym name="tune" />, onAction: () => void editSettings(projectId) },
-            ] : [{ key: 'archived', label: t(archived ? 'hideArchived' : 'showArchived'), icon: <Sym name="archive" />, onAction: () => setArchived(v => !v) }]),
+            ] : []),
           ]} />
         </div>
         <SearchField className="finder-search" aria-label={t('searchFolder')} value={query} onChange={setQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder={t('searchFolder')} /><SearchField.ClearButton /></SearchField.Group></SearchField>
@@ -274,18 +297,27 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
       </header>
       {error && <div role="alert" className="project-error resource-notice">{error}<Button size="sm" onPress={refresh}>{t('retry')}</Button></div>}
       {readOnly && <p className="resource-notice">{t('readOnly')}</p>}
-      <div className="finder-canvas" data-testid="resource-list" aria-busy={loading || busy}>
-        <SkeletonReveal show={showSkeleton && !draggedEntry} skeleton={<ResourceSkeleton view={view} count={mobile ? 3 : 6} />}>
+      <div className="finder-canvas" data-testid="resource-list" aria-busy={loading || busy}
+        onPointerDown={mobile ? undefined : marquee.onPointerDown}
+        onClickCapture={marquee.onClickCapture}
+        onClick={event => { if (event.target === event.currentTarget) setSelection(new Set()); }}>
+        <SkeletonReveal show={showSkeleton && !draggedEntries.length} skeleton={<ResourceSkeleton view={view} count={mobile ? 3 : 6} />}>
         <>
           <ul className="resource-grid" data-view={view}>
             {!loading && !showSkeleton && showSystemFolder && <li className="resource-tile" data-kind="directory" data-testid="system-folder"><button className="resource-open" title="/system" disabled={busy} onClick={() => useLibraryNavigation.getState().setFolderHistory(h => ({ entries: [...h.entries.slice(0, h.index + 1), 'system'], index: h.index + 1 }))}><FolderIcon color="gray" /><span>system</span><small>{t('systemFiles')}</small></button></li>}
             {renderedEntries.map(entry => <li key={keyOf(entry)} className="resource-tile" data-kind={entry.kind} data-testid="resource-entry"
-              data-drag-retained={retainedKey === keyOf(entry) || undefined} aria-hidden={retainedKey === keyOf(entry) || undefined}
+              data-selection-key={keyOf(entry)} data-selected={selection.has(keyOf(entry)) || undefined}
+              data-drag-retained={retainedKeys.has(keyOf(entry)) || undefined} aria-hidden={retainedKeys.has(keyOf(entry)) || undefined}
               data-drop-target={dropTarget === keyOf(entry) || undefined}
               draggable={!entry.scope && !entry.missing && !busy && !readOnly} onDragStart={e => {
-                dragSession.current = { entry, search: search.toString(), query, opened: false };
-                setDraggedEntry(entry);
-                e.dataTransfer.setData(RESOURCE_DRAG_TYPE, JSON.stringify(entry)); e.dataTransfer.effectAllowed = 'move';
+                const dragEntries = selection.has(keyOf(entry))
+                  ? renderedEntries.filter(candidate => selection.has(keyOf(candidate)) && !candidate.scope && !candidate.missing)
+                  : [entry];
+                const entries = dragEntries.length ? dragEntries : [entry];
+                dragSession.current = { entries, search: search.toString(), query, opened: false };
+                setDraggedEntries(entries);
+                if (!selection.has(keyOf(entry))) setSelection(new Set([keyOf(entry)]));
+                e.dataTransfer.setData(RESOURCE_DRAG_TYPE, JSON.stringify({ entries } satisfies ResourceDragPayload)); e.dataTransfer.effectAllowed = 'move';
               }}
               onDragEnter={e => dragOverFolder(e, entry)} onDragOver={e => dragOverFolder(e, entry)}
               onDragLeave={e => {
@@ -300,7 +332,14 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
                 if (!busy && !loading && !readOnly && !entry.scope?.archived) moveInto(e, entry.projectId, entry.path);
                 else finishResourceDrag();
               }}>
-              <button className="resource-open" disabled={busy} onClick={() => void open(entry)} title={entry.scope?.workspacePath ?? entry.path}>
+              <button className="resource-open" disabled={busy} onClick={event => {
+                if (event.ctrlKey || event.metaKey) {
+                  event.preventDefault();
+                  setSelection(current => { const next = new Set(current); const key = keyOf(entry); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+                  return;
+                }
+                void open(entry);
+              }} title={entry.scope?.workspacePath ?? entry.path}>
                 {entry.kind === 'directory' ? <FolderIcon color={entry.color} /> : <ResourceFileIcon entry={entry} />}
                 <span {...overflowTitleProps}>{entry.name}</span><small>{entry.scope?.archived ? t('archived') : entry.kind === 'directory' ? t('folder') : entry.missing ? t('learningRecord') : formatSize(entry.size)}</small>
               </button>
@@ -310,7 +349,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
                   { key: 'chat', label: t('botChat'), icon: <Sym name="chat" />, onAction: () => navigate(`/library/folders/${entry.projectId}/chat`) },
                   { key: 'settings', label: t('settings'), icon: <Sym name="tune" />, onAction: () => void editSettings(entry.projectId) },
                 ] : entry.kind === 'file' && !entry.missing ? [{ key: 'download', label: t('download'), icon: <Sym name="download" />, onAction: () => download(entry) }] : []),
-                ...(!entry.missing ? [{ key: 'remove', label: entry.scope ? t(entry.scope.archived ? 'restore' : 'archive') : t('delete'), icon: <Sym name={entry.scope ? 'archive' : 'delete'} />, danger: !entry.scope, disabled: busy || readOnly, onAction: () => void remove(entry) }] : []),
+                ...(!entry.missing ? [{ key: 'remove', label: t(entry.scope ? 'moveToTrash' : 'delete'), icon: <Sym name="delete" />, danger: true, disabled: busy || readOnly, onAction: () => void remove(entry) }] : []),
               ]}>
                 {entry.kind === 'directory' && <FolderColorMenu color={entry.color} disabled={busy || readOnly || !!entry.scope?.archived}
                   onChange={color => void perform(() => request('/resources/folders/color', { method: 'PATCH', body: JSON.stringify({ projectId: entry.projectId, path: entry.path, color }) }))} />}
@@ -324,7 +363,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
       <footer className="finder-footer"><nav className="finder-path" aria-label={t('workspace')}><Button variant="ghost" size="sm" onPress={() => openDirectory()}>{t('resources')}</Button>
         {projectId && <><Sym name="chevron_right" /><Button variant="ghost" size="sm" onPress={() => openDirectory(projectId)}>{data?.project?.name}</Button></>}
         {breadcrumbs.map((part, i) => <span key={i}><Sym name="chevron_right" /><Button variant="ghost" size="sm" onPress={() => openDirectory(projectId, breadcrumbs.slice(0, i + 1).join('/'))}>{part}</Button></span>)}
-      </nav><div className="finder-status"><span className="resource-count">{busy ? t('working') : t('itemCount', { count: entryCount })}</span>{data?.project && <code>{data.project.workspacePath}{directory ? `/${directory}` : ''}</code>}</div></footer>
+      </nav><div className="finder-status"><span className="resource-count">{busy ? t('working') : selection.size ? t('selectionCount', { selected: selection.size, count: entryCount }) : t('itemCount', { count: entryCount })}</span><span className="finder-interaction-hint">{mobile ? t('selectionMobileHint') : t('selectionHint')}</span>{data?.project && <code>{data.project.workspacePath}{directory ? `/${directory}` : ''}</code>}</div></footer>
     </section>
     {settings && <ProjectSettings project={settings.project} agents={settings.agents} onClose={() => setSettings(null)} onChange={project => { setSettings(s => s && ({ ...s, project })); refresh(); }} />}
     {editor && <Modal.Root isOpen onOpenChange={open => { if (!open && !busy) setEditor(null); }}><Modal.Backdrop><Modal.Container size="lg" className={MODAL_CONTAINER_CLASS}><Modal.Dialog>

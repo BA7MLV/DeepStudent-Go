@@ -1,0 +1,46 @@
+{
+  "headingWrap": "wrap",
+  "paragraphWrap": "wrap",
+  "mixedAutospace": "normal",
+  "supported": {
+    "balance": true,
+    "pretty": true,
+    "autospace": true,
+    "trim": true
+  },
+  "paragraphEnding": "matters.",
+  "truncated": {
+    "overflow": true,
+    "title": "DeepStudent 中文学习资料与 English reading notes 的长会话标题：第12章复习与关键概念整理",
+    "text": "DeepStudent 中文学习资料与 English reading notes 的长会话标题：第12章复习与关键概念整理"
+  },
+  "timer": {
+    "numeric": "tabular-nums",
+    "font": "Roboto, -apple-system, \"system-ui\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", sans-serif",
+    "widths": [
+      77.359375,
+      77.359375,
+      77.359375
+    ]
+  },
+  "file": {
+    "width": 219,
+    "scroll": 593,
+    "title": "第12章_中文与English混排的课程讲义和阅读笔记_DeepStudent学习资料整理_最终复习版.pdf",
+    "text": "第12章_中文与English混排的课程讲义和阅读笔记_DeepStudent学习资料整理_最终复习版.pdf",
+    "overflow": "ellipsis",
+    "whiteSpace": "nowrap"
+  },
+  "defaults": {
+    "english": "no-autospace",
+    "code": "no-autospace",
+    "input": "no-autospace",
+    "mono": "no-autospace",
+    "embedded": "no-autospace",
+    "indentTrim": "normal",
+    "tableNumbers": "tabular-nums",
+    "outputNumbers": "tabular-nums",
+    "button": "nowrap",
+    "hint": "pretty"
+  }
+}

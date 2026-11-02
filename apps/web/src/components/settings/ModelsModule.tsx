@@ -344,27 +344,16 @@ function SlotModelSelect({
   const totalResults = favRows.length + orphanFavs.length + groups.reduce((n, g) => n + g.ids.length, 0);
 
   return (
-    <div data-model-field={name} className={`flex flex-col gap-3 rounded-panel bg-background-secondary p-4 transition-shadow hover:shadow-sm ${issue ? 'ring-1 ring-danger' : ''}`}>
-      <div className="flex min-w-0 items-center gap-3">
+    <div data-model-field={name} className={`model-slot flex min-w-0 flex-col gap-3 rounded-panel bg-background-secondary p-4 ${issue ? 'ring-1 ring-danger' : ''}`}>
+      <div className="flex min-w-0 items-start gap-3">
         <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-background text-[17px] text-muted" aria-hidden="true">
           {SLOT_ICON[slot]}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-semibold leading-tight text-foreground">{SLOT_LABEL[slot]}</div>
-          <div className="mt-px truncate text-xs text-muted">{SLOT_HINT[slot]}</div>
+          <div id={`model-label-${name}`} className="text-sm font-semibold leading-tight text-foreground">{SLOT_LABEL[slot]}</div>
+          <div id={`model-hint-${name}`} className="mt-1 text-xs leading-relaxed text-muted">{SLOT_HINT[slot]}</div>
         </div>
       </div>
-
-      {ref.model && slot !== 'vision' && <Button variant="tertiary" className="self-start" onPress={() => update({ [name]: { providerId: '', model: '' } })}>{slot === 'decision' ? '不使用决策模型' : '清除选择，稍后配置'}</Button>}
-      {slot === 'vision' && <Checkbox
-        aria-label="自动：优先主模型，否则使用读图模型"
-        isSelected={!ref.model}
-        onChange={(on) => {
-          const first = modelsForSlot(settings, 'vision')[0];
-          if (!on && !first) { toast.warning('请先添加用于图片理解的模型'); return; }
-          update({ visionModel: on ? { providerId: '', model: '' } : { providerId: first.providerId, model: first.model } });
-        }}
-      ><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>自动：优先主模型，否则使用读图模型</Checkbox.Content></Checkbox>}
 
       {slot === 'vision' && !ref.model ? <p className="text-xs text-muted">主模型无图片输入能力或能力未知时，自动使用已添加且已配置凭据的图片理解模型。请先添加读图模型并勾选「图片理解」用途；不会按模型名称猜测能力，也不会静默忽略图片。</p> : <>
       {(
@@ -395,23 +384,23 @@ function SlotModelSelect({
           <button
             ref={triggerRef}
             type="button"
-             className="mt-2.5 box-border flex min-h-[48px] w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-background px-3 py-2 text-left font-[inherit] text-foreground shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/45 hover:shadow-md focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2 aria-expanded:border-accent/55 aria-expanded:shadow-lg"
+             className="model-slot__trigger box-border flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-border bg-background px-3 py-2 text-left font-[inherit] text-foreground hover:border-accent/45 focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2 aria-expanded:border-accent/55"
             data-testid={`model-button-${name}`}
-            aria-label={`选择${SLOT_LABEL[slot]}模型，当前为 ${ref.model || '未设置'}`}
+            aria-label={`选择${SLOT_LABEL[slot]}，当前为 ${ref.model || '未设置'}`}
             aria-expanded={open}
              aria-haspopup="dialog"
              aria-invalid={Boolean(issue) || undefined}
-             aria-describedby={issue ? `model-error-${name}` : undefined}
+             aria-describedby={`model-hint-${name}${issue ? ` model-error-${name}` : ''}`}
             onClick={() => setOpen((v) => !v)}
           >
-            <span className="flex flex-1 min-w-0 items-center gap-2">
+            <span className="flex flex-1 min-w-0 flex-col items-start gap-1">
               {ref.model ? (
                 <>
-                  <span className="flex min-w-0 flex-col gap-1">
-                    <span className="truncate font-mono text-[13px] font-medium" title={ref.model}>{modelLabel(settings, ref)}</span>
-                    <span className="truncate text-xs text-muted">{provider?.name ?? '原供应商已不存在'}</span>
+                  <span className="w-full truncate text-sm font-medium" title={ref.model}>{modelLabel(settings, ref)}</span>
+                  <span className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                    <span className="min-w-0 max-w-full truncate">{provider?.name ?? '原供应商已不存在'}</span>
+                    <CapBadges catalogId={catalogId} model={ref.model} overrides={modelOverridesOf(settings, ref)} />
                   </span>
-                  <CapBadges catalogId={catalogId} model={ref.model} overrides={modelOverridesOf(settings, ref)} />
                 </>
               ) : (
                 <span className="truncate text-[13px] text-muted">选择供应商与模型…</span>
@@ -583,6 +572,17 @@ function SlotModelSelect({
         </Popover>
       )}
       </>}
+      {slot === 'vision' ? <Checkbox
+        className="model-slot__auto"
+        aria-label="自动：优先主模型，否则使用读图模型"
+        isSelected={!ref.model}
+        onChange={(on) => {
+          const first = modelsForSlot(settings, 'vision')[0];
+          if (!on && !first) { toast.warning('请先添加用于图片理解的模型'); return; }
+          update({ visionModel: on ? { providerId: '', model: '' } : { providerId: first.providerId, model: first.model } });
+        }}
+      ><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>自动：优先主模型，否则使用读图模型</Checkbox.Content></Checkbox>
+        : ref.model && <Button variant="tertiary" className="model-slot__clear self-start" onPress={() => update({ [name]: { providerId: '', model: '' } })}>{slot === 'decision' ? '不使用决策模型' : '清除选择，稍后配置'}</Button>}
       {issue && <p id={`model-error-${name}`} role="alert" className="text-xs text-danger">{modelIssueMessage(issue)}</p>}
     </div>
   );
@@ -836,13 +836,15 @@ function ProviderRow({
  *
  * 供应商优先：展开一家后管理连接及其模型，再设置各用途的默认模型和运行参数。
  */
-export default function ModelsModule({ serverManaged = false, discoveryProviders, standalone = false, onSaveProvider, providerNeedsSave, onDraftChange, renderProviderAccounts, onAddOpenCodeGo, addOpenCodeGoDisabled = false, issues = [], focusIssue = 0 }: {
+export default function ModelsModule({ serverManaged = false, discoveryProviders, standalone = false, onSaveProvider, providerNeedsSave, onDraftChange, onProviderViewChange, renderProviderAccounts, onAddOpenCodeGo, addOpenCodeGoDisabled = false, issues = [], focusIssue = 0 }: {
   serverManaged?: boolean;
   discoveryProviders?: DiscoveryProvider[];
   standalone?: boolean;
   onSaveProvider?: (provider: Provider) => Promise<void>;
   providerNeedsSave?: (provider: Provider) => boolean;
   onDraftChange?: (editing: boolean) => void;
+  /** Tells the cloud editor when a custom provider detail view is active. */
+  onProviderViewChange?: (hideModelPresets: boolean) => void;
   renderProviderAccounts?: (provider: Provider) => ReactNode;
   onAddOpenCodeGo?: () => void;
   addOpenCodeGoDisabled?: boolean;
@@ -873,6 +875,12 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
   const editingDraft = Boolean(draftProvider);
   useEffect(() => { onDraftChange?.(editingDraft); }, [editingDraft, onDraftChange]);
   useEffect(() => { setProviderError(''); }, [selectedProviderId]);
+  useEffect(() => {
+    const selected = selectedProviderId ? settings.providers.find((provider) => provider.id === selectedProviderId) : null;
+    const hideModelPresets = Boolean(draftProvider && !draftProvider.catalogId.trim())
+      || Boolean(selected && !selected.catalogId.trim());
+    onProviderViewChange?.(hideModelPresets);
+  }, [draftProvider, onProviderViewChange, selectedProviderId, settings.providers]);
 
   useEffect(() => {
     if (!focusIssue) return;

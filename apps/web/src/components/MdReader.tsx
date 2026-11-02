@@ -5,6 +5,7 @@ import { db, type MaterialBlockRow } from '../store/db';
 import { getMaterialFile } from '../store/fileStore';
 import type { MaterialReaderHandle } from '../materials/types';
 import { extractMdUnits } from '../materials/md';
+import { toReadingUnit, trackReadingUnit } from '../materials/readingUnit';
 import { Sym } from '../ui';
 // ⚠️ **只要类型**。写成普通 import 会把整棵 CodeMirror 依赖图拖进 MdReader 的静态图，
 // 那正是这个文件用 React.lazy 隔离掉的那 120KB（理由见上面那段注释）。
@@ -104,7 +105,7 @@ export default function MdReader({ blob, materialId, initialUnit, handleRef, onU
   /** 编辑面交上来的 flush。null = 编辑面还没挂上（lazy chunk 还在路上）或已经卸载 */
   const editorRef = useRef<MdEditorHandle | null>(null);
 
-  const [current, setCurrent] = useState(1);
+  const [current, setCurrent] = useState(() => toReadingUnit(initialUnit));
   const scrollRef = useRef<HTMLDivElement>(null);
   const unitEls = useRef(new Map<number, HTMLElement>());
 
@@ -112,7 +113,7 @@ export default function MdReader({ blob, materialId, initialUnit, handleRef, onU
     const n = Math.max(1, Math.floor(unit));
     const el = unitEls.current.get(n);
     if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.scrollIntoView({ block: 'start', behavior: 'smooth' });
     setMark(n);
     setCurrent(n);
   }, []);
@@ -243,7 +244,8 @@ export default function MdReader({ blob, materialId, initialUnit, handleRef, onU
    */
   const enterEdit = useCallback(() => {
     if (text === null) return;
-    ink.setTool('pan');
+    // 编辑和完整预览都应允许选字，不能继承阅读器的拖动手势。
+    ink.setTool('read');
     draftRef.current = text;
     setEditing(true);
   }, [text, ink.setTool]);
@@ -298,23 +300,12 @@ export default function MdReader({ blob, materialId, initialUnit, handleRef, onU
     // 段号定位在这里没有意义 —— 顺带把观察器拆掉，别让它继续观察已卸载的节点。
     if (editing) return;
     if (!root || !ready || unitEls.current.size === 0) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (!e.isIntersecting) continue;
-          const n = Number((e.target as HTMLElement).dataset.unit);
-          if (n > 0) setCurrent(n);
-        }
-      },
-      { root, rootMargin: '-8px 0px -88% 0px' },
-    );
-    for (const el of unitEls.current.values()) io.observe(el);
-    return () => io.disconnect();
+    return trackReadingUnit(root, () => unitEls.current, setCurrent);
   }, [ready, blocks, editing]);
 
   useEffect(() => {
-    if (ready && total > 0) onUnitChange?.(current, total);
-  }, [current, total, ready, onUnitChange]);
+    if (ready && !editing && total > 0) onUnitChange?.(current, total);
+  }, [current, total, ready, editing, onUnitChange]);
 
   const jumpedRef = useRef(false);
   useEffect(() => {
@@ -326,13 +317,7 @@ export default function MdReader({ blob, materialId, initialUnit, handleRef, onU
   return (
     <div className="mr-root" data-testid="material-reader">
       <div className="mr-bar">
-        <span className="mr-bar__pos" data-testid="reader-page-indicator">
-          {/* 编辑态不显示「第 N / M 段」：段号是阅读态的定位单位，
-              编辑面里没有段落分界（也没挂 unitEls），显示它是在报一个看不见的东西。
-              e2e 只在阅读态断言这个元素的文案（scripts/e2e-materials.mjs），
-              所以这里换文案不影响它们。 */}
-          {editing ? '编辑中' : ready ? `第 ${current} / ${total} 段` : <span className="skel-bar reader-pos-skel" aria-hidden="true" />}
-        </span>
+        {editing && <span className="mr-bar__pos">编辑中</span>}
         <div className="mr-bar__spacer" />
         {ready && (
           /* mdui 的 tonal（编辑中，填充）/ outlined（未编辑，描边）在 HeroUI 里
@@ -346,8 +331,7 @@ export default function MdReader({ blob, materialId, initialUnit, handleRef, onU
             {editing ? '完成' : '编辑'}
           </Button>
         )}
-        {/* 编辑态不画进度线：段号定位在编辑面里不成立（unitEls 也没挂），
-            与上面那句「编辑中」同一个理由 —— 报一个看不见的数比不报更糟。 */}
+        {/* 编辑态没有阅读段落锚点，不显示阅读进度。 */}
         <ReaderProgress current={current} total={total} hidden={editing} />
       </div>
       {!editing && <InkToolbar disabled={!ready} />}

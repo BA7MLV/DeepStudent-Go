@@ -4,6 +4,26 @@
   color: var(--overlay-foreground);
 }
 
+/* HIG: consistent leading/trailing guides; primary selection before secondary actions.
+   Stay full-width even inside a narrow settings drawer on a wide viewport. */
+.model-slot__trigger {
+  min-height: 64px;
+  text-align: start;
+}
+
+.model-slot__clear,
+.model-slot__auto {
+  min-height: 44px;
+  max-width: 100%;
+}
+
+.model-slot__auto [data-slot='checkbox-content'] {
+  width: 100%;
+  min-height: 44px;
+  min-width: 0;
+  white-space: normal;
+}
+
 @media (max-width: 640px) {
   /* Connected providers and suggested connections share a readable, touch-sized row. */
   .provider-overview-grid > button,

@@ -1,0 +1,12 @@
+{
+  "apiVersion": 1,
+  "id": "tasks",
+  "name": "后台任务",
+  "description": "应用与 Bot 的处理进度、最近记录",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "enabled": true,
+  "order": 10,
+  "height": 440,
+  "capabilities": ["tasks"]
+}

@@ -19,6 +19,18 @@ export function taskDto(row: any): CloudTask {
     ...(typeof row.resource_name === 'string' ? { resourceName: row.resource_name } : {}) };
 }
 
+export function listOwnerTasks(store: DatabaseStore, owner: string): CloudTask[] {
+  return (store.db.prepare(`SELECT t.*, a.name AS bot_name, json_extract(v.value,'$.name') AS resource_name
+    FROM cloud_tasks t
+    LEFT JOIN runs r ON r.id=t.parent_run_id
+    LEFT JOIN threads th ON th.id=r.thread_id AND th.owner_id=t.owner_id
+    LEFT JOIN agent_profiles a ON a.id=th.agent_id AND a.owner_id=t.owner_id
+    LEFT JOIN cloud_records v ON v.owner_id=t.owner_id AND v.table_name='videos'
+      AND v.record_key=json_quote(json_extract(t.input,'$.videoId'))
+    WHERE t.owner_id=?
+    ORDER BY CASE WHEN t.status IN ('queued','running','waiting_user') THEN 0 ELSE 1 END, t.created_at DESC LIMIT 200`).all(owner) as any[]).map(taskDto);
+}
+
 let nativeRuntime: Promise<{ executeNodeTask: TaskExecutor }> | undefined;
 const executeNodeTask: TaskExecutor = async context => {
   const runtime = new URL(import.meta.url.endsWith('.ts')

@@ -1,0 +1,13 @@
+<p id="value"></p><button id="increment">+1</button><p id="error" class="error" role="alert"></p>
+<script>
+let snapshot;
+const value = document.getElementById('value'), button = document.getElementById('increment'), error = document.getElementById('error');
+async function load() { snapshot = await board.read(); value.textContent = String(snapshot.data.count || 0); }
+button.onclick = async () => {
+  button.disabled = true;
+  try { await board.write({count: (snapshot.data.count || 0) + 1}, snapshot); error.textContent = ''; }
+  catch (e) { error.textContent = e.message; }
+  finally { try { await load(); } catch (e) { error.textContent = e.message; } button.disabled = false; }
+};
+load().catch(e => { error.textContent = e.message; });
+</script>

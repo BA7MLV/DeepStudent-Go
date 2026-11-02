@@ -19,6 +19,7 @@ import { inkTextKey, type InkStroke } from '../materials/ink';
 import { indexText, makeTextAnchor, resolveTextAnchor, selectionOffsets } from '../materials/textHighlight';
 import { uuid } from '../utils/uuid';
 import type { HtmlView, MaterialReaderHandle } from '../materials/types';
+import { readCurrentUnit, toReadingUnit, trackReadingUnit } from '../materials/readingUnit';
 import '../materials/material-reader.css';
 
 interface Block {
@@ -39,9 +40,6 @@ interface Props {
   onUnitChange?: (unit: number, total: number) => void;
 }
 
-/** 视口顶部往下多少像素算「当前段」的判定线（iframe 自己的坐标系） */
-const CURRENT_LINE = 72;
-
 /**
  * 入库位置 → 落位目标。
  *
@@ -49,7 +47,7 @@ const CURRENT_LINE = 72;
  * 是什么」这件事只有一个答案。`undefined` 与 `NaN` 都退回第 1 段：库里读到 NaN 时若照直
  * 用下去，指示器会渲染成「第 NaN / 5 段」—— 静默错账，比退回第 1 段难查得多。
  */
-const toUnit = (n: number | undefined) => (typeof n === 'number' && Number.isFinite(n) && n > 1 ? Math.floor(n) : 1);
+const toUnit = toReadingUnit;
 
 /**
  * HTML 阅读器：**原样视图**（默认）+ **分段视图**。
@@ -204,7 +202,7 @@ const src = await readHtmlText(blob);
     const n = Math.max(1, Math.floor(unit));
     const el = unitEls.current.get(n);
     if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.scrollIntoView({ block: 'start', behavior: 'smooth' });
     setMark(n);
     setCurrent(n);
   }, []);
@@ -269,13 +267,11 @@ const src = await readHtmlText(blob);
     frameUnitsRef.current = Array.from(doc.querySelectorAll(`[${MR_UNIT_ATTR}]`));
 
     const syncCurrent = () => {
-      let unit = 1;
-      for (const el of frameUnitsRef.current) {
-        if (el.getBoundingClientRect().top > CURRENT_LINE) break;
-        const n = Number(el.getAttribute(MR_UNIT_ATTR));
-        if (n > 0) unit = n;
-      }
-      setCurrent(unit);
+      const root = doc.scrollingElement as HTMLElement | null;
+      if (!root) return;
+      const elements = frameUnitsRef.current.map((el) => [Number(el.getAttribute(MR_UNIT_ATTR)), el] as const);
+      const unit = readCurrentUnit(root, elements);
+      if (unit !== null) setCurrent(unit);
     };
 
     const pushHit = () => {
@@ -370,7 +366,7 @@ const src = await readHtmlText(blob);
     /**
      * **落位即位置：不在这里用几何重算。**
      *
-     * 与分段视图「丢掉 IntersectionObserver 首批回调」是同一条道理 —— 进入视图不是用户动作，
+     * 与分段视图「只在滚动后计算」是同一条道理 —— 进入视图不是用户动作，
      * 不该改写位置。几何只在用户**真的滚动**时说话（见上面的 `onScroll`）。
      *
      * 反例（实测踩到）：文档高度装得下时（本仓 fixture 约 250px 高、视口 704px），容器压根
@@ -401,39 +397,7 @@ const src = await readHtmlText(blob);
   useEffect(() => {
     const root = scrollRef.current;
     if (view !== 'blocks' || !root || !blocks || unitEls.current.size === 0) return;
-    /**
-     * **丢掉首批回调。**
-     *
-     * `IntersectionObserver` 在 `observe()` 之后会立刻回调一次「当前交集状态」——
-     * 那不是用户动作，而是**这个视图的初始状态**。对一份高度装得下的文档，
-     * 容器压根没有滚动条，带子里必然只命中第 1 段，于是它会把 `current` 报成 1。
-     *
-     * 别的阅读器（Docx / Md / Pdf）没有这个问题：它们只有一种视图，挂载时报 1 恰好就是真话。
-     * HTML 有**两种视图共用一个 `current` / `lastUnit`**，于是「切到分段视图」这一个动作
-     * 会把原样视图记下的位置改写成 1（实测：切视图前 `lastUnit=3`，切完变 1，
-     * 断点续读就废了 —— 违反设计文档不变量 6）。
-     *
-     * 丢掉首批之后：位置仍由「切换时带过来的 current」与跳转落位决定；
-     * 用户真的滚动时 IO 会再报，那时才交给它。首批只在每次进入本视图时丢一次
-     * （flag 声明在 effect 内，重新进入会重置）。
-     */
-    let firstBatch = true;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (firstBatch) {
-          firstBatch = false;
-          return;
-        }
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const n = Number((entry.target as HTMLElement).dataset.unit);
-          if (n > 0) setCurrent(n);
-        }
-      },
-      { root, rootMargin: '-8px 0px -88% 0px' },
-    );
-    for (const el of unitEls.current.values()) io.observe(el);
-    return () => io.disconnect();
+    return trackReadingUnit(root, () => unitEls.current, setCurrent);
   }, [view, blocks]);
 
   /**
@@ -491,9 +455,6 @@ const src = await readHtmlText(blob);
   return (
     <div className="mr-root" data-testid="material-reader">
       <div className="mr-bar">
-        <span className="mr-bar__pos" data-testid="reader-page-indicator">
-          {ready ? `第 ${current} / ${total} 段` : <span className="skel-bar reader-pos-skel" aria-hidden="true" />}
-        </span>
         <div className="mr-bar__spacer" />
         {/* 视图切换：选中项即当前 view。ToggleButtonGroup 单选时每一项都是 role="radio"，
             方向键在组内自动漫游（mdui 的 segmented-button-group 没有这套键盘行为）。 */}
@@ -512,8 +473,7 @@ const src = await readHtmlText(blob);
           <ToggleButton id="raw" data-testid="html-view-raw">原样</ToggleButton>
           <ToggleButton id="blocks" data-testid="html-view-blocks">分段</ToggleButton>
         </ToggleButtonGroup>
-        {/* 两个视图共用一个 current / total，所以这条线在两种视图下都在报同一个数，
-            与上面那句「第 N / M 段」同源（换视图时不会有一条线突然跳回 0）。 */}
+        {/* 两个视图共用阅读位置，切视图不重置进度。 */}
         <ReaderProgress current={current} total={total} />
       </div>
       <InkToolbar disabled={!ready || !!error} onActivate={() => { if (view === 'raw') changeView('blocks'); }} />

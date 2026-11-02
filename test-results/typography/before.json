@@ -1,0 +1,34 @@
+{
+  "headingWrap": "wrap",
+  "paragraphWrap": "wrap",
+  "mixedAutospace": "no-autospace",
+  "supported": {
+    "balance": true,
+    "pretty": true,
+    "autospace": true,
+    "trim": true
+  },
+  "paragraphEnding": "matters.",
+  "truncated": {
+    "overflow": true,
+    "title": "",
+    "text": "DeepStudent 中文学习资料与 English reading notes 的长会话标题：第12章复习与关键概念整理"
+  },
+  "timer": {
+    "numeric": "tabular-nums",
+    "font": "Roboto, -apple-system, \"system-ui\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", sans-serif",
+    "widths": [
+      77.359375,
+      77.359375,
+      77.359375
+    ]
+  },
+  "file": {
+    "width": 219,
+    "scroll": 219,
+    "title": "",
+    "text": "第12章_中文与English混排的课程讲义和阅读笔记_DeepStudent学习资料整理_最终复习版.pdf",
+    "overflow": "clip",
+    "whiteSpace": "normal"
+  }
+}

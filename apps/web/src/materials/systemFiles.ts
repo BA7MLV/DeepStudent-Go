@@ -1,4 +1,5 @@
 import type { VideoRow } from '../store/db';
+import { boardPath } from '@wangke/contracts/board';
 import { useSettings } from '../store/settings';
 import { MD_MIME } from './md';
 import { create } from 'zustand';
@@ -16,7 +17,7 @@ export function systemMaterialPath(id: string): string | undefined {
   if (id.startsWith('system:file:')) {
     try {
       const candidate = decodeURIComponent(id.slice('system:file:'.length));
-      return candidate === MCP_PATH || candidate.startsWith(`${SKILLS_PATH}/`) && candidate.slice(1).split('/').every(part => part && part !== '.' && part !== '..') ? candidate : undefined;
+      return boardPath(candidate) || candidate === MCP_PATH || candidate.startsWith(`${SKILLS_PATH}/`) && candidate.slice(1).split('/').every(part => part && part !== '.' && part !== '..') ? candidate : undefined;
     } catch { return undefined; }
   }
   return undefined;
@@ -24,7 +25,7 @@ export function systemMaterialPath(id: string): string | undefined {
 export function systemMaterialId(path: string): string | undefined {
   if (path === AGENTS_PATH) return AGENT_INSTRUCTIONS_FILE_ID;
   if (memoryName(path)) return `system:memory:${memoryName(path)}`;
-  return path === MCP_PATH || path.startsWith(`${SKILLS_PATH}/`) ? `system:file:${encodeURIComponent(path)}` : undefined;
+  return boardPath(path) || path === MCP_PATH || path.startsWith(`${SKILLS_PATH}/`) ? `system:file:${encodeURIComponent(path)}` : undefined;
 }
 export const systemMaterialRoute = (path: string) => `/player/${encodeURIComponent(systemMaterialId(path)!)}`;
 
@@ -34,7 +35,7 @@ const systemRequest = <T>(path: string, init: RequestInit = {}) => request<T>(pa
 
 function remember(document: SystemDocument) {
   const previous = useSystemDocuments.getState().documents[document.path];
-  if (previous && document.kind !== 'skill' && (previous.revision > document.revision || previous.revision === document.revision && previous.status === 'stale' && document.status === 'active')) return previous;
+  if (previous && document.kind !== 'skill' && document.kind !== 'board' && (previous.revision > document.revision || previous.revision === document.revision && previous.status === 'stale' && document.status === 'active')) return previous;
   if (previous && JSON.stringify(previous) === JSON.stringify(document)) return previous;
   useSystemDocuments.setState(state => ({ documents: { ...state.documents, [document.path]: document } }));
   return document;
@@ -88,8 +89,8 @@ export async function saveSystemMarkdown(id: string, text: string, expected?: st
     let current: SystemDocument;
     try { current = await readSystemDocument(path); }
     catch (error) {
-      if (!create || !(error instanceof ServerApiError) || error.status !== 404 || !memoryName(path)) throw error;
-      current = { path, name: `${memoryName(path)}.md`, content: '', revision: 0, updatedAt: null };
+      if (!create || !(error instanceof ServerApiError) || error.status !== 404 || !memoryName(path) && !boardPath(path)) throw error;
+      current = { path, name: path.split('/').at(-1)!, content: '', revision: 0, updatedAt: null };
     }
     if (create && current.revision !== 0) throw new Error('文件已存在，请先读取，再按原文修改。');
     if (expected !== undefined && current.content !== expected) throw new Error('文件已在其他页面更新，请重新读取后再修改。');

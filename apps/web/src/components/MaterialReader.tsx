@@ -190,7 +190,8 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
   }
 
   return (
-    <MaterialInkProvider key={`${materialId}:${requestedUnit ?? ''}`} materialId={materialId} toolbarActions={
+    <MaterialInkProvider key={`${materialId}:${requestedUnit ?? ''}`} materialId={materialId}
+      defaultTool={format === 'md' ? 'read' : 'pan'} toolbarActions={
       <Button isIconOnly variant="tertiary" onPress={toggleFullscreen} data-testid="reader-fullscreen"
         aria-label={fullscreen ? '退出全屏' : '全屏阅读'}>
         <Sym name={fullscreen ? 'fullscreen_exit' : 'fullscreen'} size={18} />

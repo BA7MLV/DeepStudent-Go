@@ -4,7 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DatabaseStore } from '../storage/database.js';
 import { CloudRecords, CloudConflict } from './records.js';
 import { CloudConfiguration, ModelConfigurationError } from './config.js';
-import { CloudTaskRunner, taskDto, TASK_KINDS, workerIdentity } from './tasks.js';
+import { CloudTaskRunner, taskDto, listOwnerTasks, TASK_KINDS, workerIdentity } from './tasks.js';
 import { workerTokens, workerTokenHash, renewWorker } from './workerAuth.js';
 import type { CloudConfig, CloudMutation } from '@wangke/contracts/cloud';
 import type { ModelSettingsUpdate, ProviderSettingsUpdate } from '@wangke/contracts/model-settings';
@@ -286,15 +286,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
 
   app.get('/api/v1/cloud/tasks', async (request, reply) => {
     const user = authorize(request, reply); if (!user) return;
-    return { tasks: (store.db.prepare(`SELECT t.*, a.name AS bot_name, json_extract(v.value,'$.name') AS resource_name
-      FROM cloud_tasks t
-      LEFT JOIN runs r ON r.id=t.parent_run_id
-      LEFT JOIN threads th ON th.id=r.thread_id AND th.owner_id=t.owner_id
-      LEFT JOIN agent_profiles a ON a.id=th.agent_id AND a.owner_id=t.owner_id
-      LEFT JOIN cloud_records v ON v.owner_id=t.owner_id AND v.table_name='videos'
-        AND v.record_key=json_quote(json_extract(t.input,'$.videoId'))
-      WHERE t.owner_id=?
-      ORDER BY CASE WHEN t.status IN ('queued','running','waiting_user') THEN 0 ELSE 1 END, t.created_at DESC LIMIT 200`).all(user.id) as any[]).map(taskDto) };
+    return { tasks: listOwnerTasks(store, user.id) };
   });
   const leaseMs = 30_000;
   app.post('/api/v1/cloud/worker/claim', async (request, reply) => {

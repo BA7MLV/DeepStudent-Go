@@ -135,7 +135,42 @@ try {
     const deleted = db.prepare(`SELECT value FROM cloud_records WHERE table_name=? AND record_key=?`).get(table, JSON.stringify(botNote.courseId));
     assert.equal(deleted?.value ?? null, null, `${table} is deleted with the resource`);
   }
-  console.log('Resource folders: migration, real I/O, nested directories, shared Bot files, stable IDs, conflicts, ranges, permissions, restart and deletion OK');
+  // Trash is independent from archive, durable, and cannot be bypassed by direct file APIs.
+  db.prepare('UPDATE agent_profiles SET enabled=1').run();
+  const disposable = await json('POST', '/resources/folders', { name: '可恢复文件夹' }, 201);
+  await json('PUT', `/projects/${disposable.id}/agents/${agent.id}`, { role: 'write' });
+  const disposableThread = await json('POST', '/threads', { mode: 'bot', projectId: disposable.id, agentId: agent.id }, 201);
+  await json('POST', location(disposable.id, 'directories', 'inside'), undefined, 201);
+  await json('PUT', location(disposable.id, 'text', 'inside/note.md'), { text: '# Keep me', expectedRevision: null });
+  const disposableNote = (await listing(disposable.id, 'inside')).entries[0];
+  await json('POST', `/resources/folders/${disposable.id}/delete`, undefined, 404);
+  await json('POST', `/resources/folders/${root.rootId}/trash`, undefined, 409);
+  db.prepare('INSERT INTO project_executions VALUES(?,?)').run(disposable.id, 'trash-test');
+  await json('POST', `/resources/folders/${disposable.id}/trash`, undefined, 409);
+  db.prepare('DELETE FROM project_executions WHERE project_id=?').run(disposable.id);
+  await json('PATCH', `/projects/${disposable.id}`, { archived: true });
+  await json('POST', `/resources/folders/${disposable.id}/trash`);
+  assert.ok(!(await json('GET', '/resources?archived=true')).entries.some(e => e.projectId === disposable.id));
+  await json('GET', location(disposable.id, 'text', 'inside/note.md'), undefined, 409);
+  assert.ok((await json('GET', '/resources/trash')).projects.some(p => p.id === disposable.id));
+  // Simulate an upgrade from the folder-archive version.
+  db.prepare('UPDATE projects SET archived=1 WHERE id=?').run(fresh.id);
+  db.prepare('DELETE FROM schema_migrations WHERE version=33').run();
+  await app.close(); app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
+  assert.equal((await json('GET', `/projects/${fresh.id}`)).archived, false, 'old archived folders return to normal resources');
+  assert.equal(db.prepare('SELECT archived FROM projects WHERE id=?').get(disposable.id).archived, 1, 'upgrade keeps trashed folders locked');
+  assert.ok((await json('GET', '/resources/trash')).projects.some(p => p.id === disposable.id));
+  await json('POST', `/resources/folders/${disposable.id}/restore`);
+  assert.equal((await json('GET', `/projects/${disposable.id}`)).archived, false);
+  assert.equal((await listing(disposable.id, 'inside')).entries[0].courseId, disposableNote.courseId);
+  await json('POST', `/resources/folders/${disposable.id}/trash`);
+  await json('POST', `/resources/folders/${disposable.id}/delete`);
+  assert.ok(!fs.existsSync(path.join(directory, 'files/projects', disposable.id)));
+  assert.equal(db.prepare('SELECT id FROM threads WHERE id=?').get(disposableThread.id), undefined);
+  assert.equal(db.prepare("SELECT value FROM cloud_records WHERE table_name='videos' AND record_key=?").get(JSON.stringify(disposableNote.courseId)).value, null);
+  assert.ok(!(await json('GET', '/resources?archived=true')).entries.some(e => e.projectId === disposable.id));
+  assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
+  console.log('Resource folders: migration, I/O, permissions, restart, trash/restore and permanent deletion OK');
 } finally {
   await app.close(); db?.close(); fs.rmSync(directory, { recursive: true, force: true });
 }

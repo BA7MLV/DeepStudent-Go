@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Spinner } from '@heroui/react';
+import { Button } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
 import type { AgentProfileDto, ProjectDto } from '@wangke/contracts';
-import { serverClient } from '../api/serverClient';
-import { MoreMenu, PageShell, promptDialog, Sym, toast } from '../ui';
+import { request, serverClient } from '../api/serverClient';
+import ResourceTrash from '../projects/ResourceTrash';
+import { MoreMenu, PageLoader, PageShell, promptDialog, Sym, toast } from '../ui';
 import { projectError } from '../projects/errors';
 import { formatListTime } from './botMessages';
 import { overflowTitleProps } from '../ui/overflowTitle';
@@ -25,7 +26,7 @@ export default function Projects() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [archived, setArchived] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     let ignore = false;
@@ -42,14 +43,13 @@ export default function Projects() {
     catch (error) { toast.error(projectError(error)); }
     finally { setBusy(false); }
   };
-  const archive = async (project: ProjectDto) => {
+  const remove = async (project: ProjectDto) => {
     setBusy(true);
-    try { const updated = await serverClient.updateProject(project.id, { archived: !project.archived }); setProjects(old => old.map(p => p.id === updated.id ? updated : p)); }
+    try { await request(`/resources/folders/${encodeURIComponent(project.id)}/trash`, { method: 'POST' }); setProjects(old => old.filter(p => p.id !== project.id)); toast.success(t('movedToTrash')); }
     catch (error) { toast.error(projectError(error)); }
     finally { setBusy(false); }
   };
-  const visible = projects.filter(p => archived || !p.archived).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const filter = [{ key: 'archived', label: tc(archived ? 'botHome.hideArchived' : 'botHome.showArchived'), icon: <Sym name="archive" />, onAction: () => setArchived(v => !v) }];
+  const visible = [...projects].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const createButton = (
     <Button isIconOnly variant="ghost" className="rounded-full" aria-label={t('create')} data-testid="project-create" isDisabled={busy || !agents.length} onPress={() => void create()}>
       <Sym name="add" />
@@ -58,11 +58,12 @@ export default function Projects() {
 
   return (
     <PageShell title={t('title')} fill rootClassName="page-projects"
-      actions={<><MoreMenu label={tc('botHome.more')} actions={filter} />{createButton}</>}>
+      actions={<><Button isIconOnly variant="ghost" aria-label={t('trash')} onPress={() => setTrashOpen(true)}><Sym name="delete" /></Button>{createButton}</>}>
+      {trashOpen && <ResourceTrash onClose={() => setTrashOpen(false)} onChange={() => setRevision(v => v + 1)} />}
       <div className="ph">
         <div className="ph-scroll">
           {error ? <div role="alert" className="bh-inline-error">{error}<Button size="sm" variant="secondary" onPress={() => setRevision(v => v + 1)}>{t('retry')}</Button></div>
-            : loading ? <div className="ph-empty"><Spinner color="current" /></div>
+            : loading ? <div className="ph-empty"><PageLoader contained /></div>
             : visible.length === 0 ? (
               <div className="ph-empty">
                 <span className="ph-empty__icon" aria-hidden="true"><Sym name="folder" /></span>
@@ -76,13 +77,12 @@ export default function Projects() {
                       <span className="ph-row__icon" aria-hidden="true"><Sym name="folder" /></span>
                       <span className="ph-row__body">
                         <span className="ph-row__name" {...overflowTitleProps}>{project.name}</span>
-                        {project.archived && <span className="ph-row__meta">{t('archived')}</span>}
                       </span>
                       <time className="ph-row__time" dateTime={project.updatedAt}>{formatListTime(project.updatedAt, i18n.language)}</time>
                     </button>
                     <MoreMenu label={tc('botHome.more')} className="ph-row__more" actions={[
                       { key: 'files', label: t('files'), icon: <Sym name="folder_open" />, onAction: () => navigate(`/projects/${project.id}/files`) },
-                      { key: 'archive', label: t(project.archived ? 'restore' : 'archive'), icon: <Sym name={project.archived ? 'archive_restore' : 'archive'} />, disabled: busy, onAction: () => void archive(project) },
+                      { key: 'remove', label: t('moveToTrash'), icon: <Sym name="delete" />, danger: true, disabled: busy, onAction: () => void remove(project) },
                     ]} />
                   </li>
                 ))}

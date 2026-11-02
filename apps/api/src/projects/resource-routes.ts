@@ -7,6 +7,20 @@ import type { ResourceFolderColor } from '@wangke/contracts/resources';
 export function registerResourceRoutes(app: FastifyInstance, resources: ResourceFiles,
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => { id: string } | null,
   checkOrigin: (request: FastifyRequest, reply: FastifyReply) => boolean) {
+  app.get('/api/v1/resources/trash', async (request, reply) => {
+    const user = requireAuth(request, reply); if (!user) return;
+    return { projects: resources.trashList(user.id) };
+  });
+  for (const action of ['trash', 'restore', 'delete'] as const) {
+    app.post<{ Params: { id: string } }>(`/api/v1/resources/folders/:id/${action}`, async (request, reply) => {
+      if (!checkOrigin(request, reply)) return;
+      const user = requireAuth(request, reply); if (!user) return;
+      if (action === 'trash') resources.trash(user.id, request.params.id);
+      else if (action === 'restore') resources.restoreTrash(user.id, request.params.id);
+      else resources.deleteTrash(user.id, request.params.id);
+      return { ok: true };
+    });
+  }
   app.get<{ Querystring: { projectId?: string; path?: string; archived?: string } }>('/api/v1/resources', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     return resources.list(user.id, request.query.projectId, request.query.path ?? '', request.query.archived === 'true');

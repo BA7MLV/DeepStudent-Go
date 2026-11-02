@@ -17,7 +17,8 @@ try {
   assert.equal(await byId('ink-pen').isVisible(), false);
   await byId('ink-toggle').click();
   await page.waitForFunction(() => document.querySelector('[data-testid="ink-pen"]')?.disabled === false);
-  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '默认拖动');
+  assert.equal(await byId('ink-read').getAttribute('aria-checked'), 'true', 'Markdown 默认选字');
+  await byId('ink-pan').click();
   const scroll = page.locator('.mr-scroll');
   const bounds = await scroll.boundingBox();
   const x = bounds.x + bounds.width / 2, y = bounds.y + Math.min(bounds.height - 30, 280);
@@ -46,7 +47,7 @@ try {
   assert.equal(await page.getByLabel('笔型', { exact: true }).count(), 0, 'Escape 收起更多选项');
   await byId('ink-toggle').click();
   assert.equal(await byId('ink-text-highlight').isVisible(), false);
-  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '收起后恢复拖动，不残留隐藏工具');
+  assert.equal(await byId('ink-read').getAttribute('aria-checked'), 'true', '收起后恢复选字，不残留隐藏工具');
   await byId('ink-toggle').click();
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await byId('ink-pen').isVisible(), true);
@@ -60,7 +61,7 @@ try {
   await byId('ink-toggle').waitFor();
   assert.equal(await byId('ink-toggle').getAttribute('aria-expanded'), 'false', '刷新默认收起');
   await byId('ink-toggle').click();
-  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '刷新默认拖动');
+  assert.equal(await byId('ink-read').getAttribute('aria-checked'), 'true', 'Markdown 刷新默认选字');
 
   await page.setViewportSize({ width: 1100, height: 900 });
   await page.goto(`${base}/#/library`);

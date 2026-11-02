@@ -60,7 +60,14 @@ import { isJobActive, libraryJobCopy, useJobStore, useTranscribeJob } from '../s
 import { cancelTranscription } from '../pipelines/transcribeQueue';
 import { startMaterialJob } from '../pipelines/materialJob';
 import { enqueueCover } from '../pipelines/coverQueue';
-import { useCoverRevision } from '../store/covers';
+import {
+  cachedCoverUrl,
+  createCachedCoverUrl,
+  invalidateCoverUrl,
+  releaseCoverUrl,
+  retainCoverUrl,
+  useCoverRevision,
+} from '../store/covers';
 import { detectMaterialFormat, isLegacyDocFile, isMaterialFile } from '../materials/parse';
 import { formatCaughtError } from '../utils/errorText';
 import { uuid } from '../utils/uuid';
@@ -253,6 +260,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const memoryFileRequested = searchParams.get('file')?.startsWith('/system/memory/') ? searchParams.get('file')! : '';
   const skillFileRequested = searchParams.get('file')?.startsWith('/system/skills/') ? searchParams.get('file')! : '';
   const mcpFileRequested = searchParams.get('file') === '/system/mcp.json' ? '/system/mcp.json' : '';
+  const boardFileRequested = searchParams.get('file')?.startsWith('/system/board/') ? searchParams.get('file')! : '';
   const isMobile = useIsMobile();
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [folders, setFolders] = useState<FolderRow[]>([]);
@@ -281,7 +289,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const inMemoryFolder = folderKey === 'system/memory';
   const inSystemFolder = typeof folderKey === 'string' && folderKey.startsWith('system');
   const systemPath = inSystemFolder ? `/${folderKey}` : '';
-  const projectLibrary = useProjectLibrary(!inSystemFolder && !agentFileRequested && !memoryFileRequested && !skillFileRequested && !mcpFileRequested && !importing);
+  const projectLibrary = useProjectLibrary(!inSystemFolder && !agentFileRequested && !memoryFileRequested && !skillFileRequested && !mcpFileRequested && !boardFileRequested && !importing);
   const [systemPage, setSystemPage] = useState<SystemDirectory>({ files: [], directories: [], nextOffset: null });
   const [systemOffset, setSystemOffset] = useState(0);
   const [systemLoading, setSystemLoading] = useState(false);
@@ -312,12 +320,12 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     navigate(AGENT_INSTRUCTIONS_ROUTE, { replace: true });
   }, [agentFileRequested, navigate, setFolderHistory]);
   useEffect(() => {
-    const file = memoryFileRequested || skillFileRequested || mcpFileRequested;
+    const file = memoryFileRequested || skillFileRequested || mcpFileRequested || boardFileRequested;
     if (!file || !systemMaterialId(file)) return;
     const parent = file.slice(1, file.lastIndexOf('/')) || 'system';
     setFolderHistory(history => ({ entries: [...history.entries.slice(0, history.index + 1), parent], index: history.index + 1 }));
     navigate(systemMaterialRoute(file), { replace: true });
-  }, [memoryFileRequested, skillFileRequested, mcpFileRequested, navigate, setFolderHistory]);
+  }, [memoryFileRequested, skillFileRequested, mcpFileRequested, boardFileRequested, navigate, setFolderHistory]);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [mobileManaging, setMobileManaging] = useState(false);
   const marquee = useMarqueeSelection(selection, setSelection);
@@ -999,6 +1007,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         await db.cards.where('videoId').equals(row.id).delete();
       },
     );
+    invalidateCoverUrl(row.id);
     // 材料在 materials/ 目录下，用视频的删除函数会清不掉（OPFS 里两份文件各自独立）
     if (row.kind === 'material') await deleteMaterialFile(row.id);
     else await deleteVideoFile(row.id);
@@ -1886,7 +1895,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                      <span className="finder-item__name" title={file.path}>{file.name}</span>
                      <span className="finder-item__meta" title={`${file.kind ?? 'system'} · r${file.revision} · ${file.sha256 ?? ''} · ${file.source ?? ''}`}>{isAgent ? '全局 Agent 指令' : file.summary ?? `${file.kind ?? '系统文件'} · r${file.revision}`}{file.kind === 'skill' && file.version ? ` · v${file.version}` : ''}</span>
                      <span className="finder-item__date">{file.updatedAt ? new Date(file.updatedAt).toLocaleDateString() : ''}</span>
-                      <span className="finder-item__kind">{isAgent ? '系统 Markdown' : file.kind === 'mcp' ? 'MCP 配置 JSON' : file.kind === 'skill' ? 'Skill 文件' : file.kind === 'diary' ? '日记 Markdown' : file.kind === 'note' ? '笔记 Markdown' : '记忆 Markdown'}</span>
+                       <span className="finder-item__kind">{isAgent ? '系统 Markdown' : file.kind === 'board' ? '看板插件文件' : file.kind === 'mcp' ? 'MCP 配置 JSON' : file.kind === 'skill' ? 'Skill 文件' : file.kind === 'diary' ? '日记 Markdown' : file.kind === 'note' ? '笔记 Markdown' : '记忆 Markdown'}</span>
                    </span>
                  </ListBox.Item>;
                  })}
@@ -2369,46 +2378,31 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
  *      而不用为一张缩略图去调整个列表的 reload。
  *   3. 用 `createdAt` 判断「是不是同一版封面」——IndexedDB 每次读都会重新反序列化，
  *      Blob 的对象身份稳定不了，比不了引用只能比这个。
- *   4. 先建好新的 object URL 再回收旧的，中间不留「指向已撤销 URL」的空窗；
- *      组件卸载时才做最后一次回收。
+ *   4. object URL 由 `store/covers` 做有界缓存：离开文件夹时不回收，回来可复用；
+ *      只有资源删除或缓存淘汰时才回收。
  */
 function useThumb(videoId: string): string | null {
   const revision = useCoverRevision();
   const [url, setUrl] = useState<string | null>(null);
-  const created = useRef<string | null>(null);
-  const shownAt = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let retained = false;
     db.covers
       .get(videoId)
       .then((row) => {
         if (cancelled) return;
-        const at = row?.createdAt ?? null;
-        // 同一版封面（别的卡片触发了 revision 变化）：不重建、不撤销，免得图标闪一下
-        if (at === shownAt.current) return;
-        const next = row?.blob ? URL.createObjectURL(row.blob) : null;
-        if (created.current) URL.revokeObjectURL(created.current);
-        created.current = next;
-        shownAt.current = at;
+        if (!row?.blob) { setUrl(null); return; }
+        const next = cachedCoverUrl(videoId, row.createdAt) ?? createCachedCoverUrl(videoId, row.createdAt, row.blob);
+        retainCoverUrl(videoId);
+        retained = true;
         setUrl(next);
       })
       .catch(() => {
         /* 读封面失败只是「这次没图」，静默走占位，不影响列表 */
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; if (retained) releaseCoverUrl(videoId); };
   }, [videoId, revision]);
-
-  useEffect(
-    () => () => {
-      if (created.current) URL.revokeObjectURL(created.current);
-      created.current = null;
-      shownAt.current = null;
-    },
-    [],
-  );
 
   return url;
 }

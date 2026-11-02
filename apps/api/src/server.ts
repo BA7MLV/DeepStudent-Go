@@ -25,6 +25,9 @@ import { receiveFile, byteRange } from './cloud/files.js';
 import { registerCloudRoutes } from './cloud/routes.js';
 import { SystemMaterials } from './storage/system-materials.js';
 import { registerSystemRoutes } from './storage/system-routes.js';
+import { BoardFiles } from './board/files.js';
+import { BoardScheduler } from './board/scheduler.js';
+import { registerBoardRoutes } from './board/routes.js';
 import { workerIdentity } from './cloud/tasks.js';
 import { workerTokens } from './cloud/workerAuth.js';
 import { McpRepository } from './mcp/repository.js';
@@ -131,6 +134,8 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   projects.isActive = id => runner.isProjectActive(id);
   const memoryWorker = new MemoryWorker(store, cloudConfig, options.fetch);
   const botService = new BotApplicationService(store, runner, projects);
+  const boardFiles = new BoardFiles(store);
+  const boardScheduler = new BoardScheduler(boardFiles, botService);
   // Factories are account-scoped; a plugin never resolves another owner's file.
   const gateway = new GatewayCore(store, cloudConfig, botService, {
     feishu: account => new FeishuPlugin(async (_peer, file) => {
@@ -170,7 +175,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   });
   app.addContentTypeParser('application/octet-stream', (_request, stream, done) => done(null, stream));
   app.addContentTypeParser(/^multipart\/form-data/, (_request, stream, done) => done(null, stream));
-  if (!held) { runner.start(); memoryWorker.start(); gateway.start(); }
+  if (!held) { runner.start(); memoryWorker.start(); gateway.start(); boardScheduler.start(); }
   const attempts = new Map<string, { count: number; until: number; seen: number }>();
   const dummyHash = argon2.hash('unusable-login-dummy', { type: argon2.argon2id });
   const secureCookie = (process.env.PUBLIC_ORIGIN ?? '').startsWith('https://');
@@ -259,6 +264,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
      syncResources: owner => { if (store.db.prepare('SELECT 1 FROM resource_roots WHERE owner_id=?').get(owner)) resources.migrate(owner); } });
    registerResourceRoutes(app, resources, requireAuth, checkOrigin);
    registerSystemRoutes(app, systemMaterials, cloudConfig, requireAuth, checkOrigin);
+   registerBoardRoutes(app, boardFiles, cloudRunner, botService, requireAuth, checkOrigin);
    registerMcpRoutes(app, { manager: mcp, store, records: cloudRecords, requireAuth, checkOrigin });
    registerWebSearchRoutes(app, { service: webSearch, store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin });
    registerProjectRoutes(app, { projects, requireAuth, checkOrigin, maxFileBytes, stopProject: (id) => {
@@ -309,7 +315,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
       const directory = fs.openSync(path.dirname(activationFile!), 'r');
       try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
       held = false;
-      runner.start(); memoryWorker.start(); gateway.start();
+      runner.start(); memoryWorker.start(); gateway.start(); boardScheduler.start();
       const address = app.server.address();
       if (process.env.CLOUD_WORKER_DISABLED !== '1' && address && typeof address === 'object') cloudRunner.start(`http://127.0.0.1:${address.port}`);
     }
@@ -895,6 +901,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if (!Number.isFinite(milliseconds) || milliseconds < 0) return Promise.reject(new Error('invalid_drain_deadline'));
     if (drainTask) return drainTask;
     draining = true;
+    boardScheduler.close();
     messageStreams.close();
     // Calling each operation before awaiting closes all admission paths at once.
     // A false deadline result is NOT a snapshot or proof that writers stopped.

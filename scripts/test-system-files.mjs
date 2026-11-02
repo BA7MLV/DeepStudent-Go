@@ -36,7 +36,7 @@ try {
   const physical = file => path.join(filesRoot, crypto.createHash('sha256').update(owner).digest('hex'), file.slice(1));
   const agents = '/system/AGENTS.md';
   assert.equal((await app.inject({ method: 'GET', url: '/api/v1/system/files?path=/system' })).statusCode, 401);
-  assert.deepEqual((await get('/system/files?path=/system')).json().directories, ['/system/memory', '/system/skills']);
+  assert.deepEqual((await get('/system/files?path=/system')).json().directories, ['/system/memory', '/system/skills', '/system/board']);
   const skillRoot = physical('/system/skills');
   fs.mkdirSync(path.join(skillRoot, 'demo', 'references'), { recursive: true });
   fs.writeFileSync(path.join(skillRoot, 'demo', 'SKILL.md'), '---\nname: Demo Skill\ndescription: A test skill\n---\n\nUse the installed skill.');

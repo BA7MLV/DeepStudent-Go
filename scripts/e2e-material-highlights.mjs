@@ -69,7 +69,7 @@ async function endpoints(target, start, end) {
     return { a: at(start), b: at(end - 1), text: el.textContent.slice(start, end) };
   }, { start, end });
 }
-async function highlight(target, start, end, reverse = false) {
+async function highlight(target, start, end, reverse = false, defaultTool = 'pan') {
   await byId('ink-text-highlight').click();
   assert.equal(await page.locator('.ink-layer[data-active]').first().evaluate((el) => getComputedStyle(el).cursor), 'text', '文字荧光笔使用选字光标');
   await target.evaluate((e) => e.scrollIntoView({ block: 'start', behavior: 'instant' }));
@@ -78,16 +78,16 @@ async function highlight(target, start, end, reverse = false) {
   await touch('touchStart', a.x, a.y);
   for (let i = 1; i <= 8; i++) { await touch('touchMove', a.x + (b.x - a.x) * i / 8, a.y + (b.y - a.y) * i / 8); await delay(16); }
   await touch('touchEnd');
-  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '高亮后恢复拖动');
+  assert.equal(await byId(`ink-${defaultTool}`).getAttribute('aria-checked'), 'true', '高亮后恢复材料默认工具');
   return points.text;
 }
 
 try {
   const paragraph = '监督学习使用带标签的数据训练模型。验证集用于评估泛化能力，训练误差降低并不代表真实效果更好。'.repeat(5);
   const mdId = await importFile({ name: '文字高亮测试.md', mimeType: 'text/markdown', buffer: Buffer.from(`# 高亮测试\n\n${paragraph}\n\n第二段包含 **加粗文字** 和 x < y & z，用于测试转义与独立来源。\n`) });
-  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true');
+  assert.equal(await byId('ink-read').getAttribute('aria-checked'), 'true');
   const para = page.locator('.mr-md__block p').filter({ hasText: '监督学习' }).first();
-  const expected = await highlight(para, 3, 95, true);
+  const expected = await highlight(para, 3, 95, true, 'read');
   await saved(mdId, 1);
   const mark = (await rows(mdId))[0];
   assert.equal(mark.anchor.exact, expected, '反向跨行拖选精确到字符');
@@ -109,9 +109,9 @@ try {
   await touch('touchStart', cancelled.a.x, cancelled.a.y);
   await touch('touchMove', cancelled.b.x, cancelled.b.y);
   await touch('touchCancel');
-  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true', '触摸取消后退出一次性工具');
+  assert.equal(await byId('ink-read').getAttribute('aria-checked'), 'true', '触摸取消后退出一次性工具');
   assert.equal((await rows(mdId)).length, 1, '取消的文字高亮不保存');
-  // 高亮完成后恢复拖动，显式选择画笔才落墨。
+  // 高亮完成后恢复选字，显式选择画笔才落墨。
   await byId('ink-pen').click();
   const penAt = await endpoints(para, 100, 105);
   await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...penAt.a, button: 'left', buttons: 1, pointerType: 'pen', force: .5 });
@@ -143,7 +143,7 @@ try {
   await page.reload();
   await path.waitFor();
   await byId('ink-toggle').click();
-  assert.equal(await byId('ink-pan').getAttribute('aria-checked'), 'true');
+  assert.equal(await byId('ink-read').getAttribute('aria-checked'), 'true');
   assert.deepEqual((await rows(mdId))[0], mark, '刷新恢复高亮');
   await page.setViewportSize({ width: 1100, height: 1100 });
   await byId('ink-erase').click();

@@ -1,0 +1,12 @@
+{
+  "apiVersion": 1,
+  "id": "schedules",
+  "name": "定时任务",
+  "description": "定时唤起 Bot，关闭页面也能运行",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "enabled": true,
+  "order": 40,
+  "height": 440,
+  "capabilities": ["schedules"]
+}
