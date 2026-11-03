@@ -21,7 +21,7 @@ import { formatCaughtError } from '../utils/errorText';
 import { toast } from '../ui';
 
 /** 在途任务的取消标记（key = videoId） */
-const signals = new Map<string, { aborted: boolean }>();
+const signals = new Map<string, AbortController>();
 
 let pumping = false;
 
@@ -47,9 +47,14 @@ export function startTranscription(videoId: string, opts: { resume?: boolean } =
   void pump();
 }
 
-/** 取消：抽音频/VAD 阶段直接终止 Worker，ASR 阶段让在途的几个请求跑完就停 */
+/** 取消：中止 ASR 请求；抽音频/VAD 阶段直接终止 Worker。 */
 export function cancelTranscription(videoId: string): void {
-  if (remoteTasks()) { void cancelResourceTasks(`course:${videoId}`).catch(e => toast.error(e.message)); markCanceled(videoId); return; }
+  if (remoteTasks()) {
+    signals.get(videoId)?.abort();
+    void cancelResourceTasks(`course:${videoId}`, 'transcribe').then(() => settleCanceled(videoId)).catch(e => toast.error(e.message));
+    markCanceled(videoId);
+    return;
+  }
   const job = useJobStore.getState().jobs[videoId];
   if (!isJobActive(job)) return;
   const signal = signals.get(videoId);
@@ -57,9 +62,10 @@ export function cancelTranscription(videoId: string): void {
     // 还没轮到它：直接出队
     dequeue(videoId);
     markCanceled(videoId);
+    void settleCanceled(videoId).catch(e => toast.error(e.message));
     return;
   }
-  signal.aborted = true;
+  signal.abort();
   // 抽取/VAD 卡在 Worker 的密集循环里，标记管不到，只能 terminate
   if (job?.phase === 'extract' || job?.phase === 'vad') terminateExtractor();
 }
@@ -70,9 +76,6 @@ function dequeue(videoId: string): void {
 
 function markCanceled(videoId: string): void {
   useJobStore.getState().upsert(videoId, { phase: 'canceled', message: '已取消' });
-  window.setTimeout(() => {
-    if (useJobStore.getState().jobs[videoId]?.phase === 'canceled') useJobStore.getState().drop(videoId);
-  }, 3000);
 }
 
 /** 串行泵：队列里有活就一直跑，跑空为止 */
@@ -100,13 +103,15 @@ async function runOne(videoId: string): Promise<void> {
   const job = useJobStore.getState().jobs[videoId];
   if (!job || job.phase === 'canceled') return;
 
-  const signal = { aborted: false };
-  signals.set(videoId, signal);
+  const controller = new AbortController();
+  const signal = controller.signal;
+  signals.set(videoId, controller);
 
   try {
     await runTranscription(
       videoId,
       (p: TranscribeProgress) => {
+        if (signal.aborted || signals.get(videoId) !== controller) return;
         if (p.phase === 'done') return;
         useJobStore.getState().upsert(videoId, {
           phase: p.phase,
@@ -117,6 +122,7 @@ async function runOne(videoId: string): Promise<void> {
       },
       { signal },
     );
+    if (signals.get(videoId) !== controller) return;
     useJobStore.getState().upsert(videoId, { phase: 'done', message: '字幕生成完成' });
     const row = await db.videos.get(videoId);
     toast.success(`《${row?.name ?? '视频'}》字幕生成完成`);
@@ -125,8 +131,9 @@ async function runOne(videoId: string): Promise<void> {
       if (useJobStore.getState().jobs[videoId]?.phase === 'done') useJobStore.getState().drop(videoId);
     }, 2000);
   } catch (e) {
+    if (signals.get(videoId) !== controller) return;
     if (isCancel(e) || signal.aborted) {
-      await settleCanceled(videoId);
+      if (!remoteTasks()) await settleCanceled(videoId);
       markCanceled(videoId);
       return;
     }
@@ -135,32 +142,30 @@ async function runOne(videoId: string): Promise<void> {
     const row = await db.videos.get(videoId);
     toast.error(`《${row?.name ?? '视频'}》转写失败：${text}`);
   } finally {
-    signals.delete(videoId);
+    if (signals.get(videoId) === controller) signals.delete(videoId);
   }
 }
 
-/** 取消后的落库：已经有完成段就当「已转写」（字幕可用），一段都没有就退回「未转写」 */
+/** 部分字幕仍可阅读，但不是完成态；显式重试才能继续，避免刷新后偷跑。 */
 async function settleCanceled(videoId: string): Promise<void> {
-  const done = await db.segments.where('videoId').equals(videoId).filter((r) => r.status === 1).count();
-  await db.videos.update(videoId, { status: done > 0 ? 'transcribed' : 'new' });
+  await db.videos.update(videoId, { status: 'new', transcriptionPaused: true });
 }
 
 /**
- * 启动时续跑：把上次没转完的视频重新入队。
- * 只认 `status === 'transcribing'`——它是「用户发起过且中途断了」的唯一证据，
- * 不再额外建任务表。流水线本身支持断点续做（已完成段跳过），无需其它状态。
+ * 启动时准备新视频、续跑中断的视频。服务端模式只检查文件索引，不下载视频；
+ * 提交会吸附已有任务，浏览器宿主随后领取。错误任务不在此无限重试。
  */
 export async function resumePendingTranscriptions(): Promise<void> {
-  if (remoteTasks()) return;
   // status 不是索引（videos 只索引了 id, createdAt），只能全表过滤；视频量级无所谓
-  const rows = await db.videos.filter((v) => v.status === 'transcribing').toArray();
+  const rows = await db.videos.filter((v) => v.kind !== 'material' && v.fileDeleted !== 1 && !v.transcriptionPaused &&
+    (v.status === 'new' || v.status === 'transcribing')).toArray();
   let resumed = 0;
   for (const v of rows) {
     // 视频文件本体没了就没法续（可能已删文件释放空间），跳过且不改状态
-    const hasFile = await getVideoFile(v.id);
+    const hasFile = remoteTasks() ? await db.table('courseFiles').get(v.id) : await getVideoFile(v.id);
     if (!hasFile) continue;
     startTranscription(v.id, { resume: true });
     resumed++;
   }
-  if (resumed > 0) toast.info(`有 ${resumed} 个视频上次没转完，已在后台继续`);
+  if (resumed > 0) toast.info(`正在自动处理 ${resumed} 个视频的字幕，请保持页面打开`);
 }

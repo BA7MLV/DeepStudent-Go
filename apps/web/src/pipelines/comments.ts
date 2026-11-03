@@ -1,5 +1,6 @@
 import { remoteTasks } from '../cloud/state';
-import { runCloudTask } from '../cloud/tasks';
+import { assertPluginAvailable } from '../plugins/availability';
+import { runMaterialPluginTask } from '../plugins/legacy-actions';
 import { getSettings, targetOfSlot } from '../store/settings';
 import { db } from '../store/db';
 import { acquireWakeLock, releaseWakeLock } from '../utils/wakeLock';
@@ -24,14 +25,15 @@ export async function runComments(
   videoId: string,
   onProgress: (p: CommentsProgress) => void,
 ): Promise<{ threads: number; posts: number }> {
-  if (remoteTasks()) return runCloudTask('comments', `course:${videoId}`, { videoId }, onProgress);
+  await assertPluginAvailable('material-tools');
+  if (remoteTasks()) return runMaterialPluginTask('comments', videoId, onProgress);
   const target = targetOfSlot(getSettings(), 'chat');
 
   const video = await db.videos.get(videoId);
   if (!video) throw new Error('视频不存在');
   const segments = await db.segments.where('videoId').equals(videoId).sortBy('idx');
   const doneSegs = segments.filter((s) => s.status === 1 && s.text);
-  if (doneSegs.length < 3) throw new Error('请先在「字幕」页生成字幕');
+  if (doneSegs.length < 3) throw new Error('可用字幕不足，请在「字幕」页检查自动处理进度或错误');
 
   await acquireWakeLock();
   try {

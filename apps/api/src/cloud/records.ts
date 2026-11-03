@@ -5,7 +5,17 @@ import { AGENTS_PATH } from '@wangke/contracts/system';
 import crypto from 'node:crypto';
 import { BotMemory } from '../agent/memory.js';
 
-const equal = isDeepStrictEqual;
+// Legacy/server-created file references may omit MIME; a browser Blob round trip
+// represents that same unknown MIME as ''. Compare those two wire forms equally,
+// but keep file identity, non-empty MIME and all other fields conflict-sensitive.
+function canonicalWire(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalWire);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([key, item]) =>
+    !(key === 'type' && item === '' && typeof (value as Record<string, unknown>).$file === 'string'))
+    .map(([key, item]) => [key, canonicalWire(item)]));
+}
+const equal = (a: unknown, b: unknown) => isDeepStrictEqual(a, b) || isDeepStrictEqual(canonicalWire(a), canonicalWire(b));
 export class CloudConflict extends Error {
   constructor(readonly table: string, readonly key: string | number, readonly fields: string[]) {
     super('sync_conflict');

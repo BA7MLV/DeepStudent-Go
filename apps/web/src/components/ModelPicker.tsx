@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Dropdown, ListBox, ScrollShadow, SearchField, Separator, Switch, Tooltip } from '@heroui/react';
 import { Sym } from '../ui';
-import { catalogOf as settingsCatalogOf, useSettings, sameRef, modelOverridesOf, type ModelRef, type ModelSlot } from '../store/settings';
-import { guessContextWindow, hasThinkingDepth, supportsThinking } from '../api/modelCaps';
+import { catalogOf as settingsCatalogOf, useSettings, sameRef, modelOverridesOf, targetOrNull, type ModelRef, type ModelSlot } from '../store/settings';
+import { guessContextWindow } from '../api/modelCaps';
+import { effectiveThinkingLevel, reasoningChoices, reasoningProfile } from '@wangke/study-core/model/reasoning';
 import { useModelMetaRevision } from '../utils/useModelMeta';
 import ReasoningEffortSlider from './ReasoningEffortSlider';
 import './subtitle-danmaku.css';
@@ -261,11 +262,12 @@ function ChipDropdown({
    * `useModelMetaRevision()`：能力表是启动后异步拉回来的，没有这条通知，
    * 拉回来之前这里只能按「不知道」处理，控件会一直停在拉取前的判断上。
    */
-  useModelMetaRevision();
-  const catalog = catalogOf(value.providerId);
-  const overrides = modelOverridesOf(settings, value);
-  const canThink = showThinking && supportsThinking(catalog, value.model, overrides);
-  const canDepth = canThink && hasThinkingDepth(catalog, value.model, overrides);
+  const metaRevision = useModelMetaRevision();
+  const target = targetOrNull(settings, value);
+  const profile = target ? reasoningProfile(target) : undefined;
+  const choices = useMemo(() => target ? reasoningChoices(target) : [], [target?.model, target?.baseUrl, target?.protocol, target?.catalogId, target?.capabilities, metaRevision]);
+  const canThink = showThinking && profile?.supported;
+  const canDepth = canThink && choices.length > 1 && (!!profile?.efforts?.length || !!profile?.budget);
   const thinking = settings.thinkingEnabled;
   const effort = settings.thinkingEffort;
 
@@ -338,7 +340,8 @@ function ChipDropdown({
               {canDepth ? (
                 <ReasoningEffortSlider
                   fluid
-                  value={thinking ? effort : 'none'}
+                  levels={choices}
+                  value={target ? effectiveThinkingLevel(target, thinking ? effort : 'none') ?? 'high' : 'high'}
                   onChange={(next) =>
                     settings.update(
                       next === 'none'
@@ -348,7 +351,7 @@ function ChipDropdown({
                   }
                   disabled={thinkingDepthDisabled}
                 />
-              ) : (
+              ) : profile?.canDisable ? (
                 <Switch
                   /* 只给标签、不给 testid：HeroUI 的 `Switch` 本体是 RAC 的
                      `SwitchField`（一个 div），testid 挂上去就落在这个壳上 ——
@@ -364,11 +367,15 @@ function ChipDropdown({
                     </Switch.Control>
                   </Switch.Content>
                 </Switch>
+              ) : (
+                <span className="text-xs text-muted">{profile?.mode === 'unknown' ? '此接口未声明可用的思考开关或深度档位' : '此模型始终开启思考，不支持关闭或调节深度'}</span>
               )}
+              {canDepth && !profile?.canDisable && <p className="text-xs text-muted">此模型不支持关闭思考</p>}
+              {profile?.mode === 'openai' && target?.protocol === 'openai-chat' && <p className="text-xs text-muted">Chat Completions 通常不返回可读推理；需要推理摘要请使用 Responses API</p>}
             </div>
             {/* 只有开关的模型才需要一句解释（「为什么没有滑块」），且它挂在行**下面**
                 而不是夹在标签与控件之间 —— 有滑块的那些模型一个字都不写 */}
-            {!canDepth && (
+            {!canDepth && profile?.canDisable && (
               <p className="model-picker__think-hint">这个模型只支持开关，没有深度档位。</p>
             )}
           </>

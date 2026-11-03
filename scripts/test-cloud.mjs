@@ -54,6 +54,16 @@ try {
   assert.throws(() => records.apply(owner, [mutation('videos', 'rollback', null, { id: 'rollback' }), mutation('badTable', 'x', null, { id: 'x' })]));
   assert.equal(records.get(owner, 'videos', 'rollback'), null);
 
+  // A legacy file reference survives Blob's absent-MIME -> empty-MIME round trip.
+  const legacyFile = { id: 'legacy-bank', blob: { $file: 'original-file' } };
+  const browserFile = { ...legacyFile, blob: { ...legacyFile.blob, type: '' } };
+  const editedFile = { ...legacyFile, blob: { $file: 'edited-file', type: 'text/markdown' } };
+  records.apply(owner, [mutation('files', legacyFile.id, null, legacyFile)]);
+  records.apply(owner, [mutation('files', legacyFile.id, browserFile, editedFile)]);
+  assert.deepEqual(records.get(owner, 'files', legacyFile.id), editedFile);
+  assert.throws(() => records.apply(owner, [mutation('files', legacyFile.id, browserFile, { ...editedFile, blob: { $file: 'third-file' } })]), CloudConflict, 'concurrent content replacements must still conflict');
+  assert.throws(() => records.apply(owner, [mutation('files', legacyFile.id, { ...editedFile, blob: { ...editedFile.blob, type: 'image/png' } }, browserFile)]), CloudConflict, 'non-empty MIME differences are not normalized');
+
   await db.open();
   const id = await db.table('chats').add({ content: 'hello' });
   assert.ok(id > 1000000 && Number.isSafeInteger(id));

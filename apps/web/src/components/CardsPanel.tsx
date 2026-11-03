@@ -3,6 +3,8 @@ import { Button, Tooltip } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { db, type CardRow } from '../store/db';
 import { runCards, type CardsProgress } from '../pipelines/cards';
+import { usePluginAvailable } from '../plugins/catalog';
+import { assertPluginAvailable } from '../plugins/availability';
 import { fmtTime } from '../utils/vtt';
 import { TextSwap } from './motion';
 import ModelPicker from './ModelPicker';
@@ -44,6 +46,7 @@ function apkgFileName(videoName: string): string {
 }
 
 export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles }: Props) {
+  const available = usePluginAvailable('flashcards');
   const [rows, setRows] = useState<CardRow[]>([]);
   /** 首次读回之前为 false —— 空态只在 `loaded && 真的为空` 时出现（不变量 I1） */
   const [loaded, setLoaded] = useState(false);
@@ -83,21 +86,23 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
 
   /** 判定：内存先行（动画不被 DB 往返阻塞），落库 fire-and-forget（QuizCard 同款） */
   const judge = useCallback((card: CardRow, keep: boolean) => {
+    if (!available) return;
     const status = keep ? 1 : 2;
     setRows((rs) => rs.map((r) => (r.id === card.id ? { ...r, status: status as 1 | 2 } : r)));
     setHistory((h) => [...h, card.id!]);
-    void db.cards.update(card.id!, { status });
-  }, []);
+    void assertPluginAvailable('flashcards').then(() => db.cards.update(card.id!, { status })).catch(e => setErrorText(formatCaughtError(e)));
+  }, [available]);
 
   const undo = useCallback(() => {
+    if (!available) return;
     setHistory((h) => {
       const last = h[h.length - 1];
       if (last == null) return h;
       setRows((rs) => rs.map((r) => (r.id === last ? { ...r, status: 0 as const } : r)));
-      void db.cards.update(last, { status: 0 });
+       void assertPluginAvailable('flashcards').then(() => db.cards.update(last, { status: 0 })).catch(e => setErrorText(formatCaughtError(e)));
       return h.slice(0, -1);
     });
-  }, []);
+  }, [available]);
 
   const doGenerate = async () => {
     setErrorText(null);
@@ -174,7 +179,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
               loading={running}
               variant="primary"
               data-testid="cards-generate"
-              isDisabled={hasSubtitles !== true}
+               isDisabled={!available || hasSubtitles !== true}
               onPress={start}
             >
               <Sym name="style" />
@@ -182,7 +187,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
             </LoadingButton>
           </Tooltip.Trigger>
           <Tooltip.Content>
-            <p>{hasSubtitles ? '从字幕提炼知识点做成问答卡' : '请先在「字幕」页生成字幕'}</p>
+            <p>{hasSubtitles ? '从字幕提炼知识点做成问答卡' : '请等待字幕自动处理完成'}</p>
           </Tooltip.Content>
         </Tooltip>
         <Tooltip>
@@ -201,7 +206,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
             <p>{kept.length > 0 ? '导出保留的卡片（Anki 全平台可导入）' : '先右滑保留一些卡片'}</p>
           </Tooltip.Content>
         </Tooltip>
-        <ModelPicker slot="chat" field="llmModel" />
+        {available ? <ModelPicker slot="chat" field="llmModel" /> : <span role="status">学习卡片插件不可用；历史卡片仍可阅读与导出</span>}
       </PanelBar>
 
       {running && progress && (
@@ -217,7 +222,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
           `.panel-body` 的 `flex: 1` 失效、已保留列表滚不动），见 cards.css。 */}
       <SkeletonReveal className="panel-reveal" show={showSkeleton} skeleton={<CueSkeleton rows={8} />}>
         {hasSubtitles === false && loaded && rows.length === 0 && !running && (
-          <PanelPlaceholder>卡片基于字幕内容生成，请先在「字幕」页生成字幕</PanelPlaceholder>
+          <PanelPlaceholder>卡片基于字幕内容生成，请等待字幕自动处理完成</PanelPlaceholder>
         )}
         {hasSubtitles === true && loaded && rows.length === 0 && !running && (
           <PanelPlaceholder testId="cards-empty">
@@ -225,7 +230,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
           </PanelPlaceholder>
         )}
 
-        {pending.length > 0 && !running && (
+        {available && pending.length > 0 && !running && (
           <SwipeDeck
             pending={pending}
             keptCount={kept.length}
@@ -250,7 +255,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
               size="sm"
               data-testid="cards-undo"
               aria-label="撤销上一张"
-              isDisabled={history.length === 0}
+               isDisabled={!available || history.length === 0}
               onPress={undo}
             >
               <Sym name="undo" />
@@ -280,11 +285,12 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
                   </span>
                   {/* 不需要再手写 stopPropagation：HeroUI 的 onPress 默认就阻止冒泡
                       （想放行才调 continuePropagation()），所以点「移除」不会连带触发整行的跳转。 */}
-                  <Button
-                    isIconOnly
+                   <Button
+                     isIconOnly
                     variant="tertiary"
                     size="sm"
-                    aria-label="移除"
+                     aria-label="移除"
+                     isDisabled={!available}
                     onPress={() => judge(c, false)}
                   >
                     <Sym name="close" />

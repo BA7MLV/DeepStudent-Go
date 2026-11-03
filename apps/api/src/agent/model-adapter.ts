@@ -1,12 +1,20 @@
 import type { CloudProvider, ModelGatewayRequest, ModelRef, ModelAudio } from '@wangke/contracts/cloud';
-import { botRequest, botReply, responseContinuation } from './model.js';
+import { modelMessageView } from './model.js';
+import crypto from 'node:crypto';
+import { requestBody, decodeResponse, textOf, type ToolDef } from '@wangke/study-core/model/client';
+import type { ModelTarget } from '@wangke/study-core/model/types';
+import type { ModelOverrides } from '@wangke/study-core/model/meta';
 import { ModelFailure, abortable } from './model-client.js';
 import { applyPromptCache } from '@wangke/study-core/model/cache';
+import { reasoningProviderOf } from '@wangke/study-core/model/reasoning';
 import { GO_PROVIDER, goBase, goTransport } from './opencode-go.js';
 
 /** Safe runtime metadata: never a connection, key or URL. */
 export interface RuntimeModelTarget extends ModelRef {
   protocol: CloudProvider['protocol']; catalogId: string;
+  reasoningProvider?: string;
+  stateScope: string;
+  capabilities?: ModelOverrides;
 }
 
 /** Protocol-native continuation is kept intact unless a caller changes target.
@@ -14,33 +22,36 @@ export interface RuntimeModelTarget extends ModelRef {
 export class ModelAdapter {
   #connection: CloudProvider;
   readonly target: RuntimeModelTarget;
-  constructor(connection: CloudProvider, model: string) {
+  constructor(connection: CloudProvider, model: string, capabilities?: ModelOverrides) {
     const deployment = connection.deployments?.find(d => d.model === model);
     const account = connection.accounts?.find(candidate => candidate.id === connection.activeAccountId && candidate.apiKey)
       ?? connection.accounts?.find(candidate => candidate.apiKey);
     this.#connection = { ...connection, apiKey: account?.apiKey ?? connection.apiKey, protocol: deployment?.protocol ?? connection.protocol, baseUrl: deployment?.baseUrl ?? connection.baseUrl };
     if (connection.id === GO_PROVIDER) this.#connection.baseUrl = goBase(this.#connection.protocol);
-    this.target = { providerId: connection.id, model, protocol: this.#connection.protocol, catalogId: connection.catalogId };
+    this.target = { providerId: connection.id, model, protocol: this.#connection.protocol, catalogId: connection.catalogId, capabilities,
+      stateScope: `endpoint:${crypto.createHash('sha256').update(this.#connection.baseUrl).digest('hex')}`,
+      reasoningProvider: reasoningProviderOf({ baseUrl: this.#connection.baseUrl, catalogId: connection.catalogId }) };
   }
-  encode(input: Pick<ModelGatewayRequest, 'messages' | 'tools' | 'image' | 'outputTokens' | 'cacheKey' | 'continuationRef'>) {
+  private codecTarget(): ModelTarget {
+    return { ...this.target, baseUrl: this.#connection.baseUrl, apiKey: '', gatewayManaged: true };
+  }
+  encode(input: Pick<ModelGatewayRequest, 'messages' | 'tools' | 'image' | 'outputTokens' | 'cacheKey' | 'continuationRef' | 'thinkingLevel' | 'temperature' | 'toolChoice'>) {
     const { protocol, model, providerId } = this.target;
     const portable = input.continuationRef && (input.continuationRef.providerId !== providerId || input.continuationRef.model !== model);
-    const messages = (input.messages ?? []).map(({ response_items, ...message }) => ({ ...message, ...(!portable && response_items ? { response_items } : {}) }));
-    const request = botRequest({ protocol, baseUrl: this.#connection.baseUrl }, model, messages, input.tools ?? [], input.outputTokens, input.cacheKey);
+    const target = this.codecTarget();
+    const messages = modelMessageView(target, (input.messages ?? []).map(({ response_items, providerState, ...message }) => ({ ...message,
+      ...(!portable ? { response_items, providerState } : {}) })), !portable);
     if (input.image) {
       const { data, mime } = input.image;
       if (!/^image\/(png|jpeg|gif|webp)$/.test(mime) || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) throw new Error('invalid_model_image');
-      const parts = protocol === 'anthropic-messages'
-        ? [{ type: 'image', source: { type: 'base64', media_type: mime, data } }]
-        : protocol === 'openai-responses' ? [{ type: 'input_image', image_url: `data:${mime};base64,${data}` }]
-          : [{ type: 'image_url', image_url: { url: `data:${mime};base64,${data}` } }];
-      const key = protocol === 'openai-responses' ? 'input' : 'messages';
-      const list = request.body[key] as Array<{ role: string; content: unknown }>;
-      const last = list.at(-1);
+      const last = messages.at(-1);
       if (!last || last.role !== 'user') throw new Error('invalid_model_image_message');
-      last.content = [...parts, ...(Array.isArray(last.content) ? last.content : [{ type: protocol === 'openai-responses' ? 'input_text' : 'text', text: last.content ?? '' }])];
+      last.content = [{ type: 'image_url', image_url: { url: `data:${mime};base64,${data}` } }, ...(Array.isArray(last.content) ? last.content : [{ type: 'text' as const, text: last.content ?? '' }])];
     }
-    return request;
+    return { path: protocol === 'anthropic-messages' ? 'messages' : protocol === 'openai-responses' ? 'responses' : 'chat/completions',
+      body: requestBody(target, { messages, tools: input.tools as ToolDef[] | undefined, max_tokens: input.outputTokens,
+        thinkingLevel: input.thinkingLevel, temperature: input.temperature, cacheKey: input.cacheKey,
+        tool_choice: input.toolChoice }, messages, false) };
   }
   encodeAudio(audio: ModelAudio) {
     if (this.target.protocol === 'anthropic-messages' || !/^audio\/(wav|x-wav|mpeg|mp3|mp4|webm|ogg|flac)$/.test(audio.mime) || typeof audio.data !== 'string' || audio.data.length > 28 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(audio.data)) throw new ModelFailure('model_invalid_request');
@@ -108,25 +119,21 @@ export class ModelAdapter {
     if (!['models', 'systemone', 'audio/transcriptions', expected].includes(endpoint) || endpoint === 'audio/transcriptions' && this.target.protocol === 'anthropic-messages') throw new Error('model_protocol_mismatch');
     return this.transport(endpoint, identity);
   }
-  decode(body: unknown, purpose?: ModelGatewayRequest['purpose']) {
-    const result = body as { stop_reason?: string; status?: string; incomplete_details?: { reason?: string }; output?: Array<{ content?: Array<{ type?: string }> }>; choices?: Array<{ finish_reason?: string; message?: { refusal?: unknown } }> } | null;
-    if (result?.stop_reason === 'refusal' || result?.incomplete_details?.reason === 'content_filter' || Array.isArray(result?.choices) && result.choices.some(c => c?.finish_reason === 'content_filter' || c?.message?.refusal) || Array.isArray(result?.output) && result.output.some(o => Array.isArray(o?.content) && o.content.some(c => c?.type === 'refusal'))) throw new ModelFailure('model_content_policy');
-    // Existing vision tools expose useful partial evidence with an explicit flag.
-    // Bot/tool rounds still reject truncation, and no incomplete continuation survives.
-    const truncated = result?.stop_reason === 'max_tokens' || result?.status === 'incomplete' && result.incomplete_details?.reason === 'max_output_tokens' || Array.isArray(result?.choices) && result.choices.some(c => c?.finish_reason === 'length');
-    if (purpose === 'vision' && truncated && body && typeof body === 'object') {
-      const complete = { ...body, ...(result?.stop_reason === 'max_tokens' ? { stop_reason: 'end_turn' } : {}), ...(result?.status === 'incomplete' ? { status: 'completed' } : {}), ...(Array.isArray(result?.choices) ? { choices: result.choices.map(c => ({ ...c, finish_reason: c.finish_reason === 'length' ? 'stop' : c.finish_reason })) } : {}) };
-      try {
-        const response = botReply(this.target.protocol, complete);
-        if (!response.text.trim() || response.calls.length) throw new Error('invalid_structured_response');
-        return { ...response, truncated: true };
-      } catch { throw new ModelFailure('invalid_structured_response'); }
-    }
-    try { return { ...botReply(this.target.protocol, body), continuation: responseContinuation(this.target.protocol, body) }; }
-    catch (error) {
-      if (error instanceof Error && error.message === 'invalid_structured_response') throw new ModelFailure('invalid_structured_response');
-      if (error instanceof Error && error.message === 'model_incomplete_or_refused') throw new ModelFailure('model_incomplete_or_refused');
-      throw new ModelFailure('model_empty_response');
+  decode(body: unknown, purpose?: ModelGatewayRequest['purpose'], tools?: ModelGatewayRequest['tools']) {
+    try {
+      const message = decodeResponse(this.codecTarget(), body, { tools: tools as ToolDef[] | undefined });
+      if (message.finish_reason === 'content_filter') throw new ModelFailure('model_content_policy');
+      const text = textOf(message), calls = (message.tool_calls ?? []).map(c => ({ ...(c.id ? { id: c.id } : {}), function: c.function }));
+      const truncated = message.finish_reason === 'length';
+      // Runtime safety, not protocol parsing: partial tool calls never execute.
+      if (truncated && purpose === 'vision' && text.trim() && !calls.length) return { text, calls, truncated: true };
+      if (message.finish_reason && ['length', 'error', 'aborted'].includes(message.finish_reason)) throw new ModelFailure('model_incomplete_or_refused');
+      if (!calls.length && !text.trim()) throw new ModelFailure('invalid_structured_response');
+      return { text, calls, ...(message.reasoning_content ? { reasoning: message.reasoning_content } : {}),
+        ...(message.providerState ? { providerState: message.providerState, continuation: message.providerState.items } : {}) };
+    } catch (error) {
+      if (error instanceof ModelFailure) throw error;
+      throw new ModelFailure('invalid_structured_response');
     }
   }
 }

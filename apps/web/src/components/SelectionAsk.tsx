@@ -4,6 +4,7 @@ import { useIsMobile } from '../utils/useMobile';
 import { cleanSelectionText, isUsableSelection } from '../materials/region';
 import { useSelectionAsk, type AskSource, type Citation } from '../store/selectionAsk';
 import { Sym } from '../ui';
+import { PluginActions } from '../plugins/PluginActions';
 import './selection-ask.css';
 
 /**
@@ -69,7 +70,7 @@ function readSelection(): Hit | null {
   };
 }
 
-export default function SelectionAsk() {
+export default function SelectionAsk({ materialId }: { materialId?: string }) {
   const isMobile = useIsMobile();
   const [hit, setHit] = useState<Hit | null>(null);
   /** 框选投过来的浮层请求（PDF 框选没有 DOM 选区，走 store） */
@@ -183,6 +184,7 @@ export default function SelectionAsk() {
           <Dropdown.Item id="explain" textValue="解释" data-testid="ask-explain"><Sym name="lightbulb" /><Label>解释</Label></Dropdown.Item>
           <Dropdown.Item id="compose" textValue="提问" data-testid="ask-compose"><Sym name="chat" /><Label>提问</Label></Dropdown.Item>
         </Dropdown.Menu>
+        <PluginActions surface="reader.selection.actions" materialId={materialId} selection={materialId ? { resourceId: materialId, text: active.cite.text } : undefined} />
       </Dropdown.Popover>
     </Dropdown>
   );
@@ -208,6 +210,7 @@ export default function SelectionAsk() {
         <span className="ask-float__text">{active.cite.text}</span>
       </div>
       <div className="ask-float__actions">
+        <PluginActions surface="reader.selection.actions" materialId={materialId} selection={materialId ? { resourceId: materialId, text: active.cite.text } : undefined} />
         {/* onMouseDown.preventDefault 保住选区（见文件头注释 1），onPress 走 React Aria
             的按压事件 —— 两者都经 filterDOMProps 透传，行为与原来的 onClick 一致。 */}
         <Button

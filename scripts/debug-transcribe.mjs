@@ -22,7 +22,7 @@ await page.waitForSelector('[data-testid="video-item"]', { timeout: 15000 });
 await page.click('[data-testid="btn-play"]');
 await page.waitForSelector('video', { timeout: 15000 });
 console.log('player ready, clicking 生成字幕');
-await page.click('[data-testid="subs-generate"]');
+// Upload already queued automatic subtitle processing.
 
 for (let i = 0; i < 24; i++) {
   await page.waitForTimeout(5000);

@@ -4,6 +4,7 @@ import { renderAsync } from 'docx-preview';
 import { ensureHandoutPreviewFonts } from '../handout/previewFonts';
 import { db, type HandoutRow } from '../store/db';
 import { runHandout, type HandoutProgress } from '../pipelines/handout';
+import { usePluginAvailable } from '../plugins/catalog';
 import { loadEnabledSkillMeta, type SkillMeta } from '../skills/store';
 import { useIsMobile } from '../utils/useMobile';
 import { TextSwap } from './motion';
@@ -35,6 +36,7 @@ interface Props {
 type SkillMode = 'auto' | 'pin' | 'drop';
 
 export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
+  const available = usePluginAvailable('material-tools');
   const [handout, setHandout] = useState<HandoutRow | null>(null);
   const [progress, setProgress] = useState<HandoutProgress | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
@@ -183,7 +185,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
               loading={running}
               variant="primary"
               data-testid="handout-generate"
-              isDisabled={hasSubtitles !== true}
+              isDisabled={!available || hasSubtitles !== true}
               onPress={start}
             >
               <Sym name="article" />
@@ -191,7 +193,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
             </LoadingButton>
           </Tooltip.Trigger>
           <Tooltip.Content>
-            <p>{hasSubtitles === false ? '请先在「字幕」页生成字幕' : '抽取课程画面、提炼大纲并排版为 DOCX'}</p>
+            <p>{hasSubtitles === false ? '请等待字幕自动处理完成' : '抽取课程画面、提炼大纲并排版为 DOCX'}</p>
           </Tooltip.Content>
         </Tooltip>
         {handout && (
@@ -214,7 +216,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
       </PanelBar>
 
       {hasSubtitles === false && !running && (
-        <PanelPlaceholder>讲义基于字幕内容生成，请先在「字幕」页生成字幕</PanelPlaceholder>
+        <PanelPlaceholder>讲义基于字幕内容生成，请等待字幕自动处理完成</PanelPlaceholder>
       )}
 
       {running && progress && (

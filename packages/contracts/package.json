@@ -14,6 +14,9 @@
     "./resources": { "types": "./dist/resources.d.ts", "default": "./dist/resources.js" },
     "./system": { "types": "./dist/system.d.ts", "default": "./dist/system.js" },
     "./board": { "types": "./dist/board.d.ts", "default": "./dist/board.js" },
+    "./plugins": { "types": "./dist/plugins.d.ts", "default": "./dist/plugins.js" },
+    "./plugin-registry": { "types": "./dist/plugin-registry.d.ts", "default": "./dist/plugin-registry.js" },
+    "./learning-plugins": { "types": "./dist/learning-plugins.d.ts", "default": "./dist/learning-plugins.js" },
     "./model-settings": { "types": "./dist/model-settings.d.ts", "default": "./dist/model-settings.js" }
   },
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit -p tsconfig.json" },

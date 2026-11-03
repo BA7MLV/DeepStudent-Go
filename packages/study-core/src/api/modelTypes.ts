@@ -13,6 +13,11 @@ export interface ModelTarget {
   capabilities?: ModelOverrides;
   /** Transport policy, credentials and retries belong to the server Gateway. */
   gatewayManaged?: boolean;
+  /** Audited wire-provider hint retained by a virtual Gateway target. Never a
+   * metadata override or a credential-bearing endpoint. */
+  reasoningProvider?: string;
+  /** Opaque endpoint fingerprint for server-managed continuation. */
+  stateScope?: string;
 }
 
 export interface ModelListConnection {

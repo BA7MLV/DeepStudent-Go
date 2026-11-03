@@ -22,6 +22,7 @@ try {
     await page.getByTestId('chat-add').click();
     await page.getByRole('menuitem', { name: /技能/ }).click();
     await page.getByTestId('skill-picker-dialog').waitFor();
+    await page.getByTestId('skill-tab-scope').click();
   };
   const close = async () => {
     await page.getByTestId('skill-picker-done').click();

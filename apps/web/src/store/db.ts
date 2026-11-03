@@ -24,6 +24,8 @@ export interface VideoRow {
   duration: number; // 秒（材料恒为 0）
   createdAt: number;
   status: 'new' | 'transcribing' | 'transcribed' | 'error';
+  /** 用户主动暂停自动字幕；刷新不自动重启，显式重试时清除。 */
+  transcriptionPaused?: boolean;
   /** B 站导入来源，用于下载后补拉自带字幕。非索引字段，旧数据无需迁移。 */
   biliSource?: BiliVideoSource;
   /**
@@ -221,6 +223,8 @@ export interface ChatSessionRow {
    * 那会把「用户明确禁用了全部技能」静默退化成「全部可用」。
    */
   skillIds?: number[];
+  /** Explicit instructions reloaded for each turn; separate from the permission scope. */
+  pinnedSkillIds?: number[];
   /** undefined inherits enabled servers; [] disables MCP for this conversation. */
   mcpServerIds?: string[];
   /**
@@ -301,6 +305,8 @@ export interface ChatRow {
   content: string;
   modelTrace?: import('@wangke/study-core/model/transcript').ModelTrace;
   modelRequests?: import('@wangke/study-core/model/usage').ModelRequestRecord[];
+  /** Explicit activation IDs for retries/resume. Never replay without checking current permissions. */
+  explicitSkillIds?: number[];
   createdAt: number;
   /** 用户消息附带的截图（非索引字段，无需升级版本） */
   images?: ChatImage[];

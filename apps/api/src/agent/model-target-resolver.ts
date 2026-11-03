@@ -1,5 +1,6 @@
 import type { CloudConfig, ModelGatewayRequest, ModelPreset, ModelPurpose } from '@wangke/contracts/cloud';
 import { ModelAdapter } from './model-adapter.js';
+import type { ModelOverrides } from '@wangke/study-core/model/meta';
 
 const slot = { chat: 'llmModel', bot: 'llmModel', memory: 'llmModel', vision: 'visionModel', asr: 'asrModel', decision: 'decisionModel' } as const;
 /** Legacy references remain exact; discovery is never treated as authorization. */
@@ -17,7 +18,8 @@ export function legacyModelPresets(config: CloudConfig): { modelPresets: ModelPr
   return { modelPresets, modelRoutes: { byPurpose } };
 }
 export class ModelTargetResolver {
-  constructor(readonly config: (owner: string) => CloudConfig) {}
+  constructor(readonly config: (owner: string) => CloudConfig,
+    readonly overrides?: (owner: string, providerId: string, model: string) => ModelOverrides | undefined) {}
   resolve(request: Pick<ModelGatewayRequest, 'owner' | 'purpose' | 'presetId' | 'modelRef'>) {
     const config = this.config(request.owner);
     const legacy = legacyModelPresets(config);
@@ -41,7 +43,7 @@ export class ModelTargetResolver {
       if (!provider.serves.includes(capability) && !legacyVision) throw new Error('model_capability_unavailable');
       const deployment = provider.deployments?.find(d => d.model === model);
       const privacy = deployment?.dataPolicy ?? provider.dataPolicy ?? 'default';
-      return { adapter: new ModelAdapter(provider, model), privacy, allowFallback: providerId === 'opencode-go' ? deployment?.allowFallback === true && privacy !== 'default' : deployment?.allowFallback !== false };
+      return { adapter: new ModelAdapter(provider, model, this.overrides?.(request.owner, providerId, model)), privacy, allowFallback: providerId === 'opencode-go' ? deployment?.allowFallback === true && privacy !== 'default' : deployment?.allowFallback !== false };
     });
     return { preset, candidates: adapters };
   }

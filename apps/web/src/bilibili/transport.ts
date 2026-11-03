@@ -47,6 +47,7 @@ export interface TransportDesc {
 }
 
 declare global {
+  interface Window { __wangkeBiliBridge?: BiliBridge }
   // eslint-disable-next-line no-var
   var __wangkeBiliBridge: BiliBridge | undefined;
 }
@@ -54,6 +55,14 @@ declare global {
 export function getWindowBridge(): BiliBridge | null {
   const b = globalThis.__wangkeBiliBridge;
   if (b && typeof b.fetch === 'function') return b;
+  // The automatic worker is a same-origin child of the importing page. User
+  // scripts may only inject into the top frame; reuse that authorized bridge.
+  if (typeof window !== 'undefined' && window.parent !== window) {
+    try {
+      const parentBridge = window.parent.__wangkeBiliBridge;
+      if (typeof parentBridge?.fetch === 'function') return parentBridge;
+    } catch { /* A cross-origin embedding must never grant bridge access. */ }
+  }
   return null;
 }
 

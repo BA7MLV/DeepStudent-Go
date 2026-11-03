@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { Button, Checkbox, Label, Modal, SearchField, Spinner, Tooltip } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
-import { Sym, MODAL_CONTAINER_CLASS } from '../ui';
+import { Sym, MODAL_CONTAINER_CLASS, toast } from '../ui';
 import { loadEnabledSkillMeta, type SkillMeta } from '../skills/store';
 import { intersectSkillMetaIds } from '../skills/scope';
 import { cloud } from '../cloud/state';
@@ -19,6 +19,11 @@ interface Props {
   hideTrigger?: boolean;
   mcpValue?: string[];
   onMcpChange?: (ids: string[] | undefined) => Promise<void>;
+  turnValue?: number[];
+  onTurnChange?: (ids: number[]) => void;
+  pinnedValue?: number[];
+  onPinnedChange?: (ids: number[]) => Promise<void>;
+  disabled?: boolean;
 }
 
 // 简短名称用于选择；用途说明保留在搜索和无障碍描述中。
@@ -30,8 +35,8 @@ const BUILTIN_PRESENTATION = [
   { name: '资料整理', key: 'organize', icon: 'folder_open' },
 ] as const;
 
-/** 技能是可用范围，不是强制调用；勾选即时生效，搜索只过滤展示。 */
-export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hideTrigger, mcpValue, onMcpChange }: Props) {
+/** Explicit activation and automatic availability are independent; search never changes selection. */
+export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hideTrigger, mcpValue, onMcpChange, turnValue = [], onTurnChange, pinnedValue = [], onPinnedChange, disabled }: Props) {
   const { t } = useTranslation('settings');
   const id = useId();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -40,6 +45,8 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
   const [catalog, setCatalog] = useState<{ status: 'loading' | 'ready' | 'error'; skills: SkillMeta[] }>({ status: 'loading', skills: [] });
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState('');
+  const [tab, setTab] = useState<'turn' | 'pinned' | 'scope'>(onTurnChange ? 'turn' : 'scope');
+  const [saving, setSaving] = useState(false);
 
   // 每次打开重新读取启停状态；关闭后丢弃未完成的结果，失败不伪装成空列表。
   useEffect(() => {
@@ -56,9 +63,13 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
   }, [open, retry]);
 
   const { skills, status } = catalog;
-  const selected = new Set(intersectSkillMetaIds(skills, value));
+  const scope = new Set(intersectSkillMetaIds(skills, value));
+  const explicit = tab !== 'scope';
+  const chosen = tab === 'turn' ? turnValue : pinnedValue;
+  const selected = explicit ? new Set(intersectSkillMetaIds(skills, chosen)) : scope;
+  const unavailable = explicit ? chosen.filter(key => !skills.some(skill => skill.id === key || skill.legacyIds?.includes(key))) : [];
   const mode = value === undefined ? 'auto' : value.length === 0 ? 'none' : 'custom';
-  const ready = status === 'ready';
+  const ready = status === 'ready' && !disabled && !saving;
   const selectionLabel = mode === 'auto' ? t('skillPicker.auto')
     : mode === 'none' ? t('skillPicker.none') : t('skillPicker.custom');
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -81,10 +92,25 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
   const showGroupLabels = skills.some((skill) => skill.builtin) && skills.some((skill) => !skill.builtin);
 
   const toggle = (skillId: number, checked: boolean) => {
+    if (explicit) {
+      const skill = skills.find(item => item.id === skillId);
+      const previous = chosen.filter(key => key !== skillId && !skill?.legacyIds?.includes(key));
+      const next = checked ? [...previous, skillId] : previous;
+      void changeExplicit(next);
+      return;
+    }
     const next = new Set(selected);
     if (checked) next.add(skillId); else next.delete(skillId);
     // 使用全部候选而非搜索结果，保留隐藏项；空集合绝不能归一化为自动。
     onChange(next.size > 0 && next.size === skills.length ? undefined : skills.map((s) => s.id).filter((key) => next.has(key)));
+  };
+
+  const changeExplicit = async (next: number[]) => {
+    if (tab === 'turn') { onTurnChange?.(next); return; }
+    setSaving(true);
+    try { await onPinnedChange?.(next); }
+    catch (error) { toast.error(error instanceof Error ? error.message : t('skillPicker.saveError')); }
+    finally { setSaving(false); }
   };
 
   const manage = () => {
@@ -111,23 +137,31 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
             <Modal.CloseTrigger aria-label={t('skillPicker.close')} />
             <Modal.Header className="skill-picker__header">
               <Modal.Heading className="skill-picker__heading">{onMcpChange && cloud.enabled ? t('mcp.scopeTitle') : t('skillPicker.title')}</Modal.Heading>
+              {onTurnChange && <div className="skill-picker__presets" role="group" aria-label={t('skillPicker.activationMode')}>
+                {(['turn', 'pinned', 'scope'] as const).map(item => <Button key={item} size="sm" variant={tab === item ? 'secondary' : 'tertiary'} aria-pressed={tab === item} data-testid={`skill-tab-${item}`} isDisabled={saving} onPress={() => setTab(item)}>{t(`skillPicker.${item}Tab`)}</Button>)}
+              </div>}
+              <p className="skill-picker__notice">{t(`skillPicker.${tab}Hint`)}</p>
+              {disabled && <p className="skill-picker__notice" role="status">{t('skillPicker.busyHint')}</p>}
               <div className="skill-picker__toolbar">
                 <div className="skill-picker__presets">
+                  {explicit ? <Button size="sm" variant="tertiary" isDisabled={!ready || chosen.length === 0} data-testid="skill-explicit-clear" onPress={() => void changeExplicit([])}>{t('skillPicker.clearSelection')}</Button> : <>
                   <Button size="sm" variant={mode === 'auto' ? 'secondary' : 'tertiary'} aria-pressed={mode === 'auto'}
                     isDisabled={!ready} data-testid="skill-picker-all" onPress={() => onChange(undefined)}>
                     {t('skillPicker.useAuto')}
                   </Button>
-                  <Button size="sm" variant={mode === 'none' ? 'secondary' : 'tertiary'} aria-pressed={mode === 'none'}
+                   <Button size="sm" variant={mode === 'none' ? 'secondary' : 'tertiary'} aria-pressed={mode === 'none'}
                     isDisabled={!ready} data-testid="skill-picker-none" onPress={() => onChange([])}>
-                    {t('skillPicker.useNone')}
-                  </Button>
+                     {t('skillPicker.useNone')}
+                   </Button>
+                  </>}
                 </div>
                 {ready && <span className="skill-picker__count" role="status" aria-live="polite" data-testid="skill-picker-status"
                   aria-label={t('skillPicker.countLabel', { count: selected.size, total: skills.length })}>
                   {t('skillPicker.count', { count: selected.size, total: skills.length })}
                 </span>}
               </div>
-              {ready && mode === 'custom' && selected.size === 0 && skills.length > 0 && <p className="skill-picker__notice" role="status">{t('skillPicker.unavailable')}</p>}
+              {unavailable.length > 0 && <p className="skill-picker__notice" role="alert">{t('skillPicker.explicitUnavailable', { count: unavailable.length })} <Button size="sm" variant="tertiary" isDisabled={!ready} onPress={() => void changeExplicit(chosen.filter(key => !unavailable.includes(key)))}>{t('skillPicker.removeUnavailable')}</Button></p>}
+              {ready && !explicit && mode === 'custom' && selected.size === 0 && skills.length > 0 && <p className="skill-picker__notice" role="status">{t('skillPicker.unavailable')}</p>}
               {ready && skills.length > 0 && <SearchField value={query} onChange={setQuery} aria-label={t('skillPicker.search')}
                 data-testid="skill-picker-search">
                 <SearchField.Group>
@@ -157,12 +191,14 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
                     <div className="skill-picker__list">
                       {group.items.map((skill) => <Checkbox key={skill.id} className="skill-picker__item"
                         isSelected={selected.has(skill.id)} onChange={(checked) => toggle(skill.id, checked)}
+                        isDisabled={!ready || (explicit && !scope.has(skill.id) && !selected.has(skill.id))}
                         aria-label={skill.title} aria-describedby={`${id}-desc-${skill.id}`}
                         data-testid="skill-scope-item" data-skill-name={skill.name}>
                         <Checkbox.Content className="skill-picker__content">
                           <span className="skill-picker__icon"><Sym name={skill.icon} /></span>
                           <span className="skill-picker__text" title={skill.summary || undefined}>
                             <Label className="skill-picker__name">{skill.title}</Label>
+                            <span className="skill-picker__dependency">{explicit ? t(!scope.has(skill.id) ? 'skillPicker.outOfScope' : selected.has(skill.id) ? 'skillPicker.pendingLoad' : 'skillPicker.available') : null}</span>
                             <span className="sr-only" id={`${id}-desc-${skill.id}`}>{skill.summary}</span>
                             {!!skill.mcpRequired?.length && <span className="skill-picker__dependency">{t('skillPicker.requiresMcp', { names: skill.mcpRequired.join(', ') })}</span>}
                           </span>

@@ -1,0 +1,9 @@
+{
+  "apiVersion": 2,
+  "id": "material-note",
+  "name": "资料上下文笔记模板",
+  "version": "1.0.0",
+  "enabled": true,
+  "capabilities": ["state", "context"],
+  "views": { "main": { "entry": "views/main.html", "surfaces": ["reader.sidepanel", "board.main", "chat.sidepanel", "app.page"], "height": 320 } }
+}

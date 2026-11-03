@@ -5,17 +5,15 @@ import { createModelGateway } from './model-gateway-factory.js';
 const virtualOrigin = 'https://model-gateway.invalid';
 /** Compatibility target for the existing streaming codec. It is NOT a provider
  * connection. The virtual address is accepted only by gatewayTaskFetch below. */
-export function gatewayTaskTarget(context: TaskContext): ModelTarget {
+export function gatewayTaskTarget(context: TaskContext, options?: { useDefaultModel: boolean }): ModelTarget {
   const input = context.task.input;
-  const modelRef = context.task.kind === 'modelOnce' ? { providerId: String(input.providerId ?? ''), model: String(input.model ?? '') }
+  const modelRef = context.task.kind === 'modelOnce' && !options?.useDefaultModel ? { providerId: String(input.providerId ?? ''), model: String(input.model ?? '') }
     : input.modelRef as { providerId: string; model: string } | undefined;
   const gateway = createModelGateway(context.store, context.configuration, context.fetch);
   let target: ReturnType<typeof gateway.target>;
   try { target = gateway.target({ owner: context.owner, purpose: 'chat', modelRef }); }
   catch { throw new Error('model_not_configured'); }
-  const saved = context.records.get(context.owner, 'preferences', 'savedModels')?.value;
-  const capabilities = Array.isArray(saved) ? saved.find(m => m?.providerId === target.providerId && m?.model === target.model) : undefined;
-  return { ...target, baseUrl: `${virtualOrigin}/${encodeURIComponent(target.providerId)}`, apiKey: '', gatewayManaged: true, capabilities };
+  return { ...target, baseUrl: `${virtualOrigin}/${encodeURIComponent(target.providerId)}`, apiKey: '', gatewayManaged: true };
 }
 export function gatewayTaskFetch(context: TaskContext): typeof fetch {
   return async (url, init) => {

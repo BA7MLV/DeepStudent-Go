@@ -12,7 +12,11 @@ export async function submitCloudTask(kind: CloudTaskKind, resource: string, inp
 }
 export async function runCloudTask<T>(kind: CloudTaskKind, resource: string, input: Record<string, unknown>, onProgress?: (p: any) => void, signal?: AbortSignal): Promise<T> {
   signal?.throwIfAborted();
-  let task = await submitCloudTask(kind, resource, input);
+  const task = await submitCloudTask(kind, resource, input);
+  return waitCloudTask<T>(task, onProgress, signal);
+}
+/** Observe an already dispatched plugin task without submitting a second job. */
+export async function waitCloudTask<T>(task: CloudTask, onProgress?: (p: any) => void, signal?: AbortSignal): Promise<T> {
   const cancel = () => { void cloudRequest(`/tasks/${task.id}/cancel`, { method: 'POST' }).catch(() => {}); };
   signal?.addEventListener('abort', cancel, { once: true });
   let awaitingOwnerSince = 0;
@@ -50,9 +54,9 @@ export async function syncTaskWidgets(progress: CloudTask['progress']): Promise<
   await flushCloud();
   return matches();
 }
-export async function cancelResourceTasks(resource: string) {
+export async function cancelResourceTasks(resource: string, kind?: CloudTaskKind) {
   const { tasks } = await cloudRequest<{ tasks: CloudTask[] }>('/tasks');
-  await Promise.all(tasks.filter(t => t.resource === resource && ['queued','running','waiting_user'].includes(t.status)).map(t => cloudRequest(`/tasks/${t.id}/cancel`, { method: 'POST' })));
+  await Promise.all(tasks.filter(t => t.resource === resource && (!kind || t.kind === kind) && ['queued','running','waiting_user'].includes(t.status)).map(t => cloudRequest(`/tasks/${t.id}/cancel`, { method: 'POST' })));
 }
 export async function commandChatTask(sessionId: number | null, action: string, value?: unknown): Promise<boolean> {
   const { tasks } = await cloudRequest<{ tasks: CloudTask[] }>('/tasks');

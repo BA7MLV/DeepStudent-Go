@@ -3,7 +3,6 @@ import type { DatabaseStore } from '../storage/database.js';
 import type { CloudTask, CloudTaskKind } from '@wangke/contracts/cloud';
 import { CloudConfiguration } from './config.js';
 import { CloudRecords } from './records.js';
-import { executeMediaTask } from './media.js';
 import { executorFor, recordMutation, type TaskContext, type TaskExecutor } from './execution.js';
 import { BudgetBlocked } from '../agent/budget.js';
 import { settleWithin } from '../lifecycle.js';
@@ -40,17 +39,20 @@ const executeNodeTask: TaskExecutor = async context => {
 };
 
 interface RunnerOptions {
+  mcp?: TaskContext['mcp'];
   webSearch?: WebSearchService;
   records?: CloudRecords;
   configuration?: CloudConfiguration;
   filesDir?: string;
   fetch?: typeof fetch;
   /** Dependency injection for scheduler tests; never accepted over HTTP. */
-  executors?: Partial<Record<'node' | 'media' | 'browser', TaskExecutor>>;
+  executors?: Partial<Record<'node' | 'browser', TaskExecutor>>;
 }
 
 /** Single-instance durable scheduler; execution backends do not own queue state. */
 export class CloudTaskRunner {
+  /** Set once by the host after both task and plugin services are constructed. */
+  pluginService?: TaskContext['pluginService'];
   private stopped = false;
   private quiescing = false;
   private active = new Map<string, AbortController>();
@@ -111,6 +113,9 @@ export class CloudTaskRunner {
         });
         this.recovered = true;
       }
+      // Closing/suspending the host must not strand a browser job in running.
+      this.store.db.prepare("UPDATE cloud_tasks SET status='queued',worker_id=NULL,lease_expires_at=NULL,progress=NULL,updated_at=? WHERE executor='browser' AND status IN ('running','waiting_user') AND lease_expires_at<=?")
+        .run(new Date().toISOString(), new Date().toISOString());
       for (const [id, controller] of this.active) {
         const row = this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(id) as any;
         if (row?.status === 'cancelled' || this.store.db.prepare("SELECT 1 FROM cloud_tasks t JOIN runs r ON r.id=t.parent_run_id WHERE t.id=? AND r.status IN ('cancelled','failed','paused')").get(id)) controller.abort();
@@ -162,6 +167,8 @@ export class CloudTaskRunner {
       const context: TaskContext = {
         task, owner: row.owner_id, store: this.store, records: this.records,
         webSearch: this.options.webSearch,
+        mcp: this.options.mcp,
+        pluginService: this.pluginService,
         configuration: this.options.configuration ?? new CloudConfiguration(this.store, path.join(directory, 'config')),
         filesDir: this.options.filesDir ?? process.env.FILES_DIR ?? path.join(directory, 'files'),
         signal, fetch: async (url, init) => {
@@ -177,7 +184,7 @@ export class CloudTaskRunner {
         },
       };
       if (executor === 'browser') throw new Error('browser_task_requires_external_worker');
-      const execute = this.options.executors?.[executor] ?? (executor === 'node' ? executeNodeTask : executeMediaTask);
+      const execute = this.options.executors?.[executor] ?? executeNodeTask;
       const result = await execute(context);
       checkActive();
       this.store.db.prepare("UPDATE cloud_tasks SET status='completed',result=?,error=NULL,updated_at=? WHERE id=? AND status IN ('running','waiting_user')")

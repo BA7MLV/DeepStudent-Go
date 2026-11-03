@@ -3,6 +3,7 @@ import { Tooltip } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { db, type DanmakuRow } from '../store/db';
 import { runDanmaku, type DanmakuProgress } from '../pipelines/danmaku';
+import { usePluginAvailable } from '../plugins/catalog';
 import { fmtTime } from '../utils/vtt';
 import { TextSwap } from './motion';
 import ModelPicker from './ModelPicker';
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export default function DanmakuPanel({ videoId, playerRef, hasSubtitles }: Props) {
+  const available = usePluginAvailable('material-tools');
   const [items, setItems] = useState<DanmakuRow[]>([]);
   /**
    * 首次读回之前为 false —— 空态只在 `loaded && 真的为空` 时出现。
@@ -79,7 +81,7 @@ export default function DanmakuPanel({ videoId, playerRef, hasSubtitles }: Props
             <LoadingButton
               loading={running}
               variant="primary"
-              isDisabled={hasSubtitles !== true}
+              isDisabled={!available || hasSubtitles !== true}
               onPress={start}
               data-testid="dm-generate"
             >
@@ -88,7 +90,7 @@ export default function DanmakuPanel({ videoId, playerRef, hasSubtitles }: Props
             </LoadingButton>
           </Tooltip.Trigger>
           <Tooltip.Content>
-            <p>{hasSubtitles ? '按课程内容设计思考题' : '请先在「字幕」页生成字幕'}</p>
+            <p>{hasSubtitles ? '按课程内容设计思考题' : '请等待字幕自动处理完成'}</p>
           </Tooltip.Content>
         </Tooltip>
         <ModelPicker slot="chat" field="llmModel" />
@@ -103,7 +105,7 @@ export default function DanmakuPanel({ videoId, playerRef, hasSubtitles }: Props
       <PanelBody testId="dm-list">
         <SkeletonReveal show={showSkeleton} skeleton={<CueSkeleton rows={8} />}>
           {hasSubtitles === false && !running && (
-            <PanelPlaceholder testId="dm-empty">弹幕基于字幕内容生成，请先在「字幕」页生成字幕</PanelPlaceholder>
+            <PanelPlaceholder testId="dm-empty">弹幕基于字幕内容生成，请等待字幕自动处理完成；进度和错误可在「字幕」页查看</PanelPlaceholder>
           )}
           {hasSubtitles === true && loaded && items.length === 0 && !running && (
             <PanelPlaceholder testId="dm-empty">

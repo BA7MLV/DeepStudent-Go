@@ -20,11 +20,8 @@ RUN npm run build -w @wangke/contracts && npm run build -w @wangke/study-core &&
 RUN npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
-ARG DEBIAN_MIRROR=deb.debian.org
 ENV NODE_ENV=production DATA_DIR=/data DB_PATH=/data/db/wangke.sqlite FILES_DIR=/data/files HOME=/tmp
 WORKDIR /app
-RUN sed -i "s|http://deb.debian.org|http://${DEBIAN_MIRROR}|g; s|https://deb.debian.org|http://${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/debian.sources \
-  && apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json

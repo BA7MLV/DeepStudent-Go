@@ -40,9 +40,9 @@
 
 ## 运行资源
 
-镜像包含 FFmpeg，但不包含 Chromium。任务调度按类型分流：模型、聊天、问答和文本任务直接在 Node 执行，视频封面使用 FFmpeg 子进程；视频/音频解码、PDF 预览和 UI 依赖任务由已认证的外部浏览器 Worker 执行。默认同时计算 2 个任务（`CLOUD_CONCURRENCY=1..4`），等待审批也占用内存。原文件与产物保存在 `/data`。分流清单与 Worker 认证方式见 [任务执行架构](task-execution.md) 和 [外部浏览器 Worker](browser-worker.md)。
+镜像不包含 FFmpeg 或 Chromium。模型、聊天、问答和文本任务直接在 Node 执行；视频封面、音频解码、PDF 预览等任务由普通已登录页面自动托管的浏览器 Worker 执行。上传后自动准备字幕，B 站原字幕优先，否则由浏览器调用配置的 ASR 服务转写（可能收费）。请保持页面打开。默认同时计算 2 个任务（`CLOUD_CONCURRENCY=1..4`），原文件与产物保存在 `/data`。详见 [任务执行架构](task-execution.md) 和 [浏览器 Worker](browser-worker.md)。
 
-非 Docker 启动时先安装系统 FFmpeg（可用 `FFMPEG_PATH` 指定路径），然后 `npm run build && npm start`。需要浏览器任务时，在外部已登录浏览器打开 `/?cloud-worker=1`；开发/E2E 仍可单独安装 Playwright。开发 API 前先运行 `npm run build:api`。
+非 Docker 启动执行 `npm run build && npm start`，无需安装 FFmpeg。浏览器任务自动由普通页面承接，仍支持 `/?cloud-worker=1` 独立页面；开发/E2E 可单独安装 Playwright 和 FFmpeg 制作测试样片。开发 API 前先运行 `npm run build:api`。
 
 ## 额外的公网 IP HTTPS 入口
 

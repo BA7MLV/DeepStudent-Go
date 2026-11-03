@@ -7,6 +7,7 @@ import type { ResourceDirectory, ResourceEntry } from '@wangke/contracts/resourc
 import { request, serverClient } from '../api/serverClient';
 import { FolderIcon } from '../components/FolderIcon';
 import FolderColorMenu from '../components/FolderColorMenu';
+import { PluginActions } from '../plugins/PluginActions';
 import { ResourceFileIcon } from '../components/ResourceFileIcon';
 import { useLibraryNavigation } from '../store/libraryNavigation';
 import { db } from '../store/db';
@@ -20,6 +21,8 @@ import ResourceTrash from '../projects/ResourceTrash';
 import ImagePreview from '../components/ImagePreview';
 import { formatSize } from '../utils/format';
 import { probeDuration } from '../utils/mediaDuration';
+import { startTranscription } from '../pipelines/transcribeQueue';
+import { enqueueCover } from '../pipelines/coverQueue';
 import { useIsMobile } from '../utils/useMobile';
 import { useMarqueeSelection } from '../utils/useMarqueeSelection';
 import { canDropResourceInto, createFolderSpringLoader, RESOURCE_DRAG_TYPE } from '../utils/resourceDrag';
@@ -169,6 +172,9 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
               const duration = await probeDuration(file);
               await flushCloud();
               if (duration) await db.videos.update(entry.courseId, { duration });
+              enqueueCover(entry.courseId);
+              startTranscription(entry.courseId);
+              toast.info(`《${file.name}》已上传，正在浏览器中自动生成字幕，请保持页面打开`);
             }
           }
         }
@@ -354,6 +360,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
                 {entry.kind === 'directory' && <FolderColorMenu color={entry.color} disabled={busy || readOnly || !!entry.scope?.archived}
                   onChange={color => void perform(() => request('/resources/folders/color', { method: 'PATCH', body: JSON.stringify({ projectId: entry.projectId, path: entry.path, color }) }))} />}
               </MoreMenu>
+              {entry.kind === 'file' && entry.courseId ? <PluginActions surface="resource.actions" materialId={entry.courseId} /> : null}
             </li>)}
           </ul>
           {!loading && !showSkeleton && !entryCount && (projectId || query) && !error && <div className="project-empty">{query ? t('noResults') : t('folderEmpty')}</div>}

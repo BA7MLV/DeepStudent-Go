@@ -6,6 +6,7 @@
  *    重建失败不丢内存状态（下次编辑带全量 IR 重试即自愈）。
  */
 import { remoteTasks } from '../cloud/state';
+import { assertPluginAvailable } from '../plugins/availability';
 import { runCloudTask } from '../cloud/tasks';
 import { getSettings, targetOfSlot } from '../store/settings';
 import { db } from '../store/db';
@@ -39,6 +40,7 @@ export async function rewriteBlockWithLLM(
   instruction: string,
   ctx: { title: string; heading?: string; prev?: string; next?: string },
 ): Promise<Block> {
+  await assertPluginAvailable('material-tools');
   if (remoteTasks()) return runCloudTask('handoutEdit', crypto.randomUUID(), { original, instruction, ctx });
   const target = targetOfSlot(getSettings(), 'chat');
   return rewriteBlock(target, original, instruction, ctx);

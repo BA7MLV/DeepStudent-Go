@@ -1,6 +1,7 @@
 import { chatOnce, textOf } from '../api/siliconflow';
 import { remoteTasks } from '../cloud/state';
-import { runCloudTask } from '../cloud/tasks';
+import { assertPluginAvailable } from '../plugins/availability';
+import { runMaterialPluginTask } from '../plugins/legacy-actions';
 import { getSettings, targetOfSlot, visionTargetOrNull, type ModelTarget } from '../store/settings';
 import { db, type FrameRow, type SegmentRow } from '../store/db';
 import { getVideoFile } from '../store/fileStore';
@@ -126,7 +127,8 @@ export async function runHandout(
   videoId: string,
   onProgress: (p: HandoutProgress) => void,
 ): Promise<void> {
-  if (remoteTasks()) return runCloudTask('handout', `course:${videoId}`, { videoId }, onProgress);
+  await assertPluginAvailable('material-tools');
+  if (remoteTasks()) return runMaterialPluginTask('handout', videoId, onProgress);
   const settings = getSettings();
   // 文本与视觉可以配在两家不同的供应商，各自独立校验凭据
   const chatTarget = targetOfSlot(settings, 'chat');
@@ -140,7 +142,7 @@ export async function runHandout(
 
   const segments = await db.segments.where('videoId').equals(videoId).sortBy('idx');
   const doneSegs = segments.filter((s) => s.status === 1 && s.text);
-  if (doneSegs.length < 3) throw new Error('请先在「字幕」页生成字幕');
+  if (doneSegs.length < 3) throw new Error('可用字幕不足，请在「字幕」页检查自动处理进度或错误');
 
   await acquireWakeLock();
   try {

@@ -1,0 +1,10 @@
+.learning-plugin { display: grid; gap: 12px; padding: 12px; overflow-wrap: anywhere; }
+.learning-plugin label { display: grid; gap: 6px; }
+.learning-plugin select { width: 100%; min-width: 0; padding: 8px; color: var(--foreground); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.learning-plugin__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.learning-plugin button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; }
+.learning-plugin button[aria-pressed="true"] { background: var(--accent); color: var(--accent-foreground); }
+.learning-plugin button:disabled { opacity: .55; }
+.learning-plugin__card { display: grid; gap: 8px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.learning-plugin details p { white-space: pre-wrap; }
+.learning-plugin__tasks { display: grid; gap: 8px; font-size: .875rem; }

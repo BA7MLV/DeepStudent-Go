@@ -53,7 +53,7 @@ export function htmlPreviewSource(source: string): string | undefined {
 }
 
 export interface AssistantContentBlock {
-  kind: 'markdown' | 'html' | 'svg' | 'widget';
+  kind: 'markdown' | 'html' | 'svg' | 'widget' | 'plugin';
   source: string;
   /** Offsets in the original answer, including fence markers when fenced. */
   start: number;
@@ -82,10 +82,10 @@ export function splitAssistantContent(source: string): AssistantContentBlock[] {
       const match = closing.exec(source);
       const end = match ? match.index + match[0].length : source.length;
       const contentType = htmlFenceContentType(line.slice(line.indexOf(fence[1]) + fence[1].length));
-      if ((/^html?$/i.test(fence[2]) && contentType === 'interactive') || fence[2] === 'wbw-widget') {
+      if ((/^html?$/i.test(fence[2]) && contentType === 'interactive') || fence[2] === 'wbw-widget' || fence[2] === 'wbw-plugin') {
         markdown(cursor);
         const body = source.slice(lineEnd, match?.index ?? end).replace(/\s+$/, '');
-        blocks.push({ kind: fence[2] === 'wbw-widget' ? 'widget' : 'html', source: body,
+        blocks.push({ kind: fence[2] === 'wbw-plugin' ? 'plugin' : fence[2] === 'wbw-widget' ? 'widget' : 'html', source: body,
           start: cursor, end, location: 'fence', closed: !!match,
           htmlContentType: contentType });
         markdownStart = end;
@@ -116,7 +116,7 @@ export function splitAssistantContent(source: string): AssistantContentBlock[] {
 
 /** Retrieval narration can reset; delivered visuals and their surrounding explanation cannot. */
 export function nextVisualRound(source: string, hasWidgets = false): string {
-  const visual = hasWidgets || splitAssistantContent(source).some((block) => block.kind === 'html' || block.kind === 'svg')
+  const visual = hasWidgets || splitAssistantContent(source).some((block) => block.kind === 'html' || block.kind === 'svg' || block.kind === 'plugin')
     || artifactFences(source).some((fence) => fence.kind === 'html' || fence.kind === 'svg' || isSvgCode(fence.kind, fence.source))
     || /^ {0,3}(?:`{3,}|~{3,})wbw-widget[ \t]*$/m.test(source);
   return visual && source.trim() ? `${source.trimEnd()}\n\n` : '';

@@ -57,7 +57,7 @@ import { saveImportedSubtitles } from '../store/subtitles';
 import { getSettings } from '../store/settings';
 import { describeTransport, isBiliBridgeAvailable, isBridgePostCapable } from '../bilibili/transport';
 import { isJobActive, libraryJobCopy, useJobStore, useTranscribeJob } from '../store/jobs';
-import { cancelTranscription } from '../pipelines/transcribeQueue';
+import { cancelTranscription, startTranscription } from '../pipelines/transcribeQueue';
 import { startMaterialJob } from '../pipelines/materialJob';
 import { enqueueCover } from '../pipelines/coverQueue';
 import {
@@ -711,13 +711,14 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       enqueueCover(id);
       // B 站自带字幕：主语言写 segments、全部语言写 subtitleTracks，并直接置为已转写
       if (subtitles) await saveImportedSubtitles(id, subtitles);
+      if (!subtitles?.primary?.cues.length) startTranscription(id);
       await reload();
       // 视频已经出现在下方列表，队列只留还在进行 / 失败的项
       setTasks((prev) => prev.filter((t) => t.key !== key));
       toast.success(
         subtitles?.primary
           ? `已导入《${file.name}》· 自带字幕 ${subtitles.primary.cues.length} 条`
-          : `已导入《${file.name}》`,
+          : `已导入《${file.name}》，字幕将在浏览器中自动生成，请保持页面打开`,
       );
     } catch (e) {
       const text = formatCaughtError(e);
@@ -825,7 +826,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         if (isBiliBridgeAvailable() && !isBridgePostCapable()) {
           toast.warning('油猴脚本版本过旧，读不到 B 站自带字幕；到「设置」重新安装一次脚本即可');
         } else {
-          toast.info('该视频没有自带字幕，导入后可点「生成字幕」走本地转写');
+          toast.info('该视频没有自带字幕，导入后会自动在浏览器中转写，请保持页面打开');
         }
       }
     } catch (e) {
@@ -2259,7 +2260,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       <>
                         <div className="text-secondary" style={{ fontSize: 12, marginTop: 10 }}>
                           {multiPage ? `字幕语言（按${biliTarget.kind === 'season' ? `第${biliLangPage ?? ''}集` : ` P${biliLangPage ?? ''}`}上可用的语言）` : '自带字幕'}
-                          ：选中的第一路作主字幕（讲义/问答用它），其余可选做播放页的「对照语言」
+                          ：优先使用所选语言，其余可做对照；未选择或无匹配时自动选择可用字幕
                         </div>
                         <TagGroup
                           selectionMode="multiple"
@@ -2288,7 +2289,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       </>
                     ) : (
                       <div className="text-secondary" style={{ fontSize: 12, marginTop: 10 }}>
-                        该视频没有自带字幕，导入后可点「生成字幕」走本地转写
+                        该视频没有自带字幕，导入后会自动在浏览器中转写，请保持页面打开
                       </div>
                     )}
                   </div>

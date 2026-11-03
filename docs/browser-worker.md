@@ -1,7 +1,9 @@
 # External browser worker
 
-The API no longer launches Chromium. Node owns task scheduling, model/media-native execution, and persistence; browser-only tasks are left queued for an authenticated browser worker.
+The API does not launch Chromium or FFmpeg. Node owns scheduling, model calls, text processing, and persistence. Media decoding/rendering runs in the user's authenticated browser.
 
-Open the deployed application with `?cloud-worker=1` in an authenticated browser tab. That page claims browser tasks for the current user, renews its lease through task reports, executes `window.__runCloudTask`, and posts completion. Only the claimed task's scoped bearer token can report, authorize, mutate records, or complete it.
+Ordinary signed-in application pages automatically host a same-origin worker iframe. Web Locks elect one host per browser/account, and server leases coordinate devices. The iframe isolates task credentials and worker state from the interactive app. A standalone `?cloud-worker=1` tab is still supported but no longer required. Only the claimed task's scoped bearer token can report, authorize, mutate records, or complete it.
 
-Browser leases expire after 30 seconds. A server restart returns browser tasks to `queued`; a disconnected worker is reclaimed by the next claim after the lease expires. Keep this tab open while browser tasks run. Playwright remains a development-only dependency for E2E scripts.
+Browser leases expire after 30 seconds. A server restart or expired lease returns browser tasks to `queued`. Keep an app tab open while processing; closing/suspending all tabs pauses browser work until a tab can claim it again. Playwright and FFmpeg are development-only tools for E2E fixtures, not deployment dependencies.
+
+Video uploads automatically prepare subtitles. Bilibili imports first reuse original subtitles; absent/unavailable originals fall back to browser audio extraction + VAD + the configured ASR model. ASR is a remote model call, not offline speech recognition, and may incur provider charges. Completed segments are checkpointed; failures and explicit cancellations retain a retry control. Cover generation also uses the browser and preserves user-selected covers.

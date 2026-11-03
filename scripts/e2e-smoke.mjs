@@ -30,7 +30,7 @@ await page.click('[data-testid="btn-play"]');
 await page.waitForSelector('video', { timeout: 15000 });
 
 console.log('4. 生成字幕');
-await page.click('[data-testid="subs-generate"]');
+// Upload already queued automatic subtitle processing.
 
 const deadline = Date.now() + 240000;
 let sideText = '';

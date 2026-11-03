@@ -154,7 +154,7 @@ PUBLIC_ORIGIN=http://localhost:5173 npm run dev:api
 WANGKE_API_PROXY=http://127.0.0.1:3000 npm run dev
 ```
 
-本地视频封面任务需要系统 FFmpeg，或通过 `FFMPEG_PATH` 指定可执行文件。直接启动 API 不会托管前端页面。
+视频上传后自动准备字幕，B 站自带字幕优先，否则在浏览器中解码并调用配置的 ASR 服务（可能收费）。字幕、封面等浏览器任务需要保持页面打开；部署不再需要 FFmpeg。直接启动 API 不会托管前端页面。
 
 ### 构建与测试
 

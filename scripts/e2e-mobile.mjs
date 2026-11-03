@@ -80,7 +80,8 @@ if (!visibility.every((v) => v.childAlive)) fail('隐藏面板的 DOM 应保留�
 else ok('五面板 DOM 均保活');
 if (visibility[0].hidden || visibility.slice(1).some((v) => !v.hidden)) fail('默认应只显示字幕面板');
 else ok('默认显示字幕面板');
-if (!(await page.locator('.panel-slot:not([hidden]) [data-testid="subs-generate"]').count())) fail('字幕面板应有「生成字幕」按钮');
+if (!(await page.locator('.panel-slot:not([hidden]) [data-testid="panel-subs"]').count())) fail('字幕面板应可见');
+if (await page.locator('[data-testid="subs-generate"]').count()) fail('自动字幕不应再有手动生成入口');
 else ok('字幕面板就绪');
 
 console.log('6. 切换到「讲义」：讲义面板显示，字幕面板隐藏');
@@ -109,7 +110,7 @@ else ok('显示检索能力提示，不阻止聊天');
 console.log('8. 切回「字幕」：状态保留（按钮仍在）');
 await page.click('[data-testid="panel-tab-subs"]');
 await page.waitForTimeout(300);
-if (!(await page.locator('.panel-slot:not([hidden]) [data-testid="subs-generate"]').count())) fail('切回字幕后内容丢失');
+if (!(await page.locator('.panel-slot:not([hidden]) [data-testid="panel-subs"]').count())) fail('切回字幕后内容丢失');
 else ok('字幕面板状态保留');
 await page.screenshot({ path: 'e2e-shots/mobile-player.png' });
 

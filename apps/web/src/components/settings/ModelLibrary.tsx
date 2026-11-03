@@ -55,7 +55,7 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
   };
 
   /**
-   * 批量添加用的草稿：与单个「添加」打开编辑器时的初值一致（接口声明 + 按能力预选用途）。
+   * 直接添加用的草稿：保留接口声明，按能力预选用途，单个与批量添加共用。
    * 预选不出用途的模型（嵌入、绘图、决策协议待确认等）返回 null，只能逐个手动配置。
    */
   const batchDraft = (found: DiscoveredModel): SavedModel | null => {
@@ -82,6 +82,14 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
     for (const m of visibleBatchable) { if (on) next.add(m.id); else next.delete(m.id); }
     return next;
   });
+
+  const addDiscovered = (draft: SavedModel) => {
+    setError('');
+    try {
+      settings.update(editModelPatch(settingsStore.getState(), null, draft));
+      toast.success('模型已添加到模型库，请保存模型设置');
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
 
   const addPicked = () => {
     setError('');
@@ -206,8 +214,7 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
           <div className="flex flex-col gap-3 border-t border-border p-3">
            <p className="text-xs text-pretty text-muted">{discoveredFromFallback ? '以下是本机已知的 TypeSafe 模型，不代表当前 Key 已获授权；添加后请测试决策连接。' : '来自当前供应商的 /models 接口，不代表调用测试通过。批量添加按模型能力预选用途，models.dev 仅补全缺失参数。'}</p>
           <SearchField aria-label="搜索接口模型" value={discoveryQuery} onChange={setDiscoveryQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="搜索模型名称或 ID" /><SearchField.ClearButton /></SearchField.Group></SearchField>
-          {/* 批量操作条：全选只作用于当前筛选结果；「添加所选」按预选用途直接入库，
-              需要改参数或用途的模型仍走右侧「添加」打开编辑器。 */}
+           {/* 单个和批量「添加」均按预选用途直接入库；特殊模型需先配置用途或协议。 */}
           <div className="flex min-h-9 items-center justify-between gap-3" data-testid="discovered-bulk-bar">
             <Checkbox aria-label={discoveryNeedle ? '全选筛选结果' : '全选'} data-testid="discovered-select-all"
               isDisabled={!visibleBatchable.length}
@@ -237,10 +244,10 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
                     {label !== m.id && `${m.id} · `}{draft ? draft.slots.map((s) => SLOT_LABEL[s]).join(' / ') : '需手动选择用途'}
                   </div>
                 </div>
-                <Button size="sm" variant="tertiary" aria-label={`添加 ${m.id}`} onPress={() => {
-                  setDiscoveryOpen(false);
-                  openEditor(null, m);
-                }}>添加</Button>
+                <Button size="sm" variant="tertiary" aria-label={`${draft ? '添加' : '配置'} ${m.id}`} onPress={() => {
+                  if (draft) addDiscovered(draft);
+                  else { setDiscoveryOpen(false); openEditor(null, m); }
+                }}>{draft ? '添加' : '配置'}</Button>
               </li>;
             })}
             {!discoveryResults.length && <li role="status" className="py-3 text-sm text-muted">没有匹配的模型</li>}

@@ -12,12 +12,14 @@ import { ModelAdapter } from './model-adapter.js';
 import { agentHttpInit } from './http.js';
 import { retryAfter, abortable, limitedJson } from './model-client.js';
 import { checkGatewayRollout } from './model-rollout.js';
+import { normalizeThinkingLevel } from '@wangke/study-core/model/reasoning';
 
 const transient: ModelErrorClass[] = ['network', 'timeout', 'rate_limited', 'server_error', 'context_exceeded'];
 // Shared across request-scoped Gateway instances; bounded, owner-isolated state.
 const circuits = new ModelCircuitBreaker();
 export type RouteEvent = { type: 'model.route.started' | 'model.route.selected' | 'model.route.fallback' | 'model.route.failed'; owner?: string; traceId: string; purpose: string; presetId?: string; providerId?: string; model?: string; errorClass?: ModelErrorClass; attempts?: ModelAttemptSummary[] };
-type GatewayOptions = { circuit?: CircuitState; clock?: () => number; sleep?: (ms: number, signal: AbortSignal) => Promise<void>; event?: (event: RouteEvent) => void };
+type GatewayOptions = { circuit?: CircuitState; clock?: () => number; sleep?: (ms: number, signal: AbortSignal) => Promise<void>; event?: (event: RouteEvent) => void;
+  defaults?: (owner: string, purpose: ModelGatewayRequest['purpose']) => Pick<ModelGatewayRequest, 'thinkingLevel'> };
 type NativeGatewayInput = {
   owner: string; purpose: ModelGatewayRequest['purpose']; modelRef: { providerId: string; model: string };
   endpoint: string; body?: BodyInit | null; contentType?: string; signal: AbortSignal; conversationId?: string; cacheKey?: string;
@@ -57,6 +59,7 @@ export class ModelGateway {
     });
   }
   estimate(request: ModelGatewayRequest) {
+    request = this.withDefaults(request);
     const adapter = this.resolver.resolve(request).candidates[0].adapter;
     if (request.audio) return adapter.encodeAudio(request.audio).total;
     const wire = adapter.encode(request);
@@ -163,6 +166,7 @@ export class ModelGateway {
     }
   }
   async request(request: ModelGatewayRequest, limits: { maxReservedTokens?: number; maxAttemptsPerCandidate?: number; attributionPurpose?: string } = {}): Promise<ModelGatewayResult> {
+    request = this.withDefaults(request);
     checkGatewayRollout(request.purpose);
     const traceId = crypto.randomUUID(), attempts: ModelAttemptSummary[] = [];
     const base = { owner: request.owner, traceId, purpose: request.purpose, ...(request.presetId ? { presetId: request.presetId } : {}) };
@@ -203,7 +207,7 @@ export class ModelGateway {
             const body = await this.client.request(transport.url, { method: 'POST', headers: transport.headers, body: audio?.body ?? JSON.stringify(bounded.body), redirect: 'error', signal }, { owner: request.owner, run: request.run, step: request.step, task: request.task, purpose: limits.attributionPurpose ?? request.purpose, provider: target.providerId, model: target.model }, bounded.total,
               { ordinary: !request.run, attempts: 1, timeoutMs: policy.timeoutMs, chainMs: Math.max(1, Math.min(policy.chainMs, deadline - this.clock())) });
             // Decode before publishing a visible result. Never return provider body in errors.
-            const response = audio ? adapter.decodeAudio(body) : adapter.decode(body, request.purpose);
+            const response = audio ? adapter.decodeAudio(body) : adapter.decode(body, request.purpose, request.tools);
             attempts.push({ providerId: target.providerId, model: target.model, candidateIndex, attempt, durationMs: Math.max(0, this.clock() - started), outcome: 'completed' });
             this.circuit.success(key);
             this.event({ ...base, type: 'model.route.selected', providerId: target.providerId, model: target.model, attempts });
@@ -230,5 +234,8 @@ export class ModelGateway {
       if (candidateIndex + 1 < candidates.length) this.event({ ...base, type: 'model.route.fallback', providerId: target.providerId, model: target.model, errorClass: lastClass });
     }
     return fail(lastClass);
+  }
+  private withDefaults(request: ModelGatewayRequest): ModelGatewayRequest {
+    return { ...request, thinkingLevel: normalizeThinkingLevel(request.thinkingLevel) ?? this.options.defaults?.(request.owner, request.purpose).thinkingLevel };
   }
 }

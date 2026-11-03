@@ -167,6 +167,7 @@ export const VIDEO_META_FIELDS = [
   'duration',
   'createdAt',
   'status',
+  'transcriptionPaused',
   'biliSource',
   'kind',
   'materialFormat',

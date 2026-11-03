@@ -6,6 +6,7 @@ import path from 'node:path';
 import { buildServer } from '../apps/api/src/server.ts';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { workerTokens, workerIdentity } from '../apps/api/src/cloud/workerAuth.js';
+import { CloudTaskRunner } from '../apps/api/src/cloud/tasks.ts';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-browser-worker-'));
 const dbPath = path.join(dir, 'db.sqlite');
@@ -13,6 +14,7 @@ const filesDir = path.join(dir, 'files');
 fs.mkdirSync(filesDir);
 const app = buildServer({ dbPath, filesDir });
 const store = new DatabaseStore(dbPath);
+const runner = new CloudTaskRunner(store);
 const owner = crypto.randomUUID(), other = crypto.randomUUID(), now = new Date().toISOString();
 const token = crypto.randomBytes(32).toString('base64url');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -22,8 +24,9 @@ try {
     .run(crypto.randomUUID(), owner, hash(token), now, new Date(Date.now() + 60_000).toISOString());
   const taskId = crypto.randomUUID();
   store.db.prepare('INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,executor,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .run(taskId, owner, taskId, 'qa', 'session:1', JSON.stringify({ sessionId: 1 }), 'queued', 'browser', now, now);
+    .run(taskId, owner, taskId, 'transcribe', 'course:one', JSON.stringify({ videoId: 'one' }), 'queued', 'browser', now, now);
   await app.ready();
+  runner.start('http://127.0.0.1:1');
   const auth = { cookie: `wangke_session=${encodeURIComponent(token)}` };
   const claim = await app.inject({ method: 'POST', url: '/api/v1/cloud/worker/claim', headers: auth });
   assert.equal(claim.statusCode, 200);
@@ -33,7 +36,31 @@ try {
   assert.ok(workerTokens.has(claimed.token));
   assert.ok(workerIdentity({ headers: { authorization: `Bearer ${claimed.token}` } }));
   assert.equal(workerIdentity({ headers: { authorization: 'Bearer wrong' } }), undefined);
-  console.log('External browser worker claim scoping and lease ownership checks passed');
+  const enqueue = (id, account, resource) => store.db.prepare('INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,executor,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(id, account, id, 'cover', resource, JSON.stringify({ videoId: resource.slice(7) }), 'queued', 'browser', now, now);
+  enqueue('same-course', owner, 'course:one');
+  enqueue('other-course', owner, 'course:two');
+  enqueue('other-account', other, 'course:three');
+  const second = await app.inject({ method: 'POST', url: '/api/v1/cloud/worker/claim', headers: auth });
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.json().task.id, 'other-course', 'same-course work cannot overlap');
+  assert.equal((await app.inject({ method: 'POST', url: '/api/v1/cloud/worker/claim', headers: auth })).statusCode, 204, 'global compute limit is shared with browsers');
+  store.db.prepare("UPDATE cloud_tasks SET status='completed' WHERE id='other-course'").run();
+  assert.equal((await app.inject({ method: 'POST', url: '/api/v1/cloud/worker/claim', headers: auth })).statusCode, 204, 'only another account or a locked course remains');
+
+  store.db.prepare('UPDATE cloud_tasks SET lease_expires_at=? WHERE id=?').run(new Date(Date.now() - 1000).toISOString(), taskId);
+  for (let i = 0; i < 30; i++) {
+    if (store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(taskId).status === 'queued') break;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  assert.equal(store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(taskId).status, 'queued', 'expired lease is recovered without a server restart');
+  const stale = await app.inject({ method: 'POST', url: `/api/v1/cloud/tasks/${taskId}/report`, headers: { authorization: `Bearer ${claimed.token}` }, payload: { progress: {} } });
+  assert.ok([403, 409].includes(stale.statusCode), 'old host cannot renew a recovered lease');
+  const reclaimed = await app.inject({ method: 'POST', url: '/api/v1/cloud/worker/claim', headers: auth });
+  assert.equal(reclaimed.statusCode, 200);
+  assert.equal(reclaimed.json().task.id, taskId);
+  assert.notEqual(reclaimed.json().token, claimed.token);
+  console.log('Browser claim ownership, course serialization, global concurrency and expired-lease recovery checks passed');
 } finally {
-  await app.close(); store.close(); fs.rmSync(dir, { recursive: true, force: true });
+  await runner.close(); await app.close(); store.close(); fs.rmSync(dir, { recursive: true, force: true });
 }

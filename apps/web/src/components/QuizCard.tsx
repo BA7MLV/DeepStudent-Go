@@ -6,7 +6,7 @@ import { uuid } from '../utils/uuid';
 import type { ComponentProps } from '@ant-design/x-markdown';
 import { Markdown as XMarkdown } from './markdown/Markdown';
 import { canGradeQuizQuestion, canUpdateQuizPick, formatQuizAnswer, gradeQuizAnswer, hasVerifiedQuizAnswer, isQuizAnswered, optionLetter,
-  questionType, quizExplanation, quizPickAnswer, quizPickResult, validQuizAnswer, type QuizAnswer, type QuizData, type QuizPick } from '../harness/quiz';
+  questionType, quizExplanation, quizPickAnswer, quizPickResult, validQuizAnswer, type QuizAnswer, type QuizData, type QuizPick, type QuizQuestion } from '../harness/quiz';
 import QuestionInput, { emptyQuizAnswer } from './QuestionInput';
 import { MaterialImage, SourceImage } from './MaterialImage';
 import { materialSourceHref } from '../materials/imageRefs';
@@ -15,6 +15,8 @@ import { MarkdownCode, MarkdownPre } from './mermaid/markdown';
 import { MarkdownTable } from './MdTable';
 import { NumberPop } from './motion';
 import { Sym } from '../ui';
+import { usePluginAvailable } from '../plugins/catalog';
+import { assertPluginAvailable } from '../plugins/availability';
 
 
 /**
@@ -23,6 +25,18 @@ import { Sym } from '../ui';
  * 失败回退源码」这一串坑问答正文已经踩平了（见 components/mermaid/）。
  */
 const MD_BLOCK_COMPONENTS = { code: MarkdownCode, pre: MarkdownPre, table: MarkdownTable };
+
+function isInputDraft(q: QuizQuestion, value: unknown): value is QuizAnswer {
+  const type = questionType(q);
+  if (type === 'boolean') return typeof value === 'boolean' || value === '';
+  if (type === 'freeform') return typeof value === 'string';
+  if (type === 'single') return Number.isInteger(value) && Number(value) >= -1 && Number(value) < q.options.length;
+  if (!Array.isArray(value) || value.length > 100) return false;
+  if (type === 'composite') return value.length === q.parts!.length && value.every((part, i) => isInputDraft(q.parts![i], part));
+  if (type === 'fill') return value.length === (emptyQuizAnswer(q) as unknown[]).length && value.every(v => typeof v === 'string');
+  if (type === 'matching') return value.length === q.options.length && value.every(v => Number.isInteger(v) && v >= -1 && v < q.matches!.length);
+  return value.every(v => Number.isInteger(v) && v >= 0 && v < q.options.length) && new Set(value).size === value.length && (type !== 'ordering' || value.length === q.options.length);
+}
 
 interface Props {
   quiz: QuizData;
@@ -40,6 +54,8 @@ interface Props {
   notebookSource?: QuestionSource;
   onAttempt?: (qIdx: number, pick: QuizPick, durationSeconds: number) => void;
   onReview?: (text: string) => void;
+  /** Plugin mounts may restore unsent input without writing learning records. */
+  draftStorageKey?: string;
 }
 
 /**
@@ -55,12 +71,22 @@ interface Props {
  * ⚠️ 已知限制：XMarkdown 依赖 DOMPurify，Node 环境（SSR / 单测）没有 window，它会直接不产出内容，
  * 所以「解析渲染」的契约由浏览器 e2e（scripts/e2e-quiz-mermaid.mjs）守着，单测只覆盖数据层。
  */
-export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = true, notebookSource, onAttempt, onReview }: Props) {
+export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = true, notebookSource, onAttempt, onReview, draftStorageKey }: Props) {
+  const available = usePluginAvailable('practice');
   const { root, finish } = useQuestionTimer(picks);
   const answered = useRef(new Set<number>());
   const [saveErrors, setSaveErrors] = useState<Record<number, string>>({});
   const [collected, setCollected] = useState<Set<number>>(() => new Set());
-  const [drafts, setDrafts] = useState<Record<number, QuizAnswer>>({});
+  const [drafts, setDrafts] = useState<Record<number, QuizAnswer>>(() => {
+    if (!draftStorageKey) return {};
+    try {
+      const saved = sessionStorage.getItem(draftStorageKey);
+      if (!saved || saved.length > 128000) return {};
+      const parsed = JSON.parse(saved);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      return Object.fromEntries(Object.entries(parsed).filter(([i, value]) => /^\d+$/.test(i) && quiz.questions[Number(i)] && isInputDraft(quiz.questions[Number(i)], value))) as Record<number, QuizAnswer>;
+    } catch { return {}; }
+  });
   const durations = useRef(new Map<number, number>());
   const pending = useRef(new Map<number, Attempt>());
   const saveAttempt = async (qi: number, attempt: Attempt) => {
@@ -75,7 +101,9 @@ export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = tru
       setSaveErrors((old) => ({ ...old, [qi]: `错题记录保存失败：${error instanceof Error ? error.message : '请重试'}` }));
     }
   };
-  const answer = (qi: number, pick: QuizPick) => {
+  const answer = async (qi: number, pick: QuizPick) => {
+    if (!available) return;
+    try { await assertPluginAvailable('practice'); } catch { setSaveErrors(old => ({ ...old, [qi]: '练习插件不可用；历史作答保留' })); return; }
     const q = quiz.questions[qi];
     if (!canUpdateQuizPick(q, picks[qi], pick) || answered.current.has(qi)) return;
     answered.current.add(qi);
@@ -140,7 +168,7 @@ export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = tru
         const verified = hasVerifiedQuizAnswer(q);
         const result = quizPickResult(q, pick);
         const simple = questionType(q) === 'single' && !q.presentation;
-        const draft = drafts[qi] ?? (isDone ? quizPickAnswer(pick) : emptyQuizAnswer(q));
+        const draft = isDone ? quizPickAnswer(pick) : drafts[qi] ?? emptyQuizAnswer(q);
         return (
           <div key={qi} className="quiz-q" data-question-index={qi}>
             <div className="quiz-stem">
@@ -179,7 +207,7 @@ export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = tru
                     key={oi}
                     type="button"
                     className={`quiz-option${state}`}
-                    disabled={isDone}
+                    disabled={!available || isDone}
                     aria-pressed={isPick}
                     onClick={() => answer(qi, oi)}
                   >
@@ -198,8 +226,14 @@ export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = tru
                 );
               })}
             </div> : <>
-              <QuestionInput question={q} value={draft} disabled={isDone} onChange={(value) => setDrafts((old) => ({ ...old, [qi]: value }))} />
-              {!isDone && <Button size="sm" isDisabled={!validQuizAnswer(q, draft)} onPress={() => answer(qi, { answer: draft })}>提交答案</Button>}
+              <QuestionInput question={q} value={draft} disabled={!available || isDone} onChange={(value) => {
+                const next = { ...drafts, [qi]: value }; setDrafts(next);
+                if (draftStorageKey) try {
+                  const serialized = JSON.stringify(next);
+                  if (serialized.length <= 128000) sessionStorage.setItem(draftStorageKey, serialized);
+                } catch { /* Optional tab-local drafts must not block answering. */ }
+              }} />
+              {!isDone && <Button size="sm" isDisabled={!available || !validQuizAnswer(q, draft)} onPress={() => answer(qi, { answer: draft })}>提交答案</Button>}
             </>}
             {collected.has(qi) && <p className="mt-2 text-sm text-muted">已记录到 <a className="underline" href="#/player/wrongbook.md">/wrongbook.md</a>。</p>}
             {saveErrors[qi] && (
@@ -220,8 +254,8 @@ export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = tru
                 {verified && !gradable && <>
                   <XMarkdown content={`参考答案：\n\n${formatQuizAnswer(q, q.answer)}`} components={mdComponents} />
                   {typeof pick === 'object' && pick.selfGrade === undefined && <div className="quiz-self-check" role="group" aria-label="核对参考答案">
-                    <Button size="sm" variant="secondary" onPress={() => answer(qi, { answer: pick.answer, selfGrade: true })}>我已核对：答对了</Button>
-                    <Button size="sm" variant="secondary" onPress={() => answer(qi, { answer: pick.answer, selfGrade: false })}>我已核对：需复习</Button>
+                    <Button size="sm" variant="secondary" isDisabled={!available} onPress={() => answer(qi, { answer: pick.answer, selfGrade: true })}>我已核对：答对了</Button>
+                    <Button size="sm" variant="secondary" isDisabled={!available} onPress={() => answer(qi, { answer: pick.answer, selfGrade: false })}>我已核对：需复习</Button>
                   </div>}
                 </>}
                 {!gradable && onReview && <Button size="sm" variant="tertiary" onPress={() => onReview(`请对这道题提供 AI 参考批改：检查我的作答、指出遗漏，给出参考评分和改进建议。明确这是 AI 建议，不是确定判分；不要修改题库答案、成绩或直接写入错题本。若原题信息不足先说明。\n\n${JSON.stringify({

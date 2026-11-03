@@ -7,6 +7,7 @@
     "./model/client": { "types": "./src/api/modelClient.ts", "default": "./dist/api/modelClient.js" },
     "./model/types": { "types": "./src/api/modelTypes.ts", "default": "./dist/api/modelTypes.js" },
     "./model/meta": { "types": "./src/api/modelMeta.ts", "default": "./dist/api/modelMeta.js" },
+    "./model/reasoning": { "types": "./src/api/reasoning.ts", "default": "./dist/api/reasoning.js" },
     "./model/discovery": { "types": "./src/api/modelDiscoveryData.ts", "default": "./dist/api/modelDiscoveryData.js" },
     "./model/dsml": { "types": "./src/api/dsml.ts", "default": "./dist/api/dsml.js" },
     "./model/messages": { "types": "./src/api/messageHygiene.ts", "default": "./dist/api/messageHygiene.js" },
@@ -20,6 +21,8 @@
     "./display": { "types": "./src/harness/displayEnvironment.ts", "default": "./dist/harness/displayEnvironment.js" },
     "./comments": { "types": "./src/harness/comments.ts", "default": "./dist/harness/comments.js" },
     "./cards": { "types": "./src/harness/ankiCard.ts", "default": "./dist/harness/ankiCard.js" },
+    "./quiz": { "types": "./src/harness/quiz.ts", "default": "./dist/harness/quiz.js" },
+    "./wrongbook": { "types": "./src/study/wrongbook.ts", "default": "./dist/study/wrongbook.js" },
     "./instructions": { "types": "./src/harness/agentInstructions.ts", "default": "./dist/harness/agentInstructions.js" },
     "./search": { "types": "./src/harness/lexical.ts", "default": "./dist/harness/lexical.js" },
     "./text/references": { "types": "./src/utils/linkify.ts", "default": "./dist/utils/linkify.js" },
@@ -47,6 +50,6 @@
     "./skills/builtin/*": "./assets/builtin/*"
   },
   "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json", "build": "tsc -p tsconfig.json" },
-  "dependencies": { "fflate": "^0.8.3" },
+  "dependencies": { "fflate": "^0.8.3", "ts-fsrs": "^5.4.2" },
   "devDependencies": { "typescript": "^7.0.2" }
 }

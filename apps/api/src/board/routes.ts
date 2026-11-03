@@ -3,11 +3,14 @@ import { BoardFiles } from './files.js';
 import type { CloudTaskRunner } from '../cloud/tasks.js';
 import type { BotApplicationService } from '../agent/service.js';
 import { BoardTasks } from './tasks.js';
+import { PluginFiles } from '../plugins/files.js';
 
 export function registerBoardRoutes(app: FastifyInstance, files: BoardFiles, runner: CloudTaskRunner, bots: BotApplicationService,
   auth: (r: FastifyRequest, p: FastifyReply) => { id: string } | null,
   origin: (r: FastifyRequest, p: FastifyReply) => boolean) {
   const tasks = new BoardTasks(files.store);
+  const unified = new PluginFiles(files.store);
+  const activePlugin = (owner: string, id: string) => { if (unified.plugin(owner, id).source !== 'v1') throw new Error('board_plugin_unavailable'); return files.plugin(owner, id); };
   const safe = async (reply: FastifyReply, action: () => unknown) => {
     try { return await action(); } catch (e) {
       const error = e instanceof Error && /^[a-z_]+$/.test(e.message) ? e.message : 'board_request_failed';
@@ -16,12 +19,12 @@ export function registerBoardRoutes(app: FastifyInstance, files: BoardFiles, run
   };
   app.get('/api/v1/board/plugins', async (r, p) => {
     const user = auth(r, p); if (!user) return;
-    return safe(p, () => ({ plugins: files.catalog(user.id) }));
+    return safe(p, () => { const catalog = unified.catalog(user.id); return { plugins: files.catalog(user.id).map(p => { const current = catalog.find(row => row.id === p.id && row.source === 'v1'); return { ...p, error: current?.error ?? p.error, manifest: p.manifest ? { ...p.manifest, enabled: !!current?.manifest?.enabled && !current.error } : undefined }; }) }; });
   });
   app.get<{ Params: { id: string } }>('/api/v1/board/plugins/:id', async (r, p) => {
     const user = auth(r, p); if (!user) return;
     return safe(p, () => {
-      const plugin = files.plugin(user.id, r.params.id);
+      const plugin = activePlugin(user.id, r.params.id);
       return { ...plugin, html: files.read(user.id, `${plugin.path}/index.html`).content };
     });
   });
@@ -29,7 +32,7 @@ export function registerBoardRoutes(app: FastifyInstance, files: BoardFiles, run
     if (!origin(r, p)) return;
     const user = auth(r, p); if (!user) return;
     return safe(p, async () => {
-      const plugin = files.plugin(user.id, r.params.id), body = r.body;
+      const plugin = activePlugin(user.id, r.params.id), body = r.body;
       if (!body || body.revision !== plugin.revision) throw new Error('board_plugin_changed');
       const args = body.args ?? {};
       const capability = body.method?.startsWith('tasks.') ? 'tasks' : body.method?.startsWith('schedules.') ? 'schedules' : 'state';

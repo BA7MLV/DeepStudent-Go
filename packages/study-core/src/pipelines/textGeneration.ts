@@ -34,7 +34,7 @@ export async function generateText<K extends TextKind>(
   onProgress: (progress: TextProgress) => void, signal?: AbortSignal, fetcher?: typeof fetch,
 ): Promise<TextResults[K]> {
   const completed = segments.filter(s => s.status === 1 && s.text).sort((a, b) => a.idx - b.idx);
-  if (completed.length < 3) throw new Error('请先在「字幕」页生成字幕');
+  if (completed.length < 3) throw new Error('可用字幕不足，请在「字幕」页检查自动处理进度或错误');
   signal?.throwIfAborted();
   const chunks = chunksOf(completed);
   const results = chunks.map((): TextResults => ({ cards: [], comments: [], danmaku: [] }));

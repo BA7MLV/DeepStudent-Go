@@ -451,6 +451,7 @@ export function createToolExecutor(courseId: string, opts: ToolExecutorOptions =
       return notice + skill.body + refList;
     }
     if (name === 'present_quiz') {
+      await (await import('../plugins/availability')).assertPluginAvailable('practice');
       if (!onQuiz) return '当前入口未接入答题卡，未展示题目。';
       if (args.path !== undefined) return '题库 path 需通过资料资源执行器读取，不能作为内联 questions 展示。';
       const v = validateQuiz(args);

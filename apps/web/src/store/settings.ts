@@ -72,6 +72,11 @@ export interface Provider {
   gatewayManaged?: boolean;
   /** Non-secret server deployment codec selection; never connection URLs/keys. */
   deploymentProtocols?: Record<string, ApiProtocol>;
+  /** Actual upstream wire provider, not the user-selected metadata catalog. */
+  reasoningProvider?: string;
+  deploymentReasoningProviders?: Record<string, string>;
+  /** Opaque server configuration revision; invalidates proxy continuation. */
+  stateScope?: string;
   /** 本机唯一短 id；槽位与收藏夹靠它引用，改名等于换一家（所以 UI 不提供改名） */
   id: string;
   /** 显示名 */
@@ -622,6 +627,8 @@ export function targetOfSlot(s: Settings, slot: ModelSlot): ModelTarget {
     catalogId: providerCatalogId(p),
     protocol: p.gatewayManaged ? p.deploymentProtocols?.[ref.model] ?? p.protocol ?? 'openai-chat' : p.protocol ?? 'openai-chat',
     gatewayManaged: p.gatewayManaged,
+    reasoningProvider: p.deploymentReasoningProviders?.[ref.model] ?? p.reasoningProvider,
+    stateScope: p.stateScope,
     capabilities: modelOverridesOf(s, ref),
   };
 }
@@ -641,6 +648,8 @@ export function targetOrNull(s: Settings, ref: ModelRef): ModelTarget | null {
     catalogId: providerCatalogId(p),
     protocol: p.gatewayManaged ? p.deploymentProtocols?.[ref.model] ?? p.protocol ?? 'openai-chat' : p.protocol ?? 'openai-chat',
     gatewayManaged: p.gatewayManaged,
+    reasoningProvider: p.deploymentReasoningProviders?.[ref.model] ?? p.reasoningProvider,
+    stateScope: p.stateScope,
     capabilities: modelOverridesOf(s, ref),
   };
 }

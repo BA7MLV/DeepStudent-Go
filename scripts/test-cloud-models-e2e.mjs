@@ -91,7 +91,9 @@ try {
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.getByTestId('provider-preset-search').evaluate(element => element.scrollIntoView({ block: 'center' }));
   await page.getByTestId('provider-preset-search').fill('Fixture Provider');
-  await page.getByRole('option').filter({ hasText: 'Fixture Provider' }).click();
+  await page.getByRole('option').filter({ hasText: 'Fixture Provider' }).waitFor();
+  await page.getByTestId('provider-preset-search').press('ArrowDown');
+  await page.getByTestId('provider-preset-search').press('Enter');
   await page.getByTestId('api-key-draft').fill('secret-for-server-only');
   await page.getByTestId('provider-draft-save').click();
   await page.getByTestId('provider-back').waitFor();
@@ -104,9 +106,16 @@ try {
   await page.getByTestId('discovered-model-select').click();
   assert.equal(await page.getByRole('button', { name: '添加 catalog-only-model', exact: true }).count(), 0, 'reference catalog never invents candidates absent from this connection');
   await page.getByRole('button', { name: '添加 catalog-model', exact: true }).click();
+  await page.getByTestId('saved-models').getByText('Catalog Model', { exact: true }).waitFor();
+  assert.equal(await page.getByTestId('model-editor').count(), 0, 'adding a discovered model saves it directly without opening the editor');
+  assert.equal(await page.getByTestId('discovered-model-select').getAttribute('aria-expanded'), 'true', 'candidate list stays open for further additions');
+  assert.equal(await page.getByRole('button', { name: '添加 catalog-model', exact: true }).count(), 0, 'added models leave the candidate list');
+  await page.getByRole('button', { name: '编辑 Catalog Model', exact: true }).click();
   assert.equal(await page.getByRole('spinbutton', { name: '上下文窗口', exact: true }).getAttribute('placeholder'), '128000');
+  assert.equal(await page.getByRole('spinbutton', { name: '上下文窗口', exact: true }).inputValue(), '64000', 'direct add retains metadata declared by the connection');
+  assert.equal(await page.getByRole('checkbox', { name: '图片理解', exact: true }).isChecked(), true, 'direct add derives uses from catalog capabilities');
   await page.getByRole('spinbutton', { name: '上下文窗口', exact: true }).fill('96000');
-  await page.getByRole('button', { name: '添加模型', exact: true }).click();
+  await page.getByRole('button', { name: '保存修改', exact: true }).click();
   await page.mouse.move(0, 0);
   await page.waitForFunction(() => !document.querySelector('[data-slot="toast"]'));
   await page.getByTestId('cloud-models-save').click();
@@ -128,13 +137,18 @@ try {
   assert.equal(upstream[1].url, 'https://fixture.example/v1/models?after_id=page%2F1', 'gateway preserves provider pagination');
   assert.equal(upstream[0].headers.authorization, 'Bearer secret-for-server-only');
   assert.equal(await page.getByTestId('saved-models').getByRole('button', { name: /^编辑 / }).count(), 1, 'discovery does not automatically add models');
-  await page.getByTestId('discovered-model-select').click();
+  if (await page.getByTestId('discovered-model-select').getAttribute('aria-expanded') !== 'true') {
+    await page.getByTestId('discovered-model-select').click();
+  }
   await page.getByRole('button', { name: '添加 openai/gpt-4o', exact: true }).click();
+  await page.getByTestId('saved-models').getByText('openai/gpt-4o', { exact: true }).waitFor();
+  assert.equal(await page.getByTestId('model-editor').count(), 0, 'official catalog models are also added without an editor');
+  await page.getByRole('button', { name: '编辑 openai/gpt-4o', exact: true }).click();
   assert.equal(await page.getByRole('spinbutton', { name: '上下文窗口', exact: true }).getAttribute('placeholder'), '128000');
   assert.match(await page.getByTestId('model-metadata-details').innerText(), /能力来源 openai/);
   assert.equal(await page.getByRole('button', { name: /模型能力来源/ }).count(), 0, 'common models need no manual source selection');
   assert.equal(await page.getByRole('checkbox', { name: '图片理解', exact: true }).isChecked(), true, 'official vision capability preselects the model use');
-  await page.getByRole('button', { name: '添加模型', exact: true }).click();
+  await page.getByTestId('model-editor').getByRole('button', { name: '取消', exact: true }).click();
   await page.getByTestId('saved-models').getByText('openai/gpt-4o', { exact: true }).waitFor();
   await page.getByRole('button', { name: '编辑 Catalog Model', exact: true }).click();
   assert.equal(await page.getByRole('spinbutton', { name: '上下文窗口', exact: true }).inputValue(), '96000');

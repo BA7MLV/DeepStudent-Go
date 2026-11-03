@@ -4,6 +4,7 @@ import path from 'node:path';
 import type Database from 'better-sqlite3';
 import { AGENTS_PATH, MCP_PATH, MEMORY_PATH, SKILLS_PATH, memoryName } from '@wangke/contracts/system';
 import { BOARD_PATH, boardPath } from '@wangke/contracts/board';
+import { pluginPath } from '@wangke/contracts/plugins';
 
 type Entry = { owner_id: string; path: string; memory_id: string | null; pending: number; content: string | null; expected: string | null };
 
@@ -13,11 +14,12 @@ export class SystemFiles {
 
   private filename(owner: string, resource: string) {
     const board = boardPath(resource) && resource !== BOARD_PATH ? resource.slice(BOARD_PATH.length + 1).split('/') : undefined;
+    const plugin = pluginPath(resource) ? resource.slice('/system/'.length).split('/') : undefined;
     const name = memoryName(resource);
     const skill = resource.startsWith(`${SKILLS_PATH}/`) ? resource.slice(SKILLS_PATH.length + 1).split('/') : undefined;
     if (skill && (skill.length < 2 || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(skill[0]) || skill.slice(1).some((part, i) =>
       !part || part === '.' || part === '..' || part.length > 255 || /[\\\u0000-\u001f\u007f]/.test(part) || part.startsWith('.') && !(i === 0 && skill.length === 2 && part === '.wangke-skill.json')))) throw new Error('invalid_system_path');
-    if (resource !== AGENTS_PATH && resource !== MCP_PATH && resource !== MEMORY_PATH && !name && !skill && !board) throw new Error('invalid_system_path');
+    if (resource !== AGENTS_PATH && resource !== MCP_PATH && resource !== MEMORY_PATH && !name && !skill && !board && !plugin) throw new Error('invalid_system_path');
     const account = crypto.createHash('sha256').update(owner).digest('hex');
     const directories = [this.root, path.join(this.root, account), path.join(this.root, account, 'system'), path.join(this.root, account, 'system', 'memory')];
     if (skill) {
@@ -30,13 +32,17 @@ export class SystemFiles {
       directories.push(current);
       for (const part of board.slice(0, -1)) { current = path.join(current, part); directories.push(current); }
     }
+    if (plugin) {
+      let current = directories[2];
+      for (const part of plugin.slice(0, -1)) { current = path.join(current, part); directories.push(current); }
+    }
     for (const directory of directories) {
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
       const stat = fs.lstatSync(directory);
       if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('unsafe_system_path');
     }
     if (resource === MEMORY_PATH) return directories[3];
-    const filename = board ? path.join(directories.at(-1)!, board.at(-1)!) : skill ? path.join(directories.at(-1)!, skill.at(-1)!) : resource === AGENTS_PATH || resource === MCP_PATH ? path.join(directories[2], resource === MCP_PATH ? 'mcp.json' : 'AGENTS.md') : path.join(directories[3], `${name}.md`);
+    const filename = plugin ? path.join(plugin.length === 1 ? directories[2] : directories.at(-1)!, plugin.at(-1)!) : board ? path.join(directories.at(-1)!, board.at(-1)!) : skill ? path.join(directories.at(-1)!, skill.at(-1)!) : resource === AGENTS_PATH || resource === MCP_PATH ? path.join(directories[2], resource === MCP_PATH ? 'mcp.json' : 'AGENTS.md') : path.join(directories[3], `${name}.md`);
     const stat = fs.lstatSync(filename, { throwIfNoEntry: false });
     if (stat && (!stat.isFile() || stat.isSymbolicLink() || stat.size > (skill ? 2 * 1024 * 1024 : 400000))) throw new Error('unsafe_system_path');
     return filename;

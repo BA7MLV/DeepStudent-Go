@@ -5,10 +5,10 @@ import { useAssistantPosition } from './useAssistantPosition';
 import { ASSISTANT_RESIZE_EDGES, type AssistantResizeEdge } from './assistantGeometry';
 import './study-assistant.css';
 
-export type StudyPanelKey = 'subs' | 'chat' | 'dm' | 'cards';
-export const STUDY_PANEL_KEYS: readonly StudyPanelKey[] = ['subs', 'chat', 'dm', 'cards'];
+export type StudyPanelKey = 'subs' | 'chat' | 'dm' | 'cards' | 'plugins';
+export const STUDY_PANEL_KEYS: readonly StudyPanelKey[] = ['subs', 'chat', 'dm', 'cards', 'plugins'];
 const LABELS: Record<StudyPanelKey, string> = {
-  subs: '字幕', chat: '问答', dm: '弹幕', cards: '卡片',
+  subs: '字幕', chat: '问答', dm: '弹幕', cards: '卡片', plugins: '组件',
 };
 const RESIZE_LABELS: Record<AssistantResizeEdge, string> = {
   n: '上边缘', e: '右边缘', s: '下边缘', w: '左边缘',

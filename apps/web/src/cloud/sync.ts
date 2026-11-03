@@ -7,6 +7,7 @@ import { useSettings } from '../store/settings';
 import { flushPreferences, loadPreferences, startPreferences } from './preferences';
 import { apiUrl } from '../api/base';
 import { cloudTransaction, isLostCloudTransaction } from './transactions';
+import { reasoningProviderOf } from '@wangke/study-core/model/reasoning';
 
 export const useCloudSync = create<{ pending: number; error: string; syncedAt: number }>()(() => ({ pending: 0, error: '', syncedAt: 0 }));
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -20,7 +21,12 @@ export function applyCloudConfig(config: CloudConfig) {
   configCheckedAt = Date.now();
   cloud.maxSteps = config.policy.maxSteps;
   useSettings.setState({
-    providers: config.providers.map(p => ({ id: p.id, name: p.name, catalogId: p.catalogId, protocol: p.protocol, serves: p.serves, deploymentProtocols: Object.fromEntries((p.deployments ?? []).map(d => [d.model, d.protocol])), baseUrl: apiUrl(`/api/v1/cloud/model-gateway/providers/${encodeURIComponent(p.id)}`), apiKey: p.configured ? 'server-managed' : 'server-local', gatewayManaged: true })),
+    providers: config.providers.map(p => ({ id: p.id, name: p.name, catalogId: p.catalogId, protocol: p.protocol, serves: p.serves,
+      deploymentProtocols: Object.fromEntries((p.deployments ?? []).map(d => [d.model, d.protocol])),
+      reasoningProvider: reasoningProviderOf(p),
+      deploymentReasoningProviders: Object.fromEntries((p.deployments ?? []).map(d => [d.model, reasoningProviderOf({ baseUrl: d.baseUrl ?? p.baseUrl, catalogId: p.catalogId })])),
+      stateScope: config.modelRevision ? `configuration:${config.modelRevision}` : undefined,
+      baseUrl: apiUrl(`/api/v1/cloud/model-gateway/providers/${encodeURIComponent(p.id)}`), apiKey: p.configured ? 'server-managed' : 'server-local', gatewayManaged: true })),
     llmModel: config.llmModel, visionModel: config.visionModel, asrModel: config.asrModel,
     ...decisionPatch(config),
     syncEnabled: false,

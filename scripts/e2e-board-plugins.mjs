@@ -107,6 +107,55 @@ try {
   await page.getByTestId('board-manage').waitFor({ state: 'hidden' });
   await plugin('my-counter').getByText('1', { exact: true }).waitFor();
   const output = process.env.SCREENSHOT_DIR ?? path.join(root, 'board-plugin-screenshots'); fs.mkdirSync(output, { recursive: true });
+  const setTheme = theme => page.evaluate(async theme => { const { useSettings } = await import('/src/store/settings.ts'); useSettings.setState({ theme }); }, theme);
+  const assertTheme = async scheme => {
+    await page.waitForFunction(scheme => getComputedStyle(document.documentElement).colorScheme === scheme, scheme);
+    const host = await page.getByTestId('board-plugin-todo').evaluate(element => ({ foreground: getComputedStyle(element).color, background: getComputedStyle(element).backgroundColor }));
+    for (const child of page.frames().filter(frame => frame.url() === 'about:srcdoc')) {
+      await child.waitForFunction(scheme => getComputedStyle(document.documentElement).colorScheme === scheme, scheme);
+      const colors = await child.evaluate(() => ({
+        foreground: getComputedStyle(document.body).color,
+        background: getComputedStyle(document.documentElement).backgroundColor,
+        theme: document.documentElement.dataset.theme,
+        dark: document.documentElement.classList.contains('dark'),
+        controls: [...document.querySelectorAll('input,select,textarea,button')].map(element => getComputedStyle(element).colorScheme),
+      }));
+      assert.equal(colors.foreground, host.foreground, `${scheme}: plugin text follows the host`);
+      assert.equal(colors.background, host.background, `${scheme}: iframe canvas matches the card, never an automatic white canvas`);
+      assert.equal(colors.theme, scheme); assert.equal(colors.dark, scheme === 'dark');
+      assert.ok(colors.controls.every(value => value === scheme), `${scheme}: native controls follow the app, not the OS preference`);
+    }
+  };
+  const liveFrames = page.frames().filter(frame => frame.url() === 'about:srcdoc');
+  for (const frame of liveFrames) await frame.evaluate(() => { window.themeDraftMarker = 'keep-frame-alive'; });
+  await todo.getByRole('textbox', { name: '待办内容' }).fill('切换主题时保留的草稿');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await setTheme('dark'); await assertTheme('dark');
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width < 640 ? 844 : 1000 });
+    await page.getByTestId('page-main').evaluate(element => { element.scrollTop = 0; });
+    await page.screenshot({ path: path.join(output, `board-dark-${width}.png`) });
+  }
+  await setTheme('auto'); await assertTheme('light');
+  await page.emulateMedia({ colorScheme: 'dark' }); await assertTheme('dark');
+  await setTheme('light'); await assertTheme('light');
+  for (const frame of liveFrames) assert.equal(await frame.evaluate(() => window.themeDraftMarker), 'keep-frame-alive', 'theme switches never reload plugins');
+  assert.equal(await todo.getByRole('textbox', { name: '待办内容' }).inputValue(), '切换主题时保留的草稿');
+  await setTheme('dark');
+  await page.reload();
+  await timer.getByRole('button', { name: '暂停', exact: true }).waitFor();
+  await plugin('my-counter').getByText('1', { exact: true }).waitFor();
+  await assertTheme('dark');
+  await page.getByTestId('board-customize').click();
+  const darkManager = page.getByTestId('board-manage');
+  await darkManager.getByRole('button', { name: '完成', exact: true }).focus();
+  const managerColors = await darkManager.evaluate(element => ({ scheme: getComputedStyle(element).colorScheme, background: getComputedStyle(element).backgroundColor }));
+  assert.equal(managerColors.scheme, 'dark');
+  assert.equal(managerColors.background, await page.getByTestId('board-plugin-todo').evaluate(element => getComputedStyle(element).backgroundColor));
+  await darkManager.getByRole('button', { name: '完成', exact: true }).click();
+  await darkManager.waitFor({ state: 'hidden' });
+  await setTheme('light'); await assertTheme('light');
+  await page.emulateMedia({ colorScheme: 'light' });
   for (const width of [1440, 390, 360]) {
     await page.setViewportSize({ width, height: width < 640 ? 844 : 1000 });
     await page.getByTestId('page-main').evaluate(element => { element.scrollTop = 0; });
@@ -216,7 +265,7 @@ try {
   await page.getByRole('link', { name: /Developer docs/ }).click();
   await page.getByText('看板插件 · API v1', { exact: true }).first().waitFor({ timeout: 30000 });
   assert.deepEqual(errors, []);
-  console.log(`Board UI passed: shared files, timer, schedules, hot-load, manager/mobile layout, Bot task filtering/result, SDK watch/wait/abort/reload recovery, conversation links, templates/docs, languages, 360/390/1440px. Screenshots: ${output}`);
+  console.log(`Board UI passed: shared files, timer, schedules, hot-load, light/dark/auto theme sync and cold load without losing drafts, manager/mobile layout, Bot task callbacks, conversation links, templates/docs, languages, 360/390/1440px. Screenshots: ${output}`);
 } catch (error) {
   for (const page of browser?.contexts()[0]?.pages() ?? []) await page.screenshot({ path: path.join(root, 'board-ui-failure.png') }).catch(() => {});
   for (const page of browser?.contexts()[0]?.pages() ?? []) { console.error((await page.locator('body').innerText()).slice(-6000)); for (const frame of page.frames().slice(1)) console.error((await frame.locator('body').innerText()).slice(-2000)); }

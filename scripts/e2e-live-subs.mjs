@@ -28,7 +28,7 @@ const fail = (msg) => { failed++; console.error(`   ❌ ${msg}`); };
 const check = (cond, msg) => (cond ? ok(msg) : fail(msg));
 
 const wait = (ms) => page.waitForTimeout(ms);
-const HINT = '请先在「字幕」页生成字幕';
+const HINT = '请等待字幕自动处理完成';
 const subItems = () => page.locator('[role="tabpanel"]:visible .sub-item').count();
 const paused = () => page.evaluate(() => document.querySelector('video')?.paused ?? true);
 const seek = (t) => page.evaluate((tt) => { const v = document.querySelector('video'); if (v) v.currentTime = tt; }, t);
@@ -165,12 +165,15 @@ console.log('\n7. 本轮转写「进行中」时，已有字幕也不解锁下�
 // 第 6 步结束在「字幕」Tab，三个下游面板已挂载过 → 直接读按钮的 disabled 属性即可（不用切 Tab，
 // 也就能容忍转写失败弹出的 modal 挡住交互）。
 // dev 下 VAD 起不来会一直停在「语音端点检测中…」；若某环境能跑完/立刻失败，则跳过本条，不算失败。
-await page.click('[data-testid="subs-generate"]');
+await page.evaluate(async videoId => {
+  const { useJobStore } = await import('/src/store/jobs.ts');
+  useJobStore.getState().upsert(videoId, { phase: 'asr', message: '模拟增量转写中', done: 1, total: 3 });
+}, videoId);
 let sawRunning = false;
 for (let i = 0; i < 12 && !sawRunning; i++) {
   await wait(400);
   const txt = await page.locator('.side-pane').innerText().catch(() => '');
-  if (txt.includes('转写中…') || txt.includes('端点检测') || txt.includes('抽取音频')) sawRunning = true;
+  if (txt.includes('模拟增量转写中')) sawRunning = true;
 }
 if (!sawRunning) {
   console.log('   ⚠ 未进入「转写中」状态（该环境转写立即结束），跳过本条断言');

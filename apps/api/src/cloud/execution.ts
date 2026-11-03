@@ -7,8 +7,10 @@ import type { CloudConfiguration } from './config.js';
 import type { CloudRecords } from './records.js';
 import { ProjectError, ProjectFiles } from '../projects/files.js';
 import type { WebSearchService } from '../web-search/service.js';
+import type { PluginService } from '../plugins/service.js';
+import type { McpManager } from '../mcp/manager.js';
 
-export type ExecutorKind = 'node' | 'media' | 'browser';
+export type ExecutorKind = 'node' | 'browser';
 export interface TaskContext {
   task: CloudTask;
   owner: string;
@@ -19,6 +21,8 @@ export interface TaskContext {
   signal: AbortSignal;
   fetch: typeof fetch;
   webSearch?: WebSearchService;
+  mcp?: McpManager;
+  pluginService?: PluginService;
   checkActive(): void;
   report(progress: Record<string, unknown>): void;
 }
@@ -31,12 +35,13 @@ export type TaskExecutor = (context: TaskContext) => Promise<unknown>;
 const nodeKinds = new Set(['chat', 'qa', 'cards', 'comments', 'danmaku', 'modelOnce', 'artifactEdit', 'handoutEdit']);
 /** Routing is explicit: a failed native job must never replay itself in a browser. */
 export function executorFor(task: CloudTask, video: Record<string, any> | null): ExecutorKind {
+  // Original question-bank QA needs browser resource/image/edit tools that the
+  // native read-only QA adapter does not implement. No fallback replay.
+  if (task.kind === 'qa' && task.input.pluginExtraction === true) return 'browser';
   if (task.kind === 'handout' && task.input.botStudyText === true) return 'node';
   if (nodeKinds.has(task.kind)) return 'node';
   if (task.kind === 'material' && ['md', 'docx'].includes(String(task.input.format))) return 'node';
-  // FFmpeg remains the bounded native fallback for video covers. Chromium is
-  // gone from the image; browser workers handle the interactive media tasks.
-  if (task.kind === 'cover' && video?.kind !== 'material') return 'media';
+  // All media decoding/rendering belongs to the user's browser, including covers.
   return 'browser';
 }
 

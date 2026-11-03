@@ -8,6 +8,8 @@ import { unzipSync, strFromU8 } from 'fflate';
 import type { DatabaseStore } from '../storage/database.js';
 import type { CloudConfiguration } from '../cloud/config.js';
 import { CloudRecords } from '../cloud/records.js';
+import { PluginFiles } from '../plugins/files.js';
+import { learningTaskProvider } from '@wangke/contracts/learning-plugins';
 import { fileOperationId as operationFileId, receiveFile } from '../cloud/files.js';
 import { taskDto } from '../cloud/tasks.js';
 import { mediaMime } from '../cloud/image.js';
@@ -111,6 +113,8 @@ export class StudyTools {
     this.register({ name: 'study_manage', description: 'Create/update/delete owned learning records. Pass study_read.records[i].key as key and .value unchanged as before (not the envelope). Supply complete after value or null for deletion. Optimistic concurrency is enforced. Cannot manage settings/accounts/credentials. Deletions require existing remove policy approval.', properties: { table: { type: 'string' }, key: { type: ['string','number'] }, before: { type: ['object','null'] }, after: { type: ['object','null'] } }, required: ['table','key','before','after'], capability: a => a.after === null ? 'remove' : 'write', execute: async (a, c) => {
       if (!learningTables.has(a.table)) throw new Error('table_not_available');
       validateStudyMutation(records, c.owner, a.table, a.key, a.before, a.after);
+      if (a.after && a.table === 'cards') new PluginFiles(store).plugin(c.owner, 'flashcards');
+      if (a.after?.quiz && a.table === 'chats') new PluginFiles(store).plugin(c.owner, 'practice');
       c.checkActive();
       if (a.after && a.table === 'courseFiles' && !store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(a.after.fileId, c.owner)) throw new Error('file_not_found');
       if (a.after && a.table === 'files' && !store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(a.after.blob?.$file, c.owner)) throw new Error('file_not_found');
@@ -121,8 +125,9 @@ export class StudyTools {
         if (!['cards','handout','material'].includes(a.kind) || typeof a.courseId !== 'string' || !records.get(c.owner, 'videos', a.courseId)) throw new Error('course_not_found');
         const existing = store.db.prepare('SELECT * FROM cloud_tasks WHERE parent_step_id=? AND owner_id=?').get(c.step, c.owner);
         if (existing) return taskDto(existing);
+        const admitted = new PluginFiles(store).admitTask(c.owner, a.kind, { videoId: a.courseId, ...(a.kind === 'handout' ? { botStudyText: true } : {}), ...(a.format ? { format: a.format } : {}), ...(a.background === true ? { background: true } : {}) });
         const id = crypto.randomUUID(), at = new Date().toISOString();
-        store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at,parent_run_id,parent_step_id) VALUES(?,?,?,?,?,?,'queued',?,?,?,?)").run(id, c.owner, `bot:${c.step}`, a.kind, `course:${a.courseId}`, JSON.stringify({ videoId: a.courseId, ...(a.kind === 'handout' ? { botStudyText: true } : {}), ...(a.format ? { format: a.format } : {}), ...(a.background === true ? { background: true } : {}) }), at, at, c.run, c.step);
+        store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at,parent_run_id,parent_step_id) VALUES(?,?,?,?,?,?,'queued',?,?,?,?)").run(id, c.owner, `bot:${c.step}`, a.kind, `course:${a.courseId}`, JSON.stringify(admitted), at, at, c.run, c.step);
         config.audit(c.owner, 'bot.study_task_created', { id, parentRun: c.run });
         return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(id));
       }
@@ -224,7 +229,15 @@ export class StudyTools {
     this.plugins.get('study_task')!.parallelSafe = args => args.action === 'status';
   }
   register(plugin: StudyToolPlugin) { if (this.plugins.has(plugin.name)) throw new Error('duplicate_study_tool'); this.plugins.set(plugin.name, plugin); }
-  definitions() { return [...this.plugins.values()].map(p => ({ type: 'function', function: { name: p.name, description: p.description, parameters: { type: 'object', additionalProperties: false, properties: p.properties, required: p.required } } })); }
+  definitions(owner?: string) { return [...this.plugins.values()].map(p => {
+    let properties = p.properties, description = p.description;
+    if (owner && p.name === 'study_task') {
+      const files = new PluginFiles(this.store), kinds = ['cards', 'handout', 'material'].filter(kind => { try { files.plugin(owner, learningTaskProvider(kind)!); return true; } catch { return false; } });
+      properties = { ...properties, kind: kinds.length ? { type: 'string', enum: kinds } : { type: 'string', description: 'No learning provider is currently installed; create is unavailable.' }, action: { type: 'string', enum: [...(kinds.length ? ['create'] : []), 'status', 'wait', 'cancel'] } };
+      description = `Persistent learning tasks. Available create kinds: ${kinds.join(', ') || 'none'}. Existing owned task status, wait and cancel remain available; create checks the current account installation and original approvals.`;
+    }
+    return { type: 'function', function: { name: p.name, description, parameters: { type: 'object', additionalProperties: false, properties, required: p.required } } };
+  }); }
   async file(owner: string, id: string) {
     const f = this.store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(id, owner) as any;
     if (!f || f.size_bytes > 20 * 1024 * 1024) throw new Error('file_not_found_or_too_large');

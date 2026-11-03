@@ -3,6 +3,7 @@ import { readSystemDocument, saveSystemMarkdown, systemMaterialId } from '../mat
 import { memoryName } from '@wangke/contracts/system';
 import { ServerApiError } from '../api/serverClient';
 import { boardPath } from '@wangke/contracts/board';
+import { pluginPath } from '@wangke/contracts/plugins';
 
 export function executeAgentInstructionsResource(name: string, args: Record<string, unknown>) {
   return executeSystemDocumentResource(name, '/system/AGENTS.md', args);
@@ -13,7 +14,7 @@ export async function executeSystemDocumentResource(name: string, path: string, 
   let document;
   try { document = await readSystemDocument(path); }
   catch (error) {
-    if (name !== 'edit' || args.create !== true || !memoryName(path) && !boardPath(path) || !(error instanceof ServerApiError) || error.status !== 404) throw error;
+    if (name !== 'edit' || args.create !== true || !memoryName(path) && !boardPath(path) && !pluginPath(path) || !(error instanceof ServerApiError) || error.status !== 404) throw error;
     if (typeof args.content !== 'string') return '创建笔记需提供 content。';
     await saveSystemMarkdown(systemMaterialId(path)!, args.content, '', true);
     return `已创建${boardPath(path) ? '看板资源' : '笔记'} ${path}，与资料和 Bot 共用同一份实体文件。`;
@@ -21,7 +22,7 @@ export async function executeSystemDocumentResource(name: string, path: string, 
   const text = document.content;
   const agent = path === '/system/AGENTS.md';
   const mcp = path === '/system/mcp.json';
-  const board = boardPath(path);
+  const board = boardPath(path) || pluginPath(path);
   const link = `[${document.name}](#/library?file=${path})`;
   const detail = board ? `与看板及 Bot 共用插件资源，revision=${document.revision}。格式见 /system/board/README.md；修改后自动加载。` : mcp ? '与 MCP 设置和主 Bot 共用同一份 JSON 配置，不含密钥。修改由服务端校验；学习任务不能修改全局 MCP 连接。' : agent ? '与「设置 → Agent」共用同一份内容。' : `与 Bot 共用同一份记忆；scope=${document.scope}:${document.scopeId ?? ''}，revision=${document.revision}，status=${document.status}，source=${document.source}。`;
   if (name === 'read') return `${readMarkdownText(text, path, args)}\n\n系统${board ? '看板' : mcp ? '配置' : agent ? '指令' : '记忆'}文件：${link}，${detail}${text.length === 0 && !mcp && !board ? '当前为空，使用应用默认行为；用户要求写入指令时，可用 edit(create=true, content=...) 初始化。' : ''}`;

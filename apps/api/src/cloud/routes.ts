@@ -14,8 +14,11 @@ import { ModelGatewayFailure } from '../agent/model-errors.js';
 import { gatewayDisabledPurposes } from '../agent/model-rollout.js';
 import { modelUsageReport } from '../agent/model-observations.js';
 import type { WebSearchService } from '../web-search/service.js';
+import { PluginFiles } from '../plugins/files.js';
+import type { McpManager } from '../mcp/manager.js';
 
 interface Dependencies {
+  mcp?: McpManager;
   webSearch?: WebSearchService;
   store: DatabaseStore; records: CloudRecords; configuration: CloudConfiguration;
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => any;
@@ -27,7 +30,7 @@ interface Dependencies {
 
 export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   const { store, records, configuration, requireAuth, checkOrigin } = deps;
-  const runner = new CloudTaskRunner(store, { records, configuration, filesDir: deps.filesDir, fetch: deps.fetch, webSearch: deps.webSearch });
+  const runner = new CloudTaskRunner(store, { records, configuration, filesDir: deps.filesDir, fetch: deps.fetch, webSearch: deps.webSearch, mcp: deps.mcp });
   const fail = (reply: FastifyReply, code: number, error: string) => reply.code(code).send({ error });
   const configurationError = (reply: FastifyReply, e: unknown) => e instanceof ModelConfigurationError
     ? reply.code(e.status).send({ error: e.message, issues: e.issues })
@@ -228,7 +231,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   app.post<{ Body: import('@wangke/contracts/cloud').ModelGatewayInput }>('/api/v1/cloud/model-gateway/request', async (request, reply) => {
     const user = authorize(request, reply); if (!user) return;
     const input = request.body;
-    const allowed = ['purpose', 'presetId', 'modelRef', 'messages', 'tools', 'image', 'audio', 'outputTokens', 'cacheKey', 'conversationId', 'idempotencyKey', 'continuationRef', 'sideEffectsOccurred'];
+    const allowed = ['purpose', 'presetId', 'modelRef', 'messages', 'tools', 'image', 'audio', 'outputTokens', 'cacheKey', 'conversationId', 'idempotencyKey', 'continuationRef', 'sideEffectsOccurred', 'thinkingLevel', 'temperature', 'toolChoice'];
     if (!input || typeof input !== 'object' || Object.keys(input).some(k => !allowed.includes(k)) || !['chat', 'bot', 'vision', 'asr', 'decision', 'memory'].includes(input.purpose)) return fail(reply, 400, 'invalid_gateway_request');
     const disconnected = new AbortController();
     request.raw.once('aborted', () => disconnected.abort());
@@ -295,7 +298,12 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     const expires = new Date(now.getTime() + leaseMs).toISOString();
     const token = crypto.randomBytes(32).toString('base64url');
     const claimed = store.transaction(() => {
-      const row = store.db.prepare("SELECT * FROM cloud_tasks WHERE owner_id=? AND executor='browser' AND status='queued' ORDER BY created_at LIMIT 1").get(user.id) as any;
+      const limit = Math.max(1, Math.min(4, Number(process.env.CLOUD_CONCURRENCY) || 2));
+      const computing = store.db.prepare("SELECT COUNT(*) AS count FROM cloud_tasks WHERE status IN ('running','waiting_user')").get() as { count: number };
+      if (computing.count >= limit) return null;
+      const row = store.db.prepare(`SELECT t.* FROM cloud_tasks t WHERE t.owner_id=? AND t.executor='browser' AND t.status='queued'
+        AND NOT EXISTS (SELECT 1 FROM cloud_tasks busy WHERE busy.owner_id=t.owner_id AND busy.resource=t.resource AND busy.status IN ('running','waiting_user'))
+        ORDER BY t.created_at LIMIT 1`).get(user.id) as any;
       if (!row) return null;
       const changed = store.db.prepare("UPDATE cloud_tasks SET status='running',worker_id=?,lease_expires_at=?,updated_at=? WHERE id=? AND status='queued'").run(workerTokenHash(token), expires, now.toISOString(), row.id);
       return changed.changes ? row.id : null;
@@ -312,6 +320,8 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
         typeof b.resource !== 'string' || b.resource.length > 256 || !b.resource || !b.input || typeof b.input !== 'object' || Array.isArray(b.input)) return fail(reply, 400, 'invalid_task');
     const previous = store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(user.id, b.nonce);
     if (previous) return taskDto(previous);
+    try { b.input = new PluginFiles(store).admitTask(user.id, b.kind, b.input); }
+    catch { return fail(reply, 403, 'plugin_unavailable'); }
     // Resource locking is derived from the payload, not trusted from a client label.
     b.resource = ['chat', 'qa'].includes(b.kind) ? `session:${Number(b.input.sessionId)}`
       : typeof b.input.videoId === 'string' ? `course:${b.input.videoId}` : b.resource;

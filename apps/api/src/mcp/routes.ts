@@ -4,6 +4,7 @@ import type { CloudRecords } from '../cloud/records.js';
 import { workerIdentity } from '../cloud/workerAuth.js';
 import type { McpContext, McpServerInput } from '@wangke/contracts/mcp';
 import { McpManager, mcpError } from './manager.js';
+import { mcpScope } from './scope.js';
 
 export function registerMcpRoutes(app: FastifyInstance, deps: {
   manager: McpManager; store: DatabaseStore; records: CloudRecords;
@@ -25,23 +26,7 @@ export function registerMcpRoutes(app: FastifyInstance, deps: {
       const task = store.db.prepare("SELECT input FROM cloud_tasks WHERE id=? AND owner_id=? AND kind IN ('chat','qa') AND status IN ('running','waiting_user')").get(worker.taskId, owner) as { input: string } | undefined;
       if (!task || JSON.parse(task.input).sessionId !== context.sessionId || context.threadId) throw new Error('mcp_context_denied');
     }
-    let ids: unknown;
-    if (context.sessionId !== undefined) {
-      if (!Number.isSafeInteger(context.sessionId)) throw new Error('mcp_invalid_context');
-      const session = records.get(owner, 'chatSessions', context.sessionId);
-      if (!session) throw new Error('mcp_context_denied');
-      ids = session.mcpServerIds;
-    } else {
-      if (typeof context.threadId !== 'string') throw new Error('mcp_invalid_context');
-      const thread = store.db.prepare('SELECT mcp_server_ids,project_id FROM threads WHERE id=? AND owner_id=?').get(context.threadId, owner) as { mcp_server_ids: string | null; project_id: string | null } | undefined;
-      if (!thread) throw new Error('mcp_context_denied');
-      // Existing connectors are owner-scoped, not project-scoped. A project
-      // cannot widen its boundary through a global external connector.
-      if (thread.project_id) return [];
-      ids = thread.mcp_server_ids === null ? undefined : JSON.parse(thread.mcp_server_ids);
-    }
-    if (ids !== undefined && (!Array.isArray(ids) || ids.some(id => typeof id !== 'string'))) throw new Error('mcp_invalid_scope');
-    return ids as string[] | undefined;
+    return mcpScope(store, records, owner, context);
   };
   const fail = (reply: FastifyReply, error: unknown) => {
     const code = mcpError(error);

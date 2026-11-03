@@ -4,9 +4,10 @@ import { useTranslation } from 'react-i18next';
 import type { BoardPlugin } from '@wangke/contracts/board';
 import { cloud } from '../cloud/state';
 import { request } from '../api/serverClient';
-import { readSystemDocument, saveSystemMarkdown, systemMaterialId } from '../materials/systemFiles';
+import type { PluginCatalog } from '../plugins/catalog';
+import { refreshPlugins } from '../plugins/catalog';
 import { PageLoader, PageShell, Sym, toast } from '../ui';
-import { PluginFrame } from '../board/PluginFrame';
+import { PluginSlot } from '../plugins/PluginSlot';
 import { BoardManager } from '../board/BoardManager';
 import '../board/board.css';
 
@@ -39,9 +40,9 @@ export default function Board() {
     if (busy || !plugin.manifest) return;
     setBusy(plugin.id);
     try {
-      const file = await readSystemDocument(`${plugin.path}/manifest.json`);
-      const manifest = JSON.parse(file.content);
-      await saveSystemMarkdown(systemMaterialId(file.path)!, JSON.stringify({ ...manifest, enabled: !plugin.manifest.enabled }, null, 2) + '\n', file.content, false, file.revision);
+      const { layout } = await request<PluginCatalog>('/plugins');
+      await request(`/plugins/${encodeURIComponent(plugin.id)}/lifecycle`, { method: 'POST', body: JSON.stringify({ source: 'v1', status: plugin.manifest.enabled ? 'disabled' : 'enabled', expected: layout.content, revision: layout.revision }) });
+      await refreshPlugins();
       await refresh();
     } catch { toast.error(t('board.saveFailed')); }
     finally { setBusy(undefined); }
@@ -54,12 +55,9 @@ export default function Board() {
   }>
     <div className="board" data-testid="board">
       {unavailable ? <p role="alert" className="text-sm text-danger">{t('board.unavailable')}</p> : null}
-      {!cloud.enabled ? <p>{t('board.cloudOnly')}</p> : plugins === null ? unavailable ? <Button onPress={() => void refresh()}>{t('board.retry')}</Button> : <PageLoader label={t('board.loading')} /> : <>
+      {!cloud.enabled ? <PluginSlot name="board.main" /> : plugins === null ? unavailable ? <Button onPress={() => void refresh()}>{t('board.retry')}</Button> : <PageLoader label={t('board.loading')} /> : <>
         {plugins.some(p => p.error) ? <div className="board-notice" role="alert"><p>{t('board.invalidPlugins')}</p><Button size="sm" variant="ghost" onPress={() => setManaging(true)}>{t('board.view')}</Button></div> : null}
-        {enabled.length ? <div className="board-grid">{enabled.map(plugin => <section key={plugin.id} className="board-widget ui-smooth" aria-labelledby={`board-title-${plugin.id}`} data-testid={`board-plugin-${plugin.id}`}>
-          <h2 className="board-widget__title" id={`board-title-${plugin.id}`}>{plugin.manifest!.name}</h2>
-          <PluginFrame key={`${plugin.id}:${plugin.revision}`} plugin={plugin} />
-        </section>)}</div> : <div className="board-empty"><Sym name="grid_view" /><p>{t('board.empty')}</p><Button variant="secondary" onPress={() => setManaging(true)}>{t('board.manage')}</Button></div>}
+        <PluginSlot name="board.main" />
       </>}
     </div>
     <BoardManager open={managing} onOpenChange={setManaging} plugins={plugins} busy={busy} onToggle={toggle} />

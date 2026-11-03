@@ -5,13 +5,14 @@ import { runCloudTask } from '../cloud/tasks';
 import { resolveMaxRounds } from './loopGuard';
 import { mdEditorOpen } from './tools';
 import { courseResourceTools, createResourceExecutor } from './resources';
+import { isPluginAvailable } from '../plugins/availability';
 import { PROMPTS } from './prompts';
 import { estimateTokens } from './context';
 import { loadSessionSkillMeta, skillMetaBlock } from '../skills/store';
+import { activateSkills, assertSkillBudget, assertSkillRequestBudget, explicitSkillIds, recordSkillActivation } from '../skills/activation';
 import { db, type ChatImage, type QuizState, type ChatToolCall } from '../store/db';
 import { ToolTraceLedger } from '../utils/toolTrace';
-import { catalogOf, getSettings, modelOverridesOf, type ModelTarget } from '../store/settings';
-import { supportsThinking } from '../api/modelCaps';
+import { getSettings, type ModelTarget } from '../store/settings';
 import type { ChatMessage, ContentPart } from '../api/siliconflow';
 import type { WidgetPayload } from './widgetRuntime';
 import { persistAssistantSnapshot } from '../store/assistantSnapshot';
@@ -63,6 +64,8 @@ export interface QaRunInput {
   images?: ContentPart[];
   /** 会话技能范围：同时作用于提示词清单与工具白名单（见下方 `allowedSkillIds`） */
   skillIds?: number[];
+  /** User-selected instructions for this turn, not an expansion of skill permissions. */
+  explicitSkillIds?: number[];
   /** 覆盖默认的 chat 槽位（链路端将来按会话指定模型时用；不传 = `targetOfSlot('chat')`） */
   modelTarget?: ModelTarget;
 
@@ -134,7 +137,8 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
   if (remoteTasks()) {
     let content = '', reasoning = '';
     const delivered = new Set<string>();
-    return runCloudTask('qa', `session:${input.sessionId}`, { ...input, modelTarget: undefined, modelRef: input.modelTarget ? { providerId: input.modelTarget.providerId, model: input.modelTarget.model } : getSettings().llmModel }, p => {
+    const settings = getSettings();
+    return runCloudTask('qa', `session:${input.sessionId}`, { ...input, modelTarget: undefined, thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none', modelRef: input.modelTarget ? { providerId: input.modelTarget.providerId, model: input.modelTarget.model } : settings.llmModel }, p => {
       if (typeof p.content === 'string') {
         if (!p.content.startsWith(content)) { sink.onRoundStart?.(0); content = ''; }
         sink.onDelta?.(p.content.slice(content.length)); content = p.content;
@@ -151,7 +155,11 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
     }, sink.signal);
   }
   const settings = getSettings();
-  const { videoId, sessionId, text, skillIds } = input;
+  const { videoId, sessionId, text } = input;
+  const session = await db.chatSessions.get(sessionId);
+  const skillIds = session ? session.skillIds : input.skillIds;
+  const selectedSkills = explicitSkillIds(input.explicitSkillIds, session?.pinnedSkillIds);
+  const activated = await activateSkills(selectedSkills, skillIds, sessionId);
   /** 阅读材料 = 有定位单元；视频课程走字幕检索 + 时间戳引用 */
   const isMaterial = input.materialKind !== undefined;
   const materialKind = input.materialKind;
@@ -169,6 +177,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
     sessionId,
     role: 'user',
     content: input.displayText ?? text,
+    explicitSkillIds: selectedSkills,
     createdAt: turnTimes.user,
     ...(input.chatImages?.length ? { images: input.chatImages } : {}),
   });
@@ -210,14 +219,17 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
   const budget =
     settings.contextWindow -
     estimateTokens(systemPrompt) -
+    activated.messages.reduce((total, message) => total + estimateTokens(String(message.content)), 0) -
     estimateTokens(text) -
     (input.images ? shotCount * 1200 : 0) - // 多模态图片每张约 1.2k tokens
     4096; // 输出预留
+  assertSkillBudget(budget, activated);
   // 末条即刚落库的当前问题；图片与工具结果从原始历史重放。
   const recent = await fitModelHistory(sessionId, history.slice(0, -1).map((row) => ({ ...row, originalContent: row.content, content: quizHistoryContent(row) })), Math.max(2000, budget));
   const messages: ChatMessage[] = [
     ...splitSystemPrompt(systemPrompt),
     ...recent.flatMap(r => replayTrace(r) ?? [{ role: r.role, content: r.content }]),
+    ...activated.messages,
   ];
   const quizUpdates = recent.filter(row => row.quiz).map(row => ({ id: row.id, snapshot: quizHistoryContent({ ...row, content: '' }) }));
   const currentText = runtimeContext({ courseId: videoId, courseName: videoName, shotCount, refsCount,
@@ -231,6 +243,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
     messages.push({ role: 'user', content: currentText });
   }
   await db.chats.update(userRowId, { modelTrace: modelTrace(input.displayText ?? text, [messages.at(-1)!]) });
+  assertSkillRequestBudget(settings.contextWindow, messages, activated);
   const baseLength = messages.length;
   let rawTurn: ChatMessage[] = [];
   let pendingModelText = '';
@@ -284,9 +297,11 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
    * 本轮工具集：只给**当下真的能用**的能力。
    * 材料没有字幕、没有画面（工具集本身就少两样），md 且编辑面开着才多一个 edit_markdown。
    */
-  const tools = courseResourceTools(canEditMd);
+  const tools = courseResourceTools(canEditMd, await isPluginAvailable('practice'));
   const toolTrace = new ToolTraceLedger();
+  recordSkillActivation(activated, toolTrace);
   const traces = toolTrace.calls;
+  sink.onTools?.([...traces]);
 
   // ── 跑循环（照搬 ChatPanel 的四个局部计数器）────────────────────────────────
   let answer = '';
@@ -336,17 +351,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
         // 覆盖模型槽位：不传就是老行为（settings 的 chat 槽位，面板与课程助手都走这条）
         target: input.modelTarget,
         mcpSessionId: sessionId,
-        // 开着思考就把档位传下去：thinkingParams 按模型声明决定发哪个字段 ——
-        // 只有开关的模型拿不到深度参数，但 `enable_thinking` 照发
-        thinkingEffort:
-          settings.thinkingEnabled &&
-          supportsThinking(
-            input.modelTarget?.catalogId ?? catalogOf(settings, settings.llmModel.providerId),
-            input.modelTarget?.model ?? settings.llmModel.model,
-            input.modelTarget ? input.modelTarget.capabilities : modelOverridesOf(settings, settings.llmModel),
-          )
-            ? settings.thinkingEffort
-            : undefined,
+        thinkingEffort: settings.thinkingEnabled ? settings.thinkingEffort : 'none',
         onReasoningDelta: (text) => {
           reasoning += text;
           markReasoningStart();

@@ -28,6 +28,8 @@ import { registerSystemRoutes } from './storage/system-routes.js';
 import { BoardFiles } from './board/files.js';
 import { BoardScheduler } from './board/scheduler.js';
 import { registerBoardRoutes } from './board/routes.js';
+import { registerPluginRoutes } from './plugins/routes.js';
+import { pluginTool } from './plugins/tool.js';
 import { workerIdentity } from './cloud/tasks.js';
 import { workerTokens } from './cloud/workerAuth.js';
 import { McpRepository } from './mcp/repository.js';
@@ -259,12 +261,15 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   const bad = (reply: FastifyReply, code: number, error: string) => reply.code(code).send({ error });
   const pruneAttempts = () => { const cutoff = Date.now() - 15 * 60_000; for (const [ip, value] of attempts) if (value.until < cutoff && value.seen < cutoff) attempts.delete(ip); while (attempts.size > 10_000) attempts.delete(attempts.keys().next().value!); };
 
-   const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch,
+   const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch, mcp,
      canStart: () => !held && !draining,
      syncResources: owner => { if (store.db.prepare('SELECT 1 FROM resource_roots WHERE owner_id=?').get(owner)) resources.migrate(owner); } });
    registerResourceRoutes(app, resources, requireAuth, checkOrigin);
    registerSystemRoutes(app, systemMaterials, cloudConfig, requireAuth, checkOrigin);
    registerBoardRoutes(app, boardFiles, cloudRunner, botService, requireAuth, checkOrigin);
+    const pluginService = registerPluginRoutes(app, store, botService, cloudRunner, requireAuth, checkOrigin, { filesDir, resources });
+    cloudRunner.pluginService = pluginService;
+    study.register(pluginTool(pluginService));
    registerMcpRoutes(app, { manager: mcp, store, records: cloudRecords, requireAuth, checkOrigin });
    registerWebSearchRoutes(app, { service: webSearch, store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin });
    registerProjectRoutes(app, { projects, requireAuth, checkOrigin, maxFileBytes, stopProject: (id) => {
@@ -914,7 +919,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     return drainTask;
   }
   app.addHook('preClose', async () => { await drainForRelease(0); });
-  app.addHook('onClose', async () => { await gateway.close(); await memoryWorker.close(); await cloudRunner.close(); await runner.close(); await mcp.close(); store.close(); });
+  app.addHook('onClose', async () => { await pluginService.close(); await gateway.close(); await memoryWorker.close(); await cloudRunner.close(); await runner.close(); await mcp.close(); store.close(); });
   return Object.assign(app, { drainForRelease });
 }
 

@@ -65,11 +65,11 @@ try {
     const require=createRequire(import.meta.url);const Database=require('/app/node_modules/better-sqlite3');const db=new Database(':memory:');assert.equal(db.prepare('SELECT 42 AS n').get().n,42);db.close();
     const argon2=require('/app/node_modules/argon2');const hash=await argon2.hash('isolated-native-proof');assert.ok(await argon2.verify(hash,'isolated-native-proof'));
     for(const p of ['/app/apps/web','/app/node_modules/react','/app/node_modules/react-dom','/app/node_modules/vite','/app/node_modules/typescript'])assert.equal(fs.existsSync(p),false,p);
-    assert.match(execFileSync('ffmpeg',['-version'],{encoding:'utf8'}),/ffmpeg version/);
+    assert.throws(()=>execFileSync('ffmpeg',['-version'],{stdio:'ignore'}), 'API media work belongs to the browser');
   `]);
   docker(['run', '--rm', '--network', 'none', '--memory', '64m', '--cpus', '.25', '--entrypoint', 'sh', images.web.image, '-ec', 'test -f /srv/index.html; test ! -d /app/apps/api; test ! -d /app/node_modules; test ! -e /srv/.env; test ! -e /srv/db']);
   docker(['run', '--rm', '--network', 'none', '--memory', '64m', '--cpus', '.25', '--entrypoint', 'sh', images.web.image, '-ec', 'mkdir -p /opt/web-assets/nested /srv/assets/nested; printf old > /srv/assets/keep.js; printf replacement > /opt/web-assets/keep.js; printf nested-new > /opt/web-assets/nested/new.js; /usr/local/bin/web-entrypoint.sh true; test "$(cat /srv/assets/keep.js)" = old; test "$(cat /srv/assets/nested/new.js)" = nested-new']);
-  mark('actual final Linux images: SQLite/Argon2/FFmpeg and API/Web dependency/source isolation');
+  mark('actual final Linux images: SQLite/Argon2, no FFmpeg, and API/Web dependency/source isolation');
   compose(['up', '-d', '--no-build', '--wait', '--wait-timeout', '120']);
   const host = compose(['port', 'proxy', '8080']); assert.match(host, /^127\.0\.0\.1:\d+$/);
   const origin = `http://${host}`;

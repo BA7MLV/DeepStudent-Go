@@ -59,6 +59,8 @@ import { messageTime } from '../utils/messageTime';
 import { chatGreeting } from '../utils/chatGreeting';
 import { PageShell, Sym, toast, useResolvedDark, useSkeletonGate } from '../ui';
 import { useBotPanel } from '../store/botPanel';
+import { PluginSlot } from '../plugins/PluginSlot';
+import { PluginActions } from '../plugins/PluginActions';
 import { useImeEnter } from '../utils/imeEnter';
 import './course-chat.css';
 
@@ -592,6 +594,8 @@ export default function CourseChat() {
   const removeMessage = useCourseChat((s) => s.deleteMessage);
   const { deleteMessage, deleting } = useMessageDeletion(listRef, activeId, (key) => removeMessage(key, activeId));
   const botOpen = useBotPanel((state) => state.open);
+  const auxiliary = useBotPanel((state) => state.auxiliary);
+  const setAuxiliary = useBotPanel((state) => state.setAuxiliary);
   const setBotOpen = useBotPanel((state) => state.setOpen);
   const setDraft = useCourseChat((s) => s.setDraft);
   const send = useCourseChat((s) => s.send);
@@ -894,6 +898,7 @@ export default function CourseChat() {
       fill
       rootClassName="page-course-chat"
       actions={<>
+        <Button variant="tertiary" onPress={() => setAuxiliary(auxiliary === 'plugins' && botOpen ? 'bot' : 'plugins')}>组件</Button>
         {isNarrow && (
           <Button
             isIconOnly
@@ -910,10 +915,10 @@ export default function CourseChat() {
       aside={{
         open: botOpen,
         onOpenChange: setBotOpen,
-        label: 'Bot',
+        label: auxiliary === 'plugins' ? '学习组件' : 'Bot',
         content: (
           <Suspense fallback={<div className="bot-center" aria-busy="true" />}>
-            <BotPanel onClose={() => setBotOpen(false)} />
+            {auxiliary === 'plugins' ? <div className="plugin-panel"><header><Button variant="tertiary" onPress={() => setAuxiliary('bot')}>Bot</Button><Button variant="tertiary" onPress={() => setBotOpen(false)}>关闭组件</Button></header><PluginSlot name="chat.sidepanel" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} /></div> : <BotPanel onClose={() => setBotOpen(false)} />}
           </Suspense>
         ),
       }}
@@ -1267,6 +1272,7 @@ export default function CourseChat() {
                 aria-label="输入区工具"
                 orientation="horizontal"
               >
+                <PluginActions surface="chat.composer.actions" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} />
                 <span className="course-chat__context-usage-slot">
                   <ContextUsageButton
                     tokens={ctxEst} windowTokens={ctxWin} breakdown={ctxBreakdown} testId="chat-context-usage"

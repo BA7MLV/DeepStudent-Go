@@ -39,6 +39,7 @@ import PlayerFeedback from '../components/PlayerFeedback';
 import { usePlayerWebFullscreen } from '../components/usePlayerWebFullscreen';
 import { createBilibiliKeyboard } from '../utils/playerKeys';
 import StudyAssistant, { STUDY_PANEL_KEYS, type StudyPanelKey } from '../components/StudyAssistant';
+import { PluginSlot } from '../plugins/PluginSlot';
 
 /** 常驻字幕轨的固定 id：vidstack 的 NativeTextRenderer 会把轨的 id 写到它创建的原生 <track> 上，
  *  而 MediaProvider 的 Tracks 观察器会把「没登记的 <track> 元素」当成新轨补进列表（id 为空时用
@@ -80,7 +81,7 @@ const PANEL_KEYS = STUDY_PANEL_KEYS;
  * 留着它们只会显示「请先生成字幕」，而那个按钮点下去会对着 PDF 起一次转写，
  * 属于**看起来能用、实际是错的**入口，必须挡掉。
  */
-const MATERIAL_PANEL_KEYS: readonly PanelKey[] = ['chat'];
+const MATERIAL_PANEL_KEYS: readonly PanelKey[] = ['chat', 'plugins'];
 const isSmallPlayerLayout = ({ width, height }: { width: number; height: number }) => width < 760 || height < 300;
 
 export default function Player() {
@@ -524,6 +525,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
   // 材料只实例化问答：其余面板都以字幕为输入，挂上去只会给出「先生成字幕」的错误入口。
   const panels: Partial<Record<PanelKey, ReactNode>> = isMaterial
     ? {
+        plugins: <div className="plugin-panel"><PluginSlot name="reader.sidepanel" materialId={systemMaterialPath(id) ? undefined : id} /></div>,
         chat: (
           <ChatPanel
             videoId={id}
@@ -538,6 +540,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
         ),
       }
     : {
+        plugins: <div className="plugin-panel"><PluginSlot name="reader.sidepanel" materialId={id} /></div>,
         subs: (
           <SubtitlePanel
             videoId={id}
@@ -707,7 +710,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
         activeTab={effTab} onTabChange={setActiveTab} panelKeys={panelKeys} panels={panels} />
 
       {/* 全局选区浮层：挂在播放页根上，跨越阅读器与面板两棵子树 */}
-      <SelectionAsk />
+      <SelectionAsk materialId={id} />
     </PageShell>
   );
 }

@@ -33,7 +33,7 @@ try {
   await page.getByTestId('provider-summary-gateway').click();
   await page.getByTestId('btn-check-models').click();
   await page.getByTestId('discovered-model-select').click();
-  await page.getByRole('button', { name: '添加 jev-test', exact: true }).click();
+  await page.getByRole('button', { name: '配置 jev-test', exact: true }).click();
   const editor = page.getByTestId('model-editor');
   assert.equal(await editor.getByRole('checkbox', { name: '决策模型', exact: true }).isChecked(), true);
   assert.equal(await editor.getByRole('checkbox', { name: '主模型', exact: true }).isChecked(), false);

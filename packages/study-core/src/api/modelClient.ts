@@ -7,6 +7,8 @@ import type { ModelListConnection } from './modelTypes.ts';
 import { modelUsage, usageCollector, type ModelUsage, type ModelRequestRecord } from './usage.ts';
 import { applyPromptCache, stableTools } from './promptCache.ts';
 import { groupToolResults } from './toolMessages.ts';
+import { reasoningProfile, reasoningWire, reasoningTemperatureAllowed } from './reasoning.ts';
+import type { ModelProviderState, ModelThinkingLevel } from '@wangke/contracts/cloud';
 export type { ModelUsage } from './usage.ts';
 
 /**
@@ -233,6 +235,7 @@ export async function transcribe(
   s: ModelTarget,
   audio: Blob,
   filename = 'chunk.wav',
+  signal?: AbortSignal,
 ): Promise<TranscriptionResult> {
   if (s.protocol === 'anthropic-messages') {
     throw new Error('Anthropic Messages 协议不提供 OpenAI 兼容的音频转写接口，请为语音识别槽位选择 OpenAI Chat 供应商');
@@ -242,7 +245,7 @@ export async function transcribe(
     form.append('file', audio, filename);
     form.append('model', s.model);
     if (verbose) form.append('response_format', 'verbose_json');
-    return request(s, '/audio/transcriptions', { method: 'POST', body: form });
+    return request(s, '/audio/transcriptions', { method: 'POST', body: form, signal });
   };
   let res: Response;
   try {
@@ -287,7 +290,7 @@ export interface ChatMessage {
   usage?: ModelUsage;
   /** Exact provider blocks, including signed/encrypted reasoning. Only replay
    * to the same connection/model/protocol; UI text is a separate projection. */
-  providerState?: { providerId: string; baseUrl: string; model: string; protocol: ModelTarget['protocol']; items: Record<string, any>[] };
+  providerState?: ModelProviderState;
 }
 
 export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'aborted' | 'error';
@@ -366,27 +369,15 @@ export function textOf(msg: ChatMessage | null | undefined): string {
   return msg.content.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join('');
 }
 
-/**
- * 思考深度档位。**刻度对齐 OpenAI 的 `reasoning_effort`**：minimal / low / medium / high / xhigh。
- *
- * 少一个 `none` —— 那是滑块第一档「不思考」，由 `enable_thinking: false` 表达，见 `ThinkingLevel`。
- * 为什么不让 `none` 混进来：硅基流动文档里 `reasoning_effort` 的 enum 只有 `high` / `max`
- * （见 modelCaps 的 DOC_EFFORT_MODELS），发 `'none'` 会被拒或被静默忽略；关掉思考走的是
- * **另一个字段** `enable_thinking`。两个字段不能混成一张枚举，否则「关掉」会变成一个发不出去的档位。
- *
- * 旧的 `'max'` 并入了 `'xhigh'`（`max` 是 Kimi / GLM 那边的叫法，语义同为「最高」）：
- * 落库的旧值由 settings 的归一化映射过来，**请求侧仍按模型自己声明的名字发**（见 toEffortValue）。
- */
-export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+/** Portable effort intent. max and xhigh remain distinct; reasoning.ts maps
+ * intent to the selected provider/model's legal wire controls. */
+export type ReasoningEffort = Exclude<ModelThinkingLevel, 'none'>;
 
-/** 滑块上的 6 档 = 5 档深度 + 第一档「不思考」 */
-export type ThinkingLevel = 'none' | ReasoningEffort;
+/** Portable intent; the UI offers only the selected target's legal levels. */
+export type ThinkingLevel = ModelThinkingLevel;
 
 /**
- * 剥掉只属于「这一轮」的两个字段，得到**能发出去**的消息：
- *
- * - `reasoning_content`：回传会重复计费，官方亦不建议
- * - `finish_reason`：这一轮的元数据，不是对话内容
+ * 清理消息与本轮计量字段；各协议在 serializeBody 中决定如何回放推理状态。
  *
  * 顺带在这里过 `sanitizeMessages` —— 它是发请求前的唯一收口点，所有调用方
  * （agent 循环 / 讲义 / 卡片 / 弹幕 / 评论…）都走这两个函数，所以脏历史只有一处能被修。
@@ -406,9 +397,11 @@ export interface ChatOptions {
   temperature?: number;
   max_tokens?: number;
   signal?: AbortSignal;
+  /** Portable user intent. Only the shared protocol adapter creates wire fields. */
+  thinkingLevel?: ThinkingLevel;
   /** 开启思考（仅支持的模型） */
   enable_thinking?: boolean;
-  /** 思考深度档位（仅 DeepSeek-V4 系 / GLM-5.2 生效） */
+  /** @deprecated Use thinkingLevel; retained for older task payloads. */
   reasoning_effort?: ReasoningEffort;
   /** 思考预算 tokens（多数推理模型生效），128~32768 */
   thinking_budget?: number;
@@ -447,12 +440,14 @@ function responsesContent(content: ChatMessage['content']): unknown {
 }
 
 export function requestBody(t: ModelTarget, opts: ChatOptions, messages: ChatMessage[], stream: boolean): Record<string, unknown> {
-  return applyPromptCache(serializeBody(t, { ...opts, tools: opts.tools ? stableTools(opts.tools) : undefined }, messages, stream), t, opts.cacheKey);
+  return applyPromptCache(serializeBody(t, { ...opts, max_tokens: opts.max_tokens ?? 4096,
+    tool_choice: opts.tool_choice ?? (opts.tools?.length ? 'auto' : undefined),
+    tools: opts.tools ? stableTools(opts.tools) : undefined }, wire(messages), stream), t, opts.cacheKey);
 }
 
 function nativeItems(t: ModelTarget, message: ChatMessage) {
   const state = message.providerState;
-  return state?.protocol === t.protocol && state.model === t.model && state.providerId === t.providerId && state.baseUrl === t.baseUrl ? state.items : undefined;
+  return state?.protocol === t.protocol && state.model === t.model && state.providerId === t.providerId && state.baseUrl === (t.stateScope ?? t.baseUrl) ? state.items : undefined;
 }
 
 function serializeBody(t: ModelTarget, opts: ChatOptions, messages: ChatMessage[], stream: boolean): Record<string, unknown> {
@@ -463,6 +458,14 @@ function serializeBody(t: ModelTarget, opts: ChatOptions, messages: ChatMessage[
   if (meta?.declaredOutput != null && meta.declaredOutput > 0) {
     opts = { ...opts, max_tokens: Math.min(opts.max_tokens ?? 4096, meta.declaredOutput) };
   }
+  const profile = reasoningProfile(t);
+  const level = opts.thinkingLevel ?? (opts.enable_thinking === false ? 'none' : opts.reasoning_effort ?? (opts.enable_thinking ? 'high' : undefined));
+  const thinking = reasoningWire(t, level, opts.max_tokens ?? 4096);
+  if (t.protocol === 'openai-chat' && profile.responsesOnly) throw new Error('此模型仅支持 Responses API；请在模型设置中切换协议');
+  if (t.protocol === 'openai-chat' && opts.tools?.length && (profile.chatTools === 'never' || profile.chatTools === 'non-reasoning' && thinking.reasoning_effort !== 'none')) {
+    throw new Error('此模型的思考模式工具调用需要 Responses API；请在模型设置中切换协议');
+  }
+  const temperature = opts.temperature != null && reasoningTemperatureAllowed(t, level) ? { temperature: opts.temperature } : {};
   if (t.protocol === 'anthropic-messages') {
     const system = messages.filter((m) => m.role === 'system').map((m) => ({ type: 'text', text: typeof m.content === 'string' ? m.content : '' }));
     const turns = messages.filter((m) => m.role !== 'system').map((m) => {
@@ -477,7 +480,7 @@ function serializeBody(t: ModelTarget, opts: ChatOptions, messages: ChatMessage[
     });
     return {
       model: t.model, messages: groupToolResults(turns), ...(system.length ? { system } : {}), max_tokens: opts.max_tokens ?? 4096,
-      ...(opts.temperature == null ? {} : { temperature: opts.temperature }),
+      ...temperature, ...thinking,
       ...(opts.tools?.length ? { tools: opts.tools.map((tool) => ({ name: tool.function.name, description: tool.function.description, input_schema: tool.function.parameters })) } : {}),
       ...(opts.tool_choice ? { tool_choice: { type: opts.tool_choice } } : {}),
       ...(stream ? { stream: true } : {}),
@@ -496,14 +499,22 @@ function serializeBody(t: ModelTarget, opts: ChatOptions, messages: ChatMessage[
     }).flat();
     return {
       model: t.model, input, store: false, include: ['reasoning.encrypted_content'], ...(opts.max_tokens == null ? {} : { max_output_tokens: opts.max_tokens }),
-      ...(opts.temperature == null ? {} : { temperature: opts.temperature }),
+      ...temperature, ...thinking,
       ...(opts.tools?.length ? { tools: opts.tools.map((tool) => ({ type: 'function', name: tool.function.name, description: tool.function.description, parameters: tool.function.parameters, strict: false })) } : {}),
       ...(opts.tool_choice ? { tool_choice: opts.tool_choice } : {}),
       ...(stream ? { stream: true } : {}),
     };
   }
-  return { model: t.model, messages: messages.map(({ providerState: _p, usage: _u, finish_reason: _f, reasoning_content: _r, ...m }) => m), tools: opts.tools, tool_choice: opts.tool_choice, temperature: opts.temperature, max_tokens: opts.max_tokens,
-    enable_thinking: opts.enable_thinking, reasoning_effort: opts.reasoning_effort, thinking_budget: opts.thinking_budget, stream };
+  return { model: t.model, messages: messages.map(({ providerState: _p, usage: _u, finish_reason: _f, reasoning_content: _r, ...m }) => {
+    // Reasoning is portable for display, but replay is bound to the exact model
+    // and connection. Never send another provider's signed/opaque state.
+    const state = profile.preserve ? nativeItems(t, { ...m, providerState: _p })?.[0] : undefined;
+    const { reasoning: _reasoning, reasoning_text: _text, reasoning_details: _details, extra_content: _extra, ...portable } = m as typeof m & { reasoning?: unknown; reasoning_text?: unknown; reasoning_details?: unknown; extra_content?: unknown };
+    if (portable.tool_calls) portable.tool_calls = portable.tool_calls.map(call => ({ id: call.id, type: call.type, function: call.function }));
+    return { ...portable, ...(state && typeof state === 'object' ? state : {}) };
+  }), tools: opts.tools, tool_choice: opts.tool_choice, ...temperature,
+    ...(profile.mode === 'openai' ? { max_completion_tokens: opts.max_tokens } : { max_tokens: opts.max_tokens }),
+    ...thinking, stream };
 }
 
 function parseArgs(value: string): Record<string, unknown> {
@@ -511,36 +522,108 @@ function parseArgs(value: string): Record<string, unknown> {
 }
 
 function normalizeResponse(data: any, protocol: ModelTarget['protocol']): ChatMessage {
+  const object = (value: any) => !!value && typeof value === 'object' && !Array.isArray(value);
+  const blocks = (value: any): any[] => {
+    if (!Array.isArray(value) || value.some(part => !object(part))) throw new Error('invalid_structured_response');
+    return value;
+  };
+  const callsOf = (calls: any[]): ToolCall[] => calls.map(call => {
+    if (!object(call) || !object(call.function) || typeof call.function.name !== 'string' || typeof call.function.arguments !== 'string') throw new Error('invalid_structured_response');
+    return call;
+  });
+  if (!object(data)) throw new Error('invalid_structured_response');
   const error = streamErrorOf(data);
   if (error) throw new Error(`模型服务返回错误：${error}`);
   if (protocol === 'anthropic-messages') {
-    if (!Array.isArray(data.content)) throw new Error('模型接口未返回有效消息，请重试或检查模型配置');
-    const blocks = data.content;
-    const text = blocks.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
-    const calls = blocks.filter((b: any) => b.type === 'tool_use').map((b: any) => ({ id: b.id, type: 'function' as const, function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } }));
-    return { role: 'assistant', content: text || null, ...(calls.length ? { tool_calls: calls } : {}), finish_reason: normalizeFinishReason(data.stop_reason) ?? (calls.length ? 'tool_calls' : 'stop') };
+    const content = blocks(data.content ?? (data.stop_reason === 'refusal' ? [] : undefined));
+    const text = content.filter((b: any) => b.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('');
+    const calls = callsOf(content.filter((b: any) => b.type === 'tool_use').map((b: any) => ({ id: b.id, type: 'function' as const, function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } })));
+    const reasoning = content.filter((b: any) => b.type === 'thinking' && typeof b.thinking === 'string').map((b: any) => b.thinking).join('\n\n');
+    return { role: 'assistant', content: text || null, ...(reasoning ? { reasoning_content: reasoning } : {}), ...(calls.length ? { tool_calls: calls } : {}), finish_reason: content.some(b => b.type === 'refusal') ? 'content_filter' : normalizeFinishReason(data.stop_reason) ?? (calls.length ? 'tool_calls' : 'stop') };
   }
   if (protocol === 'openai-responses') {
-    if (!Array.isArray(data.output)) throw new Error('模型接口未返回有效消息，请重试或检查模型配置');
-    const output = data.output;
-    const text = output.flatMap((item: any) => item.content ?? []).filter((b: any) => b.type === 'output_text').map((b: any) => b.text).join('');
-    const calls = output.filter((item: any) => item.type === 'function_call').map((item: any) => ({ id: item.call_id ?? item.id, type: 'function' as const, function: { name: item.name, arguments: item.arguments ?? '{}' } }));
-    const finish_reason = responseFinishReason(data, calls.length > 0);
-    return { role: 'assistant', content: text || null, ...(calls.length ? { tool_calls: calls } : {}), finish_reason };
+    const output = blocks(data.output);
+    const content = output.filter((item: any) => item.type === 'message' && (!item.role || item.role === 'assistant')).flatMap((item: any) => blocks(item.content ?? []));
+    const text = content.filter((b: any) => b.type === 'output_text' && typeof b.text === 'string').map((b: any) => b.text).join('');
+    const calls = callsOf(output.filter((item: any) => item.type === 'function_call').map((item: any) => ({ id: item.call_id ?? item.id, type: 'function' as const, function: { name: item.name, arguments: item.arguments } })));
+    const finish_reason = content.some(b => b.type === 'refusal') ? 'content_filter' : responseFinishReason(data, calls.length > 0);
+    const reasoning = responseReasoning(output);
+    return { role: 'assistant', content: text || null, ...(reasoning ? { reasoning_content: reasoning } : {}), ...(calls.length ? { tool_calls: calls } : {}), finish_reason };
   }
   const choice = data.choices?.[0];
-  if (!choice?.message) throw new Error('模型接口未返回有效消息，请重试或检查模型配置');
+  if (!object(choice?.message)) throw new Error('invalid_structured_response');
   const { finish_reason: messageFinishReason, ...message } = choice.message;
-  const finish_reason = normalizeFinishReason(choice.finish_reason ?? messageFinishReason);
-  return { ...message, ...(finish_reason ? { finish_reason } : {}) } as ChatMessage;
+  const finish_reason = message.refusal ? 'content_filter' : normalizeFinishReason(choice.finish_reason ?? messageFinishReason);
+  if (message.tool_calls != null) message.tool_calls = callsOf(blocks(message.tool_calls));
+  if (Array.isArray(message.content)) message.content = blocks(message.content).filter(b => b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('');
+  const reasoning = chatReasoningText(message) || reasoningDetailsText(message.reasoning_details);
+  return { ...message, ...(reasoning ? { reasoning_content: reasoning } : {}), ...(finish_reason ? { finish_reason } : {}) } as ChatMessage;
+}
+
+function responseReasoning(output: any[]): string {
+  return output.filter(item => item?.type === 'reasoning').flatMap(item => [...(item.summary ?? []), ...(item.content ?? [])])
+    .filter(part => ['summary_text', 'reasoning_text'].includes(part?.type) && typeof part.text === 'string').map(part => part.text).join('\n\n');
+}
+
+function reasoningDetailsText(details: any): string {
+  return Array.isArray(details) ? details.flatMap(part => part?.type === 'reasoning.text' && typeof part.text === 'string' ? [part.text]
+    : part?.type === 'reasoning.summary' && typeof part.summary === 'string' ? [part.summary] : []).join('\n\n') : '';
+}
+
+/** Compatible endpoints may send several aliases, including empty placeholders. */
+function chatReasoningText(message: any): string {
+  return [message?.reasoning_content, message?.reasoning, message?.reasoning_text]
+    .find(value => typeof value === 'string' && value.length > 0) ?? '';
+}
+
+/** An index is not an identity across detail types (or distinct signed blocks).
+ * Keep provider order and never concatenate one block's ciphertext into another. */
+function appendReasoningDetail(details: Record<string, any>[], detail: any): void {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return;
+  const previous = details.find(item => item.type === detail.type && (item.index ?? 0) === (detail.index ?? 0)
+    && (!item.id || !detail.id || item.id === detail.id));
+  if (!previous) { details.push({ ...detail }); return; }
+  const next = { ...previous, ...detail };
+  for (const key of ['text', 'summary', 'data', 'signature']) {
+    if (typeof detail[key] === 'string') next[key] = (previous[key] ?? '') + detail[key];
+  }
+  Object.assign(previous, next);
+}
+
+function chatReasoningState(data: any): Record<string, unknown>[] | undefined {
+  const msg = data?.choices?.[0]?.message;
+  if (!msg) return;
+  const reasoning = chatReasoningText(msg);
+  const state = { ...(reasoning ? { reasoning_content: reasoning } : {}),
+    ...(Array.isArray(msg.reasoning_details) ? { reasoning_details: msg.reasoning_details } : {}),
+    ...(msg.extra_content ? { extra_content: msg.extra_content } : {}),
+    ...(msg.tool_calls?.some((call: any) => call.extra_content) ? { tool_calls: msg.tool_calls } : {}) };
+  return Object.keys(state).length ? [state] : undefined;
 }
 
 function responseMetadata(msg: ChatMessage, data: any, target: ModelTarget): ChatMessage {
-  const items = target.protocol === 'anthropic-messages' ? data.content : target.protocol === 'openai-responses' ? data.output : undefined;
+  const items = target.protocol === 'anthropic-messages' ? data.content : target.protocol === 'openai-responses' ? data.output : chatReasoningState(data);
   const usage = modelUsage(data);
   return { ...msg, ...(usage ? { usage } : {}), ...(Array.isArray(items) && items.length ? {
-    providerState: { providerId: target.providerId, baseUrl: target.baseUrl, model: target.model, protocol: target.protocol, items },
+    providerState: { providerId: target.providerId, baseUrl: target.stateScope ?? target.baseUrl, model: target.model, protocol: target.protocol, items },
   } : {}) };
+}
+
+/** Shared JSON codec for Bot, Chat and JSON returned to streaming callers.
+ * Whether a partial answer may trigger tools is a runtime policy, not a codec. */
+export function decodeResponse(target: ModelTarget, data: unknown, options: Pick<ChatOptions, 'tools'> = {}): ChatMessage {
+  let msg = responseMetadata(normalizeResponse(data, target.protocol), data, target);
+  if (options.tools?.length && typeof msg.content === 'string') msg = applyRecoveredDsml(msg, msg.content);
+  return msg;
+}
+
+/** Keep the codec's machine error for Bot while presenting a useful Chat error. */
+function decodeChatResponse(target: ModelTarget, data: unknown, options: Pick<ChatOptions, 'tools'>): ChatMessage {
+  try { return decodeResponse(target, data, options); }
+  catch (error) {
+    if (error instanceof Error && error.message === 'invalid_structured_response') throw new Error('模型接口未返回有效消息，请重试或检查模型配置');
+    throw error;
+  }
 }
 
 /**
@@ -583,11 +666,7 @@ async function chatOnceInner(t: ModelTarget, opts: ChatOptions, fetcher?: typeof
     throw new Error('模型接口返回的数据不完整或不是有效 JSON，请重试或检查模型服务');
   }
   if (!data || typeof data !== 'object') throw new Error('模型接口未返回有效消息，请重试或检查模型配置');
-  const msg = responseMetadata(normalizeResponse(data, t.protocol), data, t);
-  // 只有声明了工具才需要 DSML 兜底：没给工具时模型没有理由吐 DSML 标记，
-  // 那时的尖括号更可能是正文（讲义片段、HTML），吞掉就是毁内容。
-  if (!opts.tools?.length || typeof msg.content !== 'string') return msg;
-  return applyRecoveredDsml(msg, msg.content as string);
+  return decodeChatResponse(t, data, opts);
 }
 
 /**
@@ -689,11 +768,10 @@ async function chatStreamInner(
     let data: unknown;
     try { data = JSON.parse(body); } catch { throw new Error('模型接口返回的数据不完整或不是有效 JSON，请重试或检查模型服务'); }
     if (!data || typeof data !== 'object') throw new Error('模型接口未返回有效消息，请重试或检查模型配置');
-    const raw = responseMetadata(normalizeResponse(data, t.protocol), data, t);
-    const msg = !opts.tools?.length || typeof raw.content !== 'string' ? raw : applyRecoveredDsml(raw, raw.content);
+    const msg = decodeChatResponse(t, data, opts);
     const content = textOf(msg);
-    if (content) onDelta?.(content);
     if (msg.reasoning_content) onReasoning?.(msg.reasoning_content);
+    if (content) onDelta?.(content);
     msg.tool_calls?.forEach((call, index) => onToolCallDelta?.({
       index, id: call.id, name: call.function.name, arguments: call.function.arguments,
     }));
@@ -712,6 +790,28 @@ async function chatStreamInner(
   const usage = usageCollector();
   const native: Record<number, Record<string, any>> = {};
   let responseItems: Record<string, any>[] | undefined;
+  const summaryParts = new Map<string, string>();
+  const reasoningDetails: Record<string, any>[] = [];
+  const finishedResponseCalls = new Set<number>();
+  const anthropicArgumentDeltas = new Set<number>();
+  const toolExtras = new Map<number, Record<string, unknown>>();
+  let extraContent: Record<string, unknown> | undefined;
+  const emitReasoning = (text: string) => { reasoning += text; onReasoning?.(text); };
+  const summaryPart = (key: string, text: string, append: boolean) => {
+    const previous = summaryParts.get(key) ?? '';
+    const next = append ? previous + text : text;
+    if (next.startsWith(previous)) {
+      const delta = next.slice(previous.length);
+      if (delta) emitReasoning((!previous && summaryParts.size && !summaryParts.has(key) ? '\n\n' : '') + delta);
+    }
+    summaryParts.set(key, next);
+  };
+  const absorbSummary = (item: any, index: number) => {
+    if (item?.type !== 'reasoning') return;
+    [...(item.summary ?? []), ...(item.content ?? [])].forEach((part: any, i: number) => {
+      if (['summary_text', 'reasoning_text'].includes(part.type) && typeof part.text === 'string') summaryPart(`${index}:${i}`, part.text, false);
+    });
+  };
   /**
    * DSML 兜底还原器，**只在真的声明了工具时装**。
    *
@@ -732,6 +832,16 @@ async function chatStreamInner(
       name: call.function.name,
       arguments: call.function.arguments,
     });
+  };
+
+  const absorbResponseCall = (item: any, index: number, complete: boolean) => {
+    if (item?.type !== 'function_call') return;
+    const previous = toolCalls[index];
+    const call: ToolCall = { id: item.call_id ?? item.id ?? previous?.id ?? '', type: 'function',
+      function: { name: item.name ?? previous?.function.name ?? '', arguments: item.arguments ?? previous?.function.arguments ?? '' } };
+    toolCalls[index] = call;
+    if (complete && typeof item.arguments === 'string') finishedResponseCalls.add(index);
+    if (!previous || previous.id !== call.id || previous.function.name !== call.function.name || previous.function.arguments !== call.function.arguments) emitToolCall(index);
   };
 
   /** 还原器的产出：只有 text 能给界面，toolCall 进 recovered */
@@ -777,7 +887,7 @@ async function chatStreamInner(
           .filter(line => line.startsWith('data:'))
           .map(line => line.slice(5).replace(/^ /, '')).join('\n').trim();
         if (!payload) continue;
-        if (payload === '[DONE]') { ended = true; break stream; }
+        if (payload === '[DONE]') { ended = t.protocol === 'openai-chat'; break stream; }
         let chunk: any;
         try {
           chunk = JSON.parse(payload);
@@ -794,7 +904,14 @@ async function chatStreamInner(
         capture?.(usage.value);
         if (t.protocol === 'anthropic-messages') {
           const delta = chunk.delta;
-          if (chunk.type === 'content_block_start') native[chunk.index] = structuredClone(chunk.content_block);
+          if (chunk.type === 'content_block_start') {
+            native[chunk.index] = structuredClone(chunk.content_block);
+            if (chunk.content_block?.type === 'thinking' && chunk.content_block.thinking) emitReasoning(chunk.content_block.thinking);
+            if (chunk.content_block?.type === 'text' && chunk.content_block.text) {
+              const text = stripLeakedToolPreamble(chunk.content_block.text);
+              if (text) { content += text; onDelta?.(text); }
+            }
+          }
           const block = native[chunk.index];
           if (chunk.type === 'content_block_delta' && block) {
             if (delta?.type === 'text_delta') block.text = (block.text ?? '') + delta.text;
@@ -803,7 +920,7 @@ async function chatStreamInner(
           }
           if (chunk.type === 'content_block_start' && chunk.content_block?.type === 'tool_use') {
             const i = chunk.index ?? Object.keys(toolCalls).length;
-            toolCalls[i] = { id: chunk.content_block.id, type: 'function', function: { name: chunk.content_block.name, arguments: '' } };
+            toolCalls[i] = { id: chunk.content_block.id, type: 'function', function: { name: chunk.content_block.name, arguments: JSON.stringify(chunk.content_block.input ?? {}) } };
             emitToolCall(i);
           }
           if (chunk.type === 'content_block_delta' && delta?.type === 'text_delta' && typeof delta.text === 'string') {
@@ -815,6 +932,7 @@ async function chatStreamInner(
             const i = chunk.index ?? 0;
             const call = toolCalls[i];
             if (call) {
+              if (!anthropicArgumentDeltas.has(i)) { call.function.arguments = ''; anthropicArgumentDeltas.add(i); }
               call.function.arguments += delta.partial_json;
               emitToolCall(i);
             }
@@ -825,16 +943,22 @@ async function chatStreamInner(
           continue;
         }
         if (t.protocol === 'openai-responses') {
-          if (chunk.type === 'response.output_item.done') native[chunk.output_index] = chunk.item;
+          if (chunk.type === 'response.output_item.done') {
+            native[chunk.output_index] = chunk.item;
+            absorbSummary(chunk.item, chunk.output_index);
+            absorbResponseCall(chunk.item, chunk.output_index, true);
+          }
           if (chunk.type === 'response.output_text.delta' && typeof chunk.delta === 'string') {
             const text = stripLeakedToolPreamble(chunk.delta);
             if (text) { content += text; onDelta?.(text); }
           }
-          if (chunk.type === 'response.reasoning_summary_text.delta' && typeof chunk.delta === 'string') { reasoning += chunk.delta; onReasoning?.(chunk.delta); }
+          if (chunk.type === 'response.reasoning_summary_text.delta' && typeof chunk.delta === 'string') summaryPart(`${chunk.output_index ?? 0}:${chunk.summary_index ?? 0}`, chunk.delta, true);
+          if (chunk.type === 'response.reasoning_summary_text.done' && typeof chunk.text === 'string') summaryPart(`${chunk.output_index ?? 0}:${chunk.summary_index ?? 0}`, chunk.text, false);
+          if (chunk.type === 'response.reasoning_text.delta' && typeof chunk.delta === 'string') summaryPart(`${chunk.output_index ?? 0}:${chunk.content_index ?? 0}`, chunk.delta, true);
+          if (chunk.type === 'response.reasoning_text.done' && typeof chunk.text === 'string') summaryPart(`${chunk.output_index ?? 0}:${chunk.content_index ?? 0}`, chunk.text, false);
           if (chunk.type === 'response.output_item.added' && chunk.item?.type === 'function_call') {
             const i = chunk.output_index ?? Object.keys(toolCalls).length;
-            toolCalls[i] = { id: chunk.item.call_id ?? chunk.item.id, type: 'function', function: { name: chunk.item.name, arguments: '' } };
-            emitToolCall(i);
+            absorbResponseCall(chunk.item, i, false);
           }
           if (chunk.type === 'response.function_call_arguments.delta') {
             const i = chunk.output_index ?? 0;
@@ -844,8 +968,21 @@ async function chatStreamInner(
               emitToolCall(i);
             }
           }
+          if (chunk.type === 'response.function_call_arguments.done') {
+            const i = chunk.output_index ?? 0;
+            const call = toolCalls[i];
+            if (call && typeof chunk.arguments === 'string') {
+              call.function.arguments = chunk.arguments;
+              finishedResponseCalls.add(i);
+              emitToolCall(i);
+            }
+          }
           if (['response.completed', 'response.incomplete', 'response.failed'].includes(chunk.type)) {
+            const responseError = streamErrorOf(chunk.response);
+            if (responseError) throw new Error(`模型服务返回错误：${responseError}`);
             responseItems = chunk.response?.output;
+            responseItems?.forEach(absorbSummary);
+            responseItems?.forEach((item, index) => absorbResponseCall(item, index, true));
             finish = responseFinishReason({ ...chunk.response, status: chunk.response?.status ?? chunk.type.slice('response.'.length) }, Object.values(toolCalls).length > 0);
             ended = true;
             break stream;
@@ -866,13 +1003,18 @@ async function chatStreamInner(
             if (text) { content += text; onDelta?.(text); }
           }
         }
-        if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
-          reasoning += delta.reasoning_content;
-          onReasoning?.(delta.reasoning_content);
+        const thought = chatReasoningText(delta);
+        if (thought) emitReasoning(thought);
+        if (delta.extra_content) extraContent = { ...extraContent, ...delta.extra_content };
+        if (!thought && delta.reasoning_details) {
+          const visible = reasoningDetailsText(delta.reasoning_details);
+          if (visible) emitReasoning(visible);
         }
+        if (Array.isArray(delta.reasoning_details)) for (const detail of delta.reasoning_details) appendReasoningDetail(reasoningDetails, detail);
         if (delta.tool_calls) {
           for (const tc of delta.tool_calls) {
             const i = tc.index ?? 0;
+            if (tc.extra_content) toolExtras.set(i, { ...toolExtras.get(i), ...tc.extra_content });
             if (!toolCalls[i]) {
               toolCalls[i] = { id: tc.id ?? '', type: 'function', function: { name: '', arguments: '' } };
               emitToolCall(i);
@@ -895,7 +1037,11 @@ async function chatStreamInner(
 
   // A clean HTTP EOF does not prove the model finished. Some proxies simply
   // close a broken upstream connection; do not execute its partial tool calls.
-  if (!ended && !finish) throw new Error('模型响应流意外结束，未收到完成标记');
+  if (!ended && (t.protocol === 'openai-responses' || !finish)) throw new Error('模型响应流意外结束，未收到完成标记');
+  if (t.protocol === 'openai-responses' && finish === 'tool_calls'
+    && Object.keys(toolCalls).some(index => !finishedResponseCalls.has(Number(index)))) {
+    throw new Error('模型返回了未完成的工具调用，请重试或检查模型服务');
+  }
   if (dsml) absorb(dsml.flush());
   const msg: ChatMessage = { role: 'assistant', content: content || null };
   if (reasoning) msg.reasoning_content = reasoning;
@@ -904,7 +1050,11 @@ async function chatStreamInner(
   const calls = [...Object.values(toolCalls), ...recovered];
   if (calls.length > 0) msg.tool_calls = calls;
   if (usage.value) msg.usage = usage.value;
-  const items = responseItems ?? Object.values(native);
-  if (items.length) msg.providerState = { providerId: t.providerId, baseUrl: t.baseUrl, model: t.model, protocol: t.protocol, items };
+  const items = t.protocol === 'openai-chat'
+    ? [{ ...(reasoning ? { reasoning_content: reasoning } : {}), ...(reasoningDetails.length ? { reasoning_details: reasoningDetails } : {}),
+      ...(extraContent ? { extra_content: extraContent } : {}),
+      ...(toolExtras.size ? { tool_calls: Object.entries(toolCalls).map(([index, call]) => ({ ...call, ...(toolExtras.has(Number(index)) ? { extra_content: toolExtras.get(Number(index)) } : {}) })) } : {}) }].filter(item => Object.keys(item).length)
+    : responseItems ?? Object.values(native);
+  if (items.length) msg.providerState = { providerId: t.providerId, baseUrl: t.stateScope ?? t.baseUrl, model: t.model, protocol: t.protocol, items };
   return msg;
 }

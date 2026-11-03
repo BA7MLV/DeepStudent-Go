@@ -10,7 +10,8 @@ import { subscribeModelMeta } from '../api/modelMeta';
  *
  * 用法：`useModelMetaRevision()`，不用返回值 —— 它只负责触发重渲染。
  */
-export function useModelMetaRevision(): void {
-  const [, setTick] = useState(0);
+export function useModelMetaRevision(): number {
+  const [tick, setTick] = useState(0);
   useEffect(() => subscribeModelMeta(() => setTick((n) => n + 1)), []);
+  return tick;
 }

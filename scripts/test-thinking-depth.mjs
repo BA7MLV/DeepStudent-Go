@@ -1,334 +1,385 @@
 #!/usr/bin/env node
-/**
- * 思考参数必须**跟着模型声明走**（纯逻辑，不需要 API key）。
- *
- * 这条护栏守的是一个具体的失败模式：以前 `thinkingParams()` 靠
- * `/(deepseek-v4|glm-5\.2)/` 猜模型名 + 写死 2048/8192/32768，于是会给只认
- * `thinking_budget` 的模型发 `reasoning_effort`（旋钮静默失效），也会给只有开关的
- * 模型发一个它根本不存在的深度参数。现在请求参数的形状只由 models.dev 的
- * `reasoning_options` 决定，所以这里从**原始条目**灌进去，逐个模型钉住结果。
- *
- * 用法：node scripts/test-thinking-depth.mjs
- */
+/** Offline request/response contracts. No API key, real model or generated files. */
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { test } from 'node:test';
+import { chatOnce, chatStream, requestBody } from '../packages/study-core/src/api/modelClient.ts';
+import { configureModelMetaStorage, getModelMeta, refreshModelMeta, MODEL_META_CACHE_VERSION } from '../packages/study-core/src/api/modelMeta.ts';
+import { effectiveThinkingLevel, normalizeThinkingLevel, reasoningChoices, reasoningProfile, reasoningWire } from '../packages/study-core/src/api/reasoning.ts';
 
-// modelCaps 内部是 `import ... from './modelMeta'`（无扩展名，Vite 的写法），
-// Node 的类型擦除不认这种 specifier，所以先 esbuild 打成一个包再 import。
-const here = dirname(fileURLToPath(import.meta.url));
-// 草稿目录是 `scripts/.cache` 根（**不能**再往下挪一层）：入口文件里写的是
-// `'../../src/...'` 相对 import，深度一变就错位。本脚本只删自己的产物。
-const dir = join(here, '.cache');
-const entry = join(dir, 'thinking-depth-entry.ts');
-const outfile = join(dir, 'thinking-depth-bundle.mjs');
-mkdirSync(dir, { recursive: true });
-{
-  const { build } = await import('esbuild');
-  const { writeFileSync } = await import('node:fs');
-  // 入口要同时暴露两侧：modelCaps（判断与参数）+ modelMeta（拉取与解析）
-  writeFileSync(entry, `export * from '../../apps/web/src/api/modelCaps.ts';\nexport * from '../../apps/web/src/api/modelMeta.ts';\n`);
-  await build({ entryPoints: [entry], outfile, bundle: true, format: 'esm', platform: 'node', logLevel: 'silent' });
-}
-process.on('exit', () => rmSync(outfile, { force: true }));
-
-/** 换 query 才能拿到一份全新的模块实例（modelMeta 的缓存是模块级变量） */
-const load = (tag) => import(`${pathToFileURL(outfile).href}?v=${tag}`);
-
-/**
- * 真实条目：2026-10 从 models.dev 拉下来的硅基流动在架声明，**照抄不改**。
- * 上游改了声明这里就会失败 —— 那正是该跟进的时候。
- */
-const FIXTURE = {
-  // effort 档位型：声明里给了合法档位
-  'zai-org/GLM-5.2': { reasoning: true, reasoning_options: [{ type: 'effort', values: ['high', 'max'] }] },
-  'zai-org/GLM-5.3': { reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'high', 'max'] }] },
-  // 预算型：给了区间（V4-Flash 另有文档钦定的 effort 覆盖，见 modelCaps 的 DOC_EFFORT_MODELS）
-  'deepseek-ai/DeepSeek-V4-Flash-0731': { reasoning: true, reasoning_options: [{ type: 'budget_tokens', min: 128, max: 32768 }] },
-  'Qwen/Qwen3-14B': {
-    reasoning: true,
-    reasoning_options: [{ type: 'toggle' }, { type: 'budget_tokens', min: 128, max: 32768 }],
-  },
-  // 只有开关：深度旋钮是假的
-  'Qwen/Qwen3.5-27B': { reasoning: true, reasoning_options: [{ type: 'toggle' }] },
-  'deepseek-ai/DeepSeek-V3.2': { reasoning: true, reasoning_options: [{ type: 'toggle' }] },
-  // 会思考但一个旋钮都没声明（`[]` 是上游真实存在的形状）
-  'deepseek-ai/DeepSeek-V4-Pro': { reasoning: true, reasoning_options: [] },
-  // 不会思考
-  'Qwen/Qwen3.6-35B-A3B': { reasoning: false },
+const limits = { context: 128000, output: 8192 };
+const entry = (options = [], reasoning = true) => ({ reasoning, reasoning_options: options, limit: limits });
+const toggle = { type: 'toggle' };
+const budget = { type: 'budget_tokens', min: 128, max: 32768 };
+const effort = values => ({ type: 'effort', values });
+const catalog = {
+  'siliconflow-cn': { models: {
+    'Qwen/Qwen3-14B': entry([toggle, budget]),
+    'Qwen/Qwen3.5-27B': entry([toggle]),
+    'deepseek-ai/DeepSeek-V4-Flash': entry([budget]),
+    'deepseek-ai/DeepSeek-V4-Flash-0731': entry([toggle, budget]),
+    'deepseek-ai/DeepSeek-V4-Pro': entry(),
+    'x/shared': entry([effort(['high', 'max'])]),
+    plain: entry([], false),
+  } },
+  siliconflow: { models: { 'x/shared': entry([toggle, { ...budget, max: 4096 }]) } },
+  custom: { models: { standard: entry([effort(['none', 'low', 'high'])]), budgetOnly: entry([budget]) } },
+  openrouter: { models: { 'anthropic/claude-sonnet-4.6': entry([toggle, effort(['low', 'medium', 'high'])]) } },
 };
+const originalFetch = globalThis.fetch;
+try {
+  configureModelMetaStorage({ getItem: () => null, setItem: () => {} });
+  globalThis.fetch = async () => Response.json(catalog);
+  await refreshModelMeta([]);
+} finally { globalThis.fetch = originalFetch; }
 
-/** models.dev 的条目必须有 context 才会进能力表，补一个免得在解析阶段被丢掉 */
-const withLimits = (models) =>
-  Object.fromEntries(Object.entries(models).map(([id, m]) => [id, { limit: { context: 128000, output: 8192 }, ...m }]));
+const target = (model, protocol = 'openai-chat', catalogId = '', baseUrl = 'https://fixture.invalid/v1') => ({ providerId: 'fixture', apiKey: '', model, protocol, catalogId, baseUrl });
+const opts = { messages: [{ role: 'user', content: 'test' }], max_tokens: 8192, temperature: .3 };
+const body = (t, level, extra = {}) => requestBody(t, { ...opts, thinkingLevel: level, ...extra }, opts.messages, false);
+const choices = t => reasoningChoices(t).map(c => c.value);
 
-const SF = 'siliconflow-cn';
-
-/** 把某份 models.dev 形状的数据当作拉取结果（挂在硅基流动国内站名下） */
-const serveMeta = (models, catalog = SF) => {
-  globalThis.fetch = async () =>
-    new Response(JSON.stringify({ [catalog]: { models: withLimits(models) } }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
-};
-
-globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {} };
-serveMeta(FIXTURE);
-
-let passed = 0;
-const failures = [];
-async function test(name, fn) {
-  try {
-    await fn();
-    passed++;
-    console.log(`  ok - ${name}`);
-  } catch (error) {
-    failures.push({ name, error });
-    console.log(`  FAIL - ${name}\n    ${error.message}`);
+test('OpenAI Chat and Responses share intent but not parameter names', () => {
+  for (const level of ['none', 'low', 'high', 'xhigh']) {
+    const chat = body(target('gpt-5.2'), level);
+    assert.equal(chat.reasoning_effort, level);
+    assert.equal(chat.enable_thinking, undefined);
+    assert.equal(chat.temperature, undefined);
+    assert.equal(chat.max_completion_tokens, 8192);
+    assert.equal(chat.max_tokens, undefined);
+    const responses = body(target('gpt-5.2', 'openai-responses'), level);
+    assert.deepEqual(responses.reasoning, { effort: level, ...(level !== 'none' ? { summary: 'auto' } : {}) });
+    assert.equal(responses.reasoning_effort, undefined);
+    assert.equal(responses.enable_thinking, undefined);
   }
-}
-
-// 走真实链路：拉元数据 → 解析 reasoning_options → 生成请求参数
-const main = await load('main');
-await main.refreshModelMeta([SF]);
-const { hasThinkingDepth, thinkingControlOf, thinkingParams, THINKING_LEVELS, normalizeThinkingEffort } = main;
-// 每个查询都要带供应商：同一个模型 id 在不同供应商下能力可以不同，
-// 所以下面的调用一律写成 thinkingParams(供应商, 模型, 档位)
-const p = (model, effort) => thinkingParams(SF, model, effort);
-const depth = (model) => hasThinkingDepth(SF, model);
-const control = (model) => thinkingControlOf(SF, model);
-
-// ── 6 档刻度本身 ─────────────────────────────────────────────────────────────
-// 这 6 档是「思考深度」的功能契约：档位数、次序、第一档的含义。钉在这里，
-// 谁把它改回 3 档、或把第一档从「不思考」挪走，都会在这里红。
-
-await test('刻度是 6 档，对齐 OpenAI 的 reasoning_effort，第一档是不思考', () => {
-  assert.deepEqual(
-    THINKING_LEVELS.map((l) => l.value),
-    ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
-  );
-  assert.equal(THINKING_LEVELS[0].label, '不思考');
-  // 每一档都要有文案：滑块右侧那格直接渲染 label，空字符串会变成一块空白
-  assert.equal(THINKING_LEVELS.every((l) => l.label.length > 0), true);
 });
 
-await test('不思考档：明确发 enable_thinking:false，不发任何深度参数', () => {
-  // 对**所有**形状的模型都一样 —— 它排在看声明之前，因为「关掉」不该依赖模型是否
-  // 声明了档位。混合思考模型（Qwen3 系）默认可能是开着的，什么都不发等于没关掉。
-  for (const model of [
-    'zai-org/GLM-5.2', // effort 型
-    'deepseek-ai/DeepSeek-V4-Flash-0731', // budget 型
-    'Qwen/Qwen3.5-27B', // 只有开关
-    'deepseek-ai/DeepSeek-V4-Pro', // 声明为空
-    'some/unknown-model', // 元数据没收录
+test('forced-reasoning models never send none; max and xhigh remain distinct', () => {
+  for (const model of ['o3', 'o4-mini', 'gpt-5', 'gpt-6-astra', 'gpt-6.1-sol']) {
+    assert.ok(!choices(target(model)).includes('none'), model);
+    assert.notEqual(body(target(model), 'none').reasoning_effort, 'none', model);
+  }
+  assert.deepEqual(choices(target('gpt-6.1-sol')), ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(body(target('gpt-6.1-sol'), 'max').reasoning_effort, 'max');
+  assert.equal(body(target('gpt-6.1-sol'), 'xhigh').reasoning_effort, 'xhigh');
+  assert.equal(body(target('gpt-5.1'), 'minimal').reasoning_effort, 'low');
+  assert.equal(body(target('gpt-5-chat-latest'), 'high').reasoning_effort, undefined);
+  assert.deepEqual(choices(target('gpt-5.2-pro', 'openai-responses')), ['medium', 'high', 'xhigh']);
+  assert.ok(!choices(target('o3-pro', 'openai-responses')).includes('xhigh'), 'GPT Pro effort overrides cannot bleed into o-series');
+  assert.equal(body(target('gpt-5.6-terra'), 'max').reasoning_effort, 'max');
+  const tools = [{ type: 'function', function: { name: 'read', description: '', parameters: { type: 'object' } } }];
+  assert.throws(() => body(target('gpt-6.1-sol'), 'high', { tools }), /Responses/);
+  assert.throws(() => body(target('gpt-5.2-pro'), 'high'), /Responses/);
+  assert.doesNotThrow(() => body(target('gpt-6-luna'), 'none', { tools }));
+});
+
+test('Claude adaptive and legacy budget thinking use different contracts', () => {
+  const t = target('claude-opus-4-6', 'anthropic-messages');
+  assert.deepEqual(body(t, 'max').thinking, { type: 'adaptive' });
+  assert.deepEqual(body(t, 'max').output_config, { effort: 'max' });
+  assert.equal(body(t, 'high').temperature, undefined);
+  assert.deepEqual(body(t, 'none').thinking, { type: 'disabled' });
+  const legacy = target('claude-sonnet-4-5-20250929', 'anthropic-messages');
+  const b = body(legacy, 'xhigh', { max_tokens: 4096 });
+  assert.equal(b.thinking.type, 'enabled');
+  assert.equal(b.thinking.budget_tokens, 3072, 'reserve final answer space');
+  assert.equal(b.output_config, undefined);
+  assert.throws(() => body(legacy, 'high', { max_tokens: 1024 }), /1024/);
+  assert.ok(!choices(target('claude-opus-5-5', 'anthropic-messages')).includes('none'));
+  assert.ok(choices(target('claude-opus-4-7', 'anthropic-messages')).includes('xhigh'));
+  assert.deepEqual(body(target('claude-haiku-5-5', 'anthropic-messages'), 'none').output_config, { effort: 'high' });
+});
+
+test('DeepSeek, Kimi and GLM native Chat/Messages controls', () => {
+  const ds = target('deepseek-v4-pro', 'openai-chat', 'deepseek');
+  assert.deepEqual(reasoningWire(ds, 'max', 8192), { thinking: { type: 'enabled' }, reasoning_effort: 'max' });
+  assert.deepEqual(reasoningWire(ds, 'none', 8192), { thinking: { type: 'disabled' } });
+  assert.deepEqual(reasoningWire({ ...ds, protocol: 'anthropic-messages' }, 'high', 8192), { thinking: { type: 'enabled' }, output_config: { effort: 'high' } });
+  assert.deepEqual(body({ ...ds, protocol: 'openai-responses' }, 'low').reasoning, { effort: 'low' });
+  const kimi = target('kimi-k2.5', 'openai-chat', 'moonshotai');
+  assert.deepEqual(reasoningWire(kimi, 'high', 8192), { thinking: { type: 'enabled' } });
+  assert.deepEqual(choices(kimi), ['none'], 'toggle-only models do not get fake depth');
+  const k3 = target('kimi-k3.1-pro', 'openai-chat', 'moonshotai');
+  assert.deepEqual(choices(k3), ['low', 'high', 'max']);
+  assert.equal(body(k3, 'none').reasoning_effort, 'low');
+  const glm = target('glm-5.3', 'openai-chat', 'zai');
+  assert.deepEqual(choices(glm), ['low', 'high', 'max']);
+  assert.equal(body(glm, 'none').thinking, undefined);
+  assert.equal(body(glm, 'none').reasoning_effort, 'low');
+});
+
+test('SiliconFlow and Qwen switches/budgets are provider scoped', () => {
+  const sf = model => target(model, 'openai-chat', 'siliconflow-cn');
+  assert.deepEqual(reasoningWire(sf('Qwen/Qwen3.5-27B'), 'none', 8192), { enable_thinking: false });
+  assert.deepEqual(reasoningWire(sf('Qwen/Qwen3.5-27B'), 'high', 8192), { enable_thinking: true });
+  assert.deepEqual(reasoningWire(sf('Qwen/Qwen3-14B'), 'high', 8192), { enable_thinking: true, thinking_budget: 16384 });
+  assert.deepEqual(reasoningWire(sf('deepseek-ai/DeepSeek-V4-Flash'), 'xhigh', 8192), { enable_thinking: true, reasoning_effort: 'max' });
+  assert.equal(body(sf('deepseek-ai/DeepSeek-V4-Flash-0731'), 'high').thinking_budget, 16384);
+  assert.equal(body(sf('x/shared'), 'high').reasoning_effort, 'high');
+  assert.equal(body(target('x/shared', 'openai-chat', 'siliconflow'), 'high').thinking_budget, 2048);
+  assert.equal(getModelMeta('siliconflow-cn', 'deepseek-ai/DeepSeek-V4-Pro').thinking.toggle, false, 'empty options are not a switch');
+  const qwen = target('qwen3.6-plus', 'openai-chat', 'alibaba-cn');
+  assert.equal(body(qwen, 'none').enable_thinking, false);
+});
+
+test('Gemini compatibility requests summaries and only real levels', () => {
+  const g = target('gemini-3-flash-preview', 'openai-chat', 'google');
+  assert.deepEqual(reasoningWire(g, 'medium', 8192), { extra_body: { google: { thinking_config: { include_thoughts: true, thinking_level: 'medium' } } } });
+  assert.deepEqual(choices(g), ['minimal', 'low', 'medium', 'high']);
+  assert.deepEqual(choices({ ...g, model: 'gemini-3.8-flash' }), ['low', 'medium', 'high']);
+  assert.equal(body({ ...g, model: 'gemini-2.5-flash' }, 'none').extra_body.google.thinking_config.thinking_budget, 0);
+  assert.ok(!choices({ ...g, model: 'gemini-2.5-pro' }).includes('none'));
+});
+
+test('OpenRouter, MiniMax and xAI do not receive generic enable_thinking', () => {
+  const router = target('anthropic/claude-sonnet-4.6', 'openai-chat', 'openrouter');
+  assert.deepEqual(body(router, 'high').reasoning, { enabled: true, exclude: false, effort: 'high' });
+  assert.deepEqual(body(router, 'none').reasoning, { enabled: false });
+  const mini = target('MiniMax-M3.1-Flash', 'openai-chat', 'minimax');
+  assert.equal(body(mini, 'max').reasoning_effort, 'max');
+  assert.equal(body(mini, 'max').reasoning_split, true);
+  assert.ok(!choices(mini).includes('none'));
+  assert.deepEqual(body({ ...mini, protocol: 'anthropic-messages' }, 'high').output_config, { effort: 'high' });
+  assert.deepEqual(choices({ ...mini, model: 'MiniMax-M2.5' }), []);
+  const grok = target('grok-4.7', 'openai-responses', 'xai');
+  assert.deepEqual(body(grok, 'xhigh').reasoning, { effort: 'xhigh' });
+  assert.ok(!choices(grok).includes('none'));
+});
+
+test('unknown endpoints, invalid levels and explicit overrides are conservative', () => {
+  const unknown = target('unknown');
+  assert.deepEqual(reasoningWire(unknown, 'none', 8192), {});
+  assert.deepEqual(reasoningWire(unknown, 'high', 8192), {});
+  const declared = { ...unknown, capabilities: { reasoningEffort: 'low,high' } };
+  assert.deepEqual(reasoningWire(declared, 'high', 8192), { reasoning_effort: 'high' });
+  assert.equal(reasoningProfile({ ...unknown, capabilities: { metadataCatalogId: 'siliconflow-cn' } }).mode, 'unknown');
+  assert.deepEqual(reasoningChoices(target('budgetOnly', 'openai-chat', 'custom')), [], 'unknown budget wire is not fabricated');
+  assert.deepEqual(choices(target('standard', 'openai-chat', 'custom')), ['none', 'low', 'high']);
+  assert.deepEqual(reasoningWire({ ...target('gpt-5.2'), capabilities: { reasoningEffort: '' } }, 'high', 8192), {});
+  for (const bad of ['ultra', NaN, null, {}, '', '__proto__']) {
+    assert.equal(normalizeThinkingLevel(bad), undefined);
+    assert.deepEqual(reasoningWire(declared, bad, 8192), {});
+  }
+  assert.equal(normalizeThinkingLevel('max'), 'max');
+  assert.equal(effectiveThinkingLevel(target('gpt-5.2'), 'max'), 'xhigh');
+});
+
+const sse = chunks => new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } });
+const reasoningItem = (text = 'Plan', encrypted = 'secret') => ({ type: 'reasoning', id: 'rs_1', summary: [{ type: 'summary_text', text }], encrypted_content: encrypted });
+const textItem = { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Answer' }] };
+
+test('Responses JSON fallback exposes summary once and never ciphertext', async () => {
+  const t = target('gpt-5.2', 'openai-responses');
+  const output = [reasoningItem(), textItem];
+  const deltas = [], thoughts = [];
+  const msg = await chatStream(t, opts, x => deltas.push(x), x => thoughts.push(x), undefined, async () => Response.json({ output, status: 'completed' }));
+  assert.equal(msg.content, 'Answer');
+  assert.equal(msg.reasoning_content, 'Plan');
+  assert.deepEqual(thoughts, ['Plan']);
+  assert.deepEqual(deltas, ['Answer']);
+  const again = requestBody(t, opts, [...opts.messages, JSON.parse(JSON.stringify(msg))], false);
+  assert.deepEqual(again.input.slice(-2), output, 'opaque state survives persistence');
+  const changed = requestBody({ ...t, model: 'gpt-5.1' }, opts, [...opts.messages, msg], false);
+  assert.ok(!JSON.stringify(changed).includes('secret'));
+});
+
+test('Responses delta/done/completed snapshots do not duplicate summaries', async () => {
+  const t = target('gpt-5.2', 'openai-responses');
+  const thoughts = [];
+  const chunks = [
+    { type: 'response.reasoning_summary_text.delta', output_index: 0, summary_index: 0, delta: 'Pl' },
+    { type: 'response.reasoning_summary_text.delta', output_index: 0, summary_index: 0, delta: 'an' },
+    { type: 'response.reasoning_summary_text.done', output_index: 0, summary_index: 0, text: 'Plan' },
+    { type: 'response.output_item.done', output_index: 0, item: reasoningItem() },
+    { type: 'response.output_text.delta', delta: 'Answer' },
+    { type: 'response.completed', response: { status: 'completed', output: [reasoningItem(), textItem] } },
+  ];
+  const msg = await chatStream(t, opts, undefined, x => thoughts.push(x), undefined, async () => sse(chunks));
+  assert.equal(thoughts.join(''), 'Plan');
+  assert.equal(msg.reasoning_content, 'Plan');
+  assert.equal(msg.providerState.items[0].encrypted_content, 'secret');
+  const snapshotOnly = await chatStream(t, opts, undefined, undefined, undefined, async () => sse([chunks.at(-1)]));
+  assert.equal(snapshotOnly.reasoning_content, 'Plan');
+});
+
+test('DeepSeek Responses reasoning_text is separate from final text', async () => {
+  const t = target('deepseek-flash', 'openai-responses', 'deepseek');
+  const item = { type: 'reasoning', content: [{ type: 'reasoning_text', text: 'Plan' }] };
+  const once = await chatOnce(t, opts, async () => Response.json({ output: [item, textItem], status: 'completed' }));
+  assert.equal(once.reasoning_content, 'Plan');
+  assert.equal(once.content, 'Answer', 'reasoning.content cannot become final text');
+  const chunks = [
+    { type: 'response.reasoning_text.delta', output_index: 0, content_index: 0, delta: 'Plan' },
+    { type: 'response.reasoning_text.done', output_index: 0, content_index: 0, text: 'Plan' },
+    { type: 'response.completed', response: { status: 'completed', output: [item] } },
+  ];
+  const msg = await chatStream(t, opts, undefined, undefined, undefined, async () => sse(chunks));
+  assert.equal(msg.reasoning_content, 'Plan');
+});
+
+test('Claude thinking/signature/redacted blocks replay intact, never as visible ciphertext', async () => {
+  const t = target('claude-sonnet-4-6', 'anthropic-messages');
+  const blocks = [{ type: 'thinking', thinking: 'Plan', signature: 'signature' }, { type: 'redacted_thinking', data: 'secret' }, { type: 'text', text: 'Answer' }];
+  const once = await chatOnce(t, opts, async () => Response.json({ content: blocks, stop_reason: 'end_turn' }));
+  assert.equal(once.reasoning_content, 'Plan');
+  assert.deepEqual(requestBody(t, opts, [...opts.messages, once], false).messages.at(-1).content, blocks);
+  const chunks = [
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Plan' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'signature' } },
+    { type: 'content_block_start', index: 1, content_block: blocks[1] },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+    { type: 'message_stop' },
+  ];
+  const msg = await chatStream(t, opts, undefined, undefined, undefined, async () => sse(chunks));
+  assert.equal(msg.reasoning_content, 'Plan');
+  assert.equal(msg.providerState.items[0].signature, 'signature');
+});
+
+test('Chat reasoning_content and OpenRouter reasoning_details survive tool continuation only on the same target', async () => {
+  for (const [t, fields] of [
+    [target('deepseek-flash', 'openai-chat', 'deepseek'), { reasoning_content: 'Plan' }],
+    [target('anthropic/claude-sonnet-4.6', 'openai-chat', 'openrouter'), { reasoning_details: [{ type: 'reasoning.summary', summary: 'Plan', index: 0 }, { type: 'reasoning.encrypted', data: 'secret', index: 1 }] }],
   ]) {
-    assert.deepEqual(p(model, 'none'), { enable_thinking: false }, model);
+    const call = { id: 'call', type: 'function', function: { name: 'read', arguments: '{}' } };
+    const result = await chatOnce(t, opts, async () => Response.json({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [call], ...fields }, finish_reason: 'tool_calls' }] }));
+    assert.equal(result.reasoning_content, 'Plan');
+    const messages = [...opts.messages, result, { role: 'tool', tool_call_id: 'call', content: 'result' }];
+    const replay = requestBody(t, opts, messages, false).messages[1];
+    for (const [key, value] of Object.entries(fields)) assert.deepEqual(replay[key], value);
+    for (const changed of [{ ...t, providerId: 'other' }, { ...t, model: 'other' }, { ...t, baseUrl: 'https://other.invalid/v1' }]) {
+      const replay = requestBody(changed, opts, messages, false).messages[1];
+      assert.equal(replay.reasoning_content, undefined);
+      assert.equal(replay.reasoning_details, undefined);
+    }
   }
-  // catalogId 为空（供应商没填能力数据源）时同样要发得出去
-  assert.deepEqual(thinkingParams('', 'zai-org/GLM-5.2', 'none'), { enable_thinking: false });
 });
 
-await test('旧档位名归一化：max → xhigh，不认识的丢掉，none 不属于这个字段', () => {
-  // 落库/迁移包里可能带着上个版本的档位名。不收敛的话预算折算会算出 NaN，
-  // 序列化成 null 发出去，网关只回一句跟界面毫无关系的 400。
-  assert.equal(normalizeThinkingEffort('max'), 'xhigh');
-  assert.equal(normalizeThinkingEffort('low'), 'low');
-  assert.equal(normalizeThinkingEffort('xhigh'), 'xhigh');
-  assert.equal(normalizeThinkingEffort('none'), null, '「不思考」由 thinkingEnabled 表达，不该出现在档位字段里');
-  assert.equal(normalizeThinkingEffort('ultra'), null);
-  assert.equal(normalizeThinkingEffort(undefined), null);
-  assert.equal(normalizeThinkingEffort(3), null);
+test('Gemini streamed tool thought_signature is retained but not leaked on model switch', async () => {
+  const t = target('gemini-3-flash-preview', 'openai-chat', 'google');
+  const signature = { google: { thought_signature: 'signed' } };
+  const chunks = [
+    { choices: [{ delta: { reasoning: 'Plan', tool_calls: [{ index: 0, id: 'call', type: 'function', function: { name: 'read', arguments: '{}' }, extra_content: signature }] } }] },
+    { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+  ];
+  const msg = await chatStream(t, opts, undefined, undefined, undefined, async () => sse(chunks));
+  const messages = [...opts.messages, msg, { role: 'tool', tool_call_id: 'call', content: 'result' }];
+  assert.equal(msg.reasoning_content, 'Plan');
+  assert.deepEqual(requestBody(t, opts, messages, false).messages[1].tool_calls[0].extra_content, signature);
+  assert.ok(!JSON.stringify(requestBody({ ...t, model: 'other' }, opts, messages, false)).includes('signed'));
 });
 
-await test('effort 型：只发 reasoning_effort，取模型声明的档位名', () => {
-  assert.deepEqual(p('zai-org/GLM-5.3', 'high'), { enable_thinking: true, reasoning_effort: 'high' });
-  assert.equal(p('zai-org/GLM-5.3', 'xhigh').reasoning_effort, 'max');
-  assert.equal('thinking_budget' in p('zai-org/GLM-5.3', 'low'), false);
+test('OpenRouter streamed encrypted details are retained, never displayed', async () => {
+  const t = target('anthropic/claude-sonnet-4.6', 'openai-chat', 'openrouter');
+  const chunks = [
+    { choices: [{ delta: { reasoning_details: [{ type: 'reasoning.summary', summary: 'Pl', index: 0 }, { type: 'reasoning.encrypted', data: 'sec', index: 1 }] } }] },
+    { choices: [{ delta: { reasoning_details: [{ type: 'reasoning.summary', summary: 'an', index: 0 }, { type: 'reasoning.encrypted', data: 'ret', index: 1 }], content: 'Answer' }, finish_reason: 'stop' }] },
+  ];
+  const msg = await chatStream(t, opts, undefined, undefined, undefined, async () => sse(chunks));
+  assert.equal(msg.reasoning_content, 'Plan');
+  assert.equal(msg.providerState.items[0].reasoning_details[1].data, 'secret');
 });
 
-await test('声明里没有我们这一档时，向下取不超出的最强档', () => {
-  // GLM-5.2 只声明 high/max：选 low 只能退到 high（它最弱的就是 high）
-  assert.equal(p('zai-org/GLM-5.2', 'low').reasoning_effort, 'high');
-  assert.equal(p('zai-org/GLM-5.2', 'high').reasoning_effort, 'high');
-  // 中间几档塌到同一档是**必然**的（模型真只有 2 档），映射必须单调不减
-  assert.equal(p('zai-org/GLM-5.2', 'minimal').reasoning_effort, 'high');
-  assert.equal(p('zai-org/GLM-5.2', 'medium').reasoning_effort, 'high');
-  // 但最高档必须够得着 max：xhigh 与 max 在次序上并列最高（两家对「最高」的叫法不同），
-  // 否则用户把滑块拉到最右却只拿到 high
-  assert.equal(p('zai-org/GLM-5.2', 'xhigh').reasoning_effort, 'max');
+test('old metadata caches are invalidated, not mistaken for disabled reasoning', () => {
+  configureModelMetaStorage({ getItem: () => JSON.stringify({ version: MODEL_META_CACHE_VERSION - 1, models: { test: {} } }), setItem: () => {} });
+  assert.equal(getModelMeta('test', 'test').declaredReasoning, undefined);
+  assert.equal(getModelMeta('test', 'test').thinking, null);
 });
 
-await test('budget 型：按声明区间的上限比例算，不越界', () => {
-  // 逐级对半的阶梯（1/16 … 1）：预算的代价对数量级敏感，均匀切分会让「极简」和「低」
-  // 看不出差别，而「高」和「极高」差得太远
-  const minimal = p('deepseek-ai/DeepSeek-V4-Flash-0731', 'minimal');
-  assert.deepEqual(minimal, { enable_thinking: true, thinking_budget: 2048 });
-  assert.equal(p('deepseek-ai/DeepSeek-V4-Flash-0731', 'low').thinking_budget, 4096);
-  assert.equal(p('deepseek-ai/DeepSeek-V4-Flash-0731', 'medium').thinking_budget, 8192);
-  assert.equal(p('deepseek-ai/DeepSeek-V4-Flash-0731', 'high').thinking_budget, 16384);
-  assert.equal(p('deepseek-ai/DeepSeek-V4-Flash-0731', 'xhigh').thinking_budget, 32768);
-  assert.equal('reasoning_effort' in minimal, false);
+test('Chat reasoning aliases select the first nonempty field, with identical JSON/SSE continuation', async () => {
+  const t = target('deepseek-flash', 'openai-chat', 'deepseek');
+  for (const fields of [
+    { reasoning_content: '', reasoning: 'Plan', reasoning_text: 'duplicate' },
+    { reasoning_content: '', reasoning: '', reasoning_text: 'Plan' },
+    { reasoning_content: 'Plan', reasoning: 'duplicate', reasoning_text: 'duplicate' },
+  ]) {
+    const once = await chatOnce(t, opts, async () => Response.json({ choices: [{ message: { role: 'assistant', content: 'Answer', ...fields }, finish_reason: 'stop' }] }));
+    const thoughts = [];
+    const streamed = await chatStream(t, opts, undefined, x => thoughts.push(x), undefined,
+      async () => sse([{ choices: [{ delta: { content: 'Answer', ...fields }, finish_reason: 'stop' }] }]));
+    assert.equal(once.reasoning_content, 'Plan');
+    assert.equal(streamed.reasoning_content, 'Plan');
+    assert.equal(thoughts.join(''), 'Plan');
+    assert.deepEqual(once.providerState, streamed.providerState);
+    const changed = requestBody({ ...t, model: 'other' }, opts, [...opts.messages, once], false);
+    assert.doesNotMatch(JSON.stringify(changed), /Plan|duplicate|reasoning_text/);
+  }
 });
 
-await test('厂商文档点名的模型走 reasoning_effort，盖过 models.dev 的 budget 记录', () => {
-  // DeepSeek-V4-Flash 在 models.dev 上被记成 budget，但硅基流动 API 参考
-  // 明确 reasoning_effort 适用于它 —— 文档优先，否则旋钮会静默失效
-  assert.deepEqual(p('deepseek-ai/DeepSeek-V4-Flash', 'high'), {
-    enable_thinking: true,
-    reasoning_effort: 'high',
-  });
-  // 该字段的 enum 只有 high/max：选 low 映射成 high（文档原文：low 会映射为 high）
-  assert.equal(p('deepseek-ai/DeepSeek-V4-Flash', 'low').reasoning_effort, 'high');
-  // 文档原文另一句：xhigh 映射为 max —— 与我们「xhigh 与 max 并列最高」的次序一致
-  assert.equal(p('deepseek-ai/DeepSeek-V4-Flash', 'xhigh').reasoning_effort, 'max');
-  // 没被文档点名的近亲（V4-Flash-0731）仍走元数据声明的 budget
-  assert.ok('thinking_budget' in p('deepseek-ai/DeepSeek-V4-Flash-0731', 'high'));
+test('OpenRouter details preserve type, id and order even when indexes collide', async () => {
+  const t = target('anthropic/claude-sonnet-4.6', 'openai-chat', 'openrouter');
+  const chunks = [
+    { choices: [{ delta: { reasoning_details: [
+      { type: 'reasoning.summary', summary: 'Pl', index: 0 },
+      { type: 'reasoning.encrypted', id: 'first', data: 'sec', index: 0 },
+      { type: 'reasoning.encrypted', id: 'second', data: 'opaque', index: 0 },
+    ] } }] },
+    { choices: [{ delta: { content: 'Answer', reasoning_details: [
+      { type: 'reasoning.summary', summary: 'an', index: 0 },
+      { type: 'reasoning.encrypted', id: 'first', data: 'ret', index: 0 },
+    ] }, finish_reason: 'stop' }] },
+  ];
+  const thoughts = [];
+  const msg = await chatStream(t, opts, undefined, x => thoughts.push(x), undefined, async () => sse(chunks));
+  assert.equal(thoughts.join(''), 'Plan');
+  assert.deepEqual(msg.providerState.items[0].reasoning_details, [
+    { type: 'reasoning.summary', summary: 'Plan', index: 0 },
+    { type: 'reasoning.encrypted', id: 'first', data: 'secret', index: 0 },
+    { type: 'reasoning.encrypted', id: 'second', data: 'opaque', index: 0 },
+  ]);
 });
 
-await test('厂商文档只对点名的那家生效：换个供应商就不认这个字段', async () => {
-  // 同一份模型 id 接到别家时，别家未必认 reasoning_effort —— 拿硅基流动的文档去覆盖它是错的。
-  // 所以 DOC_EFFORT_MODELS 是按 catalogId 分组的，跨供应商查询拿不到这三条。
-  const OTHER = 'some-other-gateway';
-  serveMeta(
-    { 'deepseek-ai/DeepSeek-V4-Flash': { reasoning: true, reasoning_options: [{ type: 'budget_tokens', min: 128, max: 32768 }] } },
-    OTHER,
-  );
-  const other = await load('other');
-  await other.refreshModelMeta([OTHER]);
-  // 元数据说它是 budget 型，就按 budget 发，不套用硅基流动文档的 effort
-  assert.ok('thinking_budget' in other.thinkingParams(OTHER, 'deepseek-ai/DeepSeek-V4-Flash', 'high'));
-  assert.equal('reasoning_effort' in other.thinkingParams(OTHER, 'deepseek-ai/DeepSeek-V4-Flash', 'high'), false);
-  // 同一份缓存里，本供应商下仍应走文档点名的 effort（文档覆盖只在对应 catalogId 生效）
-  assert.equal(
-    other.thinkingControlOf(SF, 'deepseek-ai/DeepSeek-V4-Flash')?.effort?.join(','),
-    'high,max',
-  );
+test('Responses final tool arguments reconcile added, delta, arguments.done and item.done without duplication', async () => {
+  const t = target('gpt-5.2', 'openai-responses');
+  const item = { type: 'function_call', id: 'fc_1', call_id: 'call', name: 'read', arguments: '{"path":"x"}' };
+  const added = { type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '' } };
+  const terminal = { type: 'response.completed', response: { status: 'completed', output: [item] } };
+  for (const chunks of [
+    [terminal],
+    [added, { type: 'response.function_call_arguments.done', output_index: 0, arguments: item.arguments }, terminal],
+    [added, { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"path":' }, { type: 'response.output_item.done', output_index: 0, item }, terminal],
+    [{ type: 'response.output_item.added', output_index: 0, item }, { type: 'response.output_item.done', output_index: 0, item }, terminal],
+  ]) {
+    const updates = [];
+    const streamed = await chatStream(t, opts, undefined, undefined, call => updates.push(call), async () => sse(chunks));
+    const once = await chatOnce(t, opts, async () => Response.json(terminal.response));
+    assert.deepEqual(streamed.tool_calls, once.tool_calls);
+    assert.deepEqual(updates.at(-1), { index: 0, id: 'call', name: 'read', arguments: item.arguments });
+    assert.equal(streamed.finish_reason, 'tool_calls');
+    const history = [...opts.messages, streamed, { role: 'tool', tool_call_id: 'call', content: 'result' }];
+    assert.deepEqual(requestBody(t, opts, history, false).input.slice(-2), [item, { type: 'function_call_output', call_id: 'call', output: 'result' }]);
+  }
 });
 
-await test('只有开关的模型：只发 enable_thinking，UI 也不给深度旋钮', () => {
-  assert.deepEqual(p('Qwen/Qwen3.5-27B', 'xhigh'), { enable_thinking: true });
-  assert.equal(depth('Qwen/Qwen3.5-27B'), false);
-  assert.equal(depth('deepseek-ai/DeepSeek-V3.2'), false);
+test('Responses completion cannot authorize unfinished tools or substitute a generic DONE for a terminal event', async () => {
+  const t = { ...target('gpt-5.2', 'openai-responses'), gatewayManaged: true };
+  const added = { type: 'response.output_item.added', output_index: 0, item: { type: 'function_call', call_id: 'call', name: 'read', arguments: '' } };
+  const delta = { type: 'response.function_call_arguments.delta', output_index: 0, delta: '{"path":' };
+  await assert.rejects(() => chatStream(t, opts, undefined, undefined, undefined, async () => sse([
+    added, delta, { type: 'response.completed', response: { status: 'completed', output: [] } },
+  ])), /未完成.*工具|工具.*未完成/);
+  await assert.rejects(() => chatStream(t, opts, undefined, undefined, undefined, async () => new Response(
+    `data: ${JSON.stringify(added)}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } },
+  )), /完成标记/);
+  await assert.rejects(() => chatStream(t, opts, undefined, undefined, undefined, async () => sse([
+    { type: 'response.failed', response: { status: 'failed', error: { code: 'upstream_error', message: 'fixture failure' } } },
+  ])), /fixture failure/);
 });
 
-await test('声明为空的思考模型：不替它编深度参数', () => {
-  assert.deepEqual(p('deepseek-ai/DeepSeek-V4-Pro', 'high'), { enable_thinking: true });
-  assert.equal(depth('deepseek-ai/DeepSeek-V4-Pro'), false);
-  assert.deepEqual(control('deepseek-ai/DeepSeek-V4-Pro'), { toggle: true });
+test('Claude block starts retain initial text/tool input, and JSON deltas replace the initial empty object', async () => {
+  const t = target('claude-sonnet-4-6', 'anthropic-messages');
+  for (const fragmented of [false, true]) {
+    const chunks = [
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Ready' } },
+      { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'call', name: 'read', input: fragmented ? {} : { path: 'x' } } },
+      ...(fragmented ? [{ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"path":"x"}' } }] : []),
+      { type: 'content_block_stop', index: 1 },
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
+      { type: 'message_stop' },
+    ];
+    const deltas = [];
+    const msg = await chatStream(t, opts, x => deltas.push(x), undefined, undefined, async () => sse(chunks));
+    assert.equal(msg.content, 'Ready');
+    assert.equal(deltas.join(''), 'Ready');
+    assert.equal(msg.tool_calls[0].function.arguments, '{"path":"x"}');
+    assert.deepEqual(msg.providerState.items[1].input, { path: 'x' });
+  }
 });
-
-await test('不会思考的模型：没有思考控制信息', () => {
-  assert.equal(control('Qwen/Qwen3.6-35B-A3B'), null);
-  assert.equal(depth('Qwen/Qwen3.6-35B-A3B'), false);
-});
-
-await test('元数据没收录的模型：一律不发深度参数（宁可没有，不瞎猜）', () => {
-  assert.deepEqual(p('some/unknown-model', 'xhigh'), { enable_thinking: true });
-  assert.equal(depth('some/unknown-model'), false);
-});
-
-await test('无需登记目录供应商：唯一精确模型 ID 可以补全能力，不做模糊猜测', () => {
-  assert.deepEqual(thinkingControlOf('', 'zai-org/GLM-5.2'), { toggle: false, effort: ['high', 'max'] });
-  assert.equal(hasThinkingDepth('', 'zai-org/GLM-5.2'), true);
-  assert.deepEqual(thinkingParams('', 'zai-org/GLM-5.2', 'high'), { enable_thinking: true, reasoning_effort: 'high' });
-  assert.equal(hasThinkingDepth('', 'zai-org/GLM-5.2-production'), false);
-});
-
-await test('有深度能力的模型才显示深度控件', () => {
-  assert.equal(depth('zai-org/GLM-5.2'), true);
-  assert.equal(depth('deepseek-ai/DeepSeek-V4-Flash'), true);
-  assert.equal(depth('Qwen/Qwen3-14B'), true);
-});
-
-await test('预算不得掉到声明的 min 以下', async () => {
-  serveMeta({ 'x/tiny-thinking': { reasoning: true, reasoning_options: [{ type: 'budget_tokens', min: 4096, max: 4096 }] } });
-  const tiny = await load('tiny');
-  await tiny.refreshModelMeta([SF]);
-  assert.deepEqual(tiny.thinkingParams(SF, 'x/tiny-thinking', 'low'), { enable_thinking: true, thinking_budget: 4096 });
-});
-
-await test('同一个模型 id 在两家能力不同时，按供应商各取各的', () => {
-  // 这是 v2 拍平表的老 bug：把 siliconflow 与 siliconflow-cn 合成一张 id → 能力表，
-  // 两者有 31 个同名 id、其中 7 个能力冲突（如 Qwen3.6-35B-A3B 国际站只支持文本、
-  // 国内站支持图像+视频），取到的是合并顺序里赢的那个。
-  const models = {
-    'x/shared': {
-      reasoning: true,
-      reasoning_options: [{ type: 'effort', values: ['high', 'max'] }],
-      modalities: { input: ['text'] },
-    },
-  };
-  const otherModels = {
-    'x/shared': {
-      reasoning: true,
-      reasoning_options: [{ type: 'budget_tokens', min: 128, max: 4096 }],
-      modalities: { input: ['text', 'image'] },
-    },
-  };
-  const j = {
-    'siliconflow-cn': { models: withLimits(models) },
-    'siliconflow': { models: withLimits(otherModels) },
-  };
-  globalThis.fetch = async () =>
-    new Response(JSON.stringify(j), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  return (async () => {
-    const both = await load('both');
-    await both.refreshModelMeta(['siliconflow-cn', 'siliconflow']);
-    // 国内站：effort 型
-    assert.equal(both.thinkingParams('siliconflow-cn', 'x/shared', 'high').reasoning_effort, 'high');
-    // 国际站：budget 型 —— 不能被国内站的声明盖掉
-    assert.equal(
-      both.thinkingParams('siliconflow', 'x/shared', 'high').thinking_budget,
-      2048,
-    );
-    // 视觉能力也各查各的
-    assert.equal(both.isVisionModel('siliconflow-cn', 'x/shared'), false);
-    assert.equal(both.isVisionModel('siliconflow', 'x/shared'), true);
-    assert.equal(both.hasThinkingDepth('', 'x/shared'), false, 'ambiguous models never borrow a provider control automatically');
-  })();
-});
-
-await test('全目录保留能力投影，不按登记供应商过滤', async () => {
-  const many = Object.fromEntries(
-    Array.from({ length: 50 }, (_, i) => [`x/m${i}`, { reasoning: false }]),
-  );
-  const j = {
-    'siliconflow-cn': { models: withLimits(many) },
-    'some-other': { models: withLimits(Object.fromEntries([['x/other', { reasoning: true }]])) },
-  };
-  globalThis.fetch = async () =>
-    new Response(JSON.stringify(j), { status: 200, headers: { 'Content-Type': 'application/json' } });
-  const one = await load('one');
-  const { count } = await one.refreshModelMeta(['siliconflow-cn']);
-  assert.equal(count, 51);
-  assert.equal(one.getModelMeta('', 'x/other').reasoning, true);
-  assert.ok(one.getModelMeta('siliconflow-cn', 'x/m7'));
-});
-
-await test('一家都没登记也能获取能力目录', async () => {
-  globalThis.fetch = async () => {
-    return new Response(JSON.stringify({ test: { models: { local: { tool_call: false } } } }));
-  };
-  const none = await load('none');
-  assert.deepEqual(await none.refreshModelMeta([]), { count: 1 });
-  assert.equal(none.getModelMeta('', 'local').toolCall, false);
-});
-
-await test('旧版本缓存被整体作废，而不是当成「不支持深度」', async () => {
-  // 键的形状变了（裸模型 id → `catalogId\0modelId`），旧缓存必须当没有
-  globalThis.localStorage.getItem = (k) =>
-    k === 'wangke-model-meta'
-      ? JSON.stringify({
-          version: 1,
-          updatedAt: Date.now(),
-          models: { 'zai-org/GLM-5.2': { context: 1, output: 1, vision: false, reasoning: true, toolCall: true, thinking: { toggle: true, effort: ['high'] } } },
-        })
-      : null;
-  const stale = await load('stale');
-  assert.equal(stale.hasThinkingDepth(SF, 'zai-org/GLM-5.2'), false);
-});
-
-console.log(`\n${passed} passed, ${failures.length} failed`);
-if (failures.length > 0) process.exit(1);

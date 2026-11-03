@@ -1,0 +1,10 @@
+{
+  "apiVersion": 2,
+  "id": "counter",
+  "name": "共享计数器模板",
+  "version": "1.0.0",
+  "enabled": true,
+  "capabilities": ["state"],
+  "views": { "main": { "entry": "views/main.html", "surfaces": ["board.main", "chat.sidepanel", "reader.sidepanel", "app.page", "chat.message"], "height": 160 } },
+  "actions": { "read": { "title": "读取计数", "service": "state.read", "schema": { "type": "object" } } }
+}

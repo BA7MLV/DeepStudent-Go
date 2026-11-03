@@ -5,6 +5,7 @@ import { UsageLedger } from './budget.js';
 import { ModelGateway } from './model-gateway.js';
 import { ModelTargetResolver } from './model-target-resolver.js';
 import { appendAudit } from '../storage/audit.js';
+import { modelThinkingLevel, savedModelOverrides } from './model-preferences.js';
 
 /** Environment compatibility is confined to the connection boundary. */
 function environmentConfig(): CloudConfig {
@@ -16,8 +17,10 @@ function environmentConfig(): CloudConfig {
 }
 export function createModelGateway(store: DatabaseStore, configuration?: CloudConfiguration, fetcher: typeof fetch = fetch) {
   // Owner binding happens before each event; no request payload is captured.
-  const resolver = new ModelTargetResolver(owner => configuration?.get(owner, true) ?? environmentConfig());
+  const resolver = new ModelTargetResolver(owner => configuration?.get(owner, true) ?? environmentConfig(),
+    (owner, providerId, model) => savedModelOverrides(store, owner, providerId, model));
   return new ModelGateway(resolver, new UsageLedger(store, configuration), fetcher, {
+    defaults: (owner, purpose) => ({ thinkingLevel: purpose === 'bot' || purpose === 'chat' ? modelThinkingLevel(store, owner) : undefined }),
     event: event => { if (event.owner) { const { owner, ...safe } = event; appendAudit(store, owner, safe.type, safe); } },
   });
 }

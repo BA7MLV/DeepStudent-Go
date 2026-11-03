@@ -201,7 +201,7 @@ try {
   await second.getByRole('button', { name: '退出登录', exact: true }).waitFor({ timeout: 30000 });
   await second.setViewportSize({ width: 390, height: 844 });
   assert.equal(await second.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'mobile settings fit viewport');
-  // Exercise server-side FFmpeg decoding as well as Node document parsing.
+  // Exercise browser-side cover decoding as well as Node document parsing.
   const video = await second.evaluate(async () => {
     const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180;
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#174d70'; ctx.fillRect(0, 0, 320, 180);
@@ -223,11 +223,11 @@ try {
   await until(async () => {
     const task = await (await a.request.get(`${origin}/api/v1/cloud/tasks/${cover.id}`)).json();
     if (task.status === 'failed') throw new Error(task.error);
-    if (task.status === 'completed') assert.equal(task.executor, 'media');
+    if (task.status === 'completed') assert.equal(task.executor, 'browser');
     return task.status === 'completed';
-  }, 'server video cover generation');
+  }, 'browser video cover generation');
   const coverRecord = (await (await a.request.get(`${origin}/api/v1/cloud/record?table=covers&key=${encodeURIComponent(JSON.stringify(videoId))}`)).json()).value;
-  assert.ok(coverRecord?.blob.$file, 'server video decoding produced a persisted cover');
+  assert.ok(coverRecord?.blob.$file, 'browser video decoding produced a persisted cover');
   console.log('Cloud e2e: setup, legacy data/attachments, Passkey, encrypted config, server document/video processing, two-device QA, background chat, one-shot editing/revocation, question resume, cancellation, mobile settings and logout isolation passed');
 } finally {
   await browser?.close(); await app.close(); fs.rmSync(directory, { recursive: true, force: true });

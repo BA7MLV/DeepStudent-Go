@@ -99,7 +99,7 @@ export interface BiliImportItem {
 }
 
 export interface ImportBiliOptions extends BiliApiOptions {
-  /** 要下载的字幕语言（B 站 lan key）；空数组 = 不要字幕 */
+  /** 优先下载的字幕语言（B 站 lan key）；无匹配时自动选择可用语言 */
   langs?: string[];
   /** 要导入的分 P 序号；不传 = 用 target.defaultPages */
   pages?: number[];
@@ -152,9 +152,11 @@ async function loadPageSubtitles(
   langs: string[],
   onProgress?: (ratio: number) => void,
 ): Promise<SubtitleBundle> {
-  if (langs.length === 0) return { primary: null, tracks: [] };
   try {
-    return await loadBiliSubtitles(opts, biliVideoSource(target, page), langs, onProgress);
+    const source = biliVideoSource(target, page);
+    const preferred = langs.length ? await loadBiliSubtitles(opts, source, langs, onProgress) : null;
+    if (preferred?.primary?.cues.length) return preferred;
+    return await loadBiliSubtitles(opts, source, undefined, onProgress);
   } catch {
     // 字幕失败不阻塞视频入库；来源仍会保存，之后可在播放页重试。
     return { primary: null, tracks: [] };

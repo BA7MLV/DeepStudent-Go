@@ -1,0 +1,33 @@
+<style>
+  body { margin: 0; padding: 12px; }
+  main { display: grid; gap: 12px; }
+  button { min-height: 44px; font: inherit; }
+</style>
+<main>
+  <output id="count" aria-live="polite">加载…</output>
+  <button id="increment" type="button">加一</button>
+  <p id="error" role="alert"></p>
+</main>
+<script>
+(() => {
+  const count = document.getElementById('count'), button = document.getElementById('increment'), error = document.getElementById('error');
+  let disposed = false, busy = false;
+  const read = async () => { const value = await plugin.state.read(); if (!disposed) count.textContent = String(value.data.count ?? 0); return value; };
+  const fail = e => { if (!disposed) error.textContent = e.message; };
+  const refresh = () => { if (!busy) void read().catch(fail); };
+  const off = plugin.events.subscribe('state.changed', refresh);
+  plugin.events.subscribe('mount', () => { document.querySelector('main').dataset.mounted = 'true'; });
+  plugin.events.subscribe('dispose', () => { disposed = true; off(); });
+  button.onclick = async () => {
+    if (busy) return;
+    busy = true; button.disabled = true; error.textContent = '';
+    try {
+      const before = await read();
+      const next = await plugin.state.write({ ...before.data, count: Number(before.data.count ?? 0) + 1 }, before);
+      if (!disposed) count.textContent = String(next.data.count);
+    } catch (e) { fail(e); await read().catch(fail); }
+    finally { busy = false; if (!disposed) button.disabled = false; }
+  };
+  refresh();
+})();
+</script>

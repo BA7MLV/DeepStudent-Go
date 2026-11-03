@@ -3,6 +3,7 @@ import { Tooltip } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { db, type CommentRow } from '../store/db';
 import { runComments, type CommentsProgress } from '../pipelines/comments';
+import { usePluginAvailable } from '../plugins/catalog';
 import {
   COMMENT_ROLE_LABEL,
   COMMENT_SORT_LABEL,
@@ -46,6 +47,7 @@ interface Props {
  * 内容全部由 AI 生成（只读，不做点赞，见非目标）。
  */
 export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOpenChange }: Props) {
+  const available = usePluginAvailable('material-tools');
   const [rows, setRows] = useState<Row[]>([]);
   /** 首次读回之前为 false —— 折叠态那行「还没有讨论」与展开态空态都靠它门控（不变量 I1） */
   const [loaded, setLoaded] = useState(false);
@@ -141,7 +143,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
               ? null
               : hasSubtitles
                 ? '还没有讨论'
-                : '需先生成字幕'}
+                : '等待字幕就绪'}
         </span>
         <Sym name="keyboard_arrow_down" className="comments-toggle__chev" />
       </button>
@@ -159,7 +161,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
                 <LoadingButton
                   loading={running}
                   variant="primary"
-                  isDisabled={hasSubtitles !== true}
+                  isDisabled={!available || hasSubtitles !== true}
                   onPress={start}
                   data-testid="comments-generate"
                 >
@@ -168,7 +170,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
                 </LoadingButton>
               </Tooltip.Trigger>
               <Tooltip.Content>
-                <p>{hasSubtitles === false ? '请先在「字幕」页生成字幕' : '按课程内容生成多轮讨论'}</p>
+                <p>{hasSubtitles === false ? '请等待字幕自动处理完成' : '按课程内容生成多轮讨论'}</p>
               </Tooltip.Content>
             </Tooltip>
 
@@ -205,7 +207,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
             <SkeletonReveal show={showSkeleton} skeleton={<CueSkeleton rows={6} />}>
               {hasSubtitles === false && loaded && !running && (
                 <div className="comments-placeholder" data-testid="comments-empty">
-                  讨论基于字幕内容生成，请先在「字幕」页生成字幕
+                  讨论基于字幕内容生成，请等待字幕自动处理完成
                 </div>
               )}
               {hasSubtitles === true && loaded && stats.threads === 0 && !running && (

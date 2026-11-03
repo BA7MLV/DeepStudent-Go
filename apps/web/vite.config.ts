@@ -36,6 +36,9 @@ function serveOrt(): Plugin {
         if (!fs.existsSync(file)) return next();
         res.setHeader('Content-Type', m[1].endsWith('.wasm') ? 'application/wasm' : 'text/javascript');
         res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+        // ORT also loads this .mjs as a pthread Worker. Early middleware bypasses
+        // Vite's headers, so preserve isolation on the worker entry itself.
+        res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
         fs.createReadStream(file).pipe(res);
       });
     },

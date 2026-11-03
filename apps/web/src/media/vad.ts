@@ -26,7 +26,7 @@ export interface VadSegment {
   end: number;
 }
 
-/** 单段上限：8s 约 2 行字幕，避免条内堆叠过多文本（ASR 免费，无需靠大段省请求） */
+/** 单段上限：8s 约 2 行字幕，避免条内堆叠过多文本。ASR 费用取决于配置的供应商。 */
 const MAX_SEG_SECONDS = 8;
 
 /** 合并过短/过密的 VAD 段：间隔 <0.4s 合并，单段最长 8s，最短 0.5s */

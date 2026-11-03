@@ -38,6 +38,7 @@ try {
   await mkdir('scripts/out', { recursive: true });
   await page.screenshot({ path: 'scripts/out/provider-connection-simple-desktop.png' });
   await page.getByTestId('btn-check-models').click();
+  await page.getByTestId('discovered-model-select').click();
 
   for (const [id, expected] of [
     ['catalog-vision', ['chat', 'vision']],
@@ -45,15 +46,9 @@ try {
     ['opaque-audio', ['asr']],
     ['unknown-vision-asr-name', ['chat']],
   ]) {
-    await page.getByTestId('discovered-model-select').click();
     await page.getByRole('button', { name: `添加 ${id}`, exact: true }).click();
-    const editor = page.getByTestId('model-editor');
-    for (const [slot, label] of [['chat', '主模型'], ['vision', '图片理解'], ['asr', '语音识别']]) {
-      const box = editor.getByRole('checkbox', { name: label, exact: true });
-      assert.equal(await box.isEnabled(), true, 'no supplier-level capability lock');
-      assert.equal(await box.isChecked(), expected.includes(slot), `${id}: preselected uses follow the model metadata`);
-    }
-    await editor.getByRole('button', { name: '添加模型', exact: true }).click();
+    await page.getByTestId('saved-models').getByText(id, { exact: true }).waitFor();
+    assert.equal(await page.getByTestId('model-editor').count(), 0, 'discovered models are added without opening an editor');
     assert.deepEqual((await state()).savedModels.find((m) => m.model === id).slots, expected);
     assert.deepEqual((await state()).providers[0].serves, [], 'adding models does not require rewriting legacy serves');
   }

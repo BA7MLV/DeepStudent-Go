@@ -1,0 +1,10 @@
+{
+  "apiVersion": 2,
+  "id": "bot-task",
+  "name": "持久 Bot 任务模板",
+  "version": "1.0.0",
+  "enabled": true,
+  "capabilities": ["state", "tasks", "schedules"],
+  "views": { "main": { "entry": "views/main.html", "surfaces": ["board.main", "chat.sidepanel", "reader.sidepanel", "app.page"], "height": 480 } },
+  "actions": { "start": { "title": "启动 Bot 任务", "service": "tasks.start", "schema": { "type": "object" } } }
+}

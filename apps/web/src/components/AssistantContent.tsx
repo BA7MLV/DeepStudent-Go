@@ -1,9 +1,10 @@
-import { Fragment, useMemo, type ReactNode } from 'react';
+import { Fragment, Suspense, lazy, useMemo, type ReactNode } from 'react';
 import { splitAssistantContent } from '../utils/streamingHtml';
 import ArtifactEditor from './ArtifactEditor';
 import HtmlAnswer from './HtmlAnswer';
 import { InlineWidget } from './WidgetMessage';
 import SvgBlock from './mermaid/SvgBlock';
+const PluginMessage = lazy(() => import('../plugins/PluginMessage'));
 
 /** Keep each delivered question in place while the assistant continues writing. */
 export default function AssistantContent({ content, streaming = false, children }: {
@@ -22,6 +23,8 @@ export default function AssistantContent({ content, streaming = false, children 
     </ArtifactEditor>
   ) : block.kind === 'widget' ? (
     <InlineWidget key={`widget-${block.start}`} reference={block.source} closed={block.closed} />
+  ) : block.kind === 'plugin' ? (
+    <Suspense key={`plugin-${block.start}`} fallback={<p>加载插件引用…</p>}><PluginMessage source={block.source} closed={block.closed} /></Suspense>
   ) : (
     <Fragment key={`markdown-${block.start}`}>{children(block.source, streaming && index === blocks.length - 1)}</Fragment>
   ));

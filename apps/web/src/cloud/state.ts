@@ -8,6 +8,7 @@ export const cloud = {
   workerToken: '' as string,
   permissionId: undefined as string | undefined,
   maxSteps: 100,
+  acceptedPlugins: [] as string[],
 };
 export const remoteTasks = () => cloud.enabled && !cloud.worker;
 

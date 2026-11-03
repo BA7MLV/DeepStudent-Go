@@ -1,5 +1,11 @@
 /** Transport-neutral contract. Connections and credentials are deliberately absent. */
 export type ModelProtocol = 'openai-chat' | 'openai-responses' | 'anthropic-messages';
+export type ModelThinkingLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+/** Endpoint-bound opaque state. Servers use a fingerprint, not a private URL. */
+export interface ModelProviderState {
+  providerId: string; baseUrl: string; model: string; protocol: ModelProtocol;
+  items: Record<string, any>[];
+}
 export type ModelPurpose = 'chat' | 'bot' | 'vision' | 'asr' | 'decision' | 'memory';
 export interface ModelRef { providerId: string; model: string }
 /** Per-model wire deployment. No credentials; unspecified fields inherit the connection. */
@@ -19,6 +25,7 @@ export interface ModelTool { type: string; function: { name: string; description
 export interface ModelCall { id: string; provider_id?: string; type: 'function'; function: { name: string; arguments: string } }
 export interface ModelMessage {
   role: string; content: string | null; tool_call_id?: string; tool_calls?: ModelCall[];
+  reasoning_content?: string; providerState?: ModelProviderState;
   response_items?: object[]; checkpoint_id?: string; runtime_notice?: boolean;
 }
 export interface ModelImage { mime: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; data: string }
@@ -27,6 +34,7 @@ export interface ModelGatewayInput {
   purpose: ModelPurpose; presetId?: string; modelRef?: ModelRef;
   messages?: ModelMessage[]; tools?: ModelTool[]; image?: ModelImage; audio?: ModelAudio;
   outputTokens?: number; cacheKey?: string; idempotencyKey?: string;
+  thinkingLevel?: ModelThinkingLevel; temperature?: number; toolChoice?: 'auto' | 'none';
   /** Stable conversation identity; never an attempt/run-generated ID. */
   conversationId?: string;
   /** Origin of native continuation. Gateway removes native items on a model change. */
@@ -44,7 +52,7 @@ export interface ModelAttemptSummary {
 }
 export interface ModelGatewayResult {
   providerId: string; model: string; protocol: ModelProtocol; traceId: string;
-  response: { text: string; calls: Array<{ id?: string; function: ModelCall['function'] }>; continuation?: object[]; truncated?: boolean };
+  response: { text: string; calls: Array<{ id?: string; function: ModelCall['function'] }>; reasoning?: string; providerState?: ModelProviderState; continuation?: object[]; truncated?: boolean };
   usage?: { input: number; output: number; cache?: number; cacheCreation?: number; reasoning?: number };
   continuationReusable: boolean; attempts: ModelAttemptSummary[];
 }

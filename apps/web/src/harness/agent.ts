@@ -1,5 +1,5 @@
 import { chatStream, textOf, type ChatMessage, type ThinkingLevel, type ToolCallDelta, type ToolDef } from '../api/siliconflow';
-import { effectiveContextWindow, outputLimitOf, thinkingParams } from '../api/modelCaps';
+import { effectiveContextWindow, outputLimitOf } from '../api/modelCaps';
 import { getSettings, targetOfSlot, type ModelTarget } from '../store/settings';
 import {
   CallLedger,
@@ -77,7 +77,7 @@ export interface AgentCallbacks {
   onReasoningDelta?: (text: string) => void;
   /**
    * 思考档位（含第一档 `'none'` = 不思考）；`undefined` = **这个模型压根不能思考**，
-   * 连参数都不发。内部经 thinkingParams() 映射成 API 参数。
+   * 连参数都不发。共享协议适配器负责映射到厂商参数。
    *
    * 注意 `'none'` 与 `undefined` 不是一回事：前者是「明确关掉」（会发
    * `enable_thinking: false`），后者是「没得开」。混起来会让混合思考模型关不掉。
@@ -186,7 +186,7 @@ export async function runAgentLoop(
   const { catalogId, model } = target;
   const out = messages.map((message, index) => index === 0 && message.role === 'system' && typeof message.content === 'string' && !message.content.includes(TOOL_BATCH_GUIDANCE)
     ? { ...message, content: `${message.content}\n${TOOL_BATCH_GUIDANCE}` } : message);
-  const thinking = target.capabilities?.reasoningEffort === '' ? {} : cb.thinkingEffort ? thinkingParams(catalogId, model, cb.thinkingEffort, target.capabilities) : {};
+  const thinking = { thinkingLevel: cb.thinkingEffort };
   /** 护栏 1：循环检测的账本（同一工具 + 同一参数，资源变化后允许回读） */
   const ledger = new CallLedger();
   /**

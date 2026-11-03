@@ -1,0 +1,15 @@
+{
+  "apiVersion": 2,
+  "id": "cards-reader",
+  "name": "替代卡片列表",
+  "version": "2.0.0",
+  "enabled": true,
+  "capabilities": ["context", "learning"],
+  "services": { "learning-data": 1 },
+  "requires": { "flashcards": 2 },
+  "views": { "main": { "entry": "views/main.html", "surfaces": ["board.main", "chat.sidepanel", "reader.sidepanel", "app.page"] } },
+  "actions": {
+    "materials": { "title": "可访问资料", "service": "learning.materials", "schema": { "type": "object" } },
+    "list": { "title": "读取权威卡片", "service": "cards.list", "schema": { "type": "object" } }
+  }
+}

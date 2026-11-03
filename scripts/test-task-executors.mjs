@@ -11,7 +11,6 @@ import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { CloudTaskRunner, taskDto } from '../apps/api/src/cloud/tasks.ts';
 import { executorFor } from '../apps/api/src/cloud/execution.ts';
 import { receiveFile } from '../apps/api/src/cloud/files.ts';
-import { runMediaProcess } from '../apps/api/src/cloud/media.ts';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-task-executors-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
@@ -274,41 +273,20 @@ try {
   await completed(queued);
   assert.equal(get(interrupted).status, 'interrupted', 'interrupted tasks require explicit retry');
 
-  // Real FFmpeg, not a mock: generate video, decode it in a subprocess, persist PNG cover.
-  const sample = await runMediaProcess(['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=blue:s=320x180:r=10', '-t', '1', '-c:v', 'mpeg4', '-f', 'matroska', 'pipe:1'], new AbortController().signal);
-  const file = await upload(sample, 'video.mkv');
-  // Deliberately stale duration: seeking past EOF must retry the initial frame.
-  put('videos', videoId, { ...records.get(owner, 'videos', videoId), duration: 60 });
-  put('courseFiles', videoId, { id: videoId, fileId: file.id, mimeType: 'video/x-matroska', directory: 'videos', size: sample.length });
-  const coverTask = await completed(enqueue('cover', { videoId }, `course:${videoId}`), 'media');
-  assert.equal(coverTask.result, true);
-  const cover = records.get(owner, 'covers', videoId);
-  assert.equal(cover.w, 320); assert.equal(cover.h, 180);
-  assert.equal(cover.ts, 0);
-  const png = store.db.prepare('SELECT storage_name FROM files WHERE id=?').get(cover.blob.$file);
-  assert.equal(fs.readFileSync(path.join(filesDir, png.storage_name)).subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
-  put('frames', 200, { id: 200, videoId, ts: 0.5, kind: 'slide', blob: cover.blob });
-  assert.equal((await completed(enqueue('cover', { videoId, options: { force: true } }, `course:${videoId}`), 'media')).result, true);
-  assert.equal(records.get(owner, 'covers', videoId).source, 'slide');
-  assert.equal(records.get(owner, 'covers', videoId).ts, 0.5);
-  put('covers', videoId, { ...records.get(owner, 'covers', videoId), source: 'user' });
-  assert.equal((await completed(enqueue('cover', { videoId, options: { force: true } }, `course:${videoId}`), 'media')).result, false);
-  assert.equal(records.get(owner, 'covers', videoId).source, 'user');
-
-  const controller = new AbortController();
-  const processTask = runMediaProcess(['-e', 'setInterval(() => {}, 1000)'], controller.signal, { executable: process.execPath });
-  controller.abort();
-  await assert.rejects(processTask, error => error.name === 'AbortError');
-  await assert.rejects(runMediaProcess(['-e', 'process.stdout.write("x".repeat(1000))'], new AbortController().signal,
-    { executable: process.execPath, maxBytes: 10 }), /输出超出限制/);
-  await assert.rejects(runMediaProcess(['-e', 'setInterval(() => {}, 1000)'], new AbortController().signal,
-    { executable: process.execPath, timeoutMs: 20 }), /超时/);
+  // Media stays queued for the user's browser; no native FFmpeg fallback.
+  for (const kind of ['cover', 'transcribe']) {
+    const task = enqueue(kind, { videoId }, `course:${videoId}`);
+    await until(() => get(task).executor === 'browser');
+    assert.equal(get(task).status, 'queued');
+    assert.equal(get(task).result, null);
+    store.db.prepare("UPDATE cloud_tasks SET status='cancelled' WHERE id=?").run(task);
+  }
 
   const fallback = enqueue('qa', { sessionId: 1 });
   await until(() => get(fallback).status === 'failed');
   assert.equal(get(fallback).executor, 'node');
   assert.equal(get(fallback).error, '问答上下文不存在');
-  console.log('Native protocols/text/materials, durable routing/cancellation/restart, real FFmpeg and external browser queue checks passed');
+  console.log('Native protocols/text/materials, durable routing/cancellation/restart and browser media queue checks passed');
 } finally {
   await runner.close(); store.close(); fs.rmSync(directory, { recursive: true, force: true });
 }

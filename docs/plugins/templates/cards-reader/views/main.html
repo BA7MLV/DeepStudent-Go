@@ -1,0 +1,40 @@
+<div class="stack">
+  <h3>替代实现：共享卡片</h3>
+  <label>资料 <select aria-label="卡片来源" id="material"></select></label>
+  <button id="refresh">重新读取</button>
+  <div id="cards"></div>
+  <p class="error" role="alert" id="error"></p>
+</div>
+<script>
+  const select = document.querySelector('#material');
+  let disposed = false;
+  async function load() {
+    if (!select.value) return;
+    try {
+      const result = await plugin.call('cards.list', { materialId: select.value });
+      if (disposed) return;
+      document.querySelector('#error').textContent = '';
+      const cards = document.querySelector('#cards'); cards.replaceChildren();
+      for (const card of result.cards) {
+        const entry = document.createElement('details'), question = document.createElement('summary'), answer = document.createElement('p');
+        question.textContent = card.q; answer.textContent = card.a;
+        entry.append(question, answer); cards.append(entry);
+      }
+      if (!result.cards.length) cards.textContent = '暂无卡片；本实现只读，不会触发生成。';
+    } catch (e) { if (!disposed) document.querySelector('#error').textContent = e.message; }
+  }
+  async function init() {
+    try {
+      const [context, result] = await Promise.all([plugin.context.get(), plugin.call('learning.materials')]);
+      if (disposed) return;
+      select.replaceChildren(...result.materials.map(material => new Option(material.name, material.id)));
+      if (context.materialId) select.value = context.materialId;
+      await load();
+    } catch (e) { if (!disposed) document.querySelector('#error').textContent = e.message; }
+  }
+  select.addEventListener('change', load);
+  document.querySelector('#refresh').addEventListener('click', load);
+  plugin.events.subscribe('contextChanged', init);
+  plugin.events.subscribe('dispose', () => { disposed = true; });
+  void init();
+</script>

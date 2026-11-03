@@ -38,6 +38,7 @@
  */
 
 import { WIDGET_STYLES } from './widgetStyles.ts';
+import { SANDBOX_THEME_SCRIPT } from '../sandbox/protocol';
 import { normalizeWidgetState, type WidgetState } from './widgetState.ts';
 import type { WidgetTheme } from './widgetTheme.ts';
 import { MAX_WIDGET_DIAGNOSTICS, widgetResourceLabel } from './widgetDiagnostics.ts';
@@ -89,6 +90,7 @@ export const WIDGET_MSG = {
  */
 const BRIDGE = `
 (function () {
+  ${SANDBOX_THEME_SCRIPT}
   var initial = __WBW_INITIAL__;
   var state = initial.state;
   var answerInput = initial.answerInput || null;
@@ -175,7 +177,7 @@ const BRIDGE = `
       if (/^--wbw-[a-z-]+$/.test(name) && typeof tokens[name] === 'string')
         document.documentElement.style.setProperty(name, tokens[name]);
     });
-    document.documentElement.setAttribute('data-wbw-theme', dark ? 'dark' : 'light');
+    __applyHostTheme({},dark?'dark':'light','data-wbw-theme');
     window.dispatchEvent(new CustomEvent('wbw:themechange', { detail: { dark: dark } }));
   }
   window.addEventListener('message', function (event) {

@@ -6,6 +6,10 @@ import { handoutFileOf } from '../materials/handoutFile';
 import { questionBankFileOf } from '../materials/questionBankFile';
 import { systemMaterialPath, listSystemMemory, listSystemDirectory, readSystemDocument } from '../materials/systemFiles';
 import { boardPath } from '@wangke/contracts/board';
+import { pluginPath, PLUGINS_TOOL } from '@wangke/contracts/plugins';
+import { request } from '../api/serverClient';
+import { refreshPlugins } from '../plugins/catalog';
+import { assertPluginAvailable } from '../plugins/availability';
 import { memoryName } from '@wangke/contracts/system';
 import { parseQuestionBank } from './quiz';
 import type { UnitKind } from '../materials/units';
@@ -79,12 +83,12 @@ export const EDIT_TOOL: ToolDef = {
   },
 };
 
-export function courseResourceTools(_editable = false): ToolDef[] {
-  return [GREP_TOOL, READ_TOOL, EDIT_TOOL, ...QA_TOOLS.filter((t) => ['present_quiz', 'show_widget'].includes(t.function.name))];
+export function courseResourceTools(_editable = false, practiceAvailable = true): ToolDef[] {
+  return [GREP_TOOL, READ_TOOL, EDIT_TOOL, PLUGINS_TOOL, ...QA_TOOLS.filter((t) => t.function.name === 'show_widget' || practiceAvailable && t.function.name === 'present_quiz')];
 }
 
 export function libraryResourceTools(hasCourses: boolean): ToolDef[] {
-  return [READ_TOOL, EDIT_TOOL, GREP_TOOL, SHOW_WIDGET_TOOL, ...libraryAssistantTools(hasCourses).filter((t) =>
+  return [READ_TOOL, EDIT_TOOL, GREP_TOOL, SHOW_WIDGET_TOOL, PLUGINS_TOOL, ...libraryAssistantTools(hasCourses).filter((t) =>
     ['ask_user', 'set_course_context', 'propose_folder_plan'].includes(t.function.name))];
 }
 
@@ -102,7 +106,7 @@ export function parseResource(path: unknown): Resource | undefined {
     const p = parts.map(decodeURIComponent);
     if (p.some((s) => !s || s === '.' || s === '..')) return;
     if (p.length === 1 && p[0] === 'system') return { type: 'system' };
-    if (boardPath(path)) return { type: 'system', leaf: 'board' };
+    if (boardPath(path) || pluginPath(path)) return { type: 'system', leaf: 'board' };
     if (p.length === 2 && p[0] === 'system' && p[1] === 'AGENTS.md') return { type: 'system', leaf: 'AGENTS.md' };
     if (p.length === 2 && p[0] === 'system' && p[1] === 'mcp.json') return { type: 'system', leaf: 'mcp.json' };
     if (p.length === 2 && p[0] === 'system' && p[1] === 'memory') return { type: 'system', leaf: 'memory' };
@@ -163,6 +167,12 @@ export function createResourceExecutor(options: ResourceExecutorOptions = {}) {
   const executeLocal = createToolExecutor(options.courseId ?? '', { ...options, onQuiz: presentQuiz });
   const executeLibrary = createLibraryAssistantExecutor(options.library);
   return async (name: string, args: Record<string, unknown>): Promise<string> => {
+    if (name === 'present_quiz') await assertPluginAvailable('practice');
+    if (name === 'plugins') {
+      const result = await request('/plugins/tool', { method: 'POST', body: JSON.stringify(args) });
+      if (args.operation === 'configure' || args.operation === 'invoke' || args.operation === 'lifecycle') await refreshPlugins();
+      return JSON.stringify(result);
+    }
     if (name === 'present_quiz' && quizPresented) return '本轮已展示题卡。请等待学生作答；下一批由学生在新一轮要求继续，不要覆盖当前题卡。';
     if (local && name === 'present_quiz' && args.path !== undefined) {
       if (args.questions !== undefined) return 'path 与 questions 二选一；已有题库请只传 path，由宿主读取最新版。';

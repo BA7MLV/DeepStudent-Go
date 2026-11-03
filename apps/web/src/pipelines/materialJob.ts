@@ -1,6 +1,7 @@
 import { useJobStore } from '../store/jobs';
 import { remoteTasks } from '../cloud/state';
-import { runCloudTask } from '../cloud/tasks';
+import { assertPluginAvailable } from '../plugins/availability';
+import { runMaterialPluginTask } from '../plugins/legacy-actions';
 import { formatCaughtError } from '../utils/errorText';
 import { parseMaterial, type MaterialFormat } from '../materials/parse';
 
@@ -32,7 +33,8 @@ export async function startMaterialJob(
   materialId: string,
   format: MaterialFormat,
 ): Promise<MaterialJobResult> {
-  if (remoteTasks()) return runCloudTask('material', `course:${materialId}`, { videoId: materialId, format }, p => useJobStore.getState().upsert(materialId, p));
+  await assertPluginAvailable('material-tools');
+  if (remoteTasks()) return runMaterialPluginTask('material', materialId, p => useJobStore.getState().upsert(materialId, p));
   if (running.has(materialId)) return { parsed: 0, scanned: false, empty: false };
   running.add(materialId);
   const { upsert } = useJobStore.getState();

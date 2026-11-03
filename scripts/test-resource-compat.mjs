@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { execFileSync } from 'node:child_process';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
-import { taskCourseFile } from '../apps/api/src/cloud/execution.ts';
-import { executeMediaTask, runMediaProcess } from '../apps/api/src/cloud/media.ts';
+import { taskCourseFile, executorFor } from '../apps/api/src/cloud/execution.ts';
 import { receiveFile } from '../apps/api/src/cloud/files.ts';
 import { ProjectRepository } from '../apps/api/src/projects/repository.ts';
 import { ResourceFiles } from '../apps/api/src/projects/resources.ts';
@@ -67,7 +67,7 @@ try {
     const content = Buffer.alloc(pinned.size);
     fs.readSync(pinned.fd, content, 0, content.length, 0);
     assert.equal(content.toString(), '# Worker edit\n\nSame shared file.');
-    const result = await runMediaProcess(['-e', "process.stdout.write(require('node:fs').readFileSync(3))"], context.signal, { executable: process.execPath, inputFd: pinned.fd });
+    const result = execFileSync(process.execPath, ['-e', "process.stdout.write(require('node:fs').readFileSync(3))"], { stdio: ['ignore', 'pipe', 'pipe', pinned.fd] });
     assert.equal(result.toString(), '# Worker edit\n\nSame shared file.', 'subprocesses inherit the checked descriptor, never the swapped path');
     assert.throws(() => pinned.assertCurrent(), error => error.status === 403);
     assert.equal(taskCourseFile({ ...context, owner: other }, 'compat'), null, 'another owner cannot resolve the resource');
@@ -105,12 +105,12 @@ try {
   put('courseFiles', 'movie', { id: 'movie', fileId: movie.id, mimeType: 'video/mp4' });
   resources.migrate(owner);
   assert.equal(resources.placement(owner, 'movie').path, 'Lecture.1.mp4', 'dots in an old video title are not mistaken for video extensions');
-  const mp4 = await runMediaProcess(['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=64x64:r=2', '-t', '1', '-c:v', 'mpeg4', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'], context.signal);
+  const mp4 = execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=64x64:r=2', '-t', '1', '-c:v', 'mpeg4', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1']);
   fs.writeFileSync(path.join(filesDir, 'projects', root.rootId, 'external.mp4'), mp4);
   const external = resources.list(owner).entries.find(entry => entry.name === 'external.mp4');
   const course = records.get(owner, 'videos', external.courseId);
   put('videos', external.courseId, { ...course, duration: 900 });
-  assert.equal(await executeMediaTask({ ...context, task: { ...context.task, kind: 'cover', input: { videoId: external.courseId } } }), true, 'native covers read real Bot-created videos, including seek fallback');
+  assert.equal(executorFor({ ...context.task, kind: 'cover', input: { videoId: external.courseId } }, course), 'browser', 'Bot-created video covers use browser decoding too');
   console.log('Resource compatibility: native parsing, pinned subprocess I/O, worker write-through, legacy deletion/CAS/recreation, move preflight and video names OK');
 } finally {
   store.close(); fs.rmSync(directory, { recursive: true, force: true });

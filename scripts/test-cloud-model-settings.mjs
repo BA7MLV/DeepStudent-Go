@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { createCloudModelDraft, cloudModelConfig, cloudModelPreferences, cloudDiscoveryProviders, cloudModelUpdate, cloudModelsDirty, cloudProviderDirty } from '../apps/web/src/cloud/modelSettings.ts';
 import { useSettings, targetOfSlot, targetOrNull } from '../apps/web/src/store/settings.ts';
 import { DEFAULT_AGENT_POLICY } from '../packages/contracts/src/cloud.ts';
+import { applyCloudConfig } from '../apps/web/src/cloud/sync.ts';
+import { requestBody } from '@wangke/study-core/model/client';
 
 const config = {
   providers: [{ id: 'p1', name: 'Test', baseUrl: 'https://models.example/v1', protocol: 'openai-chat', configured: true, catalogId: 'test', serves: ['chat'] }],
@@ -49,3 +51,26 @@ const deployed = { ...before, providers: [{ ...before.providers[0], apiKey: 'ser
 assert.equal(targetOfSlot(deployed, 'chat').protocol, 'anthropic-messages');
 assert.equal(targetOrNull(deployed, config.llmModel).protocol, 'anthropic-messages');
 assert.equal(targetOrNull(deployed, { providerId: 'p1', model: 'other' }).protocol, 'openai-chat');
+const hintedTarget = { ...deployed, providers: [{ ...deployed.providers[0], reasoningProvider: 'deepseek', deploymentReasoningProviders: { model: 'anthropic' }, stateScope: 'configuration:opaque-revision' }] };
+for (const target of [targetOfSlot(hintedTarget, 'chat'), targetOrNull(hintedTarget, config.llmModel)]) {
+  assert.equal(target.reasoningProvider, 'anthropic', 'wire provider follows the deployment, not the metadata catalog or proxy URL');
+  assert.equal(target.stateScope, 'configuration:opaque-revision');
+}
+assert.equal(targetOrNull(hintedTarget, { providerId: 'p1', model: 'other' }).reasoningProvider, 'deepseek');
+try {
+  // A misleading catalog and a replaced browser URL must not change the actual
+  // provider's protocol fields. Per-model deployments may use another upstream.
+  applyCloudConfig({ ...config, modelRevision: 'rev1', providers: [{ ...config.providers[0], baseUrl: 'https://api.deepseek.com', catalogId: 'openrouter', deployments: [{ model: 'deployed', protocol: 'openai-chat', baseUrl: 'https://api.openai.com/v1' }] }], llmModel: { providerId: 'p1', model: 'deepseek-v4-pro' } });
+  const target = targetOfSlot(useSettings.getState(), 'chat');
+  assert.equal(target.reasoningProvider, 'deepseek');
+  assert.equal(target.stateScope, 'configuration:rev1');
+  assert.doesNotMatch(target.baseUrl, /api\.deepseek\.com/);
+  const messages = [{ role: 'user', content: 'test' }];
+  const body = requestBody(target, { messages, thinkingLevel: 'high' }, messages, false);
+  assert.deepEqual(body.thinking, { type: 'enabled' });
+  assert.equal(body.reasoning_effort, 'high');
+  assert.equal(body.reasoning, undefined, 'metadata catalog cannot select the OpenRouter wire protocol');
+  assert.equal(targetOrNull(useSettings.getState(), { providerId: 'p1', model: 'deployed' }).reasoningProvider, 'openai');
+  applyCloudConfig({ ...config, modelRevision: 'rev2' });
+  assert.equal(targetOfSlot(useSettings.getState(), 'chat').stateScope, 'configuration:rev2');
+} finally { useSettings.setState(original, true); }

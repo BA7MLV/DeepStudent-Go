@@ -30,7 +30,7 @@ export default function CloudActivity() {
           seen.add(id);
           useJobStore.getState().upsert(id, {
             ...(task.progress ?? {}), phase: task.status === 'completed' ? 'done' : task.status === 'failed' || task.status === 'interrupted' ? 'error' : task.status === 'cancelled' ? 'canceled' : (task.progress?.phase as any) ?? 'queued',
-            message: task.error ?? String(task.progress?.message ?? task.status), resume: false,
+            message: task.error ?? String(task.progress?.message ?? task.status), error: task.error ?? undefined, resume: false,
           });
         }
       } catch {

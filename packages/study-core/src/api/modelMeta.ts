@@ -16,11 +16,12 @@ const TTL_MS = 10 * 60 * 1000;
  * 会被当成「catalog 为空的数据」，命中不上任何查询（表现为「能力数据凭空失效」）。
  * v5：缓存全目录能力投影，不再要求登记供应商；未知模态/工具采用接入默认值，移除定价。
  * v7：同时缓存 models.dev 的供应商目录，用于设置页动态显示供应商。
+ * v8：保留 effort:none 的关闭能力，不再把空 reasoning_options 猜成开关。
  *
  * 导出它是因为**手写缓存夹具的测试要跟着它走**（scripts/e2e-agent-guard.mjs、
  * scripts/test-thinking-depth.mjs）：版本写错的话那份夹具会被当成过期缓存丢掉。
  */
-export const MODEL_META_CACHE_VERSION = 7;
+export const MODEL_META_CACHE_VERSION = 8;
 
 /** models.dev 的供应商描述。凭据永远不在这里，也不会进入缓存。 */
 export interface ModelProviderMeta {
@@ -79,11 +80,11 @@ export function hasModelOverrides(value?: ModelOverrides): boolean {
 /**
  * 模型自己声明的「思考怎么控制」。
  *
- * 这是请求参数的**唯一依据**：深度该用 `reasoning_effort` 还是 `thinking_budget`、
- * 有哪些档位、预算区间多大，全看这里。声明里没有的旋钮就不发 ——
- * 发一个模型没声明的参数，轻则被网关忽略（旋钮静默失效），重则直接 400。
+ * 这是目录能力，不是协议参数名；reasoning.ts 结合实际连接与厂商文档决定线格式。
  */
 export interface ThinkingControl {
+  /** An explicit none effort is distinct from a vendor-specific toggle. */
+  canDisable?: boolean;
   /** 支持用 `enable_thinking` 开关思考 */
   toggle: boolean;
   /** 声明的 `reasoning_effort` 档位（已剔除 none：「不思考」是开关的事） */
@@ -170,7 +171,7 @@ const EFFORT_LANES: readonly string[] = ['minimal', 'low', 'medium', 'high', 'xh
  * - `{type:'budget_tokens', min, max}` —— 预算型
  *
  * `[]` / 字段缺失但 `reasoning: true`：知道它会思考，却没说旋钮怎么调 →
- * 只当开关用，**不替它编档位**。
+   * 不替它编开关或深度档位。
  */
 function reasoningSupported(m: ModelsDevEntry): boolean {
   const value = m.reasoning ?? m.capabilities?.reasoning;
@@ -206,6 +207,7 @@ function parseThinking(m: ModelsDevEntry): ThinkingControl | null {
     if (option?.type === 'toggle') {
       control.toggle = true;
     } else if (option?.type === 'effort') {
+      if (Array.isArray(option.values) && option.values.includes('none')) control.canDisable = true;
       const values = (Array.isArray(option.values) ? option.values : [])
         .filter((v): v is string => typeof v === 'string' && v !== 'none')
         .filter((v) => EFFORT_LANES.includes(v));
@@ -216,7 +218,6 @@ function parseThinking(m: ModelsDevEntry): ThinkingControl | null {
       if (min != null || max != null) control.budget = { min, max };
     }
   }
-  if (!control.toggle && !control.effort && !control.budget) control.toggle = true;
   return control;
 }
 

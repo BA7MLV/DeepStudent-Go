@@ -32,6 +32,10 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
   const [handoutPreparing, setHandoutPreparing] = useState(false);
   const skillIds = useCourseChat((state) => state.skillIds);
   const setSkillIds = useCourseChat((state) => state.setSkillIds);
+  const turnSkillIds = useCourseChat(state => state.turnSkillIds);
+  const pinnedSkillIds = useCourseChat(state => state.pinnedSkillIds);
+  const setTurnSkillIds = useCourseChat(state => state.setTurnSkillIds);
+  const setPinnedSkillIds = useCourseChat(state => state.setPinnedSkillIds);
   const mcpServerIds = useCourseChat((state) => state.mcpServerIds);
   const setMcpServerIds = useCourseChat((state) => state.setMcpServerIds);
   const loading = useCourseChat((state) => state.loading);
@@ -66,6 +70,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
       const current = useCourseChat.getState();
       if (current.activeId !== session.activeId) return;
       if (prepared.skillIds !== session.skillIds) current.setSkillIds(prepared.skillIds);
+      current.setTurnSkillIds([...new Set([...current.turnSkillIds, prepared.id])]);
       current.setDraft(handoutDraft(current.draft, prepared.prompt));
       toast.info('已添加讲义提示词，可修改后发送');
     } catch (error) {
@@ -108,7 +113,8 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
       <input ref={imageInput} type="file" accept={CHAT_IMAGE_ACCEPT} multiple hidden data-testid="chat-image-input" onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
       <input ref={fileInput} type="file" accept={CHAT_FILE_ACCEPT} multiple hidden data-testid="chat-file-input" onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
     </div>
-    <SkillPicker value={skillIds} onChange={setSkillIds} mcpValue={mcpServerIds} onMcpChange={setMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
+    {(turnSkillIds.length > 0 || pinnedSkillIds.length > 0) && <Button size="sm" variant="tertiary" data-testid="chat-active-skills" onPress={() => setSkillsOpen(true)}><Sym name="extension" />{t('skillPicker.activationCount', { turn: turnSkillIds.length, pinned: pinnedSkillIds.length })}</Button>}
+    <SkillPicker value={skillIds} onChange={setSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} pinnedValue={pinnedSkillIds} onPinnedChange={setPinnedSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={setMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
     <Modal.Root isOpen={coursesOpen} onOpenChange={setCoursesOpen}>
       <Modal.Backdrop><Modal.Container placement="center" size="md" className={MODAL_CONTAINER_CLASS}>
         <Modal.Dialog data-testid="chat-course-picker">

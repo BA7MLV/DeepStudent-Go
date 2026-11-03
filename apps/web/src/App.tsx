@@ -14,6 +14,7 @@ import { preloadOnIdle } from './utils/preload';
 import { FeedbackHost, PageLoader } from './ui';
 import { openSettingsFromHash } from './components/settingsDialogStore';
 import CloudActivity from './cloud/Activity';
+import BrowserWorkerHost from './cloud/BrowserWorkerHost';
 import { useBotPanel } from './store/botPanel';
 
 /*
@@ -39,6 +40,7 @@ const BotWorkspace = lazy(pages.bot);
 const LiveGuest = lazy(pages.live);
 const WidgetPreview = lazy(pages.widget);
 const Board = lazy(pages.tasks);
+const PluginPage = lazy(() => import('./plugins/PluginPage'));
 
 /**
  * #/bot 与 #/bot?thread=… 不再是一个页面：Bot 是对话主页右侧的一项功能。
@@ -116,6 +118,7 @@ export default function App() {
       <div className="live-share-host">
         <LiveShareBar />
         <CloudActivity />
+        <BrowserWorkerHost />
         <FeedbackHost />
         {/* 设置是全局弹窗而不是路由：挂在 App 根部一次，任何页面都能唤起，
             且唤起时不会把用户当前位置顶掉（见 components/SettingsModal.tsx）。 */}
@@ -137,6 +140,8 @@ export default function App() {
               <Route path="/study" element={<Study />} />
               <Route path="/tasks" element={<Navigate to="/board" replace />} />
               <Route path="/board" element={<Board />} />
+              <Route path="/plugins" element={<PluginPage />} />
+              <Route path="/plugins/:instanceId" element={<PluginPage />} />
               {/* #/settings 不是独立页面，而是唤起设置弹窗的入口（见上面的 useEffect）。
                   这里仍渲染默认首页，让用户「改完设置就能接着用」。 */}
               <Route path="/settings/*" element={<CourseChat />} />

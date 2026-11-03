@@ -1,6 +1,6 @@
 /** Shared cloud protocol. Table names are an allowlist, never SQL identifiers. */
 export type { ModelUsageSource, ModelUsageCounts, ModelUsageReport } from './model-usage.js';
-export type { ModelProtocol, ModelPurpose, ModelRef, ModelDeployment, ModelErrorClass, ModelCandidate, ModelPreset, ModelRouteDefaults, ModelTool, ModelCall, ModelMessage, ModelImage, ModelAudio, ModelGatewayInput, ModelGatewayRequest, ModelAttemptSummary, ModelGatewayResult } from './model-gateway.js';
+export type { ModelProtocol, ModelThinkingLevel, ModelProviderState, ModelPurpose, ModelRef, ModelDeployment, ModelErrorClass, ModelCandidate, ModelPreset, ModelRouteDefaults, ModelTool, ModelCall, ModelMessage, ModelImage, ModelAudio, ModelGatewayInput, ModelGatewayRequest, ModelAttemptSummary, ModelGatewayResult } from './model-gateway.js';
 
 export const CLOUD_TABLES: Record<string, string> = {
   videos: 'id', files: 'id', segments: 'id', frames: 'id', handouts: 'id',
@@ -115,7 +115,7 @@ export interface CloudTask {
   /** Display name of the owned course, when available in task listings. */
   resourceName?: string;
   /** Persisted execution backend; absent for jobs created before executor routing. */
-  executor?: 'node' | 'media' | 'browser';
+  executor?: 'node' | 'browser';
   id: string;
   kind: CloudTaskKind;
   resource: string;

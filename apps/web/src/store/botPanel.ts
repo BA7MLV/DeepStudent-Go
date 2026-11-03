@@ -15,6 +15,8 @@ function readOpen(): boolean {
 
 interface BotPanelState {
   open: boolean;
+  auxiliary: 'bot' | 'plugins';
+  setAuxiliary: (kind: 'bot' | 'plugins') => void;
   /** 外部链接（网关「接管」、#/bot?thread=）要求打开的线程；Bot 栏消费后清空。 */
   requestedThread: string | null;
   setOpen: (open: boolean) => void;
@@ -24,12 +26,14 @@ interface BotPanelState {
 
 export const useBotPanel = create<BotPanelState>()((set, get) => ({
   open: readOpen(),
+  auxiliary: 'bot',
+  setAuxiliary: auxiliary => set({ auxiliary, open: true }),
   requestedThread: null,
   setOpen: (open) => {
     try { if (wide()) localStorage.setItem(KEY, open ? '1' : '0'); } catch { /* private mode */ }
     set({ open });
   },
-  openThread: (threadId) => { get().setOpen(true); set({ requestedThread: threadId }); },
+  openThread: (threadId) => { get().setOpen(true); set({ auxiliary: 'bot', requestedThread: threadId }); },
   consumeRequest: () => {
     const id = get().requestedThread;
     if (id) set({ requestedThread: null });

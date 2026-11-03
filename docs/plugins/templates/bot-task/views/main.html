@@ -1,0 +1,54 @@
+<style>
+  body { margin: 0; padding: 12px; }
+  main { display: grid; gap: 10px; }
+  select, textarea, button { font: inherit; min-height: 44px; }
+  textarea, pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+</style>
+<main>
+  <label>已有 Bot 会话 <select id="thread" aria-label="Bot 会话"></select></label>
+  <label>任务 <textarea id="prompt" rows="3" maxlength="12000"></textarea></label>
+  <button id="start" type="button">启动任务</button>
+  <p id="status" role="status"></p>
+  <pre id="result"></pre>
+</main>
+<script>
+(() => {
+  const thread = document.getElementById('thread'), prompt = document.getElementById('prompt'), button = document.getElementById('start');
+  const status = document.getElementById('status'), result = document.getElementById('result');
+  let disposed = false, busy = false, stopWatch = () => {};
+  const fail = e => { if (!disposed) status.textContent = e.message; };
+  const watch = id => {
+    stopWatch(); stopWatch = plugin.tasks.watch(id, task => {
+      if (disposed) return;
+      status.textContent = `${task.status}${task.error ? ` · ${task.error}` : ''}`;
+      result.textContent = task.result?.text ?? (task.status === 'completed' ? '执行已结束；没有可读回复不等于已保存学习产物。' : '');
+    }, { onError: fail });
+  };
+  async function restore() {
+    const saved = await plugin.state.read(), request = saved.data.request;
+    if (!request || disposed) return;
+    // The nonce was persisted BEFORE dispatch. Reusing it closes the response-loss window.
+    const task = await plugin.tasks.start(request);
+    if (!disposed) watch(task.id);
+  }
+  button.onclick = async () => {
+    if (busy || !thread.value || !prompt.value.trim()) return;
+    busy = true; button.disabled = true;
+    try {
+      const before = await plugin.state.read();
+      const request = { threadId: thread.value, prompt: prompt.value.trim(), clientNonce: `${Date.now()}-${Math.random().toString(36).slice(2)}` };
+      await plugin.state.write({ ...before.data, request }, before);
+      const task = await plugin.tasks.start(request);
+      if (!disposed) watch(task.id);
+    } catch (e) { fail(e); }
+    finally { busy = false; if (!disposed) button.disabled = false; }
+  };
+  plugin.events.subscribe('dispose', () => { disposed = true; stopWatch(); });
+  void plugin.call('schedules.threads').then(({ threads }) => {
+    if (disposed) return;
+    for (const item of threads) { const option = document.createElement('option'); option.value = item.id; option.textContent = item.title || item.id; thread.append(option); }
+    if (!threads.length) status.textContent = '请先创建一个 Bot 会话';
+  }).catch(fail);
+  void restore().catch(fail);
+})();
+</script>

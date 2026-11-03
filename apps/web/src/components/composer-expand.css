@@ -9,7 +9,7 @@
   width: 100%;
 }
 
-/* Edge-attached sheet on every screen size, never a floating modal card. */
+/* Narrow screens keep the edge-attached sheet and its keyboard-aware height. */
 .composer-sheet[data-placement='bottom'] {
   width: 100%;
   height: min(85dvh, calc(var(--vvh, 100dvh) - 16px));
@@ -63,10 +63,80 @@
   scroll-padding-top: calc(var(--sheet-chrome-height, 70px) + 8px);
 }
 
+.composer-dialog {
+  width: min(45rem, calc(100% - 4rem));
+  max-width: min(45rem, calc(100% - 4rem));
+  height: min(36rem, calc(100% - 4rem));
+  min-height: 0;
+  max-height: calc(100% - 4rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-dialog);
+  background: var(--overlay);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.2);
+}
+
+.composer-dialog__header {
+  flex: none;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 16px;
+}
+
+.composer-dialog__header .modal__close-trigger {
+  position: static;
+  flex: none;
+}
+
+.composer-dialog__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  margin: 0;
+  padding: 0 24px;
+}
+
+.composer-dialog__input {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  resize: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.composer-dialog__footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0;
+  padding: 16px 24px 20px;
+}
+
+.composer-dialog__hint {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .composer-sheet__content,
   .composer-sheet__backdrop,
-  .composer-sheet {
+  .composer-sheet,
+  .composer-dialog__backdrop,
+  .composer-dialog {
     transition: none !important;
     animation: none !important;
   }

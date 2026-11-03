@@ -18,6 +18,7 @@ import { create } from 'zustand';
 
 export type JobPhase =
   | 'queued'
+  | 'source'
   | 'extract'
   | 'vad'
   | 'asr'
@@ -38,7 +39,7 @@ export interface TranscribeJob {
   resume: boolean;
 }
 
-const ACTIVE_PHASES: JobPhase[] = ['queued', 'extract', 'vad', 'asr', 'parse'];
+const ACTIVE_PHASES: JobPhase[] = ['queued', 'source', 'extract', 'vad', 'asr', 'parse'];
 
 export function isJobActive(job: TranscribeJob | undefined): boolean {
   return !!job && ACTIVE_PHASES.includes(job.phase);

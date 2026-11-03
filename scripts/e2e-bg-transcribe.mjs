@@ -37,8 +37,6 @@ const progressText = () =>
     const el = document.querySelector('[data-testid="subs-progress"]');
     return el ? el.innerText.replace(/\s+/g, ' ').trim() : null;
   });
-const generateText = () =>
-  page.evaluate(() => document.querySelector('[data-testid="subs-generate"]')?.innerText.trim() ?? null);
 
 try {
   // 假 key + 不可达接口：转写停在抽音频/VAD，任务不会马上结束
@@ -55,8 +53,7 @@ try {
 
   // ── 1. 起一个转写任务 ──────────────────────────────────────────────────
   await page.click('[data-testid="btn-play"]');
-  await page.waitForSelector('[data-testid="subs-generate"]', { timeout: 20000 });
-  await page.click('[data-testid="subs-generate"]');
+  // Upload starts processing, no manual start action.
   const started = await page
     .waitForSelector('[data-testid="subs-progress"]', { timeout: 20000 })
     .then(() => true)
@@ -75,16 +72,12 @@ try {
 
   // ── 3. 回播放页：进度接着显示，重复点「生成」不会重启 ──────────────────
   await page.click('[data-testid="btn-play"]');
-  await page.waitForSelector('[data-testid="subs-generate"]', { timeout: 20000 });
+  await page.waitForSelector('[data-testid="subs-progress"]', { timeout: 20000 });
   const backText = await progressText();
   check(backText !== null, `回到播放页进度仍在：${backText}`);
-  check((await generateText()) === '转写中…', '按钮保持「转写中…」而不是回到「生成字幕」');
+  check(await page.locator('[data-testid="subs-generate"]').count() === 0, '不再有手动生成入口');
 
-  // 幂等的直接证据：mdui-button 在 loading 态不可点，点不动就起不了第二份
-  const loading = await page.evaluate(
-    () => document.querySelector('[data-testid="subs-generate"]')?.hasAttribute('loading') ?? false,
-  );
-  check(loading, '转写中「生成」按钮是 loading 态，点不出第二份任务');
+  check(await page.locator('[data-testid="subs-cancel"]').count() > 0, '转写中保留取消入口');
 
   const before = backText ?? '';
   await page.waitForTimeout(1500);
@@ -94,7 +87,7 @@ try {
   // ── 4. 刷新：上次没转完的会被接上 ─────────────────────────────────────
   await page.reload({ waitUntil: 'domcontentloaded' });
   const resumed = await page
-    .waitForFunction(() => document.body.innerText.includes('上次没转完'), { timeout: 20000 })
+    .waitForSelector('[data-testid="subs-progress"]', { timeout: 20000 })
     .then(() => true)
     .catch(() => false);
   check(resumed, '刷新后自动续跑上次未完成的转写');

@@ -9,7 +9,7 @@ import { Markdown as XMarkdown } from './markdown/Markdown';
 import { systemMaterialPath } from '../materials/systemFiles';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { db, type ChatImage, type ChatSessionRow, type ChatToolCall, type QuizState, type SegmentRow } from '../store/db';
-import { catalogOf, decisionConfigOf, getSettings, modelOverridesOf, targetOrNull, useSettings, visionTargetOrNull } from '../store/settings';
+import { decisionConfigOf, getSettings, targetOrNull, useSettings, visionTargetOrNull } from '../store/settings';
 import { runAgentLoop, noAnswerNotice, type AgentStopInfo } from '../harness/agent';
 import { resolveMaxRounds } from '../harness/loopGuard';
 import { mdEditorOpen } from '../harness/tools';
@@ -21,9 +21,10 @@ import ContextUsageButton from './ContextUsageButton';
 import ComposerExpand, { useComposerSize } from './ComposerExpand';
 import { useContextCompression } from './useContextCompression';
 import { loadSessionSkillMeta, skillMetaBlock } from '../skills/store';
+import { activateSkills, assertSkillBudget, assertSkillRequestBudget, explicitSkillIds, recordSkillActivation } from '../skills/activation';
 import { handoutDraft, prepareHandoutPrompt } from '../skills/handout';
 import { captureFrame, resolveVideoEl, type Snapshot } from '../media/snapshot';
-import { isVisionModel, supportsThinking } from '../api/modelCaps';
+import { isVisionModel } from '../api/modelCaps';
 import { chatOnce, textOf, type ChatMessage, type ContentPart, type ThinkingLevel } from '../api/siliconflow';
 import { fmtTime } from '../utils/vtt';
 import { linkifyFrames, linkifyTimestamps, linkifyUnits } from '../utils/linkify';
@@ -72,6 +73,10 @@ import type { WidgetPayload } from '../harness/widgetRuntime';
 import { persistAssistantSnapshot } from '../store/assistantSnapshot';
 import { widgetReference } from '../harness/widgetLayout';
 import { nextVisualRound, readPartialWidgetArguments } from '../utils/streamingHtml';
+import { cloud } from '../cloud/state';
+import { useMaterialPluginView } from '../plugins/useMaterialPluginView';
+import { usePluginAvailable } from '../plugins/catalog';
+import { isPluginAvailable, assertPluginAvailable } from '../plugins/availability';
 import './chat-panel.css';
 
 interface Props {
@@ -475,6 +480,9 @@ export default function ChatPanel({
 }: Props) {
   const { t: chatText } = useTranslation('common');
   const { t: settingsText } = useTranslation('settings');
+  const learningPlugin = useMaterialPluginView(videoId);
+  const practiceAvailable = usePluginAvailable('practice'), reviewAvailable = usePluginAvailable('review'), materialToolsAvailable = usePluginAvailable('material-tools');
+  const openLearningPlugin = (id: string) => { void learningPlugin.open(id).catch(error => toast.error(error instanceof Error ? error.message : 'plugin_view_unavailable')); };
   /** 材料课程（PDF / Word / Markdown / HTML）：没有字幕、没有播放器，检索与引用都走材料那一套 */
   const isMaterial = materialKind !== undefined;
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -507,6 +515,8 @@ export default function ChatPanel({
    * 「模型看不到某技能、但调了却能成功」的错配。
    */
   const [skillIds, setSkillIds] = useState<number[] | undefined>(undefined);
+  const [turnSkillIds, setTurnSkillIds] = useState<number[]>([]);
+  const [pinnedSkillIds, setPinnedSkillIds] = useState<number[]>([]);
   const [mcpServerIds, setMcpServerIds] = useState<string[] | undefined>();
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -534,10 +544,7 @@ export default function ChatPanel({
   const ime = useImeEnter();
   // 讲义抽帧元数据：决定 list_frames 工具/提示词注入，也供 AI 气泡里的画面引用渲染
   const [framesMeta, setFramesMeta] = useState<FrameMeta[]>([]);
-  const llmModel = useSettings((s) => s.llmModel);
   // 思考能力要按**这家供应商**的能力数据源查（同一模型 id 在别家可能不支持思考）
-  const llmCatalog = useSettings((s) => catalogOf(s, s.llmModel.providerId));
-  const llmCapabilities = useSettings((s) => modelOverridesOf(s, s.llmModel));
   const thinking = useSettings((s) => s.thinkingEnabled);
   const effort = useSettings((s) => s.thinkingEffort);
   const ctxWin = useSettings((s) => s.contextWindow);
@@ -551,7 +558,6 @@ export default function ChatPanel({
    * - 能思考但只有开关（Qwen3.5 系、部分 DeepSeek）→ 一枚灯泡
    * - 不会思考 → 什么都没有
    */
-  const canThink = supportsThinking(llmCatalog, llmModel.model, llmCapabilities);
   /** 滑块当前值：关着思考就是第一档（档位本身留着，下次打开还是它） */
   const thinkingLevel: ThinkingLevel = thinking ? effort : 'none';
   // 沙箱 widget 是独立文档，拿不到 mdui 的 CSS 令牌，所以明暗得由宿主算完显式传进去。
@@ -811,10 +817,13 @@ export default function ChatPanel({
     if (activeId == null) {
       setMsgs([]);
       setSkillIds(undefined);
+      setTurnSkillIds([]);
+      setPinnedSkillIds([]);
       setMcpServerIds(undefined);
       return;
     }
     let cancelled = false;
+    setTurnSkillIds([]);
     setMsgs([]);
     setHasOlder(false);
     setLoadingOlder(false);
@@ -827,6 +836,7 @@ export default function ChatPanel({
       const page = await readChatPage(activeId);
       const history = page.rows;
       if (!cancelled) setSkillIds(row?.skillIds);
+      if (!cancelled) setPinnedSkillIds(row?.pinnedSkillIds ?? []);
       if (!cancelled) setMcpServerIds(row?.mcpServerIds);
       if (!cancelled) {
         setHasOlder(page.hasOlder);
@@ -990,6 +1000,12 @@ export default function ChatPanel({
       });
   };
 
+  const updatePinnedSkillIds = async (ids: number[]) => {
+    if (loading || activeId == null) return;
+    await db.chatSessions.update(activeId, { pinnedSkillIds: ids });
+    if (historySession.current === activeId) setPinnedSkillIds(ids);
+  };
+
   const addHandout = async () => {
     if (loading || handoutPreparing || activeId == null || activeId !== loadedSessionId) return;
     setHandoutPreparing(true);
@@ -997,6 +1013,7 @@ export default function ChatPanel({
       const prepared = await prepareHandoutPrompt(skillIds);
       if (historySession.current !== activeId) return;
       if (prepared.skillIds !== skillIds) updateSkillIds(prepared.skillIds);
+      setTurnSkillIds(ids => [...new Set([...ids, prepared.id])]);
       setInput((draft) => handoutDraft(draft, prepared.prompt));
       toast.info('已添加讲义提示词，可修改后发送');
     } catch (error) {
@@ -1040,7 +1057,7 @@ export default function ChatPanel({
    * `extraRefs` 用于「解释这段」：那一步在 effect 里触发，走 refsRef 传进来，
    * 免得依赖 state 的落地时序。普通输入框发送不传，用当前引用条。
    */
-  const send = async (question: string, extraRefs?: Citation[]) => {
+  const send = async (question: string, extraRefs?: Citation[], suppliedSkills?: number[]) => {
     const q = question.trim();
     const curRefs = extraRefs ?? refsRef.current;
     // 引用也算内容：只划了词没打字也应能发送
@@ -1111,6 +1128,7 @@ export default function ChatPanel({
      * 工具链是**流水账**（谁调了、拿到了什么、花了多久），落库后还能回看。
      */
     const toolTrace = new ToolTraceLedger();
+    const selectedSkills = explicitSkillIds(suppliedSkills ?? turnSkillIds, pinnedSkillIds);
     const toolCalls = toolTrace.calls;
     /** 实际跑过的轮数（`onRoundStart` 记的）：兜底文案只能印真实值，不能拿设置里的上限顶 */
     let roundsRan = 0;
@@ -1167,7 +1185,7 @@ export default function ChatPanel({
         serverOwned = true;
         const { runQa } = await import('../harness/qaRunner');
         const result = await runQa({ videoId, sessionId, text: (quoteBlock ? `${quoteBlock}\n\n` : '') + q,
-          displayText: displayContent, chatImages: userImages, videoName, skillIds,
+          displayText: displayContent, chatImages: userImages, videoName, skillIds, explicitSkillIds: selectedSkills,
           materialKind, materialFormat, refsCount: curRefs.length, shotCount: curShots.length,
           images: curShots.flatMap(s => [{ type: 'text' as const, text: shotTag(s) }, { type: 'image_url' as const, image_url: { url: s.dataUrl } }]),
         }, { signal: abort.signal,
@@ -1182,11 +1200,16 @@ export default function ChatPanel({
           },
         });
         patchAi({ ...result, streaming: false, hint: undefined, widgetPreview: undefined });
+        setTurnSkillIds([]);
         return;
       }
+      const activated = await activateSkills(selectedSkills, skillIds, sessionId);
+      recordSkillActivation(activated, toolTrace);
+      patchAi({ tools: [...toolCalls] });
       // 用户消息立即落库：tier 2 描述可能耗时数秒，避免期间关页丢失已上屏消息
       const userRowId = await db.chats.add({
         videoId,
+        explicitSkillIds: selectedSkills,
         sessionId,
         role: 'user',
         content: displayContent,
@@ -1341,9 +1364,12 @@ export default function ChatPanel({
       const budget =
         settings.contextWindow -
         estimateTokens(systemPrompt) -
+        activated.messages.reduce((total, message) => total + estimateTokens(String(message.content)), 0) -
         estimateTokens(currentText) -
         (imageParts ? curShots.length * 1200 : 0) - // 多模态图片每张约 1.2k tokens
         4096; // 输出预留
+      assertSkillBudget(budget, activated);
+      setTurnSkillIds([]);
       const recent = await prepareSessionHistory(sessionId, history.slice(0, -1).map((row) => ({ ...row, content: quizHistoryContent(row) })), Math.max(2000, budget), currentText, decisionConfigOf(settings), {
         signal: abort.signal,
         onStart: () => patchAi({ hint: 'Jev 正在筛选历史上下文…' }),
@@ -1352,6 +1378,7 @@ export default function ChatPanel({
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...recent.map((r) => ({ role: r.role, content: r.content }) as ChatMessage),
+        ...activated.messages,
       ];
       if (imageParts) {
         messages.push({
@@ -1362,6 +1389,7 @@ export default function ChatPanel({
         messages.push({ role: 'user', content: currentText });
       }
 
+      assertSkillRequestBudget(settings.contextWindow, messages, activated);
       // present_quiz 校验通过后回调：题卡数据上屏（初始全部未作答）
       // Keep every validated visual; the returned references place them in the explanation.
       const executeTool = createResourceExecutor({
@@ -1397,18 +1425,15 @@ export default function ChatPanel({
        * 本轮工具集：只给**当下真的能用**的能力。
        * 材料没有字幕、没有画面（工具集本身就少两样），md 且编辑面开着才多一个 edit_markdown。
        */
-      const tools = courseResourceTools(canEditMd);
+      const tools = courseResourceTools(canEditMd, await isPluginAvailable('practice'));
       await runAgentLoop(
         messages,
         tools,
         executeTool,
         {
           mcpSessionId: sessionId,
-          // 档位一律传下去（关着就是 'none'）：thinkingParams 按模型声明决定发哪个字段 ——
-          // 只有开关的模型拿不到深度参数，但 `enable_thinking` 照发。
-          // 「关着」也传 'none' 而不是不传：不传等于连 `enable_thinking: false` 都不发，
-          // 混合思考模型（默认开着的那种）就压根没被关掉。
-          thinkingEffort: canThink ? thinkingLevel : undefined,
+          // Portable intent; the shared adapter handles unsupported/off levels.
+          thinkingEffort: thinkingLevel,
           onReasoningDelta: (t) => {
             reasoning += t;
             const now = Date.now();
@@ -1625,9 +1650,10 @@ export default function ChatPanel({
     if (message.role === 'ai' && message.rowId == null && message.error) {
       const previous = msgs[idx - 1];
       if (!previous || previous.role !== 'user' || previous.rowId == null) return;
+      const original = await db.chats.get(previous.rowId);
       await db.chats.delete(previous.rowId);
       setMsgs((prev) => prev.filter((m) => m.key !== message.key && m.key !== previous.key));
-      await send(previous.content);
+      await send(previous.content, undefined, original?.explicitSkillIds ?? turnSkillIds);
       return;
     }
 
@@ -1642,7 +1668,7 @@ export default function ChatPanel({
         for (const row of tail) if (row.id != null) await db.chats.delete(row.id);
       });
       setMsgs((prev) => prev.slice(0, idx));
-      await send(message.content);
+      await send(message.content, undefined, rows[rowIdx].explicitSkillIds ?? []);
       return;
     }
 
@@ -1661,13 +1687,13 @@ export default function ChatPanel({
       await db.chats.delete(userRow.id!);
     });
     setMsgs((prev) => prev.filter((m) => m.key !== message.key && m.rowId !== userRow.id));
-    await send(userRow.content);
+    await send(userRow.content, undefined, userRow.explicitSkillIds ?? []);
   };
 
   /** 从某条消息处分叉出新会话（复制到这条为止，原会话不动）。 */
   const forkMessage = async (message: ChatMsg) => {
     if (loading || activeId == null || message.rowId == null) return;
-    const source = sessions.find((s) => s.id === activeId);
+    const source = await db.chatSessions.get(activeId);
     if (!source) return;
     const rows = await readChatHistory(activeId);
     const cut = rows.findIndex((row) => row.id === message.rowId);
@@ -1681,6 +1707,7 @@ export default function ChatPanel({
         title: `${source.title} · 分支`,
         createdAt: now,
         ...(source.skillIds !== undefined ? { skillIds: [...source.skillIds] } : {}),
+        ...(source.pinnedSkillIds ? { pinnedSkillIds: [...source.pinnedSkillIds] } : {}),
         ...(source.mcpServerIds !== undefined ? { mcpServerIds: [...source.mcpServerIds] } : {}),
       })) as number;
       for (const row of kept) {
@@ -1696,6 +1723,7 @@ export default function ChatPanel({
       title: `${source.title} · 分支`,
       createdAt: now,
       ...(source.skillIds !== undefined ? { skillIds: [...source.skillIds] } : {}),
+      ...(source.pinnedSkillIds ? { pinnedSkillIds: [...source.pinnedSkillIds] } : {}),
       ...(source.mcpServerIds !== undefined ? { mcpServerIds: [...source.mcpServerIds] } : {}),
     }]);
     setActiveId(newId);
@@ -1811,7 +1839,8 @@ export default function ChatPanel({
         {iconBtn('export-session-btn', '导出 .md 文件', <Sym name="download" />, downloadSession, loading || msgs.length === 0)}
         {iconBtn('chat-delete-session', '删除当前会话', <Sym name="delete" />, confirmDeleteSession, loading)}
       </PanelBar>
-      <SkillPicker value={skillIds} onChange={updateSkillIds} mcpValue={mcpServerIds} onMcpChange={updateMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
+      <SkillPicker value={skillIds} onChange={updateSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} pinnedValue={pinnedSkillIds} onPinnedChange={updatePinnedSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={updateMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
+      {learningPlugin.dialog}
 
       {/* 消息流：AI 靠左、用户靠右。两种气泡的形状差是 MD3 聊天的标志 ——
           靠对话侧收小圆角、另一侧全圆角。流式 markdown / 思考块 / 题卡都留在 AI 气泡内。 */}
@@ -2063,13 +2092,20 @@ export default function ChatPanel({
                 disabledKeys={[
                   ...(!indexReady || loading ? ['shot', 'quiz', 'question-bank', 'bank-practice'] : []),
                   ...(!indexReady || loading || handoutPreparing ? ['handout'] : []),
+                  ...(!practiceAvailable ? ['quiz', 'question-bank', 'bank-practice'] : []),
+                  ...(!reviewAvailable ? ['review'] : []),
+                  ...(!materialToolsAvailable ? ['handout'] : []),
                   ...(shots.length >= 4 ? ['shot'] : []),
                 ]}
                 onAction={(key) => {
                   if (key === 'shot') addShot();
-                  else if (key === 'quiz') void send('根据课程内容出 3 道单选题考考我，选项要有干扰性');
+                  else if (key === 'quiz' && cloud.enabled) openLearningPlugin('practice');
+                  else if (key === 'quiz') void assertPluginAvailable('practice').then(() => send('根据课程内容出 3 道单选题考考我，选项要有干扰性')).catch(e => toast.error(e.message));
+                  else if (key === 'question-bank' && cloud.enabled) openLearningPlugin('practice');
                   else if (key === 'question-bank') void send('请按「原题题库」技能，逐页提取这份资料的原题，保留题号、题干、选项和原图引用，核对原文答案及解析，并用 edit 保存到 /courses/current/questions.md。已有题库就读最新版后继续，不覆盖用户修改。缺答案和无法辨读的题明确标注；预算不足先保存已完成部分并说明尚未覆盖范围，不要重新编题。保存后给我题库链接，并展示第一批原题供我直接作答和批改。');
+                  else if (key === 'bank-practice' && cloud.enabled) openLearningPlugin('practice');
                   else if (key === 'bank-practice') void send(`请从题库最新版开始做原题。${materialFormat === 'md' ? '先 read 当前 Markdown 原文：若它本身含原题 quiz 数据块，使用 /courses/current/material，否则使用 /courses/current/questions.md。' : '题库路径为 /courses/current/questions.md。'}调用 present_quiz 的 path 参数，每批最多 5 题，不要改写或提前透露答案。若题库尚不存在，请说明并引导先提取原题。`);
+                  else if (key === 'review') openLearningPlugin('review');
                   else if (key === 'handout') void addHandout();
                   else if (key === 'skills') setSkillsOpen(true);
                 }}>
@@ -2077,11 +2113,13 @@ export default function ChatPanel({
                 <Dropdown.Item id="quiz" textValue="出题考我" data-testid="quiz-btn"><Sym name="quiz" />出题考我</Dropdown.Item>
                 {isMaterial && <Dropdown.Item id="question-bank" textValue="提取原题为题库" data-testid="question-bank-extract"><Sym name="description" />提取原题为题库</Dropdown.Item>}
                 {isMaterial && <Dropdown.Item id="bank-practice" textValue="开始做原题" data-testid="question-bank-practice"><Sym name="quiz" />开始做原题</Dropdown.Item>}
+                {cloud.enabled && <Dropdown.Item id="review" textValue="错题与复习清单" data-testid="question-bank-review"><Sym name="checklist" />错题与复习清单</Dropdown.Item>}
                 <Dropdown.Item id="handout" textValue="生成讲义" data-testid="handout-prompt"><Sym name="description" />生成讲义</Dropdown.Item>
                 <Dropdown.Item id="skills" textValue={settingsText('mcp.scopeTitle')}><Sym name="extension" />{settingsText('mcp.scopeTitle')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>
+          {(turnSkillIds.length > 0 || pinnedSkillIds.length > 0) && <Button size="sm" variant="tertiary" data-testid="panel-active-skills" aria-label={settingsText('skillPicker.activationCount', { turn: turnSkillIds.length, pinned: pinnedSkillIds.length })} onPress={() => setSkillsOpen(true)}><Sym name="extension" />{new Set([...turnSkillIds, ...pinnedSkillIds]).size}</Button>}
           {/* 上文用量环：只留环，不再跟一串 `≈2.1k / 131k` 文字 —— 常驻的估值
               在工具行上太吵（详情在环的弹层里），文字还会把发送键从最右侧挤开。
               环排在发送键**前面**，发送键永远占最右那一格。 */}

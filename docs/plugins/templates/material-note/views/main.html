@@ -1,0 +1,50 @@
+<style>
+  body { margin: 0; padding: 12px; }
+  main { display: grid; gap: 10px; }
+  textarea, button { font: inherit; min-height: 44px; }
+  textarea { width: 100%; box-sizing: border-box; }
+</style>
+<main>
+  <p id="material">正在读取资料上下文…</p>
+  <label>本资料笔记<textarea id="note" rows="5" disabled></textarea></label>
+  <button id="save" type="button" disabled>保存到共享实例</button>
+  <p id="status" role="status"></p>
+</main>
+<script>
+(() => {
+  const note = document.getElementById('note'), save = document.getElementById('save'), status = document.getElementById('status');
+  let context, sequence = 0, disposed = false, busy = false, dirty = false;
+  const same = (id, revision) => !disposed && context?.materialId === id && context?.revision === revision;
+  async function load(next, refresh = false) {
+    // Size/theme notifications are not resource switches and must not erase a draft.
+    if (!refresh && context && context.materialId === next.materialId) { context = next; return; }
+    if (!refresh) status.textContent = '';
+    const ticket = ++sequence; context = next; dirty = false;
+    note.disabled = save.disabled = true; note.value = '';
+    document.getElementById('material').textContent = next.materialId ? `资料：${next.materialId}` : '请在资料阅读侧栏使用此组件';
+    if (!next.materialId) return;
+    const before = await plugin.state.read();
+    if (disposed || ticket !== sequence) return;
+    note.value = before.data.notes?.[next.materialId] ?? ''; note.disabled = save.disabled = false;
+  }
+  const fail = e => { if (!disposed) status.textContent = e.message; };
+  note.oninput = () => { dirty = true; status.textContent = ''; };
+  save.onclick = async () => {
+    if (busy || !context?.materialId) return;
+    const id = context.materialId, revision = context.revision, text = note.value;
+    busy = true; save.disabled = true; status.textContent = '正在保存…';
+    try {
+      const before = await plugin.state.read();
+      // Always commit to captured A, never relabel A's text as B after a switch.
+      await plugin.state.write({ ...before.data, notes: { ...before.data.notes, [id]: text } }, before);
+      if (same(id, revision)) { dirty = note.value !== text; status.textContent = '已保存'; }
+    } catch (e) { if (same(id, revision)) fail(e); }
+    finally { busy = false; if (!disposed) save.disabled = !context?.materialId; }
+  };
+  const offContext = plugin.events.subscribe('contextChanged', next => { void load(next).catch(fail); });
+  const offState = plugin.events.subscribe('state.changed', () => { if (!dirty && !busy && context) void load(context, true).catch(fail); });
+  plugin.events.subscribe('dispose', () => { disposed = true; sequence++; offContext(); offState(); });
+  const initial = sequence;
+  void plugin.context.get().then(next => { if (sequence === initial) return load(next); }).catch(fail);
+})();
+</script>

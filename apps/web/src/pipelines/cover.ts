@@ -1,4 +1,5 @@
 import { db, type CoverRow, type VideoRow } from '../store/db';
+import { assertPluginAvailable } from '../plugins/availability';
 import { getMaterialFile, getVideoFile } from '../store/fileStore';
 import { COVER_EDGE, downscaleToCover, encodeCanvas, pickCoverFrame } from '../media/frames';
 import { paintTextCover } from '../media/textCover';
@@ -171,8 +172,9 @@ async function extractColor(source: Blob): Promise<string | undefined> {
  * @returns 是否真的写入了新封面（调用方据此决定要不要通知界面刷新）
  */
 export async function ensureCover(id: string, opts: { force?: boolean } = {}): Promise<boolean> {
+  await assertPluginAvailable('material-tools');
   const { remoteTasks } = await import('../cloud/state');
-  if (remoteTasks()) return (await import('../cloud/tasks')).runCloudTask('cover', `course:${id}`, { videoId: id, options: opts });
+  if (remoteTasks()) return (await import('../plugins/legacy-actions')).runMaterialPluginTask('cover', id, undefined, undefined, { force: opts.force ?? false });
   const row = await db.videos.get(id);
   if (!row) return false;
 
