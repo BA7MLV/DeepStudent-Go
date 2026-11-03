@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { addPlugin, assertCreationHint } from './plugin-tools.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,13 +36,53 @@ const botFixtureFetch = async (_url, init) => {
 };
 let app = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: botFixtureFetch });
 let browser, web, store, learningRunner;
+const errors = [];
+const diagnostics = [];
+const tracePage = page => {
+  const record = { url: '', requests: [], pending: new Set() }; diagnostics.push(record);
+  page.on('framenavigated', frame => { if (frame === page.mainFrame()) record.url = frame.url(); });
+  page.on('request', request => record.pending.add(request));
+  page.on('requestfinished', request => record.pending.delete(request));
+  page.on('requestfailed', request => { record.pending.delete(request); record.requests.push({ url: request.url(), error: request.failure()?.errorText }); });
+  page.on('response', response => { if (response.status() >= 400) record.requests.push({ url: response.url(), status: response.status() }); });
+  page.on('pageerror', error => { errors.push(error.message); console.error(`Browser error at ${page.url()}: ${error.stack ?? error.message}`); });
+  page.on('console', message => { if (message.type() === 'error') console.error(`Browser console at ${page.url()}: ${message.text()}`); });
+};
+const observePage = () => {
+  window.pluginDiagnostics = [];
+  const log = (event, detail) => window.pluginDiagnostics.push({ at: performance.now(), event, detail });
+  for (const name of ['DOMContentLoaded', 'load', 'visibilitychange', 'wangke:bot-session-ended']) window.addEventListener(name, () => log(name, document.visibilityState));
+  window.addEventListener('unhandledrejection', event => log('unhandledrejection', String(event.reason?.stack ?? event.reason)));
+  if (navigator.locks) {
+    const request = navigator.locks.request.bind(navigator.locks);
+    navigator.locks.request = (name, ...args) => {
+      log('lock-request', name);
+      const callback = args.pop();
+      return request(name, ...args, async lock => { log('lock-acquired', name); try { return await callback(lock); } finally { log('lock-released', name); } });
+    };
+  }
+  document.addEventListener('click', event => { const button = event.target.closest?.('[data-plugin-actions] button'); if (button) log('contribution-click', { text: button.textContent, surface: button.closest('[data-plugin-actions]').dataset.pluginActions }); }, true);
+  for (const name of ['pointerdown', 'pointerup', 'click']) document.addEventListener(name, event => {
+    const trigger = event.target.closest?.('[data-testid="study-assistant-toggle"]');
+    if (trigger) log(`assistant-${name}`, { expanded: trigger.getAttribute('aria-expanded'), x: event.clientX, y: event.clientY });
+  }, true);
+  new MutationObserver(records => { for (const record of records) {
+    if (record.type === 'attributes' && record.target.tagName === 'DIALOG') log('dialog-open', { name: record.target.getAttribute('aria-label'), open: record.target.open });
+    for (const [kind, nodes] of [['added', record.addedNodes], ['removed', record.removedNodes]]) for (const node of nodes) if (node.nodeType === 1) for (const dialog of [...(node.matches('dialog') ? [node] : []), ...node.querySelectorAll('dialog')]) log(`dialog-${kind}`, dialog.getAttribute('aria-label'));
+  } }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['open'] });
+};
 const output = process.env.SCREENSHOT_DIR ?? path.join(root, 'plugin-platform-screenshots'); fs.mkdirSync(output, { recursive: true });
+const pageDiagnostics = async () => {
+  const { cloud } = await import('/src/cloud/state.ts');
+  return { readyState: document.readyState, visibility: document.visibilityState, root: document.getElementById('root')?.innerHTML, account: { enabled: cloud.enabled, userId: cloud.userId, worker: cloud.worker }, locks: await navigator.locks?.query(), events: window.pluginDiagnostics, resources: performance.getEntriesByType('resource').slice(-30).map(r => ({ name: r.name, duration: r.duration })) };
+};
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
   const apiPort = app.server.address().port;
   web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: false } } } });
   await web.listen(); browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ locale: 'zh-CN', viewport: { width: 1440, height: 1000 } });
+  await context.addInitScript(observePage);
   await context.route('https://models.dev/**', route => route.fulfill({ json: {} }));
   const post = (url, data, headers = {}) => context.request.post(`${origin}/api/v1${url}`, { headers: { origin, ...headers }, data });
   assert.equal((await post('/bootstrap/initialize', { adminPassword: 'plugins-ui-password-123' }, { 'x-bootstrap-secret': fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim() })).status(), 201);
@@ -50,7 +91,7 @@ try {
   const files = new PluginFiles(store); files.layout(owner);
   const material = { id: 'plugin-source', name: '插件上下文验收资料', kind: 'material', materialFormat: 'md', mimeType: 'text/markdown', duration: 0, createdAt: Date.now(), status: 'transcribed' };
   new CloudRecords(store).apply(owner, [{ id: 'plugin-source', table: 'videos', key: material.id, before: null, after: material }]);
-  new CloudRecords(store).apply(owner, [{ id: 'plugin-source-block', table: 'materialBlocks', key: 700, before: null, after: { id: 700, materialId: material.id, idx: 0, text: '这份已解析的真实资料用于验证卡片生成、复习审核与持久收据。' } }]);
+  new CloudRecords(store).apply(owner, [{ id: 'plugin-source-block', table: 'materialBlocks', key: 700, before: null, after: { id: 700, materialId: material.id, idx: 0, unit: 1, unitLabel: '第 1 段', kind: 'body', text: '这份已解析的真实资料用于验证卡片生成、复习审核与持久收据。' } }]);
   const bankId = `__course_questions__${encodeURIComponent(material.id)}`;
   const bankQuestion = { stem: '原题闭环验收：哪项是权威记录？', options: ['原错题本 Markdown', '组件临时状态', '随机示例', '页面回调'], answer: 0, explanation: '原错题本是唯一学习记录。', answerSource: 'original', source: { courseId: material.id, name: material.name, page: 1 } };
   const bankBytes = Buffer.from(`# 原题\n\n\`\`\`quiz\n${JSON.stringify({ questions: [bankQuestion] })}\n\`\`\`\n`);
@@ -60,13 +101,14 @@ try {
   configuration.save(owner, { ...configuration.get(owner), policy: { ...configuration.get(owner).policy, read: 'allow', write: 'allow' }, providers: [{ id: 'fixture', name: 'Fixture', protocol: 'openai-chat', apiKey: 'fixture', baseUrl: 'https://fixture.example/v1', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture-model' } });
    learningRunner = new CloudTaskRunner(store, { configuration, fetch: async (_url, init) => Response.json({ choices: [{ message: { content: String(init.body).includes('学习练习生成器') ? JSON.stringify({ questions: [{ ...bankQuestion, stem: 'AI 练习验收：如何确认产物保存？' }] }) : JSON.parse(init.body).max_tokens === 6000 ? '# 插件讲义验收\n\n讲义来自原资料执行器，并保存到原产物。' : '[{"time":"00:10","q":"如何确认插件生成成功？","a":"读取真实产物和持久完成收据。"}]' } }] }) });
   learningRunner.start(origin);
-  const page = await context.newPage(), errors = [];
-  context.on('page', p => p.on('pageerror', e => errors.push(e.message)));
-  page.on('pageerror', e => errors.push(e.message));
+  const page = await context.newPage();
+  context.on('page', tracePage);
+  tracePage(page);
   await page.goto(`${origin}/#/board`); await page.getByTestId('board-plugin-todo').waitFor({ timeout: 30000 });
-  const manager = page.locator('.plugin-manager'); await manager.locator('summary').first().click();
-  const choose = (label, value) => manager.getByLabel(label, { exact: true }).selectOption(value);
-  const saveMount = () => Promise.all([page.waitForResponse(r => r.url().endsWith('/plugins/layout') && r.status() === 200), manager.getByRole('button', { name: '保存挂载', exact: true }).click()]);
+   await assertCreationHint(page);
+   const selection = { pluginId: 'todo', surface: 'board.main' };
+   const choose = async (label, value) => { selection[{ '位置': 'surface', '插件': 'pluginId', '数据实例': 'instanceId' }[label]] = value; if (label === '插件') delete selection.instanceId; };
+   const saveMount = () => addPlugin(page, selection);
   await choose('位置', 'chat.sidepanel'); await choose('插件', 'todo'); await choose('数据实例', 'legacy-todo');
   await saveMount();
   await choose('位置', 'reader.sidepanel'); await saveMount();
@@ -82,7 +124,18 @@ try {
   const chatTodo = chat.locator('[data-plugin-slot="chat.sidepanel"] [data-plugin-instance="legacy-todo"]').frameLocator('iframe');
   await chatTodo.getByText('真实跨位置共享待办', { exact: true }).waitFor(); await chatTodo.getByRole('checkbox').check();
   await shared.getByRole('checkbox').waitFor(); await page.waitForTimeout(5500); assert.equal(await shared.getByRole('checkbox').isChecked(), true);
-  const reader = await context.newPage(); await reader.goto(`${origin}/#/board`); await reader.getByTestId('board-plugin-todo').first().waitFor();
+  const reader = await context.newPage();
+  if (process.env.PLUGIN_TRACE_CAUGHT === '1') {
+    const debuggerSession = await context.newCDPSession(reader);
+    await debuggerSession.send('Debugger.enable');
+    debuggerSession.on('Debugger.paused', event => {
+      const description = event.data?.description ?? event.data?.value ?? '';
+      if (String(description).includes("reading 'replace'")) console.error(`Caught reader exception: ${description}\n${JSON.stringify(event.callFrames.map(frame => ({ name: frame.functionName, url: frame.url, location: frame.location })))}`);
+      void debuggerSession.send('Debugger.resume').catch(() => {});
+    });
+    await debuggerSession.send('Debugger.setPauseOnExceptions', { state: 'all' });
+  }
+  await reader.goto(`${origin}/#/board`); await reader.getByTestId('board-plugin-todo').first().waitFor();
   await reader.evaluate(async material => { const { db } = await import('/src/store/db.ts'); await db.videos.put(material); await db.files.put({ id: material.id, blob: new Blob(['# 资料\n\n用于验证阅读侧栏的资料上下文。'], { type: 'text/markdown' }) }); }, material);
   await reader.goto(`${origin}/#/player/${material.id}`); await reader.getByTestId('panel-tab-plugins').waitFor({ state: 'attached' });
   const toggle = reader.getByTestId('study-assistant-toggle'); if (await toggle.isVisible()) await toggle.click();
@@ -250,7 +303,9 @@ try {
     const counterFrame = templatePage.frameLocator('iframe[title="共享计数器模板"]');
     await counterFrame.locator('main[data-mounted="true"]').waitFor();
    await counterFrame.getByRole('button', { name: '加一', exact: true }).click();
-  const secondDevice = await browser.newContext({ storageState: await context.storageState(), viewport: { width: 390, height: 844 } });
+   const secondDevice = await browser.newContext({ storageState: await context.storageState(), viewport: { width: 390, height: 844 } });
+   await secondDevice.addInitScript(observePage);
+   secondDevice.on('page', tracePage);
   const secondPage = await secondDevice.newPage(); await secondPage.goto(`${origin}/#/plugins/template-counter`);
    await secondPage.frameLocator('iframe[title="共享计数器模板"]').locator('#count').getByText('1', { exact: true }).waitFor();
    await secondPage.frameLocator('iframe[title="共享计数器模板"]').getByRole('button', { name: '加一', exact: true }).click();
@@ -341,7 +396,7 @@ try {
     await reader.getByTestId('question-bank-practice').click();
     const oldPracticeDialog = reader.getByRole('dialog', { name: '练习', exact: true });
     try { await oldPracticeDialog.getByRole('button', { name: '打开原题题库', exact: true }).click(); }
-    catch (error) { await reader.screenshot({ path: path.join(output, 'legacy-menu-failure.png'), fullPage: true }); throw new Error(`${error.message}\nReader: ${await reader.locator('body').innerText()}`); }
+     catch (error) { await reader.screenshot({ path: path.join(output, 'legacy-menu-failure.png'), fullPage: true }); throw new Error(`${error.message}\nReader: ${await reader.locator('body').innerText()}\nCloud/session: ${JSON.stringify(await reader.evaluate(async () => { const { cloud } = await import('/src/cloud/state.ts'); const { db } = await import('/src/store/db.ts'); return { enabled: cloud.enabled, worker: cloud.worker, session: await (await import('/src/api/serverClient.ts')).serverClient.session(), tables: db.tables.map(t => t.name) }; }))}\nCatalog: ${JSON.stringify(files.catalog(owner).map(p => ({ id: p.id, revision: p.revision, error: p.error, installation: p.installation })))}\nLayout: ${files.layout(owner).content}`); }
     await oldPracticeDialog.getByText(bankQuestion.stem, { exact: true }).waitFor();
     await oldPracticeDialog.getByRole('button', { name: '关闭', exact: true }).click();
     assert.equal(await oldComposer.inputValue(), '旧问答菜单打开插件后仍保留的草稿');
@@ -447,5 +502,12 @@ try {
   await reviewFull.reload(); await reviewFull.getByLabel('复习资料').selectOption(material.id);
   await reviewFull.getByText('已作答 2 次', { exact: false }).waitFor();
   assert.deepEqual(errors, []);
-  console.log(`Plugin platform UI passed: management via real controls, shared todo/cards across board/Chat/reader/page, native AI practice and original Markdown snapshots, answer-source labels, immutable submission sync, wrongbook review re-answer and original attempt counts, artifact receipts, independent instance, refresh and service restart, 360/390/1440 light/dark/system (including 27 learning-page screenshots). Screenshots: ${output}`);
+   console.log(`Plugin platform UI passed: configuration via real tools, shared todo/cards across board/Chat/reader/page, native AI practice and original Markdown snapshots, answer-source labels, immutable submission sync, wrongbook review re-answer and original attempt counts, artifact receipts, independent instance, refresh and service restart, 360/390/1440 light/dark/system (including 27 learning-page screenshots). Screenshots: ${output}`);
+} catch (error) {
+  console.error(`Captured browser errors: ${JSON.stringify(errors)}`);
+  fs.writeFileSync(path.join(output, 'network-failure.json'), JSON.stringify(diagnostics.map(record => ({ ...record, pending: [...record.pending].map(request => request.url()) })), null, 2));
+  if (browser) for (const [index, diagnosticPage] of browser.contexts().flatMap(c => c.pages()).entries()) {
+    try { await diagnosticPage.screenshot({ path: path.join(output, `failure-page-${index}.png`) }); console.error(`Page ${index}: ${diagnosticPage.url()}\n${(await diagnosticPage.locator('body').innerText()).slice(0, 2500)}`); fs.writeFileSync(path.join(output, `page-failure-${index}.json`), JSON.stringify(await diagnosticPage.evaluate(pageDiagnostics), null, 2)); } catch { /* A closing tab has no useful diagnostics. */ }
+  }
+  throw error;
 } finally { await learningRunner?.close(); await browser?.close(); await web?.close(); await app.close(); store?.close(); fs.rmSync(directory, { recursive: true, force: true }); }

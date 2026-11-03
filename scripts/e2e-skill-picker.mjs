@@ -22,7 +22,7 @@ try {
     await page.getByTestId('chat-add').click();
     await page.getByRole('menuitem', { name: /技能/ }).click();
     await page.getByTestId('skill-picker-dialog').waitFor();
-    await page.getByTestId('skill-tab-scope').click();
+    await page.getByTestId('skill-picker-advanced').click();
   };
   const close = async () => {
     await page.getByTestId('skill-picker-done').click();
@@ -35,39 +35,39 @@ try {
   const waitSelected = (count) => page.waitForFunction(n => document.querySelectorAll('[data-testid="skill-scope-item"][data-selected="true"]').length === n, count);
 
   await open();
-  await waitCount(5);
-  assert.equal(await selected(), 5);
-  assert.match(await page.getByTestId('skill-picker-status').innerText(), /5\s*\/\s*5/);
+  await waitCount(6);
+  assert.equal(await selected(), 6);
+  assert.match(await page.getByTestId('skill-picker-status').innerText(), /6\s*\/\s*6/);
   assert.equal(await page.getByTestId('skill-picker-all').getAttribute('aria-pressed'), 'true');
   assert.equal(await scope(), undefined);
-  assert.equal(await page.getByTestId('skill-scope-check').count(), 5);
+  assert.equal(await page.getByTestId('skill-scope-check').count(), 6);
 
   // Filtering must never clear hidden selections. The entire named row is clickable.
   await search.fill('数学');
   await waitCount(1);
   await page.locator('.skill-picker__name').click();
-  assert.equal((await scope()).length, 4);
-  assert.match(await page.getByTestId('skill-picker-status').innerText(), /4\s*\/\s*5/);
+  assert.equal((await scope()).length, 5);
+  assert.match(await page.getByTestId('skill-picker-status').innerText(), /5\s*\/\s*6/);
   assert.equal(await page.getByTestId('skill-picker-all').getAttribute('aria-pressed'), 'false');
   await search.fill('no-such-skill');
   await page.getByText('没有找到匹配的技能').waitFor();
-  assert.equal((await scope()).length, 4);
+  assert.equal((await scope()).length, 5);
   await page.getByRole('button', { name: '清除搜索', exact: true }).last().click();
-  await waitCount(5);
-  await waitSelected(4);
-  console.log('PASS: five readable cards; search/clear retains hidden selections and counts.');
+  await waitCount(6);
+  await waitSelected(5);
+  console.log('PASS: six readable cards; search/clear retains hidden selections and counts.');
 
   // Keyboard activation, explicit none, and all-selected normalization.
   const handout = page.getByRole('checkbox', { name: '课程讲义', exact: true });
   await handout.focus();
   await page.keyboard.press('Space');
-  await waitSelected(5);
+  await waitSelected(6);
   assert.equal(await scope(), undefined);
   await page.getByTestId('skill-picker-none').click();
   await waitSelected(0);
   assert.deepEqual(await scope(), []);
   await page.getByTestId('skill-picker-all').click();
-  await waitSelected(5);
+  await waitSelected(6);
   assert.equal(await scope(), undefined);
   console.log('PASS: keyboard selection and automatic/none/custom semantics.');
 
@@ -92,7 +92,7 @@ try {
     await db.skills.add({ name: '课程讲义', description: '我的专用说明 ' + 'LongCustomDescription'.repeat(20), body: 'custom', builtin: 0, enabled: 1, updatedAt: Date.now() });
   });
   await open();
-  await waitCount(6);
+  await waitCount(7);
   assert.match(await page.getByRole('region', { name: '我的技能' }).locator('.skill-picker__text').getAttribute('title'), /我的专用说明/);
   await search.fill('我的专用说明');
   await waitCount(1);
@@ -103,7 +103,7 @@ try {
 
   // Both narrow phones and a reduced visual viewport keep footer actions reachable.
   await search.fill('');
-  await waitCount(6);
+  await waitCount(7);
   for (const height of [740, 480]) {
     await page.setViewportSize({ width: 360, height });
     // React Aria updates --visual-viewport-height after the resize event.
@@ -136,7 +136,7 @@ try {
   await page.getByRole('alert').filter({ hasText: '技能读取失败' }).waitFor();
   assert.equal(await page.getByTestId('skill-picker-empty').count(), 0);
   await page.getByRole('button', { name: '重新加载' }).click();
-  await waitCount(6);
+  await waitCount(7);
   assert.equal((await scope()).length, 2);
   console.log('PASS: load failure is visible; retry restores catalog without losing scope.');
 

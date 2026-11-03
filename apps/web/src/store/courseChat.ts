@@ -23,6 +23,7 @@ import {
 import { applyFolderPlan, type AppliedPlanResult } from '../pipelines/folderPlan';
 import { loadSessionSkillMeta, skillMetaBlock } from '../skills/store';
 import { activateSkills, assertSkillBudget, assertSkillRequestBudget, explicitSkillIds, recordSkillActivation } from '../skills/activation';
+import { reconcileSkillMessages } from '@wangke/study-core/model/transcript';
 import type { ChatMessage } from '../api/siliconflow';
 import { askUserToolResult, askAnswerText, validateAskAnswer, type AskUserData, type AskUserAnswer } from '../harness/askUser';
 import type { FolderPlan } from '../harness/folderPlan';
@@ -325,7 +326,6 @@ export interface CourseChatStore {
   courseCount: number | null;
   skillIds: number[] | undefined;
   turnSkillIds: number[];
-  pinnedSkillIds: number[];
   mcpServerIds: string[] | undefined;
   contextCourses: CourseContextItem[];
   project: ChatProject | null;
@@ -416,7 +416,6 @@ export interface CourseChatStore {
    */
   setSkillIds: (ids: number[] | undefined) => void;
   setTurnSkillIds: (ids: number[]) => void;
-  setPinnedSkillIds: (ids: number[]) => Promise<void>;
   setMcpServerIds: (ids: string[] | undefined) => Promise<void>;
   /** 恢复自动选课程。草稿态同样只写内存，理由见 `setSkillIds` */
   clearCourseContext: () => void;
@@ -492,7 +491,6 @@ const DRAFT_STATE: Partial<CourseChatStore> = {
   loading: false,
   skillIds: undefined,
   turnSkillIds: [],
-  pinnedSkillIds: [],
   mcpServerIds: undefined,
   contextCourses: [],
   project: null,
@@ -622,7 +620,6 @@ interface SessionView {
   planApplying: boolean;
   skillIds: number[] | undefined;
   turnSkillIds: number[];
-  pinnedSkillIds: number[];
   mcpServerIds: string[] | undefined;
   contextCourses: CourseContextItem[];
   project: ChatProject | null;
@@ -644,7 +641,6 @@ const EMPTY_VIEW: SessionView = {
   planApplying: false,
   skillIds: undefined,
   turnSkillIds: [],
-  pinnedSkillIds: [],
   mcpServerIds: undefined,
   contextCourses: [],
   project: null,
@@ -734,7 +730,6 @@ function topLevelView(s: CourseChatStore): SessionView {
     planApplying: s.planApplying,
     skillIds: s.skillIds,
     turnSkillIds: s.turnSkillIds,
-    pinnedSkillIds: s.pinnedSkillIds,
     mcpServerIds: s.mcpServerIds,
     contextCourses: s.contextCourses,
     project: s.project,
@@ -960,7 +955,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
   courseCount: null,
   skillIds: undefined,
   turnSkillIds: [],
-  pinnedSkillIds: [],
   mcpServerIds: undefined,
   contextCourses: [],
   project: null,
@@ -1065,7 +1059,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       planApplying: false,
       skillIds: session?.skillIds,
       turnSkillIds: [],
-      pinnedSkillIds: session?.pinnedSkillIds ?? [],
       mcpServerIds: session?.mcpServerIds,
       project: session?.projectFolderId == null ? null : { folderId: session.projectFolderId, name: projectFolder?.name ?? '项目', color: projectFolder?.color },
       contextCourses: contextIds
@@ -1282,13 +1275,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
   },
 
   setTurnSkillIds: (ids) => { if (!get().loading) set({ turnSkillIds: explicitSkillIds(ids) }); },
-  setPinnedSkillIds: async (ids) => {
-    const key = activeKey();
-    if (readView(key).loading) throw new Error('回复完成后可修改固定技能');
-    const pinnedSkillIds = explicitSkillIds(ids);
-    if (key !== 0) await db.chatSessions.update(key, { pinnedSkillIds });
-    writeView(key, { pinnedSkillIds });
-  },
 
   clearCourseContext: () => {
     const id = get().activeId;
@@ -1356,7 +1342,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (!view.loaded) return;
     if (!resume && !text) return;
     // Only composer submissions consume one-turn selections. Internal queue/ask sends do not.
-    let selectedSkills = explicitSkillIds(suppliedSkills ?? (fromComposer ? view.turnSkillIds : []), view.pinnedSkillIds);
+    let selectedSkills = explicitSkillIds(suppliedSkills ?? (fromComposer ? view.turnSkillIds : []));
 
     if (remoteTasks()) {
       if (view.pendingAsk && !resume && await commandChatTask(state.activeId, 'answerAsk', text)) { set({ draft: '' }); return; }
@@ -1368,7 +1354,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       try {
         if (id == null) {
           writeView(0, { loading: true });
-          const row = await newSessionRow(view.skillIds, view.contextCourses.map(c => c.id), view.mcpServerIds, view.project?.folderId, view.pinnedSkillIds);
+          const row = await newSessionRow(view.skillIds, view.contextCourses.map(c => c.id), view.mcpServerIds, view.project?.folderId);
           id = row.id!;
           if (activeKey() === key) set(s => ({ sessions: [...s.sessions, row], activeId: id, loaded: true }));
           else {
@@ -1505,7 +1491,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (sessionId == null) {
       try {
         // 草稿态里用户可能已经选过技能范围（那时只写内存，见 setSkillIds），随行一起落库
-        const row = await newSessionRow(view.skillIds, view.contextCourses.map((course) => course.id), view.mcpServerIds, view.project?.folderId, view.pinnedSkillIds);
+        const row = await newSessionRow(view.skillIds, view.contextCourses.map((course) => course.id), view.mcpServerIds, view.project?.folderId);
         sessionId = row.id!;
         justCreated = true;
         // 草稿那一轮的登记（key 0）挪到真实 id 上：`stop` / `steer` 按 activeId 找它
@@ -1867,7 +1853,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
             onStart: () => patchAi({ hint: 'Jev 正在筛选历史上下文…' }),
             onCompressed: (turns) => patchAi({ hint: `已省略 ${turns} 个旧轮次，原始记录保留` }),
           });
-      const chatMessages: ChatMessage[] = [
+      const chatMessages: ChatMessage[] = reconcileSkillMessages([
         ...splitSystemPrompt(systemPrompt),
         ...await historyMessagesWithAttachments(recent, abort.signal),
         ...activated.messages,
@@ -1875,7 +1861,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         // 于是旧工具一次都不用重跑 —— 结果本来就在里面。
         ...(resume ? resume.midTurn : []),
         tail,
-      ];
+      ], skillMetas);
       assertSkillRequestBudget(settings.contextWindow, chatMessages, activated);
       // 记录初始长度，供 onCheckpoint 截出「本回合新增的部分」（midTurn）
       baseLen = chatMessages.length;
@@ -1885,10 +1871,11 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         requestOwnerId = resume.rowId;
         modelRequests.push(...((await db.chats.get(requestOwnerId))?.modelRequests ?? []));
       }
-      if (!resume && requestOwnerId != null) await db.chats.update(requestOwnerId, { modelTrace: modelTrace(text, [tail]) });
+      if (!resume && requestOwnerId != null) await db.chats.update(requestOwnerId, { modelTrace: modelTrace(text, [...activated.messages, tail]) });
       const cacheKey = await sessionCacheKey(turnKey);
 
       const executeTool = createResourceExecutor({
+        sessionId: turnKey,
         signal: abort.signal,
         allowedSkillIds: view.skillIds,
         onWidget: async (w) => {
@@ -2519,7 +2506,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         ...(source.contextCourseIds ? { contextCourseIds: [...source.contextCourseIds] } : {}),
         ...(source.projectFolderId != null ? { projectFolderId: source.projectFolderId } : {}),
         ...(source.skillIds !== undefined ? { skillIds: [...source.skillIds] } : {}),
-        ...(source.pinnedSkillIds ? { pinnedSkillIds: [...source.pinnedSkillIds] } : {}),
         ...(source.mcpServerIds !== undefined ? { mcpServerIds: [...source.mcpServerIds] } : {}),
         ...(source.promptCacheKey ? { promptCacheKey: source.promptCacheKey } : {}),
       })) as number;
@@ -2835,18 +2821,18 @@ async function continueInterrupted(
     const skillBlock = skillMetas.length > 0 ? skillMetaBlock(skillMetas) : undefined;
     const systemPrompt = libraryAssistantSystemPrompt(skillBlock, view.contextCourses, hasCourses, settings.agentInstructions);
     const origin = [...history].reverse().find(row => row.role === 'user' && row.explicitSkillIds !== undefined);
-    const activated = await activateSkills(origin?.explicitSkillIds ?? view.pinnedSkillIds, view.skillIds, sessionId);
+    const activated = await activateSkills(origin?.explicitSkillIds ?? [], view.skillIds, sessionId);
     const budget = settings.contextWindow - estimateTokens(systemPrompt) - messageTokens(activated.messages) - estimateTokens(CONTINUE_INSTRUCTION) - 4096;
     assertSkillBudget(budget, activated);
     const recent = await fitModelHistory(sessionId, history.map((row) => ({ ...row, originalContent: row.content, content: attachmentText(row.content, row.attachments) })), Math.max(2000, budget));
     const original = rows.find(row => row.id === rowId);
     priorTrace = original && replayTrace(original) || [{ role: 'assistant', content: partial }];
-    const chatMessages: ChatMessage[] = [
+    const chatMessages: ChatMessage[] = reconcileSkillMessages([
       ...splitSystemPrompt(systemPrompt),
       ...await historyMessagesWithAttachments(recent, abort.signal),
       ...activated.messages,
       { role: 'user', content: CONTINUE_INSTRUCTION },
-    ];
+    ], skillMetas);
     assertSkillRequestBudget(settings.contextWindow, chatMessages, activated);
     rawContinuation = [chatMessages.at(-1)!];
 
@@ -2972,14 +2958,13 @@ function drainQueue(sessionId: number): void {
  * 该字段的 `undefined` 与 `[]` 语义不同（不限定 vs 一个都不给），
  * 老数据里「不限定」的形态就是**字段不存在**。
  */
-async function newSessionRow(skillIds?: number[], contextCourseIds: string[] = [], mcpServerIds?: string[], projectFolderId?: number, pinnedSkillIds: number[] = []): Promise<ChatSessionRow> {
+async function newSessionRow(skillIds?: number[], contextCourseIds: string[] = [], mcpServerIds?: string[], projectFolderId?: number): Promise<ChatSessionRow> {
   const now = Date.now();
   const row: ChatSessionRow = {
     videoId: LIBRARY_ASSISTANT_ID,
     title: '新会话',
     createdAt: now,
     ...(skillIds !== undefined ? { skillIds } : {}),
-    ...(pinnedSkillIds.length ? { pinnedSkillIds } : {}),
     ...(mcpServerIds !== undefined ? { mcpServerIds } : {}),
     ...(contextCourseIds.length ? { contextCourseIds } : {}),
     ...(projectFolderId != null ? { projectFolderId } : {}),

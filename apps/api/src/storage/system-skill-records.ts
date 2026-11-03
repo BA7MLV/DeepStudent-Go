@@ -11,7 +11,7 @@ type Binding = { skill_id: number; slug: string; builtin_slug: string | null };
 type Snapshot = { skills: Map<number, Row>; refs: Map<number, Row> };
 const builtinRoot = path.resolve(path.dirname(fileURLToPath(import.meta.resolve('@wangke/study-core/skills/assets'))), '..');
 const builtinSlugs = ['gongwen-writing', 'gongwen-format', 'subject-math', 'subject-coding', 'gongkao-xingce', 'gongkao-shenlun',
-  'diagramming', 'interactive-explainer', 'library-organizer', 'course-handout', 'question-bank'];
+  'diagramming', 'interactive-explainer', 'library-organizer', 'course-handout', 'question-bank', 'create-mode'];
 const resource = (slug: string, file: string) => `/system/skills/${slug}/${file}`;
 
 // Same stable identifiers as the existing browser builtin rows and references.

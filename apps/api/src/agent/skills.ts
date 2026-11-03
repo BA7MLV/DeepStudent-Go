@@ -3,6 +3,7 @@ import type { DatabaseStore } from '../storage/database.js';
 
 // Keep historical Bot scopes (-1 … -5) working after builtin materialization.
 const builtinAliases = ['diagramming', 'interactive-explainer', 'library-organizer', 'course-handout', 'question-bank'];
+const chatBuiltins = new Set([...builtinAliases, 'create-mode']);
 export class BotSkills {
   constructor(readonly store: DatabaseStore) {}
   private available(owner: string, thread: string) {
@@ -14,7 +15,7 @@ export class BotSkills {
       const index = builtinAliases.indexOf(b.builtin_slug ?? '');
       return index < 0 ? [] : [[-index - 1, b.skill_id] as const];
     }));
-    const legacy = new Set(bindings().filter(b => b.builtin_slug && !builtinAliases.includes(b.builtin_slug)).map(b => b.skill_id));
+    const legacy = new Set(bindings().filter(b => b.builtin_slug && !chatBuiltins.has(b.builtin_slug)).map(b => b.skill_id));
     const combined = physical.filter(s => s.enabled === 1 && !legacy.has(s.id));
     const scopeIds: number[] | undefined = row.skill_ids === null ? undefined : JSON.parse(row.skill_ids).map((id: number) => aliases.get(id) ?? id);
     const allowed = new Set(intersectSkillMetaIds(combined, scopeIds));

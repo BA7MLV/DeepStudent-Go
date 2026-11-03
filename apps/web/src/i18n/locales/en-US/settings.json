@@ -260,22 +260,20 @@
   },
   "skillPicker": {
     "activationMode": "Skill activation mode",
-    "turnTab": "Use this turn",
-    "pinnedTab": "Pin to conversation",
-    "scopeTab": "Automatic scope",
-    "turnHint": "Selected instructions load in full before your next message, for this turn only. References still load on demand.",
-    "pinnedHint": "Load selected instructions on every turn until unpinned. This does not expand skill scope or tool permissions.",
-    "scopeHint": "This only controls which skills the assistant may select automatically. To ensure loading, choose Use this turn.",
+    "turnTab": "Use next message",
+    "scopeTab": "Availability (advanced)",
+    "backToUse": "Back to invocation",
+    "turnHint": "The assistant chooses relevant skills on demand. Select one to invoke it in your next message. Existing instructions are reused; references load on demand.",
+    "scopeHint": "Only controls which skills can be discovered and read. Does not load instructions or grant tools. Legacy conversation pins no longer activate skills.",
     "busyHint": "Wait for the reply to finish before changing skills. The current task uses its submitted selection.",
     "clearSelection": "Clear selection",
-    "saveError": "Could not save pinned skills. Please retry.",
     "explicitUnavailable": "{{count}} selected skills are disabled or deleted. Sending will report an error rather than silently skip them.",
     "removeUnavailable": "Remove unavailable",
     "outOfScope": "Outside the allowed scope; update Automatic scope first",
-    "pendingLoad": "Selected · Loads in full before sending",
-    "available": "Available · Not selected",
-    "activationCount": "This turn {{turn}} · Pinned {{pinned}}",
-    "title": "Choose skills",
+    "pendingLoad": "Selected · Loads or reuses on send",
+    "available": "Chosen on demand by the assistant",
+    "activationCount": "Selected {{turn}}",
+    "title": "Use skills next message",
     "auto": "Automatic",
     "none": "No skills",
     "custom": "Custom",
@@ -300,6 +298,10 @@
     "done": "Done",
     "close": "Close skill picker",
     "builtins": {
+      "create": {
+        "title": "Create mode",
+        "description": "Describe what you need and where it belongs to create or adjust lasting tools and pages."
+      },
       "handout": {
         "title": "Course handouts",
         "description": "Build notes and revision outlines, with math, coding and civil-service exam guidance as needed."
@@ -321,6 +323,9 @@
         "description": "Plan folders for courses and materials, then organize after confirmation."
       }
     }
+  },
+  "createMode": {
+    "hint": "Want to create or adjust a feature? Choose Create mode under Skills in chat, then describe what you need and where it belongs."
   },
   "agent": {
     "title": "Agent default instructions",

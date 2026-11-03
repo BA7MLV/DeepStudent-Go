@@ -22,6 +22,7 @@ import ComposerExpand, { useComposerSize } from './ComposerExpand';
 import { useContextCompression } from './useContextCompression';
 import { loadSessionSkillMeta, skillMetaBlock } from '../skills/store';
 import { activateSkills, assertSkillBudget, assertSkillRequestBudget, explicitSkillIds, recordSkillActivation } from '../skills/activation';
+import { modelTrace, replayTrace, reconcileSkillMessages } from '@wangke/study-core/model/transcript';
 import { handoutDraft, prepareHandoutPrompt } from '../skills/handout';
 import { captureFrame, resolveVideoEl, type Snapshot } from '../media/snapshot';
 import { isVisionModel } from '../api/modelCaps';
@@ -516,7 +517,6 @@ export default function ChatPanel({
    */
   const [skillIds, setSkillIds] = useState<number[] | undefined>(undefined);
   const [turnSkillIds, setTurnSkillIds] = useState<number[]>([]);
-  const [pinnedSkillIds, setPinnedSkillIds] = useState<number[]>([]);
   const [mcpServerIds, setMcpServerIds] = useState<string[] | undefined>();
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -818,7 +818,6 @@ export default function ChatPanel({
       setMsgs([]);
       setSkillIds(undefined);
       setTurnSkillIds([]);
-      setPinnedSkillIds([]);
       setMcpServerIds(undefined);
       return;
     }
@@ -836,7 +835,6 @@ export default function ChatPanel({
       const page = await readChatPage(activeId);
       const history = page.rows;
       if (!cancelled) setSkillIds(row?.skillIds);
-      if (!cancelled) setPinnedSkillIds(row?.pinnedSkillIds ?? []);
       if (!cancelled) setMcpServerIds(row?.mcpServerIds);
       if (!cancelled) {
         setHasOlder(page.hasOlder);
@@ -1000,12 +998,6 @@ export default function ChatPanel({
       });
   };
 
-  const updatePinnedSkillIds = async (ids: number[]) => {
-    if (loading || activeId == null) return;
-    await db.chatSessions.update(activeId, { pinnedSkillIds: ids });
-    if (historySession.current === activeId) setPinnedSkillIds(ids);
-  };
-
   const addHandout = async () => {
     if (loading || handoutPreparing || activeId == null || activeId !== loadedSessionId) return;
     setHandoutPreparing(true);
@@ -1128,7 +1120,7 @@ export default function ChatPanel({
      * 工具链是**流水账**（谁调了、拿到了什么、花了多久），落库后还能回看。
      */
     const toolTrace = new ToolTraceLedger();
-    const selectedSkills = explicitSkillIds(suppliedSkills ?? turnSkillIds, pinnedSkillIds);
+    const selectedSkills = explicitSkillIds(suppliedSkills ?? turnSkillIds);
     const toolCalls = toolTrace.calls;
     /** 实际跑过的轮数（`onRoundStart` 记的）：兜底文案只能印真实值，不能拿设置里的上限顶 */
     let roundsRan = 0;
@@ -1143,6 +1135,10 @@ export default function ChatPanel({
     const widgets: WidgetPayload[] = [];
     let widgetRowId: number | undefined;
     let serverOwned = false;
+    let rawTurn: ChatMessage[] = [];
+    let pendingModelText = '';
+    const traceFor = (content: string) => modelTrace(content, [...rawTurn,
+      ...(pendingModelText ? [{ role: 'assistant' as const, content: pendingModelText }] : [])]);
     const abort = new AbortController();
     inflightAbort = abort;
     const updates = framePatch<ChatMsg>((patch) =>
@@ -1370,14 +1366,14 @@ export default function ChatPanel({
         4096; // 输出预留
       assertSkillBudget(budget, activated);
       setTurnSkillIds([]);
-      const recent = await prepareSessionHistory(sessionId, history.slice(0, -1).map((row) => ({ ...row, content: quizHistoryContent(row) })), Math.max(2000, budget), currentText, decisionConfigOf(settings), {
+      const recent = await prepareSessionHistory(sessionId, history.slice(0, -1).map((row) => ({ ...row, originalContent: row.content, content: quizHistoryContent(row) })), Math.max(2000, budget), currentText, decisionConfigOf(settings), {
         signal: abort.signal,
         onStart: () => patchAi({ hint: 'Jev 正在筛选历史上下文…' }),
         onCompressed: (turns) => patchAi({ hint: `已省略 ${turns} 个旧轮次，原始记录保留` }),
       });
-      const messages: ChatMessage[] = [
+      let messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
-        ...recent.map((r) => ({ role: r.role, content: r.content }) as ChatMessage),
+        ...recent.flatMap(r => replayTrace(r) ?? [{ role: r.role, content: r.content }]),
         ...activated.messages,
       ];
       if (imageParts) {
@@ -1389,10 +1385,14 @@ export default function ChatPanel({
         messages.push({ role: 'user', content: currentText });
       }
 
+      messages = reconcileSkillMessages(messages, skillMetas);
+      await db.chats.update(userRowId, { modelTrace: modelTrace(displayContent, [...activated.messages, messages.at(-1)!]) });
       assertSkillRequestBudget(settings.contextWindow, messages, activated);
+      const baseLength = messages.length;
       // present_quiz 校验通过后回调：题卡数据上屏（初始全部未作答）
       // Keep every validated visual; the returned references place them in the explanation.
       const executeTool = createResourceExecutor({
+        sessionId,
         signal: abort.signal,
         courseId: videoId,
         editable: canEditMd,
@@ -1432,6 +1432,7 @@ export default function ChatPanel({
         executeTool,
         {
           mcpSessionId: sessionId,
+          onTranscript: out => { rawTurn = out.slice(baseLength); pendingModelText = ''; },
           // Portable intent; the shared adapter handles unsupported/off levels.
           thinkingEffort: thinkingLevel,
           onReasoningDelta: (t) => {
@@ -1457,10 +1458,12 @@ export default function ChatPanel({
             updates.stream({ widgetPreview, hint: '正在生成交互图形…' });
           },
           onDelta: (text) => {
+            pendingModelText += text;
             answer += text;
             updates.stream({ content: answer, hint: undefined, processPhase: 'answering' });
           },
           onRoundStart: () => {
+            pendingModelText = '';
             // 只清检索旁白；已交付的 HTML / 图卡及后续讲解继续保留。
             if (answer.trim()) lastNarration = answer.trim();
             answer = nextVisualRound(answer, widgets.length > 0);
@@ -1510,6 +1513,7 @@ export default function ChatPanel({
           sessionId,
           role: 'assistant',
           content: finalAnswer,
+          modelTrace: traceFor(finalAnswer),
           createdAt: Date.now(),
           reasoning: reasoning || undefined,
           reasoningMs,
@@ -1573,6 +1577,7 @@ export default function ChatPanel({
           role: 'assistant',
           content,
           createdAt: Date.now(),
+          modelTrace: traceFor(content),
           reasoning: reasoning || undefined,
           reasoningMs,
           ...(toolCalls.length > 0 ? { tools: toolCalls } : {}),
@@ -1603,6 +1608,7 @@ export default function ChatPanel({
             role: 'assistant',
             content: partial,
             createdAt: Date.now(),
+            modelTrace: traceFor(partial),
             reasoning: reasoning || undefined,
             reasoningMs,
             ...(toolCalls.length > 0 ? { tools: toolCalls } : {}),
@@ -1707,7 +1713,6 @@ export default function ChatPanel({
         title: `${source.title} · 分支`,
         createdAt: now,
         ...(source.skillIds !== undefined ? { skillIds: [...source.skillIds] } : {}),
-        ...(source.pinnedSkillIds ? { pinnedSkillIds: [...source.pinnedSkillIds] } : {}),
         ...(source.mcpServerIds !== undefined ? { mcpServerIds: [...source.mcpServerIds] } : {}),
       })) as number;
       for (const row of kept) {
@@ -1723,7 +1728,6 @@ export default function ChatPanel({
       title: `${source.title} · 分支`,
       createdAt: now,
       ...(source.skillIds !== undefined ? { skillIds: [...source.skillIds] } : {}),
-      ...(source.pinnedSkillIds ? { pinnedSkillIds: [...source.pinnedSkillIds] } : {}),
       ...(source.mcpServerIds !== undefined ? { mcpServerIds: [...source.mcpServerIds] } : {}),
     }]);
     setActiveId(newId);
@@ -1839,7 +1843,7 @@ export default function ChatPanel({
         {iconBtn('export-session-btn', '导出 .md 文件', <Sym name="download" />, downloadSession, loading || msgs.length === 0)}
         {iconBtn('chat-delete-session', '删除当前会话', <Sym name="delete" />, confirmDeleteSession, loading)}
       </PanelBar>
-      <SkillPicker value={skillIds} onChange={updateSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} pinnedValue={pinnedSkillIds} onPinnedChange={updatePinnedSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={updateMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
+      <SkillPicker value={skillIds} onChange={updateSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={updateMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
       {learningPlugin.dialog}
 
       {/* 消息流：AI 靠左、用户靠右。两种气泡的形状差是 MD3 聊天的标志 ——
@@ -2081,7 +2085,7 @@ export default function ChatPanel({
           <div className="chat-composer__tools">
           <Dropdown isOpen={addOpen} onOpenChange={setAddOpen}>
             <Button isIconOnly variant="tertiary" size="sm" data-testid="panel-chat-add"
-              aria-label="添加截图、讲义、出题、技能范围或调整模型" isDisabled={activeId == null || activeId !== loadedSessionId}>
+              aria-label="添加截图、讲义、出题、技能或调整模型" isDisabled={activeId == null || activeId !== loadedSessionId}>
               <Sym name="add" />
             </Button>
             <Dropdown.Popover placement="top start">
@@ -2115,11 +2119,11 @@ export default function ChatPanel({
                 {isMaterial && <Dropdown.Item id="bank-practice" textValue="开始做原题" data-testid="question-bank-practice"><Sym name="quiz" />开始做原题</Dropdown.Item>}
                 {cloud.enabled && <Dropdown.Item id="review" textValue="错题与复习清单" data-testid="question-bank-review"><Sym name="checklist" />错题与复习清单</Dropdown.Item>}
                 <Dropdown.Item id="handout" textValue="生成讲义" data-testid="handout-prompt"><Sym name="description" />生成讲义</Dropdown.Item>
-                <Dropdown.Item id="skills" textValue={settingsText('mcp.scopeTitle')}><Sym name="extension" />{settingsText('mcp.scopeTitle')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
+                <Dropdown.Item id="skills" textValue={settingsText('skillPicker.title')}><Sym name="extension" />{settingsText('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>
-          {(turnSkillIds.length > 0 || pinnedSkillIds.length > 0) && <Button size="sm" variant="tertiary" data-testid="panel-active-skills" aria-label={settingsText('skillPicker.activationCount', { turn: turnSkillIds.length, pinned: pinnedSkillIds.length })} onPress={() => setSkillsOpen(true)}><Sym name="extension" />{new Set([...turnSkillIds, ...pinnedSkillIds]).size}</Button>}
+          {turnSkillIds.length > 0 && <Button size="sm" variant="tertiary" data-testid="panel-active-skills" aria-label={settingsText('skillPicker.activationCount', { turn: turnSkillIds.length })} onPress={() => setSkillsOpen(true)}><Sym name="extension" />{turnSkillIds.length}</Button>}
           {/* 上文用量环：只留环，不再跟一串 `≈2.1k / 131k` 文字 —— 常驻的估值
               在工具行上太吵（详情在环的弹层里），文字还会把发送键从最右侧挤开。
               环排在发送键**前面**，发送键永远占最右那一格。 */}

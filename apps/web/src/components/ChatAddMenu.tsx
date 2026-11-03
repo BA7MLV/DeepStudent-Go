@@ -33,9 +33,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
   const skillIds = useCourseChat((state) => state.skillIds);
   const setSkillIds = useCourseChat((state) => state.setSkillIds);
   const turnSkillIds = useCourseChat(state => state.turnSkillIds);
-  const pinnedSkillIds = useCourseChat(state => state.pinnedSkillIds);
   const setTurnSkillIds = useCourseChat(state => state.setTurnSkillIds);
-  const setPinnedSkillIds = useCourseChat(state => state.setPinnedSkillIds);
   const mcpServerIds = useCourseChat((state) => state.mcpServerIds);
   const setMcpServerIds = useCourseChat((state) => state.setMcpServerIds);
   const loading = useCourseChat((state) => state.loading);
@@ -103,7 +101,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
             <Dropdown.Item id="images" textValue="上传图片"><Sym name="image" />上传图片</Dropdown.Item>
             <Dropdown.Item id="files" textValue="上传文件"><Sym name="attach_file" />上传文件</Dropdown.Item>
             <Dropdown.Item id="handout" textValue="生成讲义" data-testid="handout-prompt"><Sym name="description" />生成讲义</Dropdown.Item>
-            <Dropdown.Item id="skills" textValue={t('mcp.scopeTitle')}><Sym name="extension" />{t('mcp.scopeTitle')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
+            <Dropdown.Item id="skills" textValue={t('skillPicker.title')}><Sym name="extension" />{t('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
           </Dropdown.Menu>
           <div className="chat-add-menu__model px-2 py-1">
             <ModelPicker slot="chat" field="llmModel" variant="chip" showThinking thinkingDepthDisabled={loading} onClose={() => setAddOpen(false)} />
@@ -113,8 +111,8 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
       <input ref={imageInput} type="file" accept={CHAT_IMAGE_ACCEPT} multiple hidden data-testid="chat-image-input" onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
       <input ref={fileInput} type="file" accept={CHAT_FILE_ACCEPT} multiple hidden data-testid="chat-file-input" onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
     </div>
-    {(turnSkillIds.length > 0 || pinnedSkillIds.length > 0) && <Button size="sm" variant="tertiary" data-testid="chat-active-skills" onPress={() => setSkillsOpen(true)}><Sym name="extension" />{t('skillPicker.activationCount', { turn: turnSkillIds.length, pinned: pinnedSkillIds.length })}</Button>}
-    <SkillPicker value={skillIds} onChange={setSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} pinnedValue={pinnedSkillIds} onPinnedChange={setPinnedSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={setMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
+    {turnSkillIds.length > 0 && <Button size="sm" variant="tertiary" data-testid="chat-active-skills" onPress={() => setSkillsOpen(true)}><Sym name="extension" />{t('skillPicker.activationCount', { turn: turnSkillIds.length })}</Button>}
+    <SkillPicker value={skillIds} onChange={setSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={setMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
     <Modal.Root isOpen={coursesOpen} onOpenChange={setCoursesOpen}>
       <Modal.Backdrop><Modal.Container placement="center" size="md" className={MODAL_CONTAINER_CLASS}>
         <Modal.Dialog data-testid="chat-course-picker">

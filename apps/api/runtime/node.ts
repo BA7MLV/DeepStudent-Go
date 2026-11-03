@@ -6,7 +6,7 @@ import { compareChatRows, nextChatTurnTimes } from '@wangke/study-core/chat-orde
 import { folderCourseScope } from '@wangke/study-core/folder-scope';
 import { CONTINUE_INSTRUCTION, createContinuationFilter } from '@wangke/study-core/continuation';
 import { chatOnce, chatStream, textOf, type ChatMessage, type ChatOptions, type ContentPart, type ToolDef } from '@wangke/study-core/model/client';
-import { modelTrace, replayTrace, messageTokens, runtimeContext, splitSystemPrompt, historyFingerprint } from '@wangke/study-core/model/transcript';
+import { modelTrace, replayTrace, messageTokens, runtimeContext, splitSystemPrompt, historyFingerprint, reconcileSkillMessages } from '@wangke/study-core/model/transcript';
 import { cachePolicy, stableTools } from '@wangke/study-core/model/cache';
 import type { ModelRequestRecord } from '@wangke/study-core/model/usage';
 import type { ModelTarget } from '@wangke/study-core/model/types';
@@ -343,8 +343,10 @@ async function runServerAgent(
     streaming = true;
     let message: ChatMessage;
     try {
+      const requestMessages = reconcileSkillMessages(out);
+      assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, requestMessages, false);
       message = await chatStream(target, {
-        messages: out,
+        messages: requestMessages,
         cacheKey, onRequest,
         tools,
         temperature: 0.3,
@@ -452,7 +454,10 @@ async function runServerAgent(
           const search = parseWebSearchResult(result);
           if (search) { trace.webSearch = search; trace.result = `${search.sources.length} · ${search.provider}`; trace.detail = search.query; }
         }
-        out.push({ role: 'tool', tool_call_id: call.id, name: call.function.name, content: clip(result, 24_000) });
+        // Full Skill instructions must never become a plausible partial policy.
+        // The next request checks the complete body against the context budget.
+        out.push({ role: 'tool', tool_call_id: call.id, name: call.function.name,
+          content: result.startsWith('<skill_content context=') ? result : clip(result, 24_000) });
         report('tool', round + 1, true);
       }
       // Once a visual has been delivered, later tool rounds must not erase the
@@ -477,8 +482,10 @@ async function runServerAgent(
   answer = '';
   streaming = true;
   let final: ChatMessage;
+  const finalMessages = reconcileSkillMessages(out);
+  assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, finalMessages, false);
   try {
-    final = await chatStream(target, { messages: out, cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, max_tokens: 4096, signal: context.signal, thinkingLevel },
+    final = await chatStream(target, { messages: finalMessages, cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, max_tokens: 4096, signal: context.signal, thinkingLevel },
       delta => { answer += delta; report('answer', maxRounds + 1); },
       delta => { reasoning += delta; report('thinking', maxRounds + 1); },
       undefined,
@@ -717,13 +724,13 @@ async function qa(context: TaskContext) {
   const images = safeImageParts(input.images);
   const current: ChatMessage = images.length ? { role: 'user', content: [...images, { type: 'text', text: currentText }] } : { role: 'user', content: currentText };
   const recent = await modelHistory(history, session, skillHistoryBudget(target.capabilities?.contextWindow ?? 131072, [{ role: 'system', content: system }, current], skills.messages));
-  const messages: ChatMessage[] = [...splitSystemPrompt(system), ...recent.messages, ...skills.messages, current];
+  const messages: ChatMessage[] = skills.reconcile([...splitSystemPrompt(system), ...recent.messages, ...skills.messages, current]);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, messages, skills.messages.length > 0);
   const title = session.title === '新会话' ? text.slice(0, 18) || '新会话' : undefined;
   let checkpointed = false;
   const persist = (result: ServerAgentResult, interrupted = true) => {
     const assistantRow = { id: assistantId, videoId, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
-    addConversationMutations(context, sessionId, { ...userRow, modelTrace: modelTrace(userRow.content, [current]), modelRequests: result.requests }, assistantRow, { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed);
+    addConversationMutations(context, sessionId, { ...userRow, modelTrace: modelTrace(userRow.content, [...skills.messages, current]), modelRequests: result.requests }, assistantRow, { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed);
     checkpointed = true;
     result.widgets = assistantRow.widgets ?? [];
     return { rowId: assistantId, userRowId: userId, ...widgetFields(result) };
@@ -754,14 +761,14 @@ async function chat(context: TaskContext) {
   const systemWithSkills = system + skills.prompt;
   const target = targetFor(context);
   const recent = await modelHistory(history, session, skillHistoryBudget(target.capabilities?.contextWindow ?? 131072, [{ role: 'system', content: systemWithSkills }, current], skills.messages));
-  const messages: ChatMessage[] = [{ role: 'system', content: systemWithSkills }, ...recent.messages, ...skills.messages, current];
+  const messages: ChatMessage[] = skills.reconcile([{ role: 'system', content: systemWithSkills }, ...recent.messages, ...skills.messages, current]);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, messages, skills.messages.length > 0);
   const userId = newRecordId();
   const assistantId = newRecordId();
   const title = session.title === '新会话' ? text.slice(0, 18) || '新会话' : undefined;
   let checkpointed = false;
   const persist = (result: ServerAgentResult, interrupted = true) => {
-    const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, modelTrace: modelTrace(text, [current]), modelRequests: result.requests, createdAt: startedAt };
+    const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, modelTrace: modelTrace(text, [...skills.messages, current]), modelRequests: result.requests, createdAt: startedAt };
     const assistantRow = { id: assistantId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
     addConversationMutations(context, sessionId, userRow, assistantRow, { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed);
     checkpointed = true;
@@ -792,7 +799,7 @@ async function continueChat(context: TaskContext) {
   const target = targetFor(context);
   const recent = await modelHistory(history.slice(0, index + 1), session, skillHistoryBudget(target.capabilities?.contextWindow ?? 131072, [], skills.messages));
   const instruction: ChatMessage = { role: 'user', content: CONTINUE_INSTRUCTION };
-  const messages: ChatMessage[] = [{ role: 'system', content: '你是学习助手。用户要求接着原回答继续写，不要重复已有内容，不调用工具。' }, ...recent.messages, ...skills.messages, instruction];
+  const messages: ChatMessage[] = skills.reconcile([{ role: 'system', content: '你是学习助手。用户要求接着原回答继续写，不要重复已有内容，不调用工具。' }, ...recent.messages, ...skills.messages, instruction]);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, messages, skills.messages.length > 0);
   const priorTrace = replayTrace(original as { content: string }) ?? [{ role: 'assistant' as const, content: original.content }];
   const filter = createContinuationFilter(original.content);

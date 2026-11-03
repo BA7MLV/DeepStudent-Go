@@ -188,5 +188,38 @@ try {
   const disabledCounter = files.read(owner, m.path);
   files.save(owner, m.path, JSON.stringify(manifest), disabledCounter.content, disabledCounter.revision);
   assert.equal(files.plugin(owner, 'dependent').id, 'dependent', 'restoring a dependency recovers the package without changing its own manifest');
+  // Sidebar navigation is an explicit reference to a validated app.page placement,
+  // shared by HTTP, Bot and native Chat rather than a browser-only bookmark.
+  const navigationBefore = files.layout(owner), navigationLayout = JSON.parse(navigationBefore.content);
+  navigationLayout.placements.push({ id: 'page-second', instanceId: 'one', pluginId: 'counter', viewId: 'list', surface: 'app.page', scope: { kind: 'account' }, order: 0 });
+  navigationLayout.navigation = [{ id: 'sidebar-counter', placementId: 'page-second', title: '我的计数', order: 0 }];
+  assert.equal((await api('/plugins/tool', { operation: 'configure', content: JSON.stringify(navigationLayout), expected: navigationBefore.content, revision: navigationBefore.revision })).statusCode, 200);
+  assert.deepEqual(JSON.parse((await api('/plugins')).json().layout.content).navigation, navigationLayout.navigation);
+  assert.equal((await api('/plugins/layout', { content: navigationBefore.content, expected: navigationBefore.content, revision: navigationBefore.revision })).statusCode, 409);
+  assert.throws(() => parsePluginLayout({ ...navigationLayout, navigation: [{ id: 'bad-nav', placementId: 'mount-0', order: 0 }] }), /invalid_plugin_layout/, 'only page placements can be pinned');
+  assert.throws(() => parsePluginLayout({ ...navigationLayout, navigation: [{ id: 'bad-nav', placementId: 'missing', order: 0 }] }), /invalid_plugin_layout/);
+  assert.throws(() => parsePluginLayout({ ...navigationLayout, navigation: [...navigationLayout.navigation, ...navigationLayout.navigation] }), /invalid_plugin_layout/);
+  const navService = new PluginService(store, undefined, undefined, { filesDir: process.env.FILES_DIR });
+  try {
+    const native = { owner, pluginService: navService, configuration: { taskPolicy: () => ({ read: 'allow', write: 'allow' }) }, task: { id: 'native-navigation' }, checkActive() {} };
+    const document = navService.tool(owner, { operation: 'layout' });
+    const renamed = JSON.parse(document.content); renamed.navigation[0].title = '原生聊天改名';
+    await executePluginsTool(native, { operation: 'configure', content: JSON.stringify(renamed), expected: document.content, revision: document.revision });
+    const botDocument = await pluginTool(navService).execute({ operation: 'layout' }, context);
+    const botLayout = JSON.parse(botDocument.content); assert.equal(botLayout.navigation[0].title, '原生聊天改名');
+    botLayout.navigation[0].title = 'Bot 改名';
+    await pluginTool(navService).execute({ operation: 'configure', content: JSON.stringify(botLayout), expected: botDocument.content, revision: botDocument.revision }, context);
+    assert.equal(JSON.parse(files.layout(owner).content).navigation[0].title, 'Bot 改名');
+    assert.equal(JSON.parse(files.layout(other).content).navigation?.length ?? 0, 0, 'navigation remains owner-scoped');
+  } finally { await navService.close(); }
+  parsePluginManifest({ ...manifest, views: { list: { ...manifest.views.list, title: '概览', description: '查看计数' } } }, 'counter');
+  assert.throws(() => parsePluginManifest({ ...manifest, views: { list: { ...manifest.views.list, title: '' } } }, 'counter'));
+  const independentBefore = files.layout(owner), independentLayout = JSON.parse(independentBefore.content);
+  independentLayout.instances.push({ id: 'independent-todo', pluginId: 'todo', scope: { kind: 'account' }, title: '单独待办' });
+  files.save(owner, independentBefore.path, JSON.stringify(independentLayout), independentBefore.content, independentBefore.revision);
+  const liveTodo = files.readState(owner, 'todo', 'legacy-todo', 'state');
+  files.writeState(owner, 'todo', 'legacy-todo', 'state', { items: [{ id: 'private', title: '只属于原内容', done: false }] }, liveTodo.content, liveTodo.revision);
+  assert.deepEqual(JSON.parse(files.readState(owner, 'todo', 'independent-todo', 'state').content), { items: [] }, 'new v1 content uses static defaults, not live legacy state');
+  assert.equal(JSON.parse(files.readState(owner, 'todo', 'legacy-todo', 'state').content).items[0].title, '只属于原内容', 'legacy user content stays untouched');
   console.log('Plugin platform passed: disposable lifecycle and real package dependencies, v2 nested files, unified HTTP/Bot/native plugin tools and policy guards, v1 state alias, origin/CAS, three placements, isolated instances, hide/remount persistence, installable templates and durable Bot nonce recovery.');
 } finally { await app.close(); store?.close(); fs.rmSync(directory, { recursive: true, force: true }); }

@@ -46,14 +46,11 @@ try {
     assert.equal(await page.getByTestId('chat-stop').count(), 1);
     await page.locator('textarea').fill('补充一个问题');
     await page.getByTestId('chat-send').waitFor();
-    await page.getByTestId('chat-delivery-bar').waitFor();
+    assert.equal(await page.getByTestId('chat-delivery-bar').count(), 0);
     assert.equal(await page.getByTestId('chat-stop').count(), 0);
     assert.equal(await page.getByTestId('chat-send').isEnabled(), true);
-    await page.getByTestId('chat-send-mode-steer').click();
-    assert.equal(await page.getByTestId('chat-delivery-bar').getAttribute('data-mode'), 'steer');
-    assert.match(await page.locator('.course-chat__send-hint').textContent(), /停止当前回复/);
-    const selected = page.getByTestId('chat-send-mode-steer');
-    assert.equal(await selected.getAttribute('aria-checked'), 'true');
+    assert.equal(await page.getByTestId('chat-send-mode-steer').count(), 0);
+    assert.equal(await page.locator('.course-chat__send-hint').count(), 0);
     const nav = page.locator('[data-testid="nav-rail-open"], [data-testid="nav-rail-toggle"]');
     const styles = await nav.evaluate((el) => {
       const css = getComputedStyle(el);

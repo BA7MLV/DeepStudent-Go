@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-// E2E：流式期间的输入 —— 排队 / 插入 / 模式切换 / 排队条 / 黑圆点尾巴 / 停止键。
+// E2E：流式期间的输入 —— 默认排队 / 手动插入 / 排队条 / 黑圆点尾巴 / 停止键。
 //
 // 背景：这一版之前，生成中输入框是禁用的、发送键被停止键顶掉，想补一句话只能先按停止，
 // 而停止会把已经写了一半的回答作废。现在输入全程可用，投递分两条路（排队 / 插入），
@@ -10,11 +10,11 @@
 // 不依赖 SF_KEY、不花 API。「慢流」用 delayMs 拖出可操作的窗口。
 //
 // 覆盖点：
-//   1. 生成中输入框**可打**、发送键**可用**、停止键与之并存（旧行为三者全反）
+//   1. 生成中输入框可打；有草稿显示发送，空草稿显示停止
 //   2. 流式尾巴是**黑色圆点**（不是默认 ▋）：圆形、深色、闪烁、写完即消失
 //   3. Enter 排队：进排队条、本轮不发；本轮一结束自动续发（含落库）
-//   4. Ctrl/⌘+Enter 插入：立刻打断本轮，旧回答标中断原因，新提问随即发出
-//   5. 工具行「排队 / 插入」切换：切到插入后 Enter 即插入
+//   4. 手动点击待发消息的插入按钮：打断本轮、保留半截、新提问随即发出
+//   5. 不显示投递方式栏；Ctrl/⌘+Enter 也只排队，不意外打断
 //   6. 排队条四操作：编辑 / 删除 / 清空 / 立刻插入（闪电键）
 //   7. 停止键：半截保留 + 「已停止生成」；**停止后队列照样续发**（Claude Code 语义）
 //
@@ -197,7 +197,7 @@ const typeInComposer = async (t) => {
   await field.fill(t);
 };
 
-/** 打一句并按回车投递。`modifier` 传 'Control' 即 Ctrl+Enter（走另一种投递方式） */
+/** 打一句并按回车投递；带 Ctrl/⌘ 的回车同样默认排队。 */
 const submit = async (t, modifier) => {
   await typeInComposer(t);
   await composer().press(modifier ? `${modifier}+Enter` : 'Enter');
@@ -209,7 +209,15 @@ const lastAssistantText = async () => {
   return els.last().innerText();
 };
 
-const userMessageCount = async () => page.locator('.course-chat__message--user').count();
+// 消息列表已虚拟化，DOM 数量不是消息总数；以落库的用户消息计数。
+const userMessageCount = () => dbHelper(async (idb) => {
+  const rows = await new Promise((resolve, reject) => {
+    const query = idb.transaction('chats', 'readonly').objectStore('chats').getAll();
+    query.onsuccess = () => resolve(query.result);
+    query.onerror = () => reject(query.error);
+  });
+  return rows.filter((row) => row.role === 'user').length;
+});
 
 const llmCalls = async () => page.evaluate(() => window.__LLM__.calls);
 
@@ -270,7 +278,7 @@ const isDarkColor = (css) => {
   return null;
 };
 
-// ── ① 生成中的三件套：输入框可打 / 黑圆点 / 发送与停止并存 ──────────────────
+// ── ① 生成中输入可用，发送与停止按草稿切换 ──────────────────────────────────
 await reset();
 // 慢流：3 块 × 600ms ≈ 1.8s。这一轮必须**活过** ①②③ 三组断言
 // （组内是十几次 DOM 往返，约几百毫秒到 1 秒）—— 提前结束的话，③ 的「排队」
@@ -278,7 +286,7 @@ await reset();
 await pushSteps([{ chunks: [{ content: '正在' }, { content: '生成' }, { content: '中的回答' }], delayMs: 600 }]);
 await submit('第一个问题');
 
-await check('① 生成中输入框可打、发送键可用、停止键并存（旧行为三者全反）', async () => {
+await check('① 生成中输入可用：有草稿显示发送，空草稿显示停止', async () => {
   const field = composer();
   await field.waitFor({ timeout: 10000 });
   // 等它真的开始吐字再断言（发送那一刻 loading 已置位，但内容可能还没到）
@@ -289,12 +297,13 @@ await check('① 生成中输入框可打、发送键可用、停止键并存（
   assert.equal(
     await page.locator('[data-testid="chat-send"]').isDisabled(),
     false,
-    '有草稿时发送键在生成中也该可用（它按当前模式投递，不是坏按钮）',
+    '有草稿时发送键在生成中也该可用',
   );
-  assert.equal(await page.locator('[data-testid="chat-stop"]').count(), 1, '停止键该在');
-  // 空草稿时发送键仍禁用（没话可发）
+  assert.equal(await page.locator('[data-testid="chat-stop"]').count(), 0, '有草稿显示发送而不是停止');
+  // 空草稿时操作位切回停止。
   await field.fill('');
-  assert.equal(await page.locator('[data-testid="chat-send"]').isDisabled(), true, '空草稿发送键应当禁用');
+  await page.getByTestId('chat-stop').waitFor();
+  assert.equal(await page.getByTestId('chat-send').count(), 0, '空草稿不显示发送键');
   // 按键提示不再占用输入区底部
   assert.equal(await page.locator('[data-testid="chat-composer-note"]').count(), 0, '输入区底部不应显示提示行');
 });
@@ -309,7 +318,7 @@ await check('② 流式尾巴是黑色圆点：圆形、深色、闪烁、跟着
   });
   assert.equal(style.radius, '50%', `圆点要是圆形，实际 border-radius=${style.radius}`);
   assert.ok(Math.abs(style.w - style.h) < 0.6 && style.w > 2, `圆点要正且别太小：${style.w}×${style.h}`);
-  assert.equal(style.anim, 'course-chat-dot-blink', `圆点该有闪烁动画，实际 animation-name=${style.anim}`);
+  assert.equal(style.anim, 'course-chat-dot-breathe', `圆点该有呼吸动画，实际 animation-name=${style.anim}`);
   // 「黑色」：与正文同色（--foreground），且确实是深色（浅色主题下即黑）
   const textColor = await page
     .locator('.course-chat__bubble--ai')
@@ -384,12 +393,12 @@ await check('③ Enter 排队：进排队条、本轮不发；答完自动续发
   assert.ok(rows.some((r) => r === 'user:排队第一句'), `库里该有排队那句，实际：${rows.join(' | ')}`);
 });
 
-// ── ④ Ctrl+Enter 插入：立刻打断本轮 ────────────────────────────────────────
-await check('④ Ctrl+Enter 插入：打断本轮、旧回答标原因、新提问随即发出', async () => {
+// ── ④ 手动插入：立刻打断本轮 ──────────────────────────────────────────────
+await check('④ 手动插入：打断本轮、旧回答标原因、新提问随即发出', async () => {
   await waitIdle();
   // 先给「插入后新开的那一轮」备好答案（插入是打断后立刻重发，请求马上就来）
   await pushSteps([
-    { chunks: [{ content: '慢慢' }, { content: '说' }], delayMs: 500 },
+    { chunks: [{ content: '慢慢' }, { content: '说' }], delayMs: 3000 },
     { chunks: [{ content: '插入后的新回答' }] },
   ]);
   await submit('第三个问题');
@@ -398,7 +407,10 @@ await check('④ Ctrl+Enter 插入：打断本轮、旧回答标原因、新提�
   // 基准取在**插入前一刻**：这一轮自己的提问已经把计数 +1 了，再拿更早的基准
   // 等 +1，会在 steer 把计数推到 +2 之后永远等不到（时序竞态，实测红过）
   const usersBeforeSteer = await userMessageCount();
-  await submit('插入这句', 'Control');
+  await submit('插入这句');
+  await page.getByTestId('chat-queue-send-now').first().waitFor();
+  assert.equal(await userMessageCount(), usersBeforeSteer, '排队本身不打断');
+  await page.getByTestId('chat-queue-send-now').first().click();
 
   // 新提问立刻上屏（不等本轮答完）
   await waitFor(async () => (await userMessageCount()) === usersBeforeSteer + 1, {
@@ -419,60 +431,38 @@ await check('④ Ctrl+Enter 插入：打断本轮、旧回答标原因、新提�
   await waitFor(async () => (await lastAssistantText()).includes('插入后的新回答'), { label: '④新回答流入' });
 });
 
-// ── ⑤ 模式切换钮：切到插入后 Enter 即插入 ──────────────────────────────────
-await check('⑤ 「排队 / 插入」切换：切到插入，Enter 就是插入', async () => {
+// ── ⑤ 默认排队：无模式栏，修饰键不触发插入 ────────────────────────────────
+await check('⑤ 不显示模式栏；Ctrl/⌘+Enter 只排队，不打断本轮', async () => {
   await waitIdle();
   await pushSteps([
-    { chunks: [{ content: '切换' }, { content: '模式' }], delayMs: 500 },
-    { chunks: [{ content: '插入模式下的回答' }] },
+    { chunks: [{ content: '继续' }, { content: '完成当前回答' }], delayMs: 1500 },
+    { chunks: [{ content: 'Ctrl 排队的回答' }] },
+    { chunks: [{ content: 'Meta 排队的回答' }] },
   ]);
   await submit('第四个问题');
-  await waitFor(async () => (await lastAssistantText()).includes('切换'), { label: '⑤慢流首块' });
-
-  // 默认是排队（选中态在排队那颗上）
-  assert.equal(
-    await page.locator('[data-testid="chat-send-mode-queue"]').getAttribute('data-selected'),
-    'true',
-    '默认模式该是排队',
-  );
-  await page.locator('[data-testid="chat-send-mode-steer"]').click();
-  assert.equal(
-    await page.locator('[data-testid="chat-send-mode-steer"]').getAttribute('data-selected'),
-    'true',
-    '点过之后选中该移到插入',
-  );
-
-  // 现在按 Enter = 插入（不再需要 Ctrl）：旧轮被打断、新提问立刻发出
+  await waitFor(async () => (await lastAssistantText()).includes('继续'), { label: '⑤慢流首块' });
+  assert.equal(await page.getByTestId('chat-delivery-bar').count(), 0);
+  assert.equal(await page.getByTestId('chat-send-mode-queue').count(), 0);
+  assert.equal(await page.getByTestId('chat-send-mode-steer').count(), 0);
   const usersBefore = await userMessageCount();
-  await submit('按插入模式发送');
-  await waitFor(async () => (await userMessageCount()) === usersBefore + 1, {
-    timeout: 8000,
-    label: '⑤插入后新 user',
-  });
-  await waitFor(async () => (await page.locator('[data-testid="chat-interrupted"]').count()) > 0, {
-    timeout: 8000,
-    label: '⑤中断条出现',
-  });
-  await waitFor(async () => (await lastAssistantText()).includes('插入模式下的回答'), { label: '⑤插入模式回答' });
+  const callsBefore = await llmCalls();
+  await submit('Ctrl 排队', 'Control');
+  await submit('Meta 排队', 'Meta');
+  assert.equal(await page.getByTestId('chat-queue-item').count(), 2);
+  assert.equal(await userMessageCount(), usersBefore);
+  assert.equal(await llmCalls(), callsBefore, '未手动插入不能提前发出');
+  await waitFor(async () => (await lastAssistantText()).includes('Meta 排队的回答'), { label: '⑤队列依次续发' });
 });
 
 // ── ⑥ 排队条四操作 ─────────────────────────────────────────────────────────
 await check('⑥ 排队条：编辑 / 删除 / 清空 / 立刻插入', async () => {
   await waitIdle();
   await pushSteps([
-    { chunks: [{ content: '队列' }, { content: '操作' }], delayMs: 500 },
+    { chunks: [{ content: '队列' }, { content: '操作' }], delayMs: 5000 },
     { chunks: [{ content: '立刻插入的回答' }] },
   ]);
   await submit('第五个问题');
   await waitFor(async () => (await lastAssistantText()).includes('队列'), { label: '⑥慢流首块' });
-  // 把模式切回排队：⑤ 把它留在插入档上，而模式钮**只在生成中渲染** ——
-  // 空闲时点不到（会干等 30s 超时），所以趁这一轮还在吐字时点。
-  await page.locator('[data-testid="chat-send-mode-queue"]').click();
-  assert.equal(
-    await page.locator('[data-testid="chat-send-mode-queue"]').getAttribute('data-selected'),
-    'true',
-    '该切回排队模式',
-  );
 
   // 编辑：改掉排队中的文字（改成空白 = 删掉，见 store 的 updateQueued）
   await submit('待编辑');

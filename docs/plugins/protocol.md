@@ -6,14 +6,14 @@
 
 - 包：`/system/plugins/<id>/manifest.json`，`apiVersion:2`，唯一 slug ID、名称、版本、enabled、capabilities、views。
 - HTML 视图：`views/<name>.html`，支持受校验的嵌套目录；仅内联脚本/CSS，禁止网络、宿主 DOM、任意文件读取。
-- `defaults.json`：可选初始 JSON 状态。视图独立声明 surfaces 和 height。
-- 布局：`/system/plugin-layout.json`，含 `instances`、`placements` 和可选 `sources`。同 ID v1/v2 冲突时须显式选用来源。
+- `defaults.json`：可选初始 JSON 状态。视图独立声明 surfaces 和 height，可选 `title/description` 用于可读展示方式；旧包未声明时使用功能名与展示方式序号，不暴露内部 view ID。
+- 布局：`/system/plugin-layout.json`，含 `instances`、`placements` 和可选 `sources/navigation`。同 ID v1/v2 冲突时须显式选用来源。
 - 实例状态：`/system/plugin-data/<pluginId>/instances/<instanceId>/state.json`。布局保存引用，不包含学习领域数据。
 - 范围：账户、项目、资料。项目使用权威 ProjectRepository.writable 验证 owner、归档与回收站；资料使用原 CloudRecords 与 resource_files 映射，并检查原项目文件可用性。不接受客户端 ID 作为授权依据。
 
 项目实例仅可挂在同项目或其资料范围，不能挂到账户默认或其他项目；资料实例不能挂到另一资料/不相关项目。不可用实例保留数据但禁止 RPC 和执行，布局只允许原样保留或移除旧行，不允许新增不可用范围。恢复项目后原实例恢复。
 
-`GET /plugins` 及 `plugins list` 返回宿主解析的 `scopes`（projects/materialProjects/projectFolders/unavailableInstances）。看板与插件总页通过 URL 的 `project` 显式选择项目；Chat 使用当前选择的资源项目，reader/资源动作由资料映射推导，不将项目自动挂到所有账户页面。独立实例页与历史消息使用已验证实例的范围。`resolvePluginPlacements` 按 surface + pluginId/viewId 执行资料 → 项目 → 账户替换，同层显式排序。
+`GET /plugins` 及 `plugins list` 返回宿主解析的 `scopes`（projects/materialProjects/projectFolders/unavailableInstances，以及可读 materials 名称）。看板与插件总页通过 URL 的 `project` 显式选择项目；Chat 使用当前选择的资源项目，reader/资源动作由资料映射推导，不将项目自动挂到所有账户页面。独立实例页与历史消息使用已验证实例的范围。`resolvePluginPlacements` 按 surface + pluginId/viewId 执行资料 → 项目 → 账户替换，同层显式排序。
 
 项目学习动作仅列出和操作项目内资料；任务、Bot thread 选择及持久调度同样检查范围，归档/回收站后调度停止派发。上下文 revision 包含项目/资料，内置视图切换时重建，旧动作仍绑定原实例与资源。
 
@@ -21,7 +21,21 @@
 
 ## v1 兼容
 
-`/system/board/plugins/<id>` 注册为 `default` 视图。`legacy-<id>` 默认实例直接读取原 state/schedules 文件，不复制、不迁移历史数据。新增 v1 包自动导入一次；隐藏入口不自动恢复。自定义 v1 实例建立独立状态，以创建时的原包状态为初始快照（不是清空用户包中未知结构）。原目录包的修改/删除规则保持不变。
+`/system/board/plugins/<id>` 注册为 `default` 视图。`legacy-<id>` 默认实例直接读取原 state/schedules 文件，不复制、不迁移历史数据。新增 v1 包自动导入一次；隐藏入口不自动恢复。自定义 v1 实例建立独立状态，只读可选独立 `defaults.json`（未提供时 `{}`）；绝不将原包的**实时用户 state.json**复制为新内容。此调整不清空或迁移任何已存在实例。原目录包的修改/删除规则保持不变。
+
+## 侧边栏导航
+
+```json
+{
+  "navigation": [{ "id": "my-page", "placementId": "page-placement", "title": "每日计划", "order": 0 }]
+}
+```
+
+`navigation` 是可选数组（最多 100 项），每项有唯一内部 id、引用 app.page 挂载的 placementId、可选可读 title 和整数 order。不能引用缺失/非页面挂载；新建或改变入口时服务端验证包、具体视图及项目/资料范围。无 navigation 的旧布局照常读取，不自动固定全部实例。
+
+完整 URL：`/plugins/:instanceId?view=<viewId>&placement=<placementId>`。显式请求的 view/placement 不存在或不可用时不回退另一个视图。旧的无 view URL 仍可打开该包默认完整页，但新增导航始终使用明确视图。导航固定到所选挂载和实例的宿主上下文，不继承当前聊天的其他项目。名称/顺序/移除通过创造模式调用原布局工具，仅更新配置；移除 navigation 引用不删除数据，不再提供页面固定/管理向导。
+
+使用 `plugins layout/configure` 即可由 Chat/Bot/HTTP 写入相同导航；保存仍需原文与 revision CAS。导航复用全局目录订阅，不为每个入口加载 React/HTML 视图或增加轮询。账户退出/切换同步清空旧快照并拒绝迟到结果。
 
 `window.board` 继续可用；`window.plugin` 增加以下接口：
 
@@ -34,7 +48,7 @@ await plugin.draft.write({ search: '未提交文本' });
 const draft = await plugin.draft.read();
 ```
 
-生命周期事件：mount、contextChanged、visibilityChanged、dispose。主题首帧注入并实时同步；容器宽度按 iframe 实际尺寸提供。上下文含 revision，异步操作必须捕获原 resourceId，不把旧结果写入新资料。
+生命周期事件：mount、contextChanged、visibilityChanged、dispose。沙盒按包来源、实例、挂载与精确 view 隔离，切换身份重新挂载，不复用上一份内容的画面。主题首帧注入并实时同步；容器宽度按 iframe 实际尺寸提供，同身份内不因主题、尺寸或无关布局变化重建。上下文含 revision，异步操作必须捕获原 resourceId，不把旧结果写入新资料。
 
 任务接口沿用 `tasks.start/get/watch/wait/open/cancel`。服务端重新校验账户、实例、包修订及能力；watch/wait 只是页面订阅。服务端调度以实例为单位，而不是以挂载为单位。插件停用仅停止新调度，已运行任务按自己的状态完成。
 

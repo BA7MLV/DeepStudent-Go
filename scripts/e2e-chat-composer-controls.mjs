@@ -33,18 +33,11 @@ try {
       const { useCourseChat } = await import('/src/store/courseChat.ts');
       useCourseChat.setState({ loading: true });
     });
-    for (const id of ['chat-send-mode-queue', 'chat-send-mode-steer']) {
-      const control = page.getByTestId(id);
-      await control.waitFor();
-      assert.equal(await control.evaluate((el) => !!el.closest('.course-chat__composer')), false);
-      assert.equal(await control.evaluate((el) => !!el.closest('.course-chat__delivery-bar')), true);
-      const bounds = await control.boundingBox();
-      const composer = await page.locator('.course-chat__composer').boundingBox();
-      assert(bounds.y + bounds.height <= composer.y, 'Delivery controls sit above the input card');
+    await send.waitFor();
+    for (const id of ['chat-delivery-bar', 'chat-send-mode-queue', 'chat-send-mode-steer']) {
+      assert.equal(await page.getByTestId(id).count(), 0);
     }
-    await page.getByTestId('chat-send-mode-steer').click();
-    await page.getByRole('status').filter({ hasText: '发送后立即打断' }).waitFor();
-    assert.equal(await page.locator('.course-chat__send-hint').evaluate((el) => !!el.closest('.course-chat__composer')), false);
+    assert.equal(await page.locator('.course-chat__send-hint').count(), 0);
     assert.equal((await send.boundingBox()).x, before.send.x);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.evaluate(async () => {

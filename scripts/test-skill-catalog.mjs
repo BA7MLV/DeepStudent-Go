@@ -6,6 +6,8 @@ import { createServer } from 'vite';
 // Exercise production TS/raw imports against a process-local, disposable database.
 // Never use a browser database, persisted settings, or a real model endpoint.
 const originalFetch = globalThis.fetch;
+const originalWindow = globalThis.window;
+globalThis.window = Object.assign(new EventTarget(), { localStorage: { getItem: () => null, setItem() {}, removeItem() {} } });
 let fetchAttempts = 0;
 globalThis.fetch = async () => {
   fetchAttempts++;
@@ -54,10 +56,10 @@ try {
   await db.videos.add({ id: 'catalog-course', name: '集成回归课程', createdAt: 1, skillOverride: override });
   const customId = await db.skills.add({ name: '用户专用技能', description: 'custom', body: 'CUSTOM_BODY', enabled: 1, builtin: 0, updatedAt: 1 });
 
-  await check('five chat entries, six legacy specifications and five on-demand handout refs', async () => {
-    assert.equal(BUILTIN_SKILLS.length, 5);
+  await check('six chat entries, six legacy specifications and five on-demand handout refs', async () => {
+    assert.equal(BUILTIN_SKILLS.length, 6);
     assert.equal(LEGACY_HANDOUT_SKILLS.length, 6);
-    assert.equal(new Set(specs.map((s) => s.name)).size, 11);
+    assert.equal(new Set(specs.map((s) => s.name)).size, 12);
     assert.deepEqual(handoutSpec.refs.map((r) => r.path).sort(), expectedRefs);
     assert.ok(handoutSpec.refs.every((r) => r.body.trim().length > 0));
     assert.match(handoutSpec.body, /Markdown/);
@@ -68,7 +70,7 @@ try {
     await Promise.all(Array.from({ length: 12 }, () => ensureBuiltinSkills()));
     await ensureBuiltinSkills();
     const rows = await db.skills.toArray();
-    assert.equal(rows.filter((s) => s.builtin).length, 11);
+    assert.equal(rows.filter((s) => s.builtin).length, 12);
     for (const [index, spec] of LEGACY_HANDOUT_SKILLS.entries()) {
       const row = await db.skills.get(oldIds[index]);
       assert.equal(row.name, spec.name);
@@ -138,7 +140,7 @@ try {
       const output = await read('read', { path: skillPath(spec.name) });
       assert.ok(output.includes(handoutSpec.body), `${spec.name}: must return canonical Markdown body, not old IR`);
       assert.ok(!output.includes(spec.body), `${spec.name}: old IR body leaked`);
-      assert.deepEqual(output.split('\n').filter((line) => line.startsWith('- /skills/')).sort(), handoutSpec.refs.map((ref) => `- ${refPath(handout.name, ref.path)}`).sort());
+      assert.deepEqual(output.split('\n').filter((line) => /^(?:- )?\/skills\//.test(line)).map(line => line.replace(/^- /, '')).sort(), handoutSpec.refs.map((ref) => refPath(handout.name, ref.path)).sort());
       for (const ref of handoutSpec.refs) assert.equal(await read('read', { path: refPath(handout.name, ref.path) }), ref.body);
     }
     assert.match(await read('read', { path: skillPath(LEGACY_HANDOUT_SKILLS[1].name) }), /未找到已启用/);
@@ -226,6 +228,7 @@ try {
   if (db) await db.delete();
   await server.close();
   globalThis.fetch = originalFetch;
+  globalThis.window = originalWindow;
 }
 console.log(`Skill catalog integration: ${passed} passed, ${failures} failed; ${fetchAttempts} network attempts blocked; fake IndexedDB deleted.`);
 if (failures) process.exitCode = 1;

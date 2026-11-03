@@ -355,6 +355,8 @@ export interface ToolExecutorOptions {
    * 与元数据、资源目录统一使用 loadSessionSkillMeta，包含已合并的历史 ID。
    */
   allowedSkillIds?: number[];
+  /** Live MCP scope when a skill is actually activated, never for discovery. */
+  sessionId?: number;
 }
 
 /** 构造绑定到某个课程的工具执行器；`kind` 决定走字幕检索还是材料检索 */
@@ -432,6 +434,8 @@ export function createToolExecutor(courseId: string, opts: ToolExecutorOptions =
         return `技能「${skillName}」不在本次会话的可选技能范围内。请改用系统提示词中列出的技能，或直接依据课程内容回答。`;
       }
       if (name === 'read_skill_reference') {
+        const { assertSkillDependencies } = await import('../skills/activation');
+        await assertSkillDependencies([skill], opts.sessionId);
         let path = String(args.path ?? '');
         if (merged) {
           // 只兼容真实存在的旧参考路径，不把任意拼错的路径当成成功读取。
@@ -442,13 +446,10 @@ export function createToolExecutor(courseId: string, opts: ToolExecutorOptions =
         const ref = await db.skillRefs.where('skillId').equals(skill.id!).filter((r) => r.path === path).first();
         return ref?.body ?? `技能「${skill.name}」下未找到参考文档：${path}`;
       }
-      const refs = await db.skillRefs.where('skillId').equals(skill.id!).toArray();
-      const refList =
-        refs.length > 0
-          ? `\n\n该技能附带的参考文档（用 read 读取以下完整路径）：\n${refs.map((r) => `- /skills/${encodeURIComponent(skill.name)}/references/${r.path.split('/').map(encodeURIComponent).join('/')}`).join('\n')}`
-          : '';
+      const { activateSkills } = await import('../skills/activation');
+      const activated = await activateSkills([skill.id!], allowedSkillIds, opts.sessionId);
       const notice = merged ? `「${skillName}」已并入「${skill.name}」。本次按需读取 ${LEGACY_HANDOUT_TOPICS[skillName]}，遵循下方 Markdown 流程。\n\n` : '';
-      return notice + skill.body + refList;
+      return notice + activated.contents.join('\n\n');
     }
     if (name === 'present_quiz') {
       await (await import('../plugins/availability')).assertPluginAvailable('practice');

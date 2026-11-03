@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { assertCreationHint, changePlugin, pluginTool } from './plugin-tools.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -39,9 +40,8 @@ try {
   files.save(owner, before.path, JSON.stringify(layout), before.content, before.revision);
   page = await context.newPage(); await page.goto(`${origin}/#/board`);
   await page.getByTestId('board-plugin-flashcards').getByText('停用后仍保留的历史卡片', { exact: true }).waitFor({ timeout: 30000 });
-  const manager = page.locator('.plugin-manager');
-  const openManager = async () => { await manager.waitFor(); if (!await manager.evaluate(e => e.open)) await manager.locator('summary').first().click(); const packages = manager.locator('details'); if (!await packages.evaluate(e => e.open)) await packages.locator('summary').click(); };
-  const change = async (id, action) => { await openManager(); const row = manager.locator(`[data-plugin-package$=":${id}"]`); const [response] = await Promise.all([page.waitForResponse(r => r.url().endsWith(`/plugins/${id}/lifecycle`)), row.getByRole('button', { name: action, exact: true }).click()]); assert.equal(response.status(), 200, `${id}/${action}: ${await response.text()}`); await page.waitForFunction(id => !document.querySelector(`[data-plugin-package$=":${id}"] button`)?.disabled, id); };
+   const openManager = () => assertCreationHint(page);
+   const change = (id, action) => changePlugin(page, id, action);
   await openManager();
   // New sandbox implementation calls the same host read without a page branch.
   const replacement = page.getByTestId('board-plugin-cards-reader').frameLocator('iframe[title="替代卡片列表"]');
@@ -64,14 +64,14 @@ try {
   await reader.screenshot({ path: path.join(output, 'legacy-cards-disabled.png') });
   await change('flashcards', '卸载（保留数据）');
   await page.reload(); await openManager();
-  await manager.locator('[data-plugin-package="builtin:flashcards"]').getByText('已卸载（保留数据）', { exact: false }).waitFor();
-  await page.screenshot({ path: path.join(output, 'uninstalled-manager.png'), fullPage: true });
+  assert.equal((await pluginTool(page, { operation: 'list' })).plugins.find(p => p.id === 'flashcards').installation, 'uninstalled');
+  await page.screenshot({ path: path.join(output, 'uninstalled-page.png'), fullPage: true });
   await change('flashcards', '重新安装并恢复');
   await page.getByTestId('board-plugin-flashcards').getByText('停用后仍保留的历史卡片', { exact: true }).waitFor();
   await replacement.getByText('停用后仍保留的历史卡片', { exact: false }).waitFor();
   for (const id of ['practice', 'review', 'material-tools', 'cards-reader']) {
     await change(id, '停用插件'); await page.getByTestId(`board-plugin-${id}`).waitFor({ state: 'detached' });
-    if (id === 'practice') { await page.getByTestId('board-plugin-review').waitFor({ state: 'detached' }); await manager.locator('[data-plugin-package="builtin:review"]').getByText('缺少依赖：practice', { exact: false }).waitFor(); }
+     if (id === 'practice') { await page.getByTestId('board-plugin-review').waitFor({ state: 'detached' }); assert.ok((await pluginTool(page, { operation: 'list' })).plugins.find(p => p.id === 'review').error); }
     if (id === 'practice') {
       const result = await page.evaluate(async () => {
         let shown = false;
@@ -97,37 +97,33 @@ try {
     await change(id, '卸载（保留数据）'); await page.reload(); await openManager();
     await change(id, '重新安装并恢复'); await page.getByTestId(`board-plugin-${id}`).waitFor();
   }
-  // The original four file packages use the very same real management controls.
+  // The original four packages use the same real lifecycle tool.
   for (const id of ['tasks', 'todo', 'pomodoro', 'schedules']) {
     const host = page.getByTestId(`board-plugin-${id}`);
     await host.locator('iframe').waitFor();
     await change(id, '停用插件'); await host.waitFor({ state: 'detached' });
     await change(id, '卸载（保留数据）');
     await page.reload(); await openManager();
-    const packageRow = manager.locator(`[data-plugin-package="v1:${id}"]`);
-    await packageRow.getByText('已卸载（保留数据）', { exact: false }).waitFor();
+    assert.equal((await pluginTool(page, { operation: 'list' })).plugins.find(p => p.id === id).installation, 'uninstalled');
     await host.waitFor({ state: 'detached' });
-    await packageRow.scrollIntoViewIfNeeded();
     await page.screenshot({ path: path.join(output, `legacy-${id}-uninstalled.png`) });
     await change(id, '重新安装并恢复'); await host.locator('iframe').waitFor();
     assert.equal(files.catalog(owner).find(p => p.id === id).installation, 'enabled');
     assert.ok(JSON.parse(files.layout(owner).content).instances.some(instance => instance.id === `legacy-${id}`), 'original instance survives UI uninstall/reinstall');
   }
-  // Local mode has its own visible, persistent manager and never bypasses flags.
+  // Local internal configuration remains persistent and never bypasses flags.
   await page.evaluate(async () => { const { cloud } = await import('/src/cloud/state.ts'); cloud.enabled = false; await (await import('/src/plugins/catalog.ts')).refreshPlugins(); });
   // A real local-mode Board mounts without the old cloud polling effect. Merely
   // mutating the module flag leaves that effect alive until a later rerender.
   await page.goto(`${origin}/#/chat`); await page.getByTestId('course-chat-page').waitFor();
   await page.goto(`${origin}/#/board`);
   await openManager();
-  await manager.getByText('本地配置独立于云账户', { exact: false }).waitFor();
-  const row = manager.locator('[data-plugin-package="builtin:flashcards"]');
-  await row.getByRole('button', { name: '停用插件', exact: true }).click();
+  await changePlugin(page, 'flashcards', '停用插件', { local: true });
   assert.equal(await page.evaluate(async () => { try { await (await import('/src/pipelines/cards.ts')).runCards('unplug-video', () => {}); return 'bypass'; } catch (e) { return e.message; } }), 'plugin_unavailable');
-  await row.getByRole('button', { name: '卸载（保留数据）', exact: true }).click();
+  await changePlugin(page, 'flashcards', '卸载（保留数据）', { local: true });
   assert.equal(await page.evaluate(async () => (await import('/src/plugins/availability.ts')).localPluginPackages(JSON.parse((await import('/src/plugins/availability.ts')).localPluginLayout().content)).find(p => p.id === 'flashcards').installation), 'uninstalled');
   await page.screenshot({ path: path.join(output, 'local-uninstalled.png'), fullPage: true });
-  await row.getByRole('button', { name: '重新安装并恢复', exact: true }).click();
+  await changePlugin(page, 'flashcards', '重新安装并恢复', { local: true });
   const workerResult = await page.evaluate(async () => {
     const { cloud } = await import('/src/cloud/state.ts'); const { assertPluginAvailable, saveLocalPluginLayout, localPluginLayout } = await import('/src/plugins/availability.ts');
     const doc = localPluginLayout(), layout = JSON.parse(doc.content); layout.installations['builtin:flashcards'] = 'disabled'; saveLocalPluginLayout(JSON.stringify(layout), doc.content, doc.revision);
@@ -136,17 +132,18 @@ try {
   }); assert.equal(workerResult, 'plugin_unavailable', 'only accepted worker permits survive disabling');
   await page.evaluate(async () => { const { cloud } = await import('/src/cloud/state.ts'); cloud.enabled = true; await (await import('/src/plugins/catalog.ts')).refreshPlugins(); });
   await openManager();
-  for (const width of [1440, 390, 360]) {
-    await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 });
+   for (const width of [1440, 390, 360]) {
+     await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 });
+     await openManager();
     for (const theme of ['light', 'dark', 'auto']) {
       await page.emulateMedia({ colorScheme: theme === 'auto' ? 'dark' : theme });
       await page.evaluate(async theme => { (await import('/src/store/settings.ts')).useSettings.setState({ theme }); }, theme);
-      await manager.locator('[data-plugin-package="builtin:flashcards"]').scrollIntoViewIfNeeded();
-      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `manager ${width}/${theme} overflows`);
-      await page.screenshot({ path: path.join(output, `manager-${width}-${theme}.png`), fullPage: true });
+      await assertCreationHint(page);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `page ${width}/${theme} overflows`);
+      await page.screenshot({ path: path.join(output, `create-mode-${width}-${theme}.png`), fullPage: true });
     }
   }
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM cloud_tasks WHERE kind='cards'").get().n, 0, 'disabled legacy and local card attempts created no task; automatic cover backfill is unrelated');
-  console.log(`Pluggability browser passed: all eight default packages and sandbox alternative managed through real controls with reload/restoration, dependency removal, old reader readonly history/export, raw pipeline and local/worker gates, 3 widths × 3 themes. Screenshots: ${output}`);
+  console.log(`Pluggability browser passed: all eight default packages and sandbox alternative through real tools with reload/restoration, dependency removal, old reader readonly history/export, raw pipeline and local/worker gates, 3 widths × 3 themes. Screenshots: ${output}`);
 } catch (error) { if (page) { await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }); console.error(await page.locator('body').innerText()); } throw error; }
 finally { await browser?.close(); await web?.close(); store?.close(); await app.close(); fs.rmSync(directory, { recursive: true, force: true }); }

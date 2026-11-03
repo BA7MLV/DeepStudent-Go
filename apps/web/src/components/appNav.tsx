@@ -4,6 +4,8 @@ import { useCourseChat } from '../store/courseChat';
 import { useBotPanel } from '../store/botPanel';
 import { focusChatComposer } from './chatComposerFocus';
 import { useTranslation } from 'react-i18next';
+import { usePluginCatalog } from '../plugins/catalog';
+import { navigationEntries } from '../plugins/layout';
 
 /**
  * 应用级导航的唯一来源：宽屏常驻左侧栏，窄屏由顶栏汉堡按钮弹成 Drawer
@@ -15,13 +17,17 @@ import { useTranslation } from 'react-i18next';
  */
 export function useAppNav(): NavConfig {
   const { t } = useTranslation('common');
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
+  const { data: catalog } = usePluginCatalog();
+  const pages = navigationEntries(catalog);
+  const query = new URLSearchParams(search);
+  const selected = pages.find(p => pathname === `/plugins/${p.instance.id}` && (query.has('placement') ? query.get('placement') === p.placement.id : !query.has('view') || query.get('view') === p.placement.viewId));
   const navigate = useNavigate();
   const createSession = useCourseChat((s) => s.createSession);
   const activeId = useCourseChat((s) => s.activeId);
   const botOpen = useBotPanel((s) => s.open);
   const chatPage = ['/', '/chat', '/course-chat'].includes(pathname) || pathname.startsWith('/settings');
-  const value = chatPage ? (botOpen ? 'bot' : activeId == null ? 'home' : '')
+  const value = selected ? `plugin:${selected.entry.id}` : chatPage ? (botOpen ? 'bot' : activeId == null ? 'home' : '')
     : /^\/(library|player)(\/|$)/.test(pathname) ? 'resources' : ['/board', '/tasks'].includes(pathname) ? 'tasks' : '';
   const items: NavItem[] = [
     {
@@ -62,5 +68,6 @@ export function useAppNav(): NavConfig {
       testId: 'nav-rail-tasks',
     },
   ];
+  items.push(...pages.map(p => ({ value: `plugin:${p.entry.id}`, label: p.title, icon: <Sym name="extension" />, to: p.url, testId: `nav-plugin-${p.entry.id}` })));
   return { value, items };
 }

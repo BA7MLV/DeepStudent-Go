@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react';
 import { Button, Checkbox, Label, Modal, SearchField, Spinner, Tooltip } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
-import { Sym, MODAL_CONTAINER_CLASS, toast } from '../ui';
+import { Sym, MODAL_CONTAINER_CLASS } from '../ui';
 import { loadEnabledSkillMeta, type SkillMeta } from '../skills/store';
 import { intersectSkillMetaIds } from '../skills/scope';
 import { cloud } from '../cloud/state';
@@ -21,13 +21,12 @@ interface Props {
   onMcpChange?: (ids: string[] | undefined) => Promise<void>;
   turnValue?: number[];
   onTurnChange?: (ids: number[]) => void;
-  pinnedValue?: number[];
-  onPinnedChange?: (ids: number[]) => Promise<void>;
   disabled?: boolean;
 }
 
 // 简短名称用于选择；用途说明保留在搜索和无障碍描述中。
 const BUILTIN_PRESENTATION = [
+  { name: '创造模式', key: 'create', icon: 'extension' },
   { name: '课程讲义', key: 'handout', icon: 'description' },
   { name: '原题题库', key: 'questions', icon: 'quiz' },
   { name: '讲解配图', key: 'diagram', icon: 'account_tree' },
@@ -36,7 +35,7 @@ const BUILTIN_PRESENTATION = [
 ] as const;
 
 /** Explicit activation and automatic availability are independent; search never changes selection. */
-export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hideTrigger, mcpValue, onMcpChange, turnValue = [], onTurnChange, pinnedValue = [], onPinnedChange, disabled }: Props) {
+export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hideTrigger, mcpValue, onMcpChange, turnValue = [], onTurnChange, disabled }: Props) {
   const { t } = useTranslation('settings');
   const id = useId();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -45,8 +44,8 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
   const [catalog, setCatalog] = useState<{ status: 'loading' | 'ready' | 'error'; skills: SkillMeta[] }>({ status: 'loading', skills: [] });
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState('');
-  const [tab, setTab] = useState<'turn' | 'pinned' | 'scope'>(onTurnChange ? 'turn' : 'scope');
-  const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState<'turn' | 'scope'>(onTurnChange ? 'turn' : 'scope');
+  const canInvoke = !!onTurnChange;
 
   // 每次打开重新读取启停状态；关闭后丢弃未完成的结果，失败不伪装成空列表。
   useEffect(() => {
@@ -54,22 +53,23 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
     let cancelled = false;
     setCatalog({ status: 'loading', skills: [] });
     setQuery('');
+    setTab(canInvoke ? 'turn' : 'scope');
     void loadEnabledSkillMeta().then((skills) => {
       if (!cancelled) setCatalog({ status: 'ready', skills });
     }).catch(() => {
       if (!cancelled) setCatalog({ status: 'error', skills: [] });
     });
     return () => { cancelled = true; };
-  }, [open, retry]);
+  }, [open, retry, canInvoke]);
 
   const { skills, status } = catalog;
   const scope = new Set(intersectSkillMetaIds(skills, value));
   const explicit = tab !== 'scope';
-  const chosen = tab === 'turn' ? turnValue : pinnedValue;
+  const chosen = turnValue;
   const selected = explicit ? new Set(intersectSkillMetaIds(skills, chosen)) : scope;
   const unavailable = explicit ? chosen.filter(key => !skills.some(skill => skill.id === key || skill.legacyIds?.includes(key))) : [];
   const mode = value === undefined ? 'auto' : value.length === 0 ? 'none' : 'custom';
-  const ready = status === 'ready' && !disabled && !saving;
+  const ready = status === 'ready' && !disabled;
   const selectionLabel = mode === 'auto' ? t('skillPicker.auto')
     : mode === 'none' ? t('skillPicker.none') : t('skillPicker.custom');
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -105,13 +105,7 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
     onChange(next.size > 0 && next.size === skills.length ? undefined : skills.map((s) => s.id).filter((key) => next.has(key)));
   };
 
-  const changeExplicit = async (next: number[]) => {
-    if (tab === 'turn') { onTurnChange?.(next); return; }
-    setSaving(true);
-    try { await onPinnedChange?.(next); }
-    catch (error) { toast.error(error instanceof Error ? error.message : t('skillPicker.saveError')); }
-    finally { setSaving(false); }
-  };
+  const changeExplicit = (next: number[]) => onTurnChange?.(next);
 
   const manage = () => {
     setOpen(false);
@@ -136,10 +130,7 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
           <Modal.Dialog className="skill-picker-dialog" data-testid="skill-picker-dialog">
             <Modal.CloseTrigger aria-label={t('skillPicker.close')} />
             <Modal.Header className="skill-picker__header">
-              <Modal.Heading className="skill-picker__heading">{onMcpChange && cloud.enabled ? t('mcp.scopeTitle') : t('skillPicker.title')}</Modal.Heading>
-              {onTurnChange && <div className="skill-picker__presets" role="group" aria-label={t('skillPicker.activationMode')}>
-                {(['turn', 'pinned', 'scope'] as const).map(item => <Button key={item} size="sm" variant={tab === item ? 'secondary' : 'tertiary'} aria-pressed={tab === item} data-testid={`skill-tab-${item}`} isDisabled={saving} onPress={() => setTab(item)}>{t(`skillPicker.${item}Tab`)}</Button>)}
-              </div>}
+              <Modal.Heading className="skill-picker__heading">{t(explicit ? 'skillPicker.title' : 'skillPicker.scopeTab')}</Modal.Heading>
               <p className="skill-picker__notice">{t(`skillPicker.${tab}Hint`)}</p>
               {disabled && <p className="skill-picker__notice" role="status">{t('skillPicker.busyHint')}</p>}
               <div className="skill-picker__toolbar">
@@ -208,11 +199,12 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
                     </div>
                   </section>)}
               </div>
-              {open && onMcpChange ? <McpScope value={mcpValue} onChange={onMcpChange} /> : null}
+              {open && !explicit && onMcpChange && cloud.enabled ? <McpScope value={mcpValue} onChange={onMcpChange} /> : null}
             </Modal.Body>
 
             <Modal.Footer className="skill-picker__footer">
               <Button variant="tertiary" size="sm" onPress={manage} data-testid="skill-picker-manage"><Sym name="settings" />{t('skillPicker.manage')}</Button>
+              {onTurnChange && <Button size="sm" variant="tertiary" data-testid="skill-picker-advanced" onPress={() => { setTab(explicit ? 'scope' : 'turn'); setQuery(''); }}>{t(explicit ? 'skillPicker.scopeTab' : 'skillPicker.backToUse')}</Button>}
               <Button variant="primary" data-testid="skill-picker-done" onPress={() => setOpen(false)}>{t('skillPicker.done')}</Button>
             </Modal.Footer>
           </Modal.Dialog>

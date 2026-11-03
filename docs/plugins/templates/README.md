@@ -2,7 +2,9 @@
 
 四个子目录是完整 v2 包：`counter`（CAS 共享数据）、`material-note`（资料 A/B 上下文隔离）、`bot-task`（真实 Bot 任务与重新挂载恢复）、`cards-reader`（显式依赖与替代学习视图）。
 
-使用当前账户的系统文件编辑入口，将一个子目录的 **内容** 写入 `/system/plugins/<manifest.id>/`；不要写入仓库源码或猜测账户物理目录。新文件用 `expected="" / revision=0`，已存在文件先读再 CAS 保存。HTML/defaults 先写，manifest 最后写；包自动发现后，在“管理插件”中创建实例及挂载。也可由 Chat/Bot 使用已有 `edit` / `board` 文件工具安装，再通过 `plugins` 的 `list / layout / configure` 配置。改名时同时修改目录和 manifest.id。
+在聊天中选择 **技能 → 创造模式**，描述要使用的模板、用途与位置即可；同一内容可共用到侧边栏页面、聊天、阅读或看板，明确要求独立使用才新建实例。技能通过真实 `edit` / `board` 工具将一个子目录的 **内容** 写入 `/system/plugins/<manifest.id>/`，不写仓库源码或猜测账户物理目录。HTML/defaults 先写，manifest 最后写，重新发现有效包后通过 `plugins` 的 `list / layout / configure` 配置。手动操作系统文件时，新文件用 `expected="" / revision=0`，已有文件先读再 CAS 保存；改名同时修改目录和 manifest.id。各端工具参数见创造模式的 tools-and-layout reference，不把 Bot 的 revision 参数混传给 Web edit。
+
+多视图包可为每个 view 声明可选 `title/description`（例如“概览”“详细记录”）；页面入口准确引用所选 view，不取第一个视图代替。侧边栏导航是布局的可选 `navigation` 数组，具体格式见 `../protocol.md`。不需要修改主导航代码或把 HTML 包改为受信 React。
 
 - `counter`：同一实例挂看板与侧栏，两处加一互相同步；独立实例互不影响。冲突提示后刷新，不重放加一操作。示例同时订阅 mount/state.changed/dispose。
 - `material-note`：资料作用域实例和 reader 挂载；每份资料使用原 ID 索引，异步保存固定原上下文。尺寸/主题变化不重载未提交输入；迟到的初次 context.get 不覆盖新资料事件；A 的迟到保存不替换 B 正在编辑的内容。刷新只恢复已点保存的便签，未提交内容不承诺跨刷新恢复。这里保存的是插件自有便签，不复制题库、cards 或错题记录。账户实例在没有 materialId 的看板位置只显示提示。

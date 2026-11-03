@@ -8,8 +8,6 @@ import {
   Button,
   Dropdown,
   Input,
-  ToggleButton,
-  ToggleButtonGroup,
   Tooltip,
 } from '@heroui/react';
 import { MarkdownCode, MarkdownPre } from '../components/mermaid/markdown';
@@ -44,7 +42,7 @@ import WidgetMessage from '../components/WidgetMessage';
 import ContextUsageButton from '../components/ContextUsageButton';
 import { useContextCompression } from '../components/useContextCompression';
 import { EMPTY_COMPRESSION, retainedContext, useContextCompressionStore } from '../store/contextCompression';
-import { useCourseChat, reflectArtifactEdit, type CourseChatMessage, type QueuedMessage, type SendMode } from '../store/courseChat';
+import { useCourseChat, reflectArtifactEdit, type CourseChatMessage, type QueuedMessage } from '../store/courseChat';
 import { useChatNotifications } from '../store/chatNotifications';
 import { useSettingsDialog } from '../components/settingsDialogStore';
 import { decisionConfigOf, useSettings } from '../store/settings';
@@ -604,9 +602,6 @@ export default function CourseChat() {
   // ── 流式期间的输入（排队 / 插入）─────────────────────────────────────────
   /** 还没交出去的话（生成中投递的队列）。只在内存里，见 store 文件头第 3 条不变量 */
   const queued = useCourseChat((s) => s.queued);
-  /** 当前默认投递方式：Enter 用它，Ctrl/⌘+Enter 用另一种 */
-  const sendMode = useCourseChat((s) => s.sendMode);
-  const setSendMode = useCourseChat((s) => s.setSendMode);
   const removeQueued = useCourseChat((s) => s.removeQueued);
   const updateQueued = useCourseChat((s) => s.updateQueued);
   const clearQueue = useCourseChat((s) => s.clearQueue);
@@ -1138,30 +1133,6 @@ export default function CourseChat() {
               onSendNow={(id) => void sendQueuedNow(id)}
               onClear={clearQueue}
             />
-            {/* 生成期间保持模式栏挂载。之前把它绑在 `hasDraft` 上，用户开始输入或发送后
-                会整块挂载/卸载，造成输入区跳动并让「插入 / 排队」像闪出来一样。 */}
-            {generating && (
-              <div className="course-chat__delivery-bar" data-testid="chat-delivery-bar" data-mode={sendMode}>
-                <ToggleButtonGroup
-                  className="course-chat__send-mode"
-                  selectionMode="single"
-                  disallowEmptySelection
-                  size="sm"
-                  aria-label="流式期间的投递方式"
-                  selectedKeys={[sendMode]}
-                  onSelectionChange={(keys) => {
-                    const next = [...keys][0];
-                    if (next) setSendMode(next as SendMode);
-                  }}
-                >
-                  <ToggleButton id="queue" data-testid="chat-send-mode-queue" aria-describedby="chat-delivery-hint"><Sym name="schedule" />排队</ToggleButton>
-                  <ToggleButton id="steer" data-testid="chat-send-mode-steer" aria-describedby="chat-delivery-hint"><Sym name="arrow_upward" />插入</ToggleButton>
-                </ToggleButtonGroup>
-                <p id="chat-delivery-hint" className="course-chat__send-hint" role="status">
-                  {sendMode === 'queue' ? '输入后按 Enter 排队，等本轮结束自动发出' : '输入后按 Enter 插入，立即切换到新消息'}
-                </p>
-              </div>
-            )}
             {/* 只在尚未发送的会话显示；发送后保留项目归属，入口收进添加菜单。 */}
             {loaded && activeId == null && messages.length === 0 && !loading && !importDismissed && (
               <div className="course-chat__import" data-testid="chat-import-strip">
@@ -1253,20 +1224,11 @@ export default function CourseChat() {
                   if (!ime.isSubmitEnter(event)) return;
                   event.preventDefault();
                   setVoiceEditVersion((version) => version + 1);
-                  /**
-                   * Enter = 当前模式（默认排队）；Ctrl/⌘+Enter = **另一种**。
-                   *
-                   * 与 Codex CLI 的 Enter/Tab 同构：两者都是「这一次怎么发」，
-                   * 不改默认值 —— 默认值由工具行上那颗切换钮管（`sendMode`）。
-                   * 没在生成中时 `mode` 传什么都一样（`send` 直接发），所以这里
-                   * 不需要再判一次 `loading`。
-                   */
-                  const override: SendMode | undefined =
-                    event.ctrlKey || event.metaKey ? (sendMode === 'queue' ? 'steer' : 'queue') : undefined;
-                  void send(draft, override);
+                  // 生成中一律排队；只有待发消息上的手动插入操作才打断本轮。
+                  void send(draft, 'queue');
                 }}
               />
-               {/* Toolbar 负责方向键在输入区工具间循环。投递切换独立挂在输入卡上方。 */}
+               {/* Toolbar 负责方向键在输入区工具间循环。 */}
               <ChatComposerTools
                 className="course-chat__composer-tools"
                 aria-label="输入区工具"
@@ -1282,8 +1244,8 @@ export default function CourseChat() {
                 </span>
                 {/* 发送与停止共用最右侧的操作位：生成中有草稿就发送，没有才停止。 */}
                 {generating ? (
-                  hasDraft ? iconButton(sendMode === 'queue' ? '排队发送' : '插入发送', <Sym name="arrow_upward" />,
-                    () => void send(draft), { className: 'course-chat__send', testId: 'chat-send', disabled: !sessionReady || attachmentsPending })
+                  hasDraft ? iconButton('排队发送', <Sym name="arrow_upward" />,
+                    () => void send(draft, 'queue'), { className: 'course-chat__send', testId: 'chat-send', disabled: !sessionReady || attachmentsPending })
                   : iconButton('停止生成（已写出的内容会保留）', <Sym name="stop" filled />, stop, {
                     className: 'course-chat__stop',
                     testId: 'chat-stop',
@@ -1299,12 +1261,8 @@ export default function CourseChat() {
                     const base = voiceDraftBase.current;
                     setDraft(base ? `${base} ${text}` : text);
                   }}
-                  onSend={() => void send(useCourseChat.getState().draft)}
-                  sendLabel={loading
-                    ? sendMode === 'queue'
-                      ? '排队发送：等这一轮答完自动发出去'
-                      : '插入发送：立刻打断这一轮，换成这句'
-                    : '发送'}
+                  onSend={() => void send(useCourseChat.getState().draft, 'queue')}
+                  sendLabel={loading ? '排队发送' : '发送'}
                 />}
               </ChatComposerTools>
               </>}

@@ -23,5 +23,6 @@ export function PluginHost({ plugin, instance, placement, context }: { plugin: P
   const Builtin = builtinView(plugin, placement.viewId);
    if (plugin.source === 'builtin') return Builtin ? <Suspense fallback={<p aria-busy="true">加载学习组件…</p>}><Builtin key={`${instance.id}:${context.projectId ?? ''}:${context.materialId ?? ''}`} plugin={plugin} instance={instance} placement={placement} context={context} /></Suspense> : <p role="alert">内置视图提供者不可用</p>;
   const compatibility: BoardPlugin = { id: plugin.id, path: plugin.path, revision: plugin.revision, manifest: { apiVersion: 1, id: plugin.id, name: plugin.manifest.name, version: plugin.manifest.version, enabled: plugin.manifest.enabled, entry: 'index.html', capabilities: [], height: view.height ?? 640 } };
-  return <PluginFrame plugin={compatibility} adapter={adapter} />;
+  // A different content/view gets a fresh sandbox; theme/size updates keep drafts.
+  return <PluginFrame key={`${plugin.source}:${adapter.identity}:${placement.viewId}`} plugin={compatibility} adapter={adapter} />;
 }

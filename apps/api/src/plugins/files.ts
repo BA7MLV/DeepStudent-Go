@@ -153,7 +153,10 @@ export class PluginFiles {
     let instances: PluginLayout['instances'] = [];
     try { instances = parsePluginLayout(JSON.parse(this.read(owner, PLUGIN_LAYOUT_PATH).content)).instances; } catch { /* First visit. */ }
     const unavailableInstances = instances.filter(i => { try { this.validateScope(owner, i.scope); return false; } catch { return true; } }).map(i => i.id);
-    return { projects, materialProjects, projectFolders, unavailableInstances };
+    const records = new CloudRecords(this.store);
+    const materialIds = new Set((this.store.db.prepare("SELECT record_key FROM cloud_records WHERE owner_id=? AND table_name='videos' AND value IS NOT NULL").all(owner) as { record_key: string }[]).map(row => String(JSON.parse(row.record_key))));
+    const materials = [...materialIds].flatMap(id => { try { this.materialProject(owner, id); const row = records.get(owner, 'videos', id); return row ? [{ id, name: String(row.name ?? '资料') }] : []; } catch { return []; } });
+    return { projects, materialProjects, projectFolders, unavailableInstances, materials };
   }
   private validateLayout(owner: string, layout: PluginLayout) {
     const packages = this.catalog(owner, layout.sources, layout);
@@ -179,6 +182,15 @@ export class PluginFiles {
       if (!plugin?.manifest?.enabled && !unchanged) throw new Error('plugin_unavailable');
       if (!pluginTargets(plugin?.manifest)[p.viewId]?.surfaces.includes(p.surface) && !previous?.placements.some(row => JSON.stringify(row) === JSON.stringify(p))) throw new Error('plugin_surface_unavailable');
     }
+    for (const entry of layout.navigation ?? []) {
+      if (previous?.navigation?.some(row => JSON.stringify(row) === JSON.stringify(entry))) continue;
+      const placement = layout.placements.find(p => p.id === entry.placementId)!;
+      const instance = layout.instances.find(i => i.id === placement.instanceId)!;
+      this.validateScope(owner, placement.scope);
+      this.validateScope(owner, instance.scope);
+      const plugin = packages.find(p => p.id === instance.pluginId && !p.error && p.manifest?.enabled);
+      if (!plugin?.manifest?.views[placement.viewId]?.surfaces.includes('app.page')) throw new Error('plugin_surface_unavailable');
+    }
   }
   instance(owner: string, pluginId: string, instanceId: string) {
     const plugin = this.plugin(owner, pluginId);
@@ -201,7 +213,9 @@ export class PluginFiles {
       const { plugin } = this.instance(owner, pluginId, instanceId);
       let content = kind === 'schedules' ? '{"jobs":[]}\n' : '{}\n';
       if (kind === 'state' && plugin.source !== 'builtin') {
-        try { content = plugin.source === 'v1' ? this.board.read(owner, `${plugin.path}/state.json`).content : this.read(owner, `${plugin.path}/defaults.json`).content; } catch { /* Optional defaults. */ }
+        // v1 state.json is live legacy user content, never a seed for a new
+        // independent instance. Packages may declare a separate defaults file.
+        try { content = plugin.source === 'v1' ? this.board.read(owner, `${plugin.path}/defaults.json`).content : this.read(owner, `${plugin.path}/defaults.json`).content; } catch { /* Optional defaults. */ }
       }
       return this.save(owner, resource, content, '', 0);
     }

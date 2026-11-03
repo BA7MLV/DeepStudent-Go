@@ -20,6 +20,10 @@ import handoutCoding from '@wangke/study-core/skills/builtin/course-handout/refe
 import handoutXingce from '@wangke/study-core/skills/builtin/course-handout/references/gongkao-xingce.md?raw';
 import handoutShenlun from '@wangke/study-core/skills/builtin/course-handout/references/gongkao-shenlun.md?raw';
 import questionBank from '@wangke/study-core/skills/builtin/question-bank/SKILL.md?raw';
+import createMode from '@wangke/study-core/skills/builtin/create-mode/SKILL.md?raw';
+import createTools from '@wangke/study-core/skills/builtin/create-mode/references/tools-and-layout.md?raw';
+import createRuntime from '@wangke/study-core/skills/builtin/create-mode/references/runtime.md?raw';
+import createDesign from '@wangke/study-core/skills/builtin/create-mode/references/design.md?raw';
 
 /** 内置 skill：标准 SKILL.md 文件（?raw 导入）+ 可选 references */
 export interface BuiltinSkill extends SkillFile {
@@ -43,7 +47,7 @@ export const LEGACY_HANDOUT_SKILLS: BuiltinSkill[] = [
   fromMd(gongkaoShenlun),
 ];
 
-/** 日常可选的五个任务入口；讲义专题通过参考文档按需加载。 */
+/** 日常可选任务入口；专题通过参考文档按需加载。 */
 export const BUILTIN_SKILLS: BuiltinSkill[] = [
   // 会话可视化与文件导出是不同交付通道。
   fromMd(diagramming),
@@ -58,4 +62,5 @@ export const BUILTIN_SKILLS: BuiltinSkill[] = [
     ref('references/gongkao-shenlun.md', handoutShenlun),
   ]),
   fromMd(questionBank),
+  fromMd(createMode, [ref('references/tools-and-layout.md', createTools), ref('references/runtime.md', createRuntime), ref('references/design.md', createDesign)]),
 ];

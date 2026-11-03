@@ -42,7 +42,7 @@ async function run(kind, input, failed) {
 
 try {
   put('chatSessions', 10, { id: 10, videoId: '__library_assistant__', title: '新会话', createdAt: Date.now() });
-  for (const [id, body] of [[1001, 'TURN_BEGIN_' + '完整规范。'.repeat(1800) + '_TURN_END'], [1002, 'PINNED_V1']]) {
+  for (const [id, body] of [[1001, 'TURN_BEGIN_' + '完整规范。'.repeat(6000) + '_TURN_END'], [1002, 'PINNED_V1']]) {
     put('skills', id, { id, name: `test-${id}`, description: '测试技能', body, enabled: 1, builtin: 0, updatedAt: Date.now() });
   }
   put('skillRefs', 1003, { id: 1003, skillId: 1001, path: 'references/guide.md', body: 'REFERENCE_LAZY_ONLY' });
@@ -51,22 +51,34 @@ try {
   assert.ok(requestBody().includes('test-1001'));
   assert.ok(!requestBody().includes('TURN_BEGIN_'));
   patchSession({ pinnedSkillIds: [1002] });
+  await run('chat');
+  assert.ok(!requestBody().includes('PINNED_V1'), 'legacy pins are not activation');
   const activated = await run('chat', { explicitSkillIds: [1001, 1001, 1002] });
   assert.ok(requestBody().includes('TURN_BEGIN_') && requestBody().includes('_TURN_END'));
   assert.equal(requestBody().match(/PINNED_V1/g).length, 1);
   assert.ok(!requestBody().includes('REFERENCE_LAZY_ONLY'));
   assert.equal(activated.result.tools.filter(tool => tool.name === 'use_skill' && tool.status === 'done').length, 2);
-  assert.deepEqual(records.get(owner, 'chats', activated.result.userRowId).explicitSkillIds, [1002, 1001]);
-  await run('chat');
-  assert.ok(!requestBody().includes('TURN_BEGIN_'));
+  assert.deepEqual(records.get(owner, 'chats', activated.result.userRowId).explicitSkillIds, [1001, 1002]);
+  assert.ok(JSON.stringify(records.get(owner, 'chats', activated.result.userRowId).modelTrace).includes('_TURN_END'));
+  const plain = await run('chat');
+  assert.ok(requestBody().includes('TURN_BEGIN_'), 'retained history reuses loaded instructions');
   assert.ok(requestBody().includes('PINNED_V1'));
+  assert.equal(plain.result.tools.filter(tool => tool.name === 'use_skill').length, 0, 'no new activation on unrelated turn');
+  await run('chat', { explicitSkillIds: [1001, 1002] });
+  assert.equal(requestBody().match(/TURN_BEGIN_/g).length, 1);
+  assert.equal(requestBody().match(/PINNED_V1/g).length, 1);
   put('skills', 1002, { ...records.get(owner, 'skills', 1002), body: 'PINNED_V2', updatedAt: Date.now() });
-  // Even a durable history checkpoint must not omit freshly loaded skill context.
-  patchSession({ contextCheckpoint: { fromId: activated.result.userRowId, source: '测试问题' } });
   await run('chat');
-  assert.ok(requestBody().includes('PINNED_V2'));
+  assert.ok(!requestBody().includes('PINNED_V2'), 'edits do not eagerly activate a new revision');
   assert.ok(!requestBody().includes('PINNED_V1'));
-  console.log('PASS: native chat loads full/deduplicated instructions, persists IDs and receipts, reloads pins independently of history, and does not leak one-turn bodies.');
+  const boundary = await run('chat');
+  patchSession({ contextCheckpoint: { fromId: boundary.result.userRowId, source: '测试问题' } });
+  await run('chat');
+  assert.ok(!requestBody().includes('TURN_BEGIN_'), 'compression does not resurrect all previously loaded skills');
+  await run('chat', { explicitSkillIds: [1002] });
+  assert.ok(requestBody().includes('PINNED_V2'));
+  assert.ok(!requestBody().includes('TURN_BEGIN_'));
+  console.log('PASS: metadata-only default, ignored legacy pins, retained-body reuse/deduplication, revision invalidation and on-demand reactivation after compression.');
 
   const before = requests.length;
   patchSession({ skillIds: [] });
@@ -103,7 +115,15 @@ try {
   put('chats', activated.result.rowId, { ...records.get(owner, 'chats', activated.result.rowId), interrupted: true });
   await run('chat', { action: 'continue', rowId: activated.result.rowId });
   assert.ok(requestBody().includes('_TURN_END'));
-  console.log('PASS: native continuation reloads the original turn selection without persisting instruction bodies into traces.');
+  assert.equal(requestBody().match(/TURN_BEGIN_/g).length, 1);
+  console.log('PASS: native continuation restores the original invocation after compression, deduplicating retained bodies.');
+
+  put('skills', 1002, { ...records.get(owner, 'skills', 1002), body: 'HUGE_BEGIN_' + '完整规范。'.repeat(70000) + '_HUGE_END', updatedAt: Date.now() });
+  scripted = [{ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'huge-read', type: 'function', function: { name: 'read', arguments: '{"path":"/skills/test-1002"}' } }] }, finish_reason: 'tool_calls' }] }];
+  const beforeHuge = requests.length;
+  assert.match((await run('chat', {}, true)).error, /没有被截断/);
+  assert.equal(requests.length, beforeHuge + 1, 'oversized lazy instructions fail before the next model request');
+  console.log('PASS: lazy body reads exceed the generic 24k tool limit without truncation, and oversized bodies fail before sending a partial policy.');
 } finally {
   await runner.close();
   store.close();

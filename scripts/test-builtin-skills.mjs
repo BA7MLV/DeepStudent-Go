@@ -38,9 +38,9 @@ const skills = dirs.map((d) => {
   return { dir: d, ...skill, refs };
 });
 
-test('五个对话任务入口，六份旧 IR 规范仅作兼容资产', () => {
+test('六个对话任务入口，六份旧 IR 规范仅作兼容资产', () => {
   const active = skills.filter((s) => !isLegacyHandoutSkill({ ...s, builtin: 1 }));
-  assert.deepEqual(active.map((s) => s.name).sort(), ['课程讲义', '原题题库', '讲解配图', '交互式讲解', '资料整理'].sort());
+  assert.deepEqual(active.map((s) => s.name).sort(), ['课程讲义', '原题题库', '讲解配图', '交互式讲解', '资料整理', '创造模式'].sort());
   assert.equal(skills.length - active.length, 6);
 });
 
@@ -168,7 +168,7 @@ test('「资料整理」写明主轴互斥、数量区间、id 来源与确认�
 test('「课程讲义」复用资源工具，直接输出 Markdown，未读范围与图片证据边界明确', () => {
   const s = skills.find((x) => x.name === '课程讲义');
   assert.ok(s);
-  for (const kw of ['read', 'grep', 'edit', 'Markdown', '/courses/current/handout.md', '600 秒', '20 页', '未读范围', '视觉能力', '目录名称不是图像证据', '唯一真相源', '用户笔记', '保存后', '历史快照']) {
+  for (const kw of ['read', 'grep', 'edit', 'Markdown', '/courses/current/handout.md', '600 秒', '20 页', '未读范围', '视觉能力', '不是图像证据', '唯一真相源', '用户笔记', '保存后', '历史快照']) {
     assert.ok(s.body.includes(kw), `课程讲义缺约定：${kw}`);
   }
   assert.match(s.description, /对话/);

@@ -7,4 +7,4 @@ export const MATERIAL_TASK_ACTIONS = [
   { id: 'material', title: '重新解析资料', note: 'PDF 需要浏览器；Markdown/Word 使用原服务端解析器。' },
   { id: 'cover', title: '重新生成封面', note: '需要浏览器画布/媒体能力，会替换原派生封面。' },
 ] as const;
-export const MATERIAL_TOOLS_PLUGIN = learningPackage('material-tools', '资料处理', ['context', 'learning', 'tasks'], Object.fromEntries(MATERIAL_TASK_ACTIONS.map(a => [a.id, action(a.title, `material.${a.id}`)])));
+export const MATERIAL_TOOLS_PLUGIN = learningPackage('material-tools', '资料处理', ['context', 'learning', 'tasks'], Object.fromEntries(MATERIAL_TASK_ACTIONS.map(a => [a.id, action(a.title, `material.${a.id}`)])), undefined, '为资料制作讲义、字幕和封面，查看处理进度');

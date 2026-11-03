@@ -31,6 +31,19 @@ export class BoardFiles {
     const marker = `${BOARD_PATH}/README.md`;
     const source = fileURLToPath(new URL(import.meta.url.endsWith('/runtime/node.mjs') ? '../board-plugins/' : '../../board-plugins/', import.meta.url));
     if (this.store.systemFiles.entry(owner, marker)) {
+      // Add static instance defaults to still-installed, unedited shipped
+      // packages. Never seed from live state, replace user defaults or recreate
+      // a missing package. This does not touch any instance/user data.
+      const installedRoot = path.join(this.directory(owner), 'plugins');
+      if (fs.lstatSync(installedRoot, { throwIfNoEntry: false })?.isDirectory() && !fs.lstatSync(installedRoot).isSymbolicLink()) for (const id of fs.readdirSync(path.join(source, 'plugins')).filter(boardSlug)) {
+        const installed = path.join(installedRoot, id), bundled = path.join(source, 'plugins', id);
+        const stat = fs.lstatSync(installed, { throwIfNoEntry: false });
+        if (!stat?.isDirectory() || stat.isSymbolicLink() || !fs.existsSync(path.join(bundled, 'defaults.json'))) continue;
+        const entry = path.join(installed, 'index.html'), entryStat = fs.lstatSync(entry, { throwIfNoEntry: false });
+        if (!entryStat?.isFile() || entryStat.isSymbolicLink() || !fs.readFileSync(entry).equals(fs.readFileSync(path.join(bundled, 'index.html')))) continue;
+        const target = `${BOARD_PLUGINS_PATH}/${id}/defaults.json`;
+        if (!fs.existsSync(path.join(installed, 'defaults.json')) && !this.store.systemFiles.entry(owner, target)) this.store.systemFiles.write(owner, target, fs.readFileSync(path.join(bundled, 'defaults.json'), 'utf8'), null);
+      }
       for (const [relative, hash] of Object.entries(DEFAULT_UPGRADES)) {
         try {
           let physical = this.directory(owner);

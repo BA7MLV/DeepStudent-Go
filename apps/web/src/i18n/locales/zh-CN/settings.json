@@ -260,22 +260,20 @@
   },
   "skillPicker": {
     "activationMode": "技能使用方式",
-    "turnTab": "本轮使用",
-    "pinnedTab": "固定到会话",
-    "scopeTab": "自动使用范围",
-    "turnHint": "勾选后，下一次发送会完整加载技能规范；仅用于本轮，不等待模型自行选择。参考资料仍按需读取。",
-    "pinnedHint": "每轮发送都完整加载所选规范，直到取消固定。固定不扩大技能范围或工具权限。",
-    "scopeHint": "这里仅控制助手可以自动选用哪些技能，不代表已加载。需要确保使用，请切换到「本轮使用」。",
+    "turnTab": "本次使用",
+    "scopeTab": "可用范围（高级）",
+    "backToUse": "返回本次使用",
+    "turnHint": "默认由助手按需选用。勾选后，下一次发送会明确使用该技能；已在上下文的正文直接复用，参考资料按需读取。",
+    "scopeHint": "这里只限定助手可发现和读取哪些技能，不加载正文，也不授权工具。旧版会话固定不再自动激活技能。",
     "busyHint": "回复完成后可修改技能；当前任务使用发送时的选择。",
     "clearSelection": "清空选择",
-    "saveError": "固定技能保存失败，请重试。",
     "explicitUnavailable": "有 {{count}} 个指定技能已停用或删除；发送将明确报错，不会静默跳过。",
     "removeUnavailable": "移除失效项",
     "outOfScope": "不在技能范围内，请先调整自动使用范围",
-    "pendingLoad": "已指定 · 发送前完整加载",
-    "available": "可用 · 尚未指定",
-    "activationCount": "本轮 {{turn}} · 固定 {{pinned}}",
-    "title": "选择技能",
+    "pendingLoad": "本次指定 · 发送时加载或复用",
+    "available": "由助手按需选用",
+    "activationCount": "本次指定 {{turn}}",
+    "title": "本次使用技能",
     "auto": "自动",
     "none": "不使用技能",
     "custom": "自定义",
@@ -300,6 +298,10 @@
     "done": "完成",
     "close": "关闭技能选择",
     "builtins": {
+      "create": {
+        "title": "创造模式",
+        "description": "说出用途和位置，创建或调整长期可用的功能与页面。"
+      },
       "handout": {
         "title": "课程讲义",
         "description": "整理讲义与复习提纲；数学、编程、行测、申论规范按需加载。"
@@ -321,6 +323,9 @@
         "description": "为课程和资料规划分类，确认后再整理归档。"
       }
     }
+  },
+  "createMode": {
+    "hint": "想创建或调整功能？在聊天的「技能」中选择「创造模式」，描述用途和位置即可。"
   },
   "agent": {
     "title": "Agent 默认提示词",

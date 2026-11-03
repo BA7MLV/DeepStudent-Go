@@ -8,7 +8,7 @@ export const PLUGIN_HOST_SERVICES: Record<string, number> = { 'learning-data': 1
 /** One discovery/configuration/action vocabulary for Chat, Bot and HTTP clients. */
 export const PLUGINS_TOOL = { type: 'function' as const, function: {
   name: 'plugins',
-  description: 'Discover real installed plugins, views, instances and surfaces (list). Use describe with pluginId for available host-validated actions. layout reads the exact layout document; configure replaces it using content, expected and revision (CAS), preserving unrelated instances/placements. lifecycle sets pluginId status to enabled, disabled or uninstalled using expected/revision from layout; it retains instances and authoritative learning history, never deletes data or cancels accepted work. Reuse instanceId across surfaces; new IDs are independent. invoke requires pluginId, instanceId, revision, actionId and args from describe. reference takes pluginId/instanceId/viewId/summary and returns exact wbw-plugin Markdown; summaries survive uninstall. Package declarations never grant permissions. Task dispatch is not artifact completion; query durable receipts. Never invent resource or Bot thread IDs.',
+  description: 'Discover real installed plugins, views, instances and surfaces (list). Use describe with pluginId for available host-validated actions. layout reads the exact layout document; configure replaces it using content, expected and revision (CAS), preserving unrelated instances/placements/navigation. To add a sidebar page, create an app.page placement referencing the exact viewId and instance, then add navigation:{id,placementId,title,order} in the layout navigation array. Removing navigation only removes the shortcut, not data. lifecycle sets pluginId status to enabled, disabled or uninstalled using expected/revision from layout; it retains instances and authoritative learning history, never deletes data or cancels accepted work. Reuse instanceId across surfaces; new IDs are independent. invoke requires pluginId, instanceId, revision, actionId and args from describe. reference takes pluginId/instanceId/viewId/summary and returns exact wbw-plugin Markdown; summaries survive uninstall. Package declarations never grant permissions. Task dispatch is not artifact completion; query durable receipts. Never invent resource or Bot thread IDs.',
   parameters: { type: 'object' as const, additionalProperties: false, properties: {
     operation: { type: 'string', enum: ['list', 'describe', 'layout', 'configure', 'invoke', 'reference', 'lifecycle'] },
     status: { type: 'string', enum: ['enabled', 'disabled', 'uninstalled'] },
@@ -22,7 +22,7 @@ export const PLUGIN_SURFACES = ['board.main', 'chat.sidepanel', 'reader.sidepane
 export type PluginSurface = typeof PLUGIN_SURFACES[number];
 export const PLUGIN_CAPABILITIES = ['state', 'tasks', 'schedules', 'context', 'resources', 'learning', 'ui'] as const;
 export type PluginCapability = typeof PLUGIN_CAPABILITIES[number];
-export interface PluginView { entry: string; surfaces: PluginSurface[]; height?: number }
+export interface PluginView { entry: string; surfaces: PluginSurface[]; height?: number; title?: string; description?: string }
 export interface PluginAction { title: string; service: string; schema: Record<string, unknown> }
 export const PLUGIN_ACTION_SURFACES = ['chat.composer.actions', 'reader.selection.actions', 'resource.actions'] as const;
 export interface PluginContribution {
@@ -40,12 +40,14 @@ export interface PluginPackage { id: string; path: string; manifest?: PluginMani
 export type PluginScope = { kind: 'account' } | { kind: 'material' | 'project'; id: string };
 export interface PluginInstance { id: string; pluginId: string; scope: PluginScope; title?: string }
 export interface PluginPlacement { id: string; pluginId: string; instanceId: string; viewId: string; surface: PluginSurface; scope: PluginScope; order: number; props?: Record<string, unknown> }
-export interface PluginLayout { apiVersion: 2; instances: PluginInstance[]; placements: PluginPlacement[]; sources?: Record<string, 'v1' | 'v2' | 'builtin'>; disabledBuiltins?: string[]; installations?: Record<string, 'enabled' | 'disabled' | 'uninstalled'> }
+export interface PluginNavigation { id: string; placementId: string; title?: string; order: number }
+export interface PluginLayout { apiVersion: 2; instances: PluginInstance[]; placements: PluginPlacement[]; navigation?: PluginNavigation[]; sources?: Record<string, 'v1' | 'v2' | 'builtin'>; disabledBuiltins?: string[]; installations?: Record<string, 'enabled' | 'disabled' | 'uninstalled'> }
 export interface PluginScopes {
   projects: { id: string; name: string }[];
   materialProjects: Record<string, string>;
   projectFolders: { folderId: number; projectId: string }[];
   unavailableInstances: string[];
+  materials?: { id: string; name: string }[];
 }
 /** Most-specific layer replaces the same plugin/target at broader layers;
  * multiple placements within the winning layer remain explicitly ordered. */
@@ -88,7 +90,9 @@ export function parsePluginManifest(value: unknown, id: string): PluginManifest 
   for (const [key, view] of Object.entries(m.views)) {
     if (!boardSlug(key) || !record(view) || typeof view.entry !== 'string' || !/^views\/[a-zA-Z0-9][a-zA-Z0-9_/-]*\.html$/.test(view.entry) || view.entry.split('/').some(p => !p || p === '..') ||
       !Array.isArray(view.surfaces) || !view.surfaces.length || view.surfaces.some((s: any) => !PLUGIN_SURFACES.includes(s)) || new Set(view.surfaces).size !== view.surfaces.length ||
-      view.height !== undefined && (!Number.isSafeInteger(view.height) || view.height < 56 || view.height > 2000)) return fail();
+      view.height !== undefined && (!Number.isSafeInteger(view.height) || view.height < 56 || view.height > 2000) ||
+      view.title !== undefined && (typeof view.title !== 'string' || !view.title.trim() || view.title.length > 100) ||
+      view.description !== undefined && (typeof view.description !== 'string' || view.description.length > 300)) return fail();
   }
   for (const deps of [m.requires, m.optional, m.services]) if (deps !== undefined && (!record(deps) || Object.entries(deps).some(([key, version]) => !boardSlug(key) || !Number.isSafeInteger(version) || Number(version) < 1))) return fail();
   if (m.actions !== undefined && (!record(m.actions) || Object.keys(m.actions).length > 50 || Object.entries(m.actions).some(([key, a]) => !boardSlug(key) || !record(a) || typeof a.title !== 'string' || !a.title || a.title.length > 100 || typeof a.service !== 'string' || !/^[a-z][a-z0-9_.-]{0,99}$/.test(a.service) || !record(a.schema)))) return fail();
@@ -124,6 +128,15 @@ export function parsePluginLayout(value: unknown): PluginLayout {
   for (const p of value.placements) {
     if (!record(p) || !identity(p.id) || placements.has(p.id) || ids.get(p.instanceId) !== p.pluginId || !boardSlug(p.viewId) || !PLUGIN_SURFACES.includes(p.surface) || !scope(p.scope) || !Number.isSafeInteger(p.order) || Math.abs(p.order) > 10000 || p.props !== undefined && !record(p.props)) return bad();
     placements.add(p.id);
+  }
+  if (value.navigation !== undefined) {
+    if (!Array.isArray(value.navigation) || value.navigation.length > 100) return bad();
+    const entries = new Set<string>();
+    for (const n of value.navigation) {
+      if (!record(n) || !identity(n.id) || entries.has(n.id) || !value.placements.some((p: PluginPlacement) => p.id === n.placementId && p.surface === 'app.page') ||
+        !Number.isSafeInteger(n.order) || Math.abs(n.order) > 10000 || n.title !== undefined && (typeof n.title !== 'string' || !n.title.trim() || n.title.length > 100)) return bad();
+      entries.add(n.id);
+    }
   }
   return value as PluginLayout;
 }

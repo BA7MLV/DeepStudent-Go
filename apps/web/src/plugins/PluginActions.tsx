@@ -22,7 +22,11 @@ export function PluginActions({ surface, materialId, projectId: requestedProject
   useEffect(() => { const element = dialog.current; if (opened && element && !element.open) element.showModal(); return () => { element?.close(); }; }, [opened]);
   const context = useMemo<PluginHostContext>(() => ({ surface, projectId, materialId, selection, conversation, revision, locale: i18n.language, theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light', width: Math.min(window.innerWidth - 32, 720), mode: 'inline' }), [revision, i18n.language]);
   const layout = data ? parsePluginLayout(JSON.parse(data.layout.content)) : { apiVersion: 2 as const, instances: [], placements: [] };
-  const entries = resolvePluginPlacements(layout, surface, context, data?.scopes?.unavailableInstances).flatMap(placement => {
+  // A resource listing may index a new material after the first catalog read.
+  // Do not open against an unresolved scope and then close the user's dialog
+  // when the shared catalog discovers its project on the next update.
+  const materialReady = !materialId || !data?.scopes?.materials || data.scopes.materials.some(material => material.id === materialId);
+  const entries = (materialReady ? resolvePluginPlacements(layout, surface, context, data?.scopes?.unavailableInstances) : []).flatMap(placement => {
     const plugin = data?.plugins.find(p => p.id === placement.pluginId && !p.error && p.manifest?.enabled);
     const instance = layout.instances.find(i => i.id === placement.instanceId && i.pluginId === placement.pluginId);
     const contribution = plugin?.manifest?.contributions?.[placement.viewId];

@@ -11,7 +11,7 @@ import {
   truncatedToolResult,
 } from './loopGuard';
 import { estimateTokens } from './context';
-import { messageTokens } from '@wangke/study-core/model/transcript';
+import { messageTokens, reconcileSkillMessages } from '@wangke/study-core/model/transcript';
 import { stableTools, cachePolicy } from '@wangke/study-core/model/cache';
 import { executeToolBatch, recordToolResult, TOOL_BATCH_GUIDANCE } from '@wangke/study-core/tool-batch';
 
@@ -223,12 +223,21 @@ export async function runAgentLoop(
       messageTokens(out) + estimateTokens(JSON.stringify(tools)),
     );
 
+  const requestMessages = () => {
+    const projected = reconcileSkillMessages(out);
+    const hasBody = projected.some(message => typeof message.content === 'string' && message.content.includes('<skill_content context='));
+    if (hasBody && messageTokens(projected) + estimateTokens(JSON.stringify(tools)) + answerReserve(settings.contextWindow) > settings.contextWindow) {
+      throw new Error('完整技能规范与当前上下文超出模型预算，请压缩历史或切换更大上下文模型。技能正文没有被截断。');
+    }
+    return projected;
+  };
+
   for (let round = 0; round < maxRounds; round++) {
     cb.onRoundStart?.(round);
     const msg = await chatStream(
       target,
       {
-        messages: out,
+        messages: requestMessages(),
         tools,
         cacheKey: cb.cacheKey,
         onRequest: cb.onRequest,
@@ -333,7 +342,7 @@ export async function runAgentLoop(
         result = `工具执行失败：${e instanceof Error ? e.message : String(e)}`;
       }
       cb.signal?.throwIfAborted();
-      ledger.recordResult(call.function.name, result);
+      ledger.recordResult(call.function.name, result, call.function.arguments);
       cb.onToolEnd?.(call.function.name, result, callId);
       toolTokens += estimateTokens(result);
       recordToolResult(out, resultStart, calls, {
@@ -372,7 +381,7 @@ export async function runAgentLoop(
     const finalMsg = await chatStream(
       target,
       {
-        messages: out,
+        messages: requestMessages(),
         temperature: 0.3,
         cacheKey: cb.cacheKey,
         onRequest: cb.onRequest,

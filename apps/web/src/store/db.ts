@@ -223,7 +223,8 @@ export interface ChatSessionRow {
    * 那会把「用户明确禁用了全部技能」静默退化成「全部可用」。
    */
   skillIds?: number[];
-  /** Explicit instructions reloaded for each turn; separate from the permission scope. */
+  /** @deprecated Legacy forced activation. Preserved for sync compatibility;
+   * ignored by every runtime and never copied to new sessions/forks. */
   pinnedSkillIds?: number[];
   /** undefined inherits enabled servers; [] disables MCP for this conversation. */
   mcpServerIds?: string[];

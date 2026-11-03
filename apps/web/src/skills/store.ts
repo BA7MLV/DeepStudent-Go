@@ -18,6 +18,7 @@ export interface SkillMeta {
   legacyIds?: number[];
   mcpRequired?: string[];
   id: number;
+  revision: number;
   name: string;
   description: string;
 }
@@ -112,7 +113,7 @@ export async function loadEnabledSkillMeta(context: 'chat' | 'legacy-handout' = 
   return skills
     .filter((s) => !s.builtin || (context === 'legacy-handout' ? isLegacyHandoutSkill(s) : !isLegacyHandoutSkill(s)))
     .map((s) => ({
-      id: s.id!, name: s.name, description: s.description,
+      id: s.id!, name: s.name, description: s.description, revision: s.updatedAt,
       builtin: !!s.builtin,
       ...(s.mcpRequired ? { mcpRequired: s.mcpRequired } : {}),
       ...(context === 'chat' && s.builtin && s.name === COURSE_HANDOUT_SKILL ? { legacyIds } : {}),

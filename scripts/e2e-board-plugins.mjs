@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { assertCreationHint, changePlugin } from './plugin-tools.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,7 +21,7 @@ const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
 let browser, store, web;
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
-  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
+  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
   await web.listen(); browser = await chromium.launch({ headless: true });
   // Playwright's SW-blocking probe itself throws in opaque sandboxed frames.
   const context = await browser.newContext({ locale: 'zh-CN' });
@@ -91,20 +92,14 @@ try {
   assert.ok(iframe);
   assert.equal(await iframe.evaluate(() => { try { void parent.document.body; return false; } catch { return true; } }), true);
   await todo.getByRole('textbox', { name: '待办内容' }).fill('未提交的草稿');
-  await page.getByRole('button', { name: '管理插件', exact: true }).click();
-  await page.getByRole('switch', { name: '新计数插件', exact: true }).focus();
-  await page.keyboard.press('Space');
+  await assertCreationHint(page);
+  await changePlugin(page, 'my-counter', '停用插件');
   await page.getByTestId('board-plugin-my-counter').waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: '完成', exact: true }).click();
-  await page.getByTestId('board-manage').waitFor({ state: 'hidden' });
-  assert.equal(await todo.getByRole('textbox', { name: '待办内容' }).inputValue(), '未提交的草稿', 'manager preserves running frames and drafts');
+  assert.equal(await todo.getByRole('textbox', { name: '待办内容' }).inputValue(), '未提交的草稿', 'tool configuration preserves running frames and drafts');
   await page.reload();
   await page.getByTestId('board-plugin-todo').waitFor({ timeout: 30000 });
   assert.equal(await page.getByTestId('board-plugin-my-counter').count(), 0);
-  await page.getByRole('button', { name: '管理插件', exact: true }).click();
-  await page.getByTestId('board-manage-my-counter').locator('[data-slot="switch-content"]').click();
-  await page.getByRole('button', { name: '完成', exact: true }).click();
-  await page.getByTestId('board-manage').waitFor({ state: 'hidden' });
+  await changePlugin(page, 'my-counter', '启用插件');
   await plugin('my-counter').getByText('1', { exact: true }).waitFor();
   const output = process.env.SCREENSHOT_DIR ?? path.join(root, 'board-plugin-screenshots'); fs.mkdirSync(output, { recursive: true });
   const setTheme = theme => page.evaluate(async theme => { const { useSettings } = await import('/src/store/settings.ts'); useSettings.setState({ theme }); }, theme);
@@ -146,14 +141,7 @@ try {
   await timer.getByRole('button', { name: '暂停', exact: true }).waitFor();
   await plugin('my-counter').getByText('1', { exact: true }).waitFor();
   await assertTheme('dark');
-  await page.getByTestId('board-customize').click();
-  const darkManager = page.getByTestId('board-manage');
-  await darkManager.getByRole('button', { name: '完成', exact: true }).focus();
-  const managerColors = await darkManager.evaluate(element => ({ scheme: getComputedStyle(element).colorScheme, background: getComputedStyle(element).backgroundColor }));
-  assert.equal(managerColors.scheme, 'dark');
-  assert.equal(managerColors.background, await page.getByTestId('board-plugin-todo').evaluate(element => getComputedStyle(element).backgroundColor));
-  await darkManager.getByRole('button', { name: '完成', exact: true }).click();
-  await darkManager.waitFor({ state: 'hidden' });
+  await assertCreationHint(page);
   await setTheme('light'); await assertTheme('light');
   await page.emulateMedia({ colorScheme: 'light' });
   for (const width of [1440, 390, 360]) {
@@ -170,31 +158,7 @@ try {
       assert.ok(clock.y + clock.height < 844, `focus timer is visible on the first screen at ${width}`);
     }
     await page.screenshot({ path: path.join(output, `board-${width}.png`), fullPage: true });
-    await page.getByTestId('board-customize').click();
-    const manager = page.getByTestId('board-manage');
-    await manager.waitFor();
-    await manager.getByRole('link', { name: /开发文档/ }).waitFor();
-    // Measure the settled sheet, including the transition after data-entering clears.
-    await page.waitForFunction(() => {
-      const dialog = document.querySelector('[data-testid="board-manage"]');
-      if (!dialog || dialog.closest('[data-entering="true"]')) return false;
-      for (let node = dialog; node; node = node.parentElement) {
-        if (node.getAnimations().some(animation => animation.playState === 'running')) return false;
-      }
-      return true;
-    });
-    const bounds = await manager.boundingBox();
-    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, 'manager fits the viewport');
-    assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= (width < 640 ? 844 : 1000) + 1, 'manager stays in the visible viewport');
-    assert.equal(await manager.evaluate(element => element.scrollWidth > element.clientWidth), false, 'manager has no horizontal overflow');
-    if (width < 640) {
-      assert.equal(await manager.evaluate(element => element.classList.contains('board-manager--mobile')), true);
-      assert.ok(Math.abs(bounds.y + bounds.height - 844) < 1, 'mobile sheet is anchored to the bottom');
-    }
-    await page.screenshot({ path: path.join(output, `board-manager-${width}.png`) });
-    await page.keyboard.press('Escape');
-    await manager.waitFor({ state: 'hidden' });
-    assert.equal(await page.getByTestId('board-customize').evaluate(element => document.activeElement === element), true, 'closing restores keyboard focus');
+    await assertCreationHint(page);
   }
   // Observe a durable Bot run through the real iframe SDK, including nonterminal waits.
   const { BotApplicationService } = await import('../apps/api/src/agent/service.ts');
@@ -245,14 +209,11 @@ try {
   await task.getByTestId(`background-task-${taskId}`).getByRole('button', { name: '查看会话', exact: true }).click();
   await page.waitForURL(url => url.hash === '#/');
   await page.goto(`${origin}/#/board`);
-  await page.getByTestId('board-customize').click();
-  await page.getByRole('link', { name: /插件模板/ }).click();
   for (const file of ['manifest.json', 'index.html', 'state.json']) {
-    await page.locator(`[data-system-file="/system/board/template/${file}"]`).waitFor({ timeout: 30000 });
+    assert.ok((await getFile(`/system/board/template/${file}`)).content.length > 0, 'templates remain readable by tools');
   }
   await page.goto(`${origin}/#/board`);
-  await page.getByTestId('board-customize').click();
-  await page.getByRole('link', { name: '打开 待办 的配置', exact: true }).click();
+  await page.goto(`${origin}/#/player/${encodeURIComponent(`system:file:${encodeURIComponent('/system/board/plugins/todo/manifest.json')}`)}`);
   await page.waitForURL(url => decodeURIComponent(decodeURIComponent(url.hash)).includes('/system/board/plugins/todo/manifest.json'));
   await page.getByRole('heading', { name: 'manifest.json', exact: true }).waitFor();
   await page.goto(`${origin}/#/board`);
@@ -261,11 +222,10 @@ try {
   await todo.getByRole('button', { name: 'Add', exact: true }).waitFor();
   await task.getByRole('button', { name: /^Recent/ }).click();
   await task.getByText('Parse document', { exact: true }).first().waitFor();
-  await page.getByTestId('board-customize').click();
-  await page.getByRole('link', { name: /Developer docs/ }).click();
+  await page.goto(`${origin}/#/player/${encodeURIComponent(`system:file:${encodeURIComponent('/system/board/README.md')}`)}`);
   await page.getByText('看板插件 · API v1', { exact: true }).first().waitFor({ timeout: 30000 });
   assert.deepEqual(errors, []);
-  console.log(`Board UI passed: shared files, timer, schedules, hot-load, light/dark/auto theme sync and cold load without losing drafts, manager/mobile layout, Bot task callbacks, conversation links, templates/docs, languages, 360/390/1440px. Screenshots: ${output}`);
+  console.log(`Board UI passed: shared files, timer, schedules, hot-load, light/dark/auto theme sync and cold load without losing drafts, Create mode guidance, Bot task callbacks, conversation links, templates/docs, languages, 360/390/1440px. Screenshots: ${output}`);
 } catch (error) {
   for (const page of browser?.contexts()[0]?.pages() ?? []) await page.screenshot({ path: path.join(root, 'board-ui-failure.png') }).catch(() => {});
   for (const page of browser?.contexts()[0]?.pages() ?? []) { console.error((await page.locator('body').innerText()).slice(-6000)); for (const frame of page.frames().slice(1)) console.error((await frame.locator('body').innerText()).slice(-2000)); }

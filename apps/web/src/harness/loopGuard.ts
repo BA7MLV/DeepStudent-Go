@@ -118,10 +118,23 @@ export class CallLedger {
   }
 
   /** 写成功后旧读取指纹失效，允许 read → edit → read；失败与重复写入仍受护栏保护。 */
-  recordResult(name: string, result: string): void {
-    if (!['edit', 'edit_markdown'].includes(name) || !/^已(?:创建|修改)/.test(result)) return;
+  recordResult(name: string, result: string, argsJson = '{}'): void {
+    let args: Record<string, unknown>;
+    try { args = JSON.parse(argsJson); } catch { return; }
+    const edited = ['edit', 'edit_markdown'].includes(name) && /^已(?:创建|修改)/.test(result);
+    const pluginEdit = edited && typeof args.path === 'string' && /^\/system\/(?:plugins\/|plugin-layout\.json$|board\/)/.test(args.path);
+    let pluginMutation = false;
+    if (name === 'plugins' && ['configure', 'lifecycle', 'invoke'].includes(String(args.operation))) {
+      try { const value = JSON.parse(result); pluginMutation = value !== null && typeof value === 'object' && !value.error; } catch { /* Failed mutations keep their fingerprints. */ }
+    }
+    const pluginConflict = name === 'plugins' && /system_revision_conflict|HTTP 409/.test(result);
+    if (!edited && !pluginMutation && !pluginConflict) return;
     for (const key of this.seen) {
-      if (/^(?:read|grep|get_material_range|search_material):/.test(key)) this.seen.delete(key);
+      if (edited && /^(?:read|grep|get_material_range|search_material):/.test(key)) this.seen.delete(key);
+      // Only invalidate plugin discovery reads, never writes or unrelated calls.
+      if ((pluginEdit || pluginMutation || pluginConflict) && key.startsWith('plugins:')) {
+        try { if (['list', 'describe', 'layout'].includes(JSON.parse(key.slice('plugins:'.length)).operation)) this.seen.delete(key); } catch { /* Invalid calls stay guarded. */ }
+      }
     }
   }
 }

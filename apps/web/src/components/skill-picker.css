@@ -62,5 +62,7 @@
   .skill-picker-dialog.modal__dialog { width: calc(100% - 1.25rem); max-height: calc(100% - 1.25rem); padding: 1rem; }
   .skill-picker__header { gap: .75rem; }
   .skill-picker .skill-picker__content { padding: .75rem; gap: .75rem; }
-  .skill-picker__footer.modal__footer { flex-wrap: wrap; margin-top: .75rem; padding-top: .75rem; }
+  .skill-picker__footer.modal__footer { display: grid; grid-template-columns: 1fr auto; margin-top: .75rem; padding-top: .75rem; }
+  .skill-picker__footer [data-testid='skill-picker-manage'] { justify-self: start; }
+  .skill-picker__footer [data-testid='skill-picker-done'] { grid-column: 1 / -1; width: 100%; }
 }

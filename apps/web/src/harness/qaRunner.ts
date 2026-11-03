@@ -21,7 +21,7 @@ import { nextChatTurnTimes } from '@wangke/study-core/chat-order';
 import type { UnitKind } from '../materials/units.ts';
 import { nextVisualRound } from '../utils/streamingHtml';
 import { quizHistoryContent } from './quiz';
-import { modelTrace, replayTrace, runtimeContext, splitSystemPrompt } from '@wangke/study-core/model/transcript';
+import { modelTrace, replayTrace, runtimeContext, splitSystemPrompt, reconcileSkillMessages } from '@wangke/study-core/model/transcript';
 import { fitModelHistory, sessionCacheKey } from '../store/modelHistory';
 import { displayEnvironmentPrompt } from './displayEnvironment';
 
@@ -158,7 +158,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
   const { videoId, sessionId, text } = input;
   const session = await db.chatSessions.get(sessionId);
   const skillIds = session ? session.skillIds : input.skillIds;
-  const selectedSkills = explicitSkillIds(input.explicitSkillIds, session?.pinnedSkillIds);
+  const selectedSkills = explicitSkillIds(input.explicitSkillIds);
   const activated = await activateSkills(selectedSkills, skillIds, sessionId);
   /** 阅读材料 = 有定位单元；视频课程走字幕检索 + 时间戳引用 */
   const isMaterial = input.materialKind !== undefined;
@@ -226,7 +226,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
   assertSkillBudget(budget, activated);
   // 末条即刚落库的当前问题；图片与工具结果从原始历史重放。
   const recent = await fitModelHistory(sessionId, history.slice(0, -1).map((row) => ({ ...row, originalContent: row.content, content: quizHistoryContent(row) })), Math.max(2000, budget));
-  const messages: ChatMessage[] = [
+  let messages: ChatMessage[] = [
     ...splitSystemPrompt(systemPrompt),
     ...recent.flatMap(r => replayTrace(r) ?? [{ role: r.role, content: r.content }]),
     ...activated.messages,
@@ -242,7 +242,8 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
   } else {
     messages.push({ role: 'user', content: currentText });
   }
-  await db.chats.update(userRowId, { modelTrace: modelTrace(input.displayText ?? text, [messages.at(-1)!]) });
+  messages = reconcileSkillMessages(messages, skillMetas);
+  await db.chats.update(userRowId, { modelTrace: modelTrace(input.displayText ?? text, [...activated.messages, messages.at(-1)!]) });
   assertSkillRequestBudget(settings.contextWindow, messages, activated);
   const baseLength = messages.length;
   let rawTurn: ChatMessage[] = [];
@@ -258,6 +259,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
   let widgetRowId: number | undefined;
   let widgetState: WidgetPayload | undefined;
   const executeTool = createResourceExecutor({
+    sessionId,
     signal: sink.signal,
     courseId: videoId,
     editable: canEditMd,

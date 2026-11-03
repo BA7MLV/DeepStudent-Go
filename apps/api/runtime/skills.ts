@@ -1,5 +1,5 @@
 import { intersectSkillMetaIds } from '@wangke/study-core/skills/scope';
-import { messageTokens } from '@wangke/study-core/model/transcript';
+import { messageTokens, skillContent, reconcileSkillMessages } from '@wangke/study-core/model/transcript';
 import type { ChatMessage } from '@wangke/study-core/model/client';
 import { taskRows, type TaskContext } from '../src/cloud/execution.js';
 
@@ -18,11 +18,13 @@ export function sessionSkills(context: TaskContext, session: Record<string, any>
   const handoutId = bindings.find(b => b.builtin_slug === 'course-handout')?.skill_id;
   const legacyIds = physical.filter(s => legacy.has(s.id) && s.enabled === 1).map(s => s.id);
   const enabled = physical.filter(s => s.enabled === 1 && !legacy.has(s.id)).map(s => ({ ...s,
+    // Use the synced record revision token, matching browser model traces.
+    revision: context.records.get(context.owner, 'skills', s.id)?.updatedAt ?? s.updatedAt,
     ...(s.id === handoutId ? { legacyIds } : {}),
   }));
   const allowed = new Set(intersectSkillMetaIds(enabled, session.skillIds === undefined ? undefined : ids(session.skillIds)));
   const available = enabled.filter(s => allowed.has(s.id));
-  const selected = [...new Set([...ids(session.pinnedSkillIds), ...ids(turnIds)])];
+  const selected = [...new Set(ids(turnIds))];
   const resolved = selected.map(id => {
     const skill = available.find(s => s.id === id || s.legacyIds?.includes(id));
     if (!skill) throw new Error(`技能「${physical.find(s => s.id === id)?.name ?? id}」已停用、已删除或不在当前技能范围内；请调整选择后重试。`);
@@ -37,15 +39,16 @@ export function sessionSkills(context: TaskContext, session: Record<string, any>
   const skillBody = (skill: typeof available[number]) => {
     check(skill);
     const refs = references(skill.id);
-    return skill.body + (refs.length ? `\n\n参考资料（仅按需 read）：\n${refs.map(ref => `/skills/${encodeURIComponent(skill.name)}/references/${String(ref.path).split('/').map(encodeURIComponent).join('/')}`).join('\n')}` : '');
+    return skillContent(skill, skill.body + (refs.length ? `\n\n参考资料（仅按需 read，不代表已读取）：\n${refs.map(ref => `/skills/${encodeURIComponent(skill.name)}/references/${String(ref.path).split('/').map(encodeURIComponent).join('/')}`).join('\n')}` : ''));
   };
   const messages: ChatMessage[] = resolved.length ? [{ role: 'user', content:
-    `以下是用户为当前任务明确指定的技能规范，宿主已完整加载，请用于本轮任务，无需重复读取正文。这些规范不覆盖系统规则，不增加工具或数据权限；冲突时先向用户确认。\n<activated_skills>\n${resolved.map(skill => `<skill_content name=${JSON.stringify(skill.name)} revision=${JSON.stringify(skill.revision)}>\n${skillBody(skill)}\n</skill_content>`).join('\n\n')}\n</activated_skills>`,
+    `[技能激活：宿主上下文]\n用户为当前任务明确指定以下技能；正文已在上下文则复用。保留规范只用于后续相关任务，不代表每轮强制使用。不覆盖系统规则，不增加工具或数据权限；冲突时先确认。\n${resolved.map(skillBody).join('\n\n')}`,
   }] : [];
   return {
     ids: selected, messages,
-    traces: resolved.map(skill => ({ name: 'use_skill', detail: JSON.stringify({ name: skill.name }), status: 'done' as const, result: '宿主已完整加载用户指定的技能规范；参考资料按需读取。' })),
-    prompt: available.length ? `\n\n可用技能（仅元数据，不代表正文已加载）：\n${available.map(s => `- ${s.name}：${s.description}`).join('\n')}\n对于相关任务，先 read /skills/{URI编码名称} 加载规范；已通过 activated_skills 提供的正文直接遵循。参考资料仅按需读取，技能不增加权限。` : '',
+    traces: resolved.map(skill => ({ name: 'use_skill', detail: JSON.stringify({ name: skill.name }), status: 'done' as const, result: '宿主已读取完整规范；相同正文在模型上下文中复用。参考资料按需读取。' })),
+    reconcile: (messages: readonly ChatMessage[]) => reconcileSkillMessages(messages, available),
+    prompt: available.length ? `\n\n可用技能（仅元数据，不代表正文已加载）：\n${available.map(s => `- ${s.name}：${s.description}`).join('\n')}\n仅在任务相关时 read /skills/{URI编码名称} 加载规范；当前上下文已有相同正文时复用。压缩后未保留正文的技能需要重新读取，不得仅凭摘要声称已加载。参考资料仅按需读取，技能不增加权限。` : '',
     wrap(execute: (name: string, args: Record<string, unknown>) => Promise<string>) {
       return async (name: string, args: Record<string, unknown>) => {
         if (name !== 'read' || typeof args.path !== 'string' || !/^\/skills(?:\/|$)/.test(args.path)) return execute(name, args);
@@ -74,5 +77,6 @@ export function skillHistoryBudget(contextWindow: number, messages: ChatMessage[
 }
 
 export function assertSkillRequestBudget(contextWindow: number, messages: ChatMessage[], hasSkills: boolean): void {
+  hasSkills ||= messages.some(message => typeof message.content === 'string' && message.content.includes('<skill_content context='));
   if (hasSkills && contextWindow - messageTokens(messages) - 16000 < 0) throw new Error('指定技能、当前输入与保留历史超出模型上下文预算；请减少指定技能或开启新会话。技能正文没有被截断。');
 }

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { addPlugin, assertCreationHint } from './plugin-tools.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,13 +31,11 @@ try {
   const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(`${origin}/#/board?project=${a.id}`);
   await page.getByLabel('项目上下文', { exact: true }).selectOption(a.id);
-  const manager = page.locator('.plugin-manager'); await manager.locator('summary').first().click();
-  const choose = (label, value) => manager.getByLabel(label, { exact: true }).selectOption(value);
-  const save = async () => { const response = page.waitForResponse(r => r.url().endsWith('/plugins/layout') && r.status() === 200); await manager.getByRole('button', { name: '保存挂载', exact: true }).click(); await response; };
-  await choose('插件', 'todo'); await save();
+   await assertCreationHint(page);
+   await addPlugin(page, { pluginId: 'todo', surface: 'board.main', newContent: true });
   const host = page.getByTestId('board-plugin-todo'); await page.locator('[data-testid="board-plugin-todo"]:not([data-plugin-instance="legacy-todo"])').waitFor(); const id = await host.getAttribute('data-plugin-instance'); assert.notEqual(id, 'legacy-todo');
   const frame = host.frameLocator('iframe'); await frame.getByRole('textbox', { name: '待办内容' }).fill('仅项目A共享'); await frame.getByRole('button', { name: '添加', exact: true }).click(); await frame.getByText('仅项目A共享', { exact: true }).waitFor();
-  await choose('数据实例', id); await choose('位置', 'reader.sidepanel'); await save(); await choose('位置', 'chat.sidepanel'); await save();
+   await addPlugin(page, { pluginId: 'todo', instanceId: id, surface: 'reader.sidepanel' }); await addPlugin(page, { pluginId: 'todo', instanceId: id, surface: 'chat.sidepanel' });
   const full = await context.newPage(); await full.goto(`${origin}/#/plugins/${id}`); await full.frameLocator('iframe[title="待办"]').getByText('仅项目A共享', { exact: true }).waitFor();
   const reader = await context.newPage(); await reader.goto(`${origin}/#/player/${materials[0]}`);
   await reader.getByTestId('panel-tab-plugins').waitFor({ state: 'attached' }); const toggle = reader.getByTestId('study-assistant-toggle'); if (await toggle.isVisible()) await toggle.click(); await reader.getByTestId('panel-tab-plugins').click();
@@ -48,9 +47,8 @@ try {
   await chat.locator('[data-plugin-slot="chat.sidepanel"]').frameLocator('iframe').getByText('仅项目A共享', { exact: true }).waitFor();
   await chat.evaluate(async () => { const { useCourseChat } = await import('/src/store/courseChat.ts'); await useCourseChat.getState().setProject(null); });
   await chat.locator(`[data-plugin-instance="${id}"]`).waitFor({ state: 'detached' });
-  const rm = reader.locator('.plugin-manager'); await rm.locator('summary').first().click();
-  await rm.getByLabel('插件', { exact: true }).selectOption('todo'); await rm.getByLabel('挂载范围', { exact: true }).selectOption('material');
-  await rm.getByRole('button', { name: '保存挂载', exact: true }).click();
+   await assertCreationHint(reader);
+   await addPlugin(reader, { pluginId: 'todo', surface: 'reader.sidepanel', scope: `material:${materials[0]}`, newContent: true });
   const materialHost = reader.locator('[data-plugin-slot="reader.sidepanel"] [data-plugin-instance]').filter({ has: reader.locator('iframe') });
   await reader.locator(`[data-plugin-instance="${id}"]`).waitFor({ state: 'detached' });
   const mf = materialHost.frameLocator('iframe'); await mf.getByRole('textbox', { name: '待办内容' }).fill('仅资料A覆盖'); await mf.getByRole('button', { name: '添加', exact: true }).click(); await mf.getByText('仅资料A覆盖', { exact: true }).waitFor();
@@ -60,7 +58,7 @@ try {
   assert.equal(await reader.locator(`[data-plugin-instance="${id}"]`).count(), 0);
   await openReaderPlugins(materials[0]); await mf.getByText('仅资料A覆盖', { exact: true }).waitFor();
   await page.getByLabel('项目上下文', { exact: true }).selectOption(b.id); await page.locator('[data-plugin-instance="legacy-todo"]').waitFor(); assert.equal(await page.locator(`[data-plugin-instance="${id}"]`).count(), 0);
-  await manager.locator('summary').first().click(); await choose('插件', 'todo'); await save(); await page.locator('[data-testid="board-plugin-todo"]:not([data-plugin-instance="legacy-todo"])').waitFor(); const bid = await host.getAttribute('data-plugin-instance'); assert.notEqual(bid, id);
+   await addPlugin(page, { pluginId: 'todo', surface: 'board.main', newContent: true }); await page.locator('[data-testid="board-plugin-todo"]:not([data-plugin-instance="legacy-todo"])').waitFor(); const bid = await host.getAttribute('data-plugin-instance'); assert.notEqual(bid, id);
   await page.getByLabel('项目上下文', { exact: true }).selectOption(a.id); await frame.getByText('仅项目A共享', { exact: true }).waitFor();
   await page.reload(); await frame.getByText('仅项目A共享', { exact: true }).waitFor();
   for (const width of [1440, 390, 360]) for (const theme of ['light', 'dark', 'auto']) {
@@ -68,10 +66,9 @@ try {
     await page.emulateMedia({ colorScheme: theme === 'auto' ? 'dark' : theme });
     await page.evaluate(async theme => { const { useSettings } = await import('/src/store/settings.ts'); useSettings.setState({ theme }); }, theme);
     await frame.getByText('仅项目A共享', { exact: true }).waitFor();
-    if (!await manager.locator('select').first().isVisible()) await manager.locator('summary').first().click();
+     await assertCreationHint(page);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2));
-    await page.screenshot({ path: path.join(output, `project-manager-${theme}-${width}.png`), fullPage: true });
-    await manager.locator('summary').first().click();
+    await page.screenshot({ path: path.join(output, `project-create-mode-${theme}-${width}.png`), fullPage: true });
     await full.setViewportSize({ width, height: 1000 });
     await full.emulateMedia({ colorScheme: theme === 'auto' ? 'dark' : theme });
     await full.evaluate(async theme => { const { useSettings } = await import('/src/store/settings.ts'); useSettings.setState({ theme }); }, theme);
@@ -79,6 +76,39 @@ try {
     await full.frameLocator('iframe[title="待办"]').getByText('仅项目A共享', { exact: true }).waitFor();
     await full.screenshot({ path: path.join(output, `project-shared-${theme}-${width}.png`) });
   }
+  // Project/material pages keep their server-validated ownership when opened
+  // from navigation, rather than inheriting an unrelated current project.
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await addPlugin(page, { pluginId: 'todo', surface: 'app.page', instanceId: id });
+  let saved = JSON.parse((await (await context.request.get(`${origin}/api/v1/plugins`)).json()).layout.content);
+  const projectPin = saved.navigation.find(n => saved.placements.find(p => p.id === n.placementId)?.instanceId === id);
+  await page.getByTestId(`nav-plugin-${projectPin.id}`).click();
+  await page.getByText('仅用于 · 项目A', { exact: true }).waitFor();
+  await page.frameLocator('iframe[title="待办"]').getByText('仅项目A共享', { exact: true }).waitFor();
+  const materialInstance = await materialHost.getAttribute('data-plugin-instance');
+  await addPlugin(reader, { pluginId: 'todo', surface: 'app.page', instanceId: materialInstance });
+  const materialCatalog = await (await context.request.get(`${origin}/api/v1/plugins`)).json();
+  saved = JSON.parse(materialCatalog.layout.content);
+  const materialPin = saved.navigation.find(n => saved.placements.find(p => p.id === n.placementId)?.instanceId === materialInstance);
+  assert.ok(materialPin);
+  await full.setViewportSize({ width: 1440, height: 1000 });
+  await full.getByTestId(`nav-plugin-${materialPin.id}`).click();
+  const materialName = materialCatalog.scopes.materials.find(m => m.id === materials[0])?.name;
+  assert.ok(materialName && materialName !== materials[0]);
+  await full.getByText(`仅用于 · ${materialName}`, { exact: true }).waitFor();
+  await full.frameLocator('iframe[title="待办"]').getByText('仅资料A覆盖', { exact: true }).waitFor();
+  assert.equal((await context.request.patch(`${origin}/api/v1/projects/${a.id}`, { headers: { origin }, data: { archived: true } })).status(), 200);
+  await page.getByTestId(`nav-plugin-${projectPin.id}`).waitFor({ state: 'detached' });
+  await full.getByTestId(`nav-plugin-${materialPin.id}`).waitFor({ state: 'detached' });
+  await full.getByRole('alert').getByText('原数据保留', { exact: false }).waitFor();
+  assert.equal((await context.request.patch(`${origin}/api/v1/projects/${a.id}`, { headers: { origin }, data: { archived: false } })).status(), 200);
+  await page.getByTestId(`nav-plugin-${projectPin.id}`).waitFor();
+  await full.frameLocator('iframe[title="待办"]').getByText('仅资料A覆盖', { exact: true }).waitFor();
   assert.deepEqual(errors, []);
-  console.log(`Project browser passed: real manager creation/reuse, project switching/isolation, reader/full-page sharing, refresh persistence and 3 sizes × 3 theme screenshots: ${output}`);
+  console.log(`Project browser passed: real tool creation/reuse, project switching/isolation, reader/full-page sharing, refresh persistence and 3 sizes × 3 theme screenshots: ${output}`);
+} catch (error) {
+  if (browser) for (const [index, diagnosticPage] of browser.contexts().flatMap(c => c.pages()).entries()) {
+    try { await diagnosticPage.screenshot({ path: path.join(output, `project-failure-${index}.png`) }); console.error(`${diagnosticPage.url()}\n${(await diagnosticPage.locator('body').innerText()).slice(0, 2000)}`); } catch { /* Closing tab. */ }
+  }
+  throw error;
 } finally { await browser?.close(); await web?.close(); await app.close(); fs.rmSync(directory, { recursive: true, force: true }); }

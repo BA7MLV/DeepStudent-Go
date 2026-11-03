@@ -1046,28 +1046,6 @@
 
 .course-chat__composer-tools .model-picker__chip-name { display: none; }
 
-.course-chat__delivery-bar {
-  box-sizing: border-box;
-  width: min(100%, var(--course-chat-column));
-  margin: 0 auto 8px;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--background);
-}
-
-.course-chat__send-hint {
-  flex: 1 1 120px;
-  min-width: 0;
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
 .course-chat__send {
   width: 34px;
   height: 34px;
@@ -1086,31 +1064,6 @@
   height: 34px;
   min-width: 34px;
   flex: none;
-}
-
-/* 生成期间独立挂在输入卡上方，不挤占技能、模型与发送工具的位置。 */
-.course-chat__send-mode {
-  flex: none;
-  gap: 4px;
-  padding: 4px;
-  border-radius: var(--radius-full);
-  background: var(--surface-secondary);
-}
-
-.course-chat__send-mode button {
-  gap: 4px;
-  border-radius: var(--radius-full);
-}
-
-.course-chat__send-mode button[aria-pressed='true'],
-.course-chat__send-mode button[data-selected='true'] {
-  background: var(--foreground);
-  color: var(--background);
-}
-
-.course-chat__send-mode svg {
-  width: 14px;
-  height: 14px;
 }
 
 /* ── 排队条 ─────────────────────────────────────────────────────────────
@@ -1363,10 +1316,6 @@
     gap: 4px;
   }
 
-  .course-chat__send-mode [role='radio'],
-  .course-chat__send-mode button {
-    padding-inline: 8px;
-  }
 }
 
 /* 触屏设备输入框字号给到 16px：iOS Safari（iPhone 与 iPad 一视同仁）聚焦字号

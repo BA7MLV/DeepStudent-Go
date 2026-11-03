@@ -62,7 +62,7 @@ await page.waitForSelector('[data-testid="card-skills"] [data-testid="skill-row"
 const listText = await page.locator('[data-testid="card-skills"]').innerText();
 const hasBuiltin = listText.includes('课程讲义');
 const rowCount = await rows.count();
-check(rowCount === 5, `新安装技能列表有 ${rowCount} 个任务入口（应为 5）`);
+check(rowCount === 6, `新安装技能列表有 ${rowCount} 个任务入口（应为 6）`);
 check(!listText.includes('公文版式规格'), '旧 IR 规范不混入日常技能列表');
 check(hasBuiltin, '行内渲染出技能名（不是只有按钮）');
 check(
@@ -79,7 +79,7 @@ await page.click('[data-testid="skill-catalog-mode"]');
 check((await rows.count()) === 6, '旧版管理入口保留六份 IR 规范');
 check((await page.locator('[data-testid="card-skills"]').innerText()).includes('公文版式规格'), '旧版规范仍可查看和启停');
 await page.click('[data-testid="skill-catalog-mode"]');
-check((await rows.count()) === 5, '返回日常技能后恢复五个任务入口');
+check((await rows.count()) === 6, '返回日常技能后恢复六个任务入口');
 
 // ── 2. 新建对话框：打开 ──────────────────────────────────────────────────
 await page.click('[data-testid="btn-skill-new"]');

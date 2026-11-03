@@ -267,7 +267,7 @@ ${transcript}
     );
     if (skillMetaList) {
       rules.push(
-        `可用的技能（名称：用途）：\n${skillMetaList}\n用户明确指定且已由宿主通过 activated_skills 提供的技能正文，直接遵循，无需重复读取。其他技能在问题涉及其用途领域时，先 read /skills/{URI 编码后的技能名称} 加载正文，再按规范回答；参考文档使用返回的完整路径 read。可 read /skills 获取准确路径。`,
+        `可用的技能（名称：用途；仅元数据，不代表正文已加载）：\n${skillMetaList}\n仅在任务相关时加载规范。当前上下文已有完整 skill_content 正文时直接复用，无需重复读取；仅有名称、摘要或加载回执不算已加载。需要时 read /skills/{URI 编码后的技能名称}；参考文档按需使用返回的完整路径 read。可 read /skills 获取准确路径。`,
       );
     }
     if (hasFrames) {
@@ -331,7 +331,7 @@ ${rules.map((r, i) => `${i + 1}. ${r}`).join('\n')}`, agentInstructions);
     );
     if (skillMetaList) {
       rules.push(
-        `可用的技能（名称：用途）：\n${skillMetaList}\n用户明确指定且已由宿主通过 activated_skills 提供的技能正文，直接遵循，无需重复读取。其他技能在问题涉及其用途领域时，先 read /skills/{URI 编码后的技能名称} 加载正文，再按规范回答；参考文档使用返回的完整路径 read。可 read /skills 获取准确路径。`,
+        `可用的技能（名称：用途；仅元数据，不代表正文已加载）：\n${skillMetaList}\n仅在任务相关时加载规范。当前上下文已有完整 skill_content 正文时直接复用，无需重复读取；仅有名称、摘要或加载回执不算已加载。需要时 read /skills/{URI 编码后的技能名称}；参考文档按需使用返回的完整路径 read。可 read /skills 获取准确路径。`,
       );
     }
     if (editable) {
