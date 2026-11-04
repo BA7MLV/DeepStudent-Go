@@ -90,7 +90,7 @@ cd deepstudent-go
 3. 在课程问答里直接提问，也可以选中文字、截取视频画面或框选 PDF 区域。点击回答里的引用回到来源，核对模型有没有理解错。
 4. 想整理笔记，在问答输入框的加号菜单选择「生成讲义」。讲义保存为 Markdown 资料，后续可以续写或手动修改；聊天里的内容只是当时的快照，文件才是最新版。
 
-转写、PDF / HTML 解析等部分任务仍需要浏览器 Worker。服务器不会自动启动 Chromium；需要时，在已登录的 HTTPS 页面打开 `https://你的域名/?cloud-worker=1` 并保持该页面运行。没有 Worker 时，这类任务会留在队列中。普通聊天、课程问答和 Bot 的后端任务不依赖这个页面。任务分工见[任务执行说明](docs/task-execution.md)。
+转写、PDF / HTML 解析、封面、含图讲义及原题提取由服务器独立执行，关闭全部浏览器不影响已提交任务。API 需要 FFmpeg（含 ffprobe）、Poppler；Linux 还需要 util-linux 和中文字体，Dockerfile 已包含。无需 Chromium 或 worker 页面。任务分工见[任务执行说明](docs/task-execution.md)。
 
 课程检索使用 BM25 全文匹配，不需要额外的向量模型。它依赖原文用词，换一种说法可能搜不到；可以补充术语、章节名或原句再问。引用有助于核对，但不能保证回答正确。
 
@@ -154,7 +154,7 @@ PUBLIC_ORIGIN=http://localhost:5173 npm run dev:api
 WANGKE_API_PROXY=http://127.0.0.1:3000 npm run dev
 ```
 
-视频上传后自动准备字幕，B 站自带字幕优先，否则在浏览器中解码并调用配置的 ASR 服务（可能收费）。字幕、封面等浏览器任务需要保持页面打开；部署不再需要 FFmpeg。直接启动 API 不会托管前端页面。
+视频上传后自动准备字幕，B 站自带字幕优先，否则服务器解码、使用仓库自带 Silero 模型分段并调用配置的 ASR 服务（可能收费）。本机 API 需安装 FFmpeg、Poppler；无需保持页面打开。直接启动 API 不会托管前端页面。
 
 ### 构建与测试
 

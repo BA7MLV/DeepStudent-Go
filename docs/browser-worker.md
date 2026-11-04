@@ -1,9 +1,11 @@
-# External browser worker
+# 浏览器执行器已退役
 
-The API does not launch Chromium or FFmpeg. Node owns scheduling, model calls, text processing, and persistence. Media decoding/rendering runs in the user's authenticated browser.
+当前持久云端任务全部由 API 的 Node 执行器调度；关闭全部浏览器不暂停任务。服务器不会启动 Chromium，也不使用隐藏 iframe、task bearer token、claim 或租约续期。
 
-Ordinary signed-in application pages automatically host a same-origin worker iframe. Web Locks elect one host per browser/account, and server leases coordinate devices. The iframe isolates task credentials and worker state from the interactive app. A standalone `?cloud-worker=1` tab is still supported but no longer required. Only the claimed task's scoped bearer token can report, authorize, mutate records, or complete it.
+部署需要 FFmpeg、ffprobe、Poppler；Linux 还需要 util-linux（prlimit）与中文字体。Dockerfile 已声明这些依赖。Silero 使用仓库原有的 legacy ONNX 模型，随 study-core 打包；不运行下载器，不新增推理服务。
 
-Browser leases expire after 30 seconds. A server restart or expired lease returns browser tasks to `queued`. Keep an app tab open while processing; closing/suspending all tabs pauses browser work until a tab can claim it again. Playwright and FFmpeg are development-only tools for E2E fixtures, not deployment dependencies.
+旧 executor IndexedDB 只供显式核对、导出。列表仅读取键与数量；导出时才读取完整附件。不会自动续跑、归档或清除旧 Blob/outbox。旧 queued browser 任务迁移 Node；旧运行中或等待用户的任务保守标记 interrupted，不自动重放不确定副作用。旧 token 无写入权限。
 
-Video uploads automatically prepare subtitles. Bilibili imports first reuse original subtitles; absent/unavailable originals fall back to browser audio extraction + VAD + the configured ASR model. ASR is a remote model call, not offline speech recognition, and may incur provider charges. Completed segments are checkpointed; failures and explicit cancellations retain a retry control. Cover generation also uses the browser and preserves user-selected covers.
+真正的本地音频抽取、PDF 阅读等 Web Workers 仍保留，不是云端执行器。历史文档中的「浏览器 worker / 保持页面打开 / 租约过期自动排队」仅描述退役架构，历史验收数字不代表当前版本通过。
+
+当前架构、资源边界与验收范围见 [server-task-execution.md](server-task-execution.md)。

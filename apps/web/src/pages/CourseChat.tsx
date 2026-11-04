@@ -555,7 +555,7 @@ export default function CourseChat() {
   const draft = useCourseChat((s) => s.draft);
   const attachmentItems = useChatAttachments((state) => state.items);
   const hasDraft = !!draft.trim() || attachmentItems.length > 0;
-  const attachmentsPending = attachmentItems.some((item) => !item.value);
+  const attachmentsPending = attachmentItems.some((item) => !item.value || !!item.error);
   const courseCount = useCourseChat((s) => s.courseCount);
   const skillIds = useCourseChat((s) => s.skillIds);
   const contextCourses = useCourseChat((s) => s.contextCourses);
@@ -715,11 +715,11 @@ export default function CourseChat() {
     const main = composer?.parentElement;
     if (!composer || !main) return;
     const measure = () => {
-      const height = composer.getBoundingClientRect().height;
-      // Clip at the input area's actual top edge, not above its transparent padding.
-      const inset = parseFloat(getComputedStyle(composer).paddingTop) || 0;
-      main.style.setProperty('--chat-composer-height', `${height}px`);
-      main.style.setProperty('--chat-composer-clip-height', `${Math.max(0, height - inset)}px`);
+      const bounds = composer.getBoundingClientRect();
+      const card = composer.querySelector('.course-chat__composer')?.getBoundingClientRect();
+      main.style.setProperty('--chat-composer-height', `${bounds.height}px`);
+      // Anchor the backdrop to the card, not the queue or attachment area above it.
+      if (card) composer.style.setProperty('--chat-composer-blur-top', `${card.top - bounds.top + card.height / 2}px`);
       pinIfSticking();
     };
     measure();
@@ -892,28 +892,25 @@ export default function CourseChat() {
       title={activeTitle}
       fill
       rootClassName="page-course-chat"
-      actions={<>
-        <Button variant="tertiary" onPress={() => setAuxiliary(auxiliary === 'plugins' && botOpen ? 'bot' : 'plugins')}>组件</Button>
-        {isNarrow && (
-          <Button
-            isIconOnly
-            variant="tertiary"
-            className="page-shell__toolbar-button course-chat__new-chat"
-            aria-label="新会话"
-            data-testid="chat-new-session"
-            onPress={() => { void createSession(); }}
-          >
-            <Sym name="edit" />
-          </Button>
-        )}
-      </>}
+      actions={isNarrow ? (
+        <Button
+          isIconOnly
+          variant="tertiary"
+          className="page-shell__toolbar-button course-chat__new-chat"
+          aria-label="新会话"
+          data-testid="chat-new-session"
+          onPress={() => { void createSession(); }}
+        >
+          <Sym name="edit" />
+        </Button>
+      ) : undefined}
       aside={{
         open: botOpen,
         onOpenChange: setBotOpen,
         label: auxiliary === 'plugins' ? '学习组件' : 'Bot',
         content: (
           <Suspense fallback={<div className="bot-center" aria-busy="true" />}>
-            {auxiliary === 'plugins' ? <div className="plugin-panel"><header><Button variant="tertiary" onPress={() => setAuxiliary('bot')}>Bot</Button><Button variant="tertiary" onPress={() => setBotOpen(false)}>关闭组件</Button></header><PluginSlot name="chat.sidepanel" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} /></div> : <BotPanel onClose={() => setBotOpen(false)} />}
+            {auxiliary === 'plugins' ? <div className="plugin-panel"><header><Button variant="tertiary" onPress={() => setAuxiliary('bot')}>Bot</Button><Button variant="tertiary" onPress={() => setBotOpen(false)}>关闭组件</Button></header><PluginSlot name="chat.sidepanel" manage={false} projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} /></div> : <BotPanel onClose={() => setBotOpen(false)} />}
           </Suspense>
         ),
       }}
@@ -1107,6 +1104,9 @@ export default function CourseChat() {
           {/* 正文独占上行；底部添加入口固定在左，发送操作固定在右。
               队列只在有待发消息时出现；长问题仍可自动增高。 */}
           <div className="course-chat__composer-wrap" ref={composerWrapRef}>
+            <div className="course-chat__composer-blur" aria-hidden="true">
+              <span /><span /><span /><span />
+            </div>
             <ChatSyncStatus key={activeId ?? 'draft'} />
             {/* 回到底部：用户往上滚去读历史时，浮在输入卡正上方。
                 默认隐藏，显隐由消息流的 scroll 监听直接写 `data-show`（见组件里的

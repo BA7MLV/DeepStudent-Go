@@ -76,6 +76,10 @@ export function inspectSource(filename, text, options = {}, root = repository) {
   const pluginView = pluginSource && relative.endsWith('.tsx');
   const errors = [];
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true);
+  // Persistent cloud execution must never regain a browser carrier. These are
+  // retired entrypoints, not the local PDF/extraction/PWA Web Workers.
+  if (sourceOwner === 'web' && /cloud\.(?:worker|workerToken|taskId|permissionId|acceptedPlugins)\b|BrowserWorkerHost|createExecutorRuntime|[?&]cloud-worker\b/.test(text)) errors.push(`${relative}: retired browser executor authority`);
+  if (sourceOwner === 'api' && /(?:from\s*['"](?:playwright|puppeteer)|chromium\.launch|new\s+BrowserWorkerHost)/.test(text)) errors.push(`${relative}: server tasks cannot use a headless browser`);
   const constants = new Map();
   function collect(node) {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer

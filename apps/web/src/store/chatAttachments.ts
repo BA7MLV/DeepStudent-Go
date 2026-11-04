@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { MAX_CHAT_ATTACHMENTS, type ChatAttachment } from '../chat/attachments';
 import { prepareAttachment, removeAttachmentFile } from '../chat/prepareAttachment';
 
+export const ATTACHMENTS_PENDING_ERROR = '请等待附件就绪，或重试 / 移除失败的附件后发送';
+
 interface PendingAttachment {
   id: string;
   sessionKey: string;
@@ -40,7 +42,10 @@ export const useChatAttachments = create<AttachmentDraft>((set, get) => {
     };
     const patch = (updates: Partial<PendingAttachment>) => set((state) => {
       const update = (items: PendingAttachment[]) => items.map((row) => row.id === item.id ? { ...row, ...updates } : row);
-      if (state.sessionKey === item.sessionKey) return { items: update(state.items) };
+      if (state.sessionKey === item.sessionKey) {
+        const items = update(state.items);
+        return { items, ...(state.error === ATTACHMENTS_PENDING_ERROR && items.every(row => row.value && !row.error) ? { error: null } : {}) };
+      }
       return { parked: { ...state.parked, [item.sessionKey]: update(state.parked[item.sessionKey] ?? []) } };
     });
     patch({ error: undefined, phase: '加载中' });

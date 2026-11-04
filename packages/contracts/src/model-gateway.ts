@@ -7,7 +7,20 @@ export interface ModelProviderState {
   items: Record<string, any>[];
 }
 export type ModelPurpose = 'chat' | 'bot' | 'vision' | 'asr' | 'decision' | 'memory';
-export interface ModelRef { providerId: string; model: string }
+export type ModelRef = { providerId: string; model: string };
+/** A task choice never changes account settings or execution permissions. */
+export type TaskModelSelection =
+  | { modelRef: ModelRef; presetId?: never; fallbackPolicy?: 'strict' }
+  | { presetId: string; modelRef?: never; fallbackPolicy?: 'strict' | 'configured' };
+/** Server-issued, credential-free admission snapshot. Live authorization is still checked per call. */
+export type FrozenTaskModel = {
+  selectionSource: 'task' | 'session' | 'purpose' | 'account';
+  fallbackPolicy: 'strict' | 'configured';
+  candidates: ModelRef[];
+  policy?: ModelPreset['policy'];
+  configurationRevision?: string;
+  thinkingLevel: ModelThinkingLevel;
+};
 /** Per-model wire deployment. No credentials; unspecified fields inherit the connection. */
 export interface ModelDeployment {
   model: string; protocol: ModelProtocol; baseUrl?: string; dataPolicy?: string;
@@ -45,6 +58,7 @@ export interface ModelGatewayInput {
 /** owner/run/task are server-issued, never trusted from HTTP input. */
 export interface ModelGatewayRequest extends ModelGatewayInput {
   owner: string; run?: string; step?: string; task?: string; signal: AbortSignal;
+  frozenModel?: FrozenTaskModel;
 }
 export interface ModelAttemptSummary {
   candidateIndex: number; attempt: number; providerId: string; model: string;
@@ -52,7 +66,7 @@ export interface ModelAttemptSummary {
 }
 export interface ModelGatewayResult {
   providerId: string; model: string; protocol: ModelProtocol; traceId: string;
-  response: { text: string; calls: Array<{ id?: string; function: ModelCall['function'] }>; reasoning?: string; providerState?: ModelProviderState; continuation?: object[]; truncated?: boolean };
+  response: { text: string; calls: Array<{ id?: string; function: ModelCall['function'] }>; reasoning?: string; providerState?: ModelProviderState; continuation?: object[]; truncated?: boolean; segments?: { start: number; end: number; text: string }[] };
   usage?: { input: number; output: number; cache?: number; cacheCreation?: number; reasoning?: number };
   continuationReusable: boolean; attempts: ModelAttemptSummary[];
 }

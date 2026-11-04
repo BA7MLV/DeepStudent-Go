@@ -5,8 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { DatabaseStore } from '../storage/database.js';
 import { CloudRecords, CloudConflict } from './records.js';
 import { CloudConfiguration, ModelConfigurationError } from './config.js';
-import { CloudTaskRunner, taskDto, listOwnerTasks, TASK_KINDS, workerIdentity } from './tasks.js';
-import { workerTokens, workerTokenHash } from './workerAuth.js';
+import { CloudTaskRunner, taskDto, listOwnerTasks, TASK_KINDS } from './tasks.js';
 import type { CloudConfig, CloudMutation } from '@wangke/contracts/cloud';
 import type { ModelSettingsUpdate, ProviderSettingsUpdate } from '@wangke/contracts/model-settings';
 import { BudgetBlocked } from '../agent/budget.js';
@@ -18,6 +17,7 @@ import type { WebSearchService } from '../web-search/service.js';
 import { PluginFiles } from '../plugins/files.js';
 import type { McpManager } from '../mcp/manager.js';
 import { submitOwnerTask } from './task-commands.js';
+import { TaskDelegationService } from './delegation.js';
 import { validateAskAnswer, type AskUserData, type AskUserAnswer } from '@wangke/study-core/ask-user';
 
 interface Dependencies {
@@ -42,7 +42,6 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   const authorize = (request: FastifyRequest, reply: FastifyReply, admin = false) => {
     if (!['GET', 'HEAD'].includes(request.method) && !checkOrigin(request, reply)) return null;
     const user = requireAuth(request, reply);
-    if (user && admin && workerIdentity(request)) { fail(reply, 403, 'worker_scope_denied'); return null; }
     return user;
   };
   app.addHook('onListen', async () => {
@@ -130,7 +129,6 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   });
   const commitRecords = async (request: FastifyRequest<{ Body: { mutations: CloudMutation[] }; Params: { id?: string } }>, reply: FastifyReply) => {
     const user = authorize(request, reply); if (!user) return;
-    if (workerIdentity(request)) return fail(reply, 403, 'executor_artifact_command_required');
     return fail(reply, 410, 'domain_command_required');
   };
   app.post('/api/v1/cloud/records', commitRecords);
@@ -165,8 +163,6 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
             if (value !== null) pagination.set(key, value);
           }
         }
-        const worker = workerIdentity(request);
-        const task = worker ? ownedTask(user.id, worker.taskId) : undefined;
         const cacheKey = request.headers['x-wangke-cache-key'];
         const scopedKey = typeof cacheKey === 'string' && cacheKey.length <= 200 ? crypto.createHash('sha256').update(`${user.id}:${cacheKey}`).digest('hex') : undefined;
         const model = endpoint === 'models' ? '' : typeof request.body === 'object' && request.body && 'model' in request.body && typeof request.body.model === 'string' ? request.body.model
@@ -174,8 +170,8 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
         const response = await createModelGateway(store, configuration, deps.fetch ?? fetch).forward({ owner: user.id,
           purpose: endpoint === 'audio/transcriptions' ? 'asr' : endpoint === 'systemone' ? 'decision' : 'chat', modelRef: { providerId: provider.id, model }, endpoint,
           body: init.body, contentType: request.headers['content-type'], signal: init.signal!, pagination, cacheKey: scopedKey,
-          conversationId: typeof request.headers['x-wangke-conversation'] === 'string' ? request.headers['x-wangke-conversation'] : task ? `task:${task.id}` : undefined,
-          attribution: { run: task?.parent_run_id ?? undefined, step: task?.parent_step_id ?? undefined, task: task?.id, purpose: task ? `study:${task.kind}` : 'chat' } });
+          conversationId: typeof request.headers['x-wangke-conversation'] === 'string' ? request.headers['x-wangke-conversation'] : undefined,
+          attribution: { purpose: 'chat' } });
         if (!response.ok) {
           const retryAfter = response.headers.get('retry-after');
           if (retryAfter) reply.header('retry-after', retryAfter);
@@ -187,8 +183,6 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
         return response.body ? reply.send(Readable.fromWeb(response.body as any)) : reply.send('');
       } catch (error) {
         if (error instanceof BudgetBlocked) {
-          const worker = workerIdentity(request);
-          if (worker) store.db.prepare("UPDATE runs SET status='paused',error_code=? WHERE id=(SELECT parent_run_id FROM cloud_tasks WHERE id=? AND owner_id=?) AND status NOT IN ('completed','cancelled','failed')").run(error.code, worker.taskId, user.id);
           return fail(reply, 429, error.code);
         }
         return fail(reply, 502, 'model_connection_failed');
@@ -204,10 +198,8 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     const disconnected = new AbortController();
     request.raw.once('aborted', () => disconnected.abort());
     reply.raw.once('close', () => { if (!reply.raw.writableEnded) disconnected.abort(); });
-    const worker = workerIdentity(request), task = worker ? ownedTask(user.id, worker.taskId) : undefined;
     try {
-      return await createModelGateway(store, configuration, deps.fetch ?? fetch).request({ ...input, owner: user.id, signal: disconnected.signal,
-         ...(task ? { task: task.id, run: task.parent_run_id ?? undefined, step: task.parent_step_id ?? undefined } : {}) }, { ...(task ? { attributionPurpose: `study:${task.kind}` } : {}) });
+      return await createModelGateway(store, configuration, deps.fetch ?? fetch).request({ ...input, owner: user.id, signal: disconnected.signal });
     } catch (error) {
       if (error instanceof BudgetBlocked) return fail(reply, 429, error.code);
       if (error instanceof ModelGatewayFailure) return reply.code(502).send({ error: error.code, errorClass: error.errorClass, traceId: error.traceId, attempts: error.attempts });
@@ -259,28 +251,6 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     const user = authorize(request, reply); if (!user) return;
     return { tasks: listOwnerTasks(store, user.id) };
   });
-  const leaseMs = 30_000;
-  app.post('/api/v1/cloud/worker/claim', async (request, reply) => {
-    const user = authorize(request, reply); if (!user) return;
-    const now = new Date();
-    const expires = new Date(now.getTime() + leaseMs).toISOString();
-    const token = crypto.randomBytes(32).toString('base64url');
-    const claimed = store.transaction(() => {
-      const limit = Math.max(1, Math.min(4, Number(process.env.CLOUD_CONCURRENCY) || 2));
-      const computing = store.db.prepare("SELECT COUNT(*) AS count FROM cloud_tasks WHERE status IN ('running','waiting_user')").get() as { count: number };
-      if (computing.count >= limit) return null;
-      const row = store.db.prepare(`SELECT t.* FROM cloud_tasks t WHERE t.owner_id=? AND t.executor='browser' AND t.status='queued'
-        AND NOT EXISTS (SELECT 1 FROM cloud_tasks busy WHERE busy.owner_id=t.owner_id AND busy.resource=t.resource AND busy.status IN ('running','waiting_user'))
-        ORDER BY t.created_at LIMIT 1`).get(user.id) as any;
-      if (!row) return null;
-      const changed = store.db.prepare("UPDATE cloud_tasks SET status='running',worker_id=?,lease_expires_at=?,updated_at=? WHERE id=? AND status='queued'").run(workerTokenHash(token), expires, now.toISOString(), row.id);
-      return changed.changes ? row.id : null;
-    });
-    if (!claimed) return reply.code(204).send();
-    workerTokens.set(token, { id: user.id, taskId: claimed, expiresAt: now.getTime() + leaseMs });
-    const row = ownedTask(user.id, claimed);
-    return { token, leaseExpiresAt: expires, task: taskDto(row) };
-  });
   app.post<{ Body: { nonce: string; kind: string; resource: string; input: Record<string, unknown> } }>('/api/v1/cloud/tasks', async (request, reply) => {
     const user = authorize(request, reply, true); if (!user) return;
     const b = request.body;
@@ -306,7 +276,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   app.post<{ Params: { id: string } }>('/api/v1/cloud/tasks/:id/cancel', async (request, reply) => {
     const user = authorize(request, reply, true); if (!user) return;
     const task = ownedTask(user.id, request.params.id); if (!task) return fail(reply, 404, 'task_not_found');
-    store.db.prepare("UPDATE cloud_tasks SET status='cancelled',updated_at=? WHERE id=? AND status IN ('queued','running','waiting_user')").run(new Date().toISOString(), task.id);
+    new TaskDelegationService(store, configuration).command(user.id, { action: 'cancel', taskId: task.id });
     await runner.cancel(task.id);
     configuration.audit(user.id, 'task.cancelled', { id: task.id });
     return { cancelled: true };
@@ -323,28 +293,14 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     const user = authorize(request, reply, true); if (!user) return;
     const task = ownedTask(user.id, request.params.id);
     if (!task || !['running', 'waiting_user'].includes(task.status)) return fail(reply, 409, 'task_not_running');
+    if (task.executor !== 'node') return fail(reply, 409, 'legacy_executor_read_only');
     const b = request.body;
     if (!b || typeof b.nonce !== 'string' || b.nonce.length > 100 || !['answerAsk','confirmPlan','cancelPlan'].includes(b.action)) return fail(reply, 400, 'invalid_task_command');
     const value = JSON.stringify(b.value ?? null);
     const previous = store.db.prepare('SELECT action,value FROM cloud_task_commands WHERE task_id=? AND nonce=?').get(task.id, b.nonce) as { action: string; value: string } | undefined;
     if (previous && (previous.action !== b.action || previous.value !== value)) return fail(reply, 409, 'task_command_nonce_conflict');
-    const view = JSON.parse(task.progress ?? '{}').view;
-    const target = b.action === 'answerAsk' ? view?.pendingAsk?.messageKey : view?.pendingPlan?.messageKey;
-    if (!previous && task.executor === 'browser' && typeof target !== 'string') return fail(reply, 409, 'task_interaction_not_waiting');
-    if (!previous && task.executor === 'browser') {
-      const rowId = typeof target === 'string' && /^row:(\d+)$/.exec(target);
-      const row = rowId && records.get(user.id, 'chats', Number(rowId[1]));
-      if (!row || row.sessionId !== JSON.parse(task.input).sessionId || row.role !== 'assistant') return fail(reply, 409, 'task_interaction_checkpoint_missing');
-      if (b.action === 'answerAsk') {
-        if (!row.ask || row.ask.picked != null) return fail(reply, 409, 'task_interaction_not_waiting');
-        try { validateAskAnswer(row.ask as AskUserData, b.value as string | AskUserAnswer); }
-        catch { return fail(reply, 400, 'invalid_task_answer'); }
-      } else if (!row.folderPlan || row.folderPlan.applied !== 0 || b.value != null) return fail(reply, 400, 'invalid_task_plan_decision');
-    }
-    if (!previous && task.executor === 'browser' && store.db.prepare('SELECT 1 FROM executor_interaction_targets t JOIN cloud_task_commands c ON c.id=t.command_id WHERE c.task_id=? AND t.target=?').get(task.id, target)) return fail(reply, 409, 'task_interaction_already_answered');
     store.transaction(() => {
       store.db.prepare('INSERT OR IGNORE INTO cloud_task_commands(task_id,nonce,action,value) VALUES(?,?,?,?)').run(task.id, b.nonce, b.action, value);
-      if (task.executor === 'browser') store.db.prepare('INSERT OR IGNORE INTO executor_interaction_targets(command_id,target) SELECT id,? FROM cloud_task_commands WHERE task_id=? AND nonce=?').run(target ?? '', task.id, b.nonce);
     });
     wakeInteractions(store, task.id);
     return { ok: true };
@@ -364,40 +320,6 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     wakeInteractions(store, permission.task_id);
     configuration.audit(user.id, 'permission.resolved', { id: request.params.id, status });
     return { status };
-  });
-  app.post<{ Params: { id: string }; Body: { capability: 'read' | 'write' | 'remove' | 'shell'; arguments: unknown; permissionId?: string } }>('/api/v1/cloud/tasks/:id/authorize', async (request, reply) => {
-    const worker = workerIdentity(request);
-    if (!worker || worker.taskId !== request.params.id) return fail(reply, 403, 'worker_scope_denied');
-    const task = ownedTask(worker.id, worker.taskId);
-    if (!task || !['running', 'waiting_user'].includes(task.status)) return fail(reply, 409, 'task_not_running');
-    if (task.worker_id !== workerTokenHash(request.headers.authorization?.slice(7) ?? '') || (task.lease_expires_at && Date.parse(task.lease_expires_at) <= Date.now())) return fail(reply, 409, 'worker_lease_expired');
-    const capability = request.body.capability;
-    if (!['read', 'write', 'remove', 'shell'].includes(capability)) return fail(reply, 400, 'invalid_capability');
-    const policy = configuration.taskPolicy(worker.id, worker.taskId)[capability];
-    if (policy === 'deny') return { status: 'rejected' };
-    if (request.body.permissionId) {
-      const permission = store.db.prepare('SELECT * FROM cloud_permissions WHERE id=? AND owner_id=? AND task_id=? AND capability=? AND arguments=?')
-        .get(request.body.permissionId, worker.id, worker.taskId, capability, JSON.stringify(request.body.arguments)) as any;
-      if (!permission) return fail(reply, 404, 'permission_not_found');
-      if (permission.status !== 'pending') store.db.prepare("UPDATE cloud_tasks SET status='running' WHERE id=? AND status='waiting_user'").run(task.id);
-      if (permission.status === 'approved') {
-        const consumed = store.db.prepare("UPDATE cloud_permissions SET status='consumed' WHERE id=? AND status='approved'").run(permission.id);
-        if (!consumed.changes) return { id: permission.id, status: 'rejected' };
-        configuration.audit(worker.id, 'permission.consumed', { id: permission.id });
-      }
-      return { id: permission.id, status: ['pending','approved'].includes(permission.status) ? permission.status : 'rejected' };
-    }
-    const id = crypto.randomUUID();
-    store.db.prepare('INSERT INTO cloud_permissions(id,owner_id,task_id,capability,arguments,created_at,status) VALUES(?,?,?,?,?,?,?)')
-      .run(id, worker.id, worker.taskId, capability, JSON.stringify(request.body.arguments), new Date().toISOString(), policy === 'allow' ? 'consumed' : 'pending');
-    if (policy !== 'allow') store.db.prepare("UPDATE cloud_tasks SET status='waiting_user' WHERE id=?").run(task.id);
-    return { id, status: policy === 'allow' ? 'approved' : 'pending' };
-  });
-  app.post<{ Params: { id: string }; Body: { permissionId: string } }>('/api/v1/cloud/tasks/:id/authorize/finish', async (request, reply) => {
-    const worker = workerIdentity(request);
-    if (!worker || worker.taskId !== request.params.id) return fail(reply, 403, 'worker_scope_denied');
-    store.db.prepare("UPDATE cloud_permissions SET status='finished' WHERE id=? AND task_id=? AND owner_id=? AND status='consumed'").run(request.body.permissionId, worker.taskId, worker.id);
-    return { ok: true };
   });
   app.get('/api/v1/cloud/audit', async (request, reply) => {
     const user = authorize(request, reply, true); if (!user) return;

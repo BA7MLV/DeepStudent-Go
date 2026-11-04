@@ -4,9 +4,7 @@ import { Context } from '@deepseek-ai/cordis';
 import { Peer, clientRequestSchema, type ConnectionRpcHandler } from '@deepseek-ai/dsh-client-connection';
 import { TypertRegistry, type TypertContribution } from '@deepseek-ai/dsh-typert-registry';
 import { TypertGatewayService } from '@deepseek-ai/dsh-api-gateway';
-import { ClientRuntimeService, ExecutorRuntimeService } from '@wangke/remote-host';
-import { ExecutorRuntimeDomain } from './executor.js';
-import { workerTokens, workerTokenHash } from '../cloud/workerAuth.js';
+import { ClientRuntimeService } from '@wangke/remote-host';
 import type { ResourceFiles } from '../projects/resources.js';
 import { TYPERT } from '@wangke/remote-artifacts/host';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
@@ -18,7 +16,6 @@ import type { CloudConfiguration } from '../cloud/config.js';
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface PrincipalMap { wangke: { kind: 'wangke'; accountId: string } }
-  interface PrincipalMap { wangkeExecutor: { kind: 'wangkeExecutor'; taskId: string } }
 }
 
 /** Fastify and Wangke account policy only; Typert owns dispatch/codec/mux. */
@@ -34,22 +31,10 @@ export function registerClientRuntime(app: FastifyInstance, options: {
   prepareRecords(owner: string): void;
 }) {
   const ctx = new Context();
-  const domain = new ClientRuntimeDomain(options.store, options.plugins, options.submitTask, options.prepareRecords, options.resources);
-  const executor = new ExecutorRuntimeDomain(options.store, options.configuration, 30000, options.resources);
+  const domain = new ClientRuntimeDomain(options.store, options.plugins, options.submitTask, options.prepareRecords, options.resources, options.configuration);
   let handler: ConnectionRpcHandler | undefined;
-  const livePeers = new Map<Peer, { request: { headers: IncomingMessage['headers'] }; account?: string; workerToken?: string }>();
+  const livePeers = new Map<Peer, { request: { headers: IncomingMessage['headers'] }; account?: string }>();
   const createPeer = (request: { headers: IncomingMessage['headers'] }) => {
-    if (request.headers.authorization?.startsWith('Bearer ')) {
-      const token = request.headers.authorization.slice(7), worker = workerTokens.get(token);
-      // Bearer is a transport, not a principal type. Only a registered task
-      // capability is a Worker; normal api_tokens are account credentials.
-      if (worker) {
-        if (worker.expiresAt <= Date.now()) return;
-        const peer = new Peer(ctx, { principal: { kind: 'wangkeExecutor', taskId: worker.taskId } });
-        executor.admit(peer, token);
-        return peer;
-      }
-    }
     const account = options.identity(request)?.id;
     if (!account) return;
     const peer = new Peer(ctx, { principal: { kind: 'wangke', accountId: account } });
@@ -69,28 +54,13 @@ export function registerClientRuntime(app: FastifyInstance, options: {
       // Only this facade is admitted. It resolves all resources using the
       // authenticated account and retains original per-call domain checks.
       decide: ({ principal, action }: { principal: { kind: string }; action: string }) =>
-        principal.kind === 'wangke' && action.startsWith('clientRuntime/') || principal.kind === 'wangkeExecutor' && action.startsWith('executorRuntime/') ? { kind: 'allow' } : { kind: 'deny', reason: 'scope' },
+         principal.kind === 'wangke' && action.startsWith('clientRuntime/') ? { kind: 'allow' } : { kind: 'deny', reason: 'scope' },
     });
     ctx.provide('connection', {
       rpc: { intercept: (_channel: string, _matches: unknown, callback: ConnectionRpcHandler) => { handler = callback; return async () => { handler = undefined; }; } },
       admitConnection: (request: IncomingMessage) => {
         if (!validOrigin(request)) return { rejection: 403 };
-        const bearer = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : undefined;
-        if (bearer && workerTokens.has(bearer)) return { rejection: 403 };
         const protocols = String(request.headers['sec-websocket-protocol'] ?? '').split(',').map(value => value.trim());
-        if (protocols[0] === 'wangke-executor') {
-          if (!options.canExecute()) return { rejection: 403 };
-          // Explicit capability carrier. Never fall back to ambient Cookie,
-          // including for unknown, expired, malformed or wrong-task tokens.
-          const token = protocols[1], worker = protocols.length === 2 && token && workerTokens.get(token);
-          const task = worker && options.store.db.prepare('SELECT worker_id,lease_expires_at,status FROM cloud_tasks WHERE id=? AND owner_id=?').get(worker.taskId, worker.id) as any;
-          if (!worker || worker.expiresAt <= Date.now() || !task || !['running', 'waiting_user'].includes(task.status) || task.worker_id !== workerTokenHash(token) || !Number.isFinite(Date.parse(task.lease_expires_at)) || Date.parse(task.lease_expires_at) <= Date.now()) return { rejection: 403 };
-          if (livePeers.size >= 64) return { rejection: 409 };
-          const peer = new Peer(ctx, { principal: { kind: 'wangkeExecutor', taskId: worker.taskId } });
-          executor.admit(peer, token);
-          livePeers.set(peer, { request, workerToken: token });
-          return { peer, release: async () => { livePeers.delete(peer); await peer.dispose(); } };
-        }
         if (protocols.some(protocol => protocol.startsWith('wangke-executor'))) return { rejection: 403 };
         if (!options.canStart()) return { rejection: 403 };
         const peer = createPeer(request);
@@ -110,7 +80,6 @@ export function registerClientRuntime(app: FastifyInstance, options: {
       },
     });
     await ctx.plugin((scope: Context) => { new ClientRuntimeService(scope, domain); });
-    await ctx.plugin((scope: Context) => { new ExecutorRuntimeService(scope, executor); });
     await ctx.plugin(TypertGatewayService, { websocketHeartbeatIntervalMs: 15_000, streamInboxBytes: 262144, websocketCompression: 'none' });
     // Ready is emitted by upstream only after this event source is attached.
     ctx.typertGateway.registerRemoteEvents(async function* (signal: AbortSignal) {
@@ -121,10 +90,7 @@ export function registerClientRuntime(app: FastifyInstance, options: {
   app.post<{ Params: { namespace: string; method: string } }>('/api/:namespace/:method', async (request, reply) => {
     await setup;
     if (!options.origin(request, reply)) return;
-    const bearer = request.headers.authorization?.startsWith('Bearer ') ? request.headers.authorization.slice(7) : undefined;
-    if (bearer && workerTokens.has(bearer) && request.params.namespace !== 'executorRuntime') return reply.code(403).send({ error: 'worker_scope_denied' });
-    const executorCall = request.params.namespace === 'executorRuntime' && request.headers.authorization?.startsWith('Bearer ');
-    if (!(executorCall ? options.canExecute() : options.canStart())) return reply.code(503).send({ error: 'api_draining' });
+    if (!options.canStart()) return reply.code(503).send({ error: 'api_draining' });
     const peer = createPeer(request);
     if (!peer) return reply.code(401).send({ error: 'unauthorized' });
     const control = new AbortController();
@@ -143,9 +109,7 @@ export function registerClientRuntime(app: FastifyInstance, options: {
   // invocation also revalidates. Disposing a Peer closes all its streams/socket.
   const authLease = setInterval(() => {
     for (const [peer, entry] of livePeers) {
-      const worker = entry.workerToken && workerTokens.get(entry.workerToken);
-      const task = worker && options.store.db.prepare('SELECT worker_id,status,lease_expires_at FROM cloud_tasks WHERE id=? AND owner_id=?').get(worker.taskId, worker.id) as any;
-      const valid = entry.workerToken ? options.canExecute() && worker && worker.expiresAt > Date.now() && task && ['running', 'waiting_user'].includes(task.status) && task.worker_id === workerTokenHash(entry.workerToken) && Number.isFinite(Date.parse(task.lease_expires_at)) && Date.parse(task.lease_expires_at) > Date.now() : options.canStart() && options.identity(entry.request)?.id === entry.account;
+      const valid = options.canStart() && options.identity(entry.request)?.id === entry.account;
       if (!valid) { livePeers.delete(peer); void peer.dispose(); }
     }
   }, 1000);

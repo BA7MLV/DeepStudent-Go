@@ -77,8 +77,8 @@ export class ModelClient {
     }
     const signal = AbortSignal.any([init.signal ?? new AbortController().signal, AbortSignal.timeout(policy.chainMs)]);
     // Preserve ordinary-traffic semantics: observe once, do not debit Bot budgets.
-    const ordinary = options.ordinary && Boolean(this.ledger.store);
-    const fetcher: typeof fetch = ordinary ? (url, init) => observeModelFetch(this.ledger.store, attribution.owner, attribution.provider, attribution.model, this.fetcher, url, init) : this.fetcher;
+    const ordinary = options.ordinary && Boolean(this.ledger.store) && !this.ledger.taskBudgeted(attribution.owner, attribution.task);
+    const fetcher: typeof fetch = ordinary ? (url, init) => observeModelFetch(this.ledger.store, attribution.owner, attribution.provider, attribution.model, this.fetcher, url, init, this.ledger.observation(attribution, reserveTokens)) : this.fetcher;
     for (let attempt = 1; attempt <= policy.attempts; attempt++) {
       signal.throwIfAborted();
       const id = ordinary ? undefined : this.ledger.reserve(attribution, attempt, reserveTokens);

@@ -7,8 +7,7 @@ import { readLearningMarkdown } from './learning-files.js';
 import { recordLearningReceipt } from './learning-results.js';
 import type { PluginActionContext, PluginService } from './service.js';
 
-/** The existing browser QA executor owns extraction, image tools, edit CAS and
- * model permissions. Native QA currently only reads; never silently route there. */
+/** Server extraction reads owned source pixels and saves via resource CAS. */
 export function registerPracticeExtraction(service: PluginService, resolveMaterial: (args: Record<string, any>, context: PluginActionContext) => string) {
   const { store } = service, records = new CloudRecords(store);
   service.register({ id: 'practice.extract', capability: 'learning', access: 'write', trustedOnly: true,
@@ -20,7 +19,7 @@ export function registerPracticeExtraction(service: PluginService, resolveMateri
       const nonce = `plugin:${crypto.createHash('sha256').update(JSON.stringify([c.plugin.id, c.instance.id, 'practice.extract', a.clientNonce])).digest('hex')}`;
       return store.transaction(() => {
         const previous = store.db.prepare('SELECT t.*,l.request FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE t.owner_id=? AND t.nonce=?').get(c.owner, nonce) as any;
-        if (previous) { if (previous.request !== request) throw new Error('plugin_nonce_conflict'); return { ...taskDto(previous), executor: 'browser' }; }
+        if (previous) { if (previous.request !== request) throw new Error('plugin_nonce_conflict'); return taskDto(previous); }
         if (store.db.prepare("SELECT 1 FROM plugin_learning_tasks l JOIN cloud_tasks t ON t.id=l.task_id WHERE l.owner_id=? AND l.material_id=? AND l.action_id='practice.extract' AND t.status IN ('queued','running','waiting_user')").get(c.owner, id)) throw new Error('plugin_generation_conflict');
         let bankRevision: string | null = null;
         const bankId = `__course_questions__${encodeURIComponent(id)}`;
@@ -29,7 +28,7 @@ export function registerPracticeExtraction(service: PluginService, resolveMateri
         const text = '请按「原题题库」技能，逐页提取这份资料的原题，保留题号、题干、选项和原图引用，核对原文答案及解析，并用 edit 保存到 /courses/current/questions.md。已有题库就 read 最新版后继续，不覆盖用户修改。缺答案和无法辨读的题明确标注；预算不足先保存已完成部分并说明尚未覆盖范围，不要重新编题。保存后给我题库链接，说明实际覆盖范围，不要把任务执行结束说成全文已提取。';
         const input = { videoId: id, sessionId, videoName: material.name, materialFormat: material.materialFormat, materialKind: material.materialFormat === 'pdf' ? 'page' : 'para', text, pluginExtraction: true, bankRevision };
         records.apply(c.owner, [recordMutation('chatSessions', sessionId, null, { id: sessionId, videoId: id, title: '插件原题提取', createdAt: Date.now() })]);
-        store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,executor,created_at,updated_at) VALUES(?,?,?,'qa',?,?,'queued','browser',?,?)").run(taskId, c.owner, nonce, `session:${sessionId}`, JSON.stringify(service.files.admitTask(c.owner, 'qa', input)), now, now);
+        store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,executor,created_at,updated_at) VALUES(?,?,?,'qa',?,?,'queued','node',?,?)").run(taskId, c.owner, nonce, `session:${sessionId}`, JSON.stringify(service.files.admitTask(c.owner, 'qa', input)), now, now);
         store.db.prepare('INSERT INTO plugin_learning_tasks(task_id,owner_id,plugin_id,instance_id,action_id,material_id,request) VALUES(?,?,?,?,?,?,?)').run(taskId, c.owner, c.plugin.id, c.instance.id, 'practice.extract', id, request);
         return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(taskId));
       });

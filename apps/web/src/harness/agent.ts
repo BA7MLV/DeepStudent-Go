@@ -179,7 +179,6 @@ export async function runAgentLoop(
       cb.onToolStart?.('MCP · connection', '{}', 'mcp:connection'); cb.onToolEnd?.('MCP · connection', 'Error: mcp_connection_failed', 'mcp:connection');
     }
   }
-  if (cloud.worker) maxRounds = Math.min(maxRounds, cloud.maxSteps);
   const settings = getSettings();
   const target = cb.target ?? targetOfSlot(settings, 'chat');
   tools = stableTools(tools);
@@ -312,7 +311,7 @@ export async function runAgentLoop(
       signal: cb.signal,
       shouldStop: () => stopped !== null,
       // Background workers hold a single scoped permissionId; don't overlap permits.
-      canParallel: call => !cloud.worker && !mcpNames.has(call.function.name) && (parallelReads.has(call.function.name) || webNames.has(call.function.name)),
+      canParallel: call => !mcpNames.has(call.function.name) && (parallelReads.has(call.function.name) || webNames.has(call.function.name)),
       execute: async call => {
       cb.signal?.throwIfAborted();
       // 原地打转：同样的工具 + 同样的参数，且期间没有成功写入改变读取结果。
@@ -333,7 +332,6 @@ export async function runAgentLoop(
         if (webNames.has(name) || mcpNames.has(name) || ['ask_user', 'propose_folder_plan', 'show_widget', 'present_quiz', 'set_course_context'].includes(name)) {
           result = await executeTool(name, args);
         } else {
-          if (cloud.worker && !parallelReads.has(name) && !['edit', 'edit_markdown'].includes(name)) throw new Error(`未注册权限的工具：${name}`);
           const capability = ['edit', 'edit_markdown'].includes(name) ? 'write' : 'read';
           result = await withToolPermission(capability, { tool: name, arguments: args }, () => executeTool(name, args));
         }

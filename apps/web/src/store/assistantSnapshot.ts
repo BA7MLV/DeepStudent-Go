@@ -16,5 +16,5 @@ export async function persistAssistantSnapshot(snapshot: Omit<ChatRow, 'id'>, ro
       interrupted: snapshot.interrupted, interruptReason: snapshot.interruptReason, resume: snapshot.resume });
     return rowId;
   };
-  return cloud.worker ? save() : db.transaction('rw', db.chats, save);
+  return db.transaction('rw', db.chats, save);
 }

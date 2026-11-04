@@ -34,7 +34,7 @@ export const serverChatHistory: ChatHistoryAdapter = {
 };
 
 export function readChatPage(sessionId: number, before?: Pick<ChatRow, 'createdAt' | 'id'> & Partial<Pick<ChatRow, 'role'>>) {
-  return (cloud.enabled && !cloud.worker ? serverChatHistory : localChatHistory).page(sessionId, before);
+  return (cloud.enabled ? serverChatHistory : localChatHistory).page(sessionId, before);
 }
 
 /** Read bounded timestamp ranges, including whole tie buckets before applying the shared order. */

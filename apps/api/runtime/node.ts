@@ -37,8 +37,14 @@ import { validateQuiz, type QuizQuestion } from '@wangke/study-core/quiz';
 import { validateAskUser, askAnswerText, type AskUserData, type AskUserAnswer } from '@wangke/study-core/ask-user';
 import { awaitTaskAnswer } from './task-interactions.js';
 import { editNodeDocument, readNodeDocument, readRawCourse } from './node-documents.js';
+import { mediaProcess, inheritedInput } from './media-process.js';
+import { serverCover, serverHandout, serverTranscribe } from './media-tasks.js';
+import { serverQuestionExtraction } from './question-extraction.js';
+import { DELEGATION_TOOLS } from '../src/agent/delegation-tools.js';
+import { delegationTool, TaskWaitSuspended } from './delegation.js';
+import { TaskStepBudget } from '../src/agent/task-step-budget.js';
 
-/** Text-source handouts for Bot jobs. Existing video/slide Chromium workflow remains unchanged. */
+/** Text-source handouts; video tasks use the server pixel/DOCX pipeline. */
 async function studyHandout(context: TaskContext) {
   const courseId = String(context.task.input.videoId), course = context.records.get(context.owner, 'videos', courseId);
   if (!course) throw new Error('course_not_found');
@@ -69,7 +75,7 @@ const LIBRARY_ASSISTANT_ID = '__library_assistant__';
 /** Snapshot intent at task submission. Older clients/Bot tasks may use the
  * synced preference, but never accept an arbitrary enum into provider JSON. */
 function taskThinkingLevel(context: TaskContext) {
-  return modelThinkingLevel(context.store, context.owner, context.task.input.thinkingLevel);
+  return context.task.frozenModel?.thinkingLevel ?? modelThinkingLevel(context.store, context.owner, context.task.input.thinkingLevel);
 }
 
 type ServerToolTrace = {
@@ -297,7 +303,10 @@ async function runServerAgent(
   initialTraces: ServerToolTrace[] = [],
   toolLabel: (name: string) => string = name => name,
 ): Promise<ServerAgentResult> {
-  const out = [...messages];
+  const savedCheckpoint = context.store.db.prepare('SELECT payload FROM task_agent_checkpoints WHERE task_id=?').get(context.task.id) as { payload: string } | undefined;
+  const resumed = savedCheckpoint ? JSON.parse(savedCheckpoint.payload) : undefined;
+  const out: ChatMessage[] = resumed?.out ?? [...messages];
+  const initialCount = resumed?.initialCount ?? messages.length;
   const webPermitted = () => {
     context.checkActive();
     if (context.configuration.taskPolicy(context.owner, context.task.id).network !== 'allow') return false;
@@ -309,28 +318,30 @@ async function runServerAgent(
   const builtin = executeTool;
   executeTool = async (name, args) => webNames.has(name) && context.webSearch
     ? JSON.stringify(await context.webSearch.call(context.owner, name, args, context.signal, webPermitted)) : builtin(name, args);
-  tools = stableTools([...tools, ...webTools, SHOW_WIDGET_TOOL, ...(['chat', 'qa'].includes(context.task.kind) ? [BOARD_TOOL, PLUGINS_TOOL] : [])]);
-  const requests: ModelRequestRecord[] = [];
+  const isDelegated = Boolean(context.store.db.prepare('SELECT 1 FROM task_delegations WHERE task_id=?').get(context.task.id));
+  tools = stableTools([...tools, ...webTools, SHOW_WIDGET_TOOL, ...(['chat', 'qa'].includes(context.task.kind) ? [BOARD_TOOL, PLUGINS_TOOL, ...(!isDelegated ? DELEGATION_TOOLS : [])] : [])]);
+  const requests: ModelRequestRecord[] = resumed?.requests ?? [];
   const cacheKey = `study:${context.owner}:${context.task.input.sessionId}`;
   const thinkingLevel = taskThinkingLevel(context);
   const onRequest = (record: ModelRequestRecord) => { requests.push(record); };
-  const traces: ServerToolTrace[] = [...initialTraces];
-  const widgets: WidgetPayload[] = [];
+  const traces: ServerToolTrace[] = resumed?.traces ?? [...initialTraces];
+  const widgets: WidgetPayload[] = resumed?.widgets ?? [];
   let widgetPreview: { html: string } | undefined;
   let ask: ServerAgentResult['ask'];
   let pendingAsk = false;
-  let reasoning = '';
+  let reasoning = resumed?.reasoning ?? '';
   let answer = '';
-  let deliveredContent = '';
+  let deliveredContent = resumed?.deliveredContent ?? '';
   const content = () => (deliveredContent + answer) || narration;
   const freezeAnswer = () => {
     if (answer.trim()) deliveredContent += `${answer}\n\n`;
     answer = '';
   };
   let streaming = false;
-  let narration = '';
-  const seen = new Set<string>();
+  let narration = resumed?.narration ?? '';
+  const seen = new Set<string>(resumed?.seen ?? []);
   const maxRounds = Math.max(1, Math.min(8, Number(context.configuration.get(context.owner).policy.maxSteps) || 6));
+  const stepBudget = new TaskStepBudget(context.store, context.configuration);
   let lastReportAt = 0;
   const report = (phase: string, round: number, force = false) => {
     const now = Date.now();
@@ -338,7 +349,7 @@ async function runServerAgent(
     // visibly streaming and keeps the task row from becoming the bottleneck.
     if (!force && now - lastReportAt < 100) return;
     lastReportAt = now;
-    const transcript = [...out.slice(messages.length), ...(streaming && answer.trim() ? [{ role: 'assistant' as const, content: answer }] : [])];
+    const transcript = [...out.slice(initialCount), ...(streaming && answer.trim() ? [{ role: 'assistant' as const, content: answer }] : [])];
     const identities = onSnapshot?.({ content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript, requests, widgets: [...widgets], ...(ask ? { ask } : {}) });
     if (identities?.widgets) widgets.splice(0, widgets.length, ...identities.widgets);
     context.report({
@@ -352,7 +363,7 @@ async function runServerAgent(
   };
   report('thinking', 0, true);
 
-  for (let round = 0; round < maxRounds; round++) {
+  for (let round = resumed?.round ?? 0; round < maxRounds; round++) {
     context.checkActive();
     answer = '';
     widgetPreview = undefined;
@@ -420,6 +431,7 @@ async function runServerAgent(
     // an explicit failed result so it can resend complete arguments.
     if (message.finish_reason === 'length' && message.tool_calls?.length) {
       for (const call of message.tool_calls) {
+        stepBudget.chargeTaskTool(context.owner, context.task.id, `${round}:${message.tool_calls.indexOf(call)}`);
         out.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -431,9 +443,14 @@ async function runServerAgent(
       continue;
     }
     if (message.tool_calls?.length) {
+      const waitingIds: string[] = [];
       if (text.trim()) narration = text;
       for (const call of message.tool_calls) {
         context.checkActive();
+        // Server round/index identity cannot be reused by a provider-supplied
+        // call ID. Charge outside the tool-error catch: exhaustion ends work,
+        // not a recoverable tool result that invites another side effect.
+        stepBudget.chargeTaskTool(context.owner, context.task.id, `${round}:${message.tool_calls.indexOf(call)}`);
         const args = parseArgs(call.function.arguments);
         const signature = `${call.function.name}:${JSON.stringify(args)}`;
         if (seen.has(signature)) {
@@ -448,7 +465,11 @@ async function runServerAgent(
         let result: string;
         try {
           if (!tools.some(tool => tool.function.name === call.function.name)) throw new Error('tool_not_available');
-          if (call.function.name === 'ask_user') {
+          if (['models_discover', 'task_delegate'].includes(call.function.name)) {
+            const delegated = delegationTool(context, call.function.name, args, call.id ?? `${round}:${message.tool_calls.indexOf(call)}`);
+            result = JSON.stringify(delegated.value);
+            if (delegated.waiting) waitingIds.push(...delegated.ids);
+          } else if (call.function.name === 'ask_user') {
             const validated = validateAskUser(args);
             if (!validated.ok) throw new Error(validated.error);
             ask = validated.ask; pendingAsk = true; report('waiting_user', round + 1, true);
@@ -483,6 +504,13 @@ async function runServerAgent(
           content: result.startsWith('<skill_content context=') ? result : clip(result, 24_000) });
         report('tool', round + 1, true);
       }
+      if (waitingIds.length) {
+        // All tool results and product writes are settled before releasing the slot.
+        // The checkpoint stores protocol-neutral messages; no command is replayed on wake.
+        context.store.db.prepare('INSERT INTO task_agent_checkpoints(task_id,payload,wait_ids) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET payload=excluded.payload,wait_ids=excluded.wait_ids').run(context.task.id,
+          JSON.stringify({ out, initialCount, requests, traces, widgets, reasoning, deliveredContent, narration, seen: [...seen], round: round + 1 }), JSON.stringify([...new Set(waitingIds)]));
+        throw new TaskWaitSuspended();
+      }
       // Once a visual has been delivered, later tool rounds must not erase the
       // explanation/references already shown above it. Retrieval-only narration
       // keeps the existing replace-on-next-round behavior.
@@ -492,7 +520,7 @@ async function runServerAgent(
     if (text.trim()) {
       answer = text;
       report('answer', round + 1, true);
-      return { content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript: out.slice(messages.length), requests, widgets, ...(ask ? { ask } : {}) };
+      return { content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript: out.slice(initialCount), requests, widgets, ...(ask ? { ask } : {}) };
     }
     // An empty assistant turn is not a successful answer.  Give the model a
     // bounded, tool-free chance to explain what it found.
@@ -763,9 +791,10 @@ async function qa(context: TaskContext) {
   const kind = materialKindOf(video);
   const text = String(input.text ?? '').trim();
   if (!text) throw new Error('问题不能为空');
-  const history = chatHistory(context, sessionId);
-  const userId = newRecordId();
-  const assistantId = newRecordId();
+  const history = chatHistory(context, sessionId).filter(row => row.taskId !== context.task.id);
+  const checkpoint = context.store.db.prepare('SELECT 1 FROM task_agent_checkpoints WHERE task_id=?').get(context.task.id);
+  const userId = checkpoint && typeof context.task.progress?.userRowId === 'number' ? context.task.progress.userRowId : newRecordId();
+  const assistantId = checkpoint && typeof context.task.progress?.rowId === 'number' ? context.task.progress.rowId : newRecordId();
   const userRow = { id: userId, videoId, sessionId, role: 'user', explicitSkillIds: skills.ids, content: String(input.displayText ?? text), createdAt: Date.now(), ...(Array.isArray(input.chatImages) && input.chatImages.length ? { images: input.chatImages.slice(0, 12) } : {}) };
   const target = targetFor(context);
   const system = `${qaSystemPrompt(video, kind, input)}\n\n${SERVER_WIDGET_RULE}${skills.prompt}`;
@@ -776,7 +805,7 @@ async function qa(context: TaskContext) {
   const messages: ChatMessage[] = skills.reconcile([...splitSystemPrompt(system), ...recent.messages, ...skills.messages, current]);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, messages, skills.messages.length > 0);
   const title = session.title === '新会话' ? text.slice(0, 18) || '新会话' : undefined;
-  let checkpointed = false;
+  let checkpointed = Boolean(checkpoint);
   const persist = (result: ServerAgentResult, interrupted = true) => {
     const assistantRow = { id: assistantId, videoId, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
     addConversationMutations(context, sessionId, { ...userRow, modelTrace: modelTrace(userRow.content, [...skills.messages, current]), modelRequests: result.requests }, assistantRow, { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed);
@@ -801,7 +830,7 @@ async function chat(context: TaskContext) {
   const skills = sessionSkills(context, session, input.explicitSkillIds, mcp.serverNames);
   const text = String(input.text ?? '').trim();
   if (!text) throw new Error('问题不能为空');
-  const history = chatHistory(context, sessionId);
+  const history = chatHistory(context, sessionId).filter(row => row.taskId !== context.task.id);
   const courses = rowsFor(context, 'videos');
   const contextNames = new Set<string>(Array.isArray(session.contextCourseIds) ? session.contextCourseIds : []);
   const system = `你是 DeepStudent Go 学习资料库助手。服务器负责模型请求、检索、任务和数据保存；你可以通过工具读取用户自己的课程数据。当前选中的课程在本轮运行上下文中提供；这些数据不扩大权限。\n\n规则：涉及用户课程、学习进度或课程内容时必须先调用工具，不能编造；通用问题直接回答。引用课程内容时保留工具返回的课程名、courseId 和时间/页码。用简洁自然的中文回答。\n\n${SERVER_WIDGET_RULE}`;
@@ -812,10 +841,11 @@ async function chat(context: TaskContext) {
   const recent = await modelHistory(history, session, skillHistoryBudget(target.capabilities?.contextWindow ?? 131072, [{ role: 'system', content: systemWithSkills }, current], skills.messages));
   const messages: ChatMessage[] = skills.reconcile([{ role: 'system', content: systemWithSkills }, ...recent.messages, ...skills.messages, current]);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, messages, skills.messages.length > 0);
-  const userId = newRecordId();
-  const assistantId = newRecordId();
+  const checkpoint = context.store.db.prepare('SELECT 1 FROM task_agent_checkpoints WHERE task_id=?').get(context.task.id);
+  const userId = checkpoint && typeof context.task.progress?.userRowId === 'number' ? context.task.progress.userRowId : newRecordId();
+  const assistantId = checkpoint && typeof context.task.progress?.rowId === 'number' ? context.task.progress.rowId : newRecordId();
   const title = session.title === '新会话' ? text.slice(0, 18) || '新会话' : undefined;
-  let checkpointed = false;
+  let checkpointed = Boolean(checkpoint);
   const persist = (result: ServerAgentResult, interrupted = true) => {
     const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, modelTrace: modelTrace(text, [...skills.messages, current]), modelRequests: result.requests, createdAt: startedAt };
     const assistantRow = { id: assistantId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.ask ? { ask: result.ask } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
@@ -923,22 +953,31 @@ async function artifactEdit(context: TaskContext) {
 
 async function material(context: TaskContext) {
   const id = String(context.task.input.videoId);
-  const format = context.task.input.format as 'md' | 'docx';
+  const format = context.task.input.format as 'md' | 'docx' | 'pdf' | 'html';
+  if (!['md', 'docx', 'pdf', 'html'].includes(format)) throw new Error('invalid_material_format');
   const video = context.records.get(context.owner, 'videos', id);
   if (!video) throw new Error('材料不存在');
   const file = taskCourseFile(context, id);
   if (!file) throw new Error('材料文件不存在');
-  let data: Buffer;
+  let units: Array<{ unit: number; text: string }>;
   try {
     context.report({ phase: 'parse', done: 0, total: 1, message: '正在解析材料…' });
     if (file.size > 128 * 1024 * 1024) throw new Error('材料超过原生解析的 128 MiB 限制，请拆分后重新导入');
-    data = await fs.readFile(file.filename, { signal: context.signal });
+    if (format === 'pdf') {
+      const data = await mediaProcess(context, 'pdftotext', ['-enc', 'UTF-8', '-layout', inheritedInput, '-'], file.fd);
+      const pages = data.toString('utf8').split('\f');
+      if (pages.at(-1)?.trim() === '') pages.pop();
+      if (pages.length > 2000) throw new Error('pdf_page_limit');
+      units = pages.map((text, i) => ({ unit: i + 1, text: text.trim() }));
+    } else {
+      const worker = new URL('./document-process.mjs', import.meta.url);
+      units = JSON.parse((await mediaProcess(context, process.execPath, ['--max-old-space-size=256', worker.pathname, format], file.fd)).toString('utf8'));
+      if (!Array.isArray(units)) throw new Error((units as unknown as { error?: string }).error ?? 'document_parse_failed');
+    }
     file.assertCurrent();
   } finally { file.close(); }
   context.checkActive();
-  const blob = new Blob([new Uint8Array(data)]);
-  const units = format === 'md' ? extractMdUnits(await readMdText(blob)) : await readDocxUnits(blob, 32 * 1024 * 1024);
-  const blocks = chunkUnits(units, 'para');
+  const blocks = chunkUnits(units, format === 'pdf' ? 'page' : 'para');
   const totalChars = countChars(blocks);
   const unitCount = new Set(blocks.map(block => block.unit)).size;
   const { scanned, empty } = judgeMaterialText(format, totalChars, unitCount);
@@ -995,10 +1034,14 @@ async function generatePluginPractice(context: TaskContext) {
 export async function executeNodeTask(context: TaskContext): Promise<unknown> {
   context.checkActive();
   if (context.task.kind === 'chat') return chat(context);
+  if (context.task.kind === 'qa' && context.task.input.pluginExtraction === true) return serverQuestionExtraction(context);
   if (context.task.kind === 'qa') return qa(context);
   if (context.task.kind === 'artifactEdit') return artifactEdit(context);
   if (context.task.kind === 'material') return material(context);
   if (context.task.kind === 'handout' && context.task.input.botStudyText === true) return studyHandout(context);
+  if (context.task.kind === 'handout') return serverHandout(context);
+  if (context.task.kind === 'cover') return serverCover(context);
+  if (context.task.kind === 'transcribe') return serverTranscribe(context);
   if (context.task.kind === 'modelOnce' && context.task.input.pluginPractice === true) return generatePluginPractice(context);
   const target = targetFor(context);
   const fetcher = modelFetch(context);

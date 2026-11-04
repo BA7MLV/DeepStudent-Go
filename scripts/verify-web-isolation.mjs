@@ -14,6 +14,10 @@ execFileSync('npm', ['exec', '--', 'turbo', 'prune', '@wangke/web', '--docker', 
 });
 const directory = path.join(output, 'full');
 fs.cpSync(path.join(output, 'json'), directory, { recursive: true });
+// Same explicit non-application packaging inputs as the Web image/build.
+fs.mkdirSync(path.join(directory, 'scripts'), { recursive: true });
+fs.copyFileSync(path.join(repository, 'scripts/build-client-runtime-licenses.mjs'), path.join(directory, 'scripts/build-client-runtime-licenses.mjs'));
+fs.cpSync(path.join(repository, 'licenses/client-runtime'), path.join(directory, 'licenses/client-runtime'), { recursive: true });
 console.log(`Isolated Web verification directory: ${directory}`);
 const run = args => execFileSync('npm', args, { cwd: directory, stdio: 'inherit' });
 run(['ci', '--no-audit', '--no-fund']);

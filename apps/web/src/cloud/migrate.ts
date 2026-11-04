@@ -160,7 +160,7 @@ export async function mapLibraryFile(id: string, expectedReference: unknown, blo
   if (!navigator.locks || !blob.size) throw new Error('安全映射需要跨标签锁和非空文件');
   const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map(n => n.toString(16).padStart(2, '0')).join('');
   return navigator.locks.request(`library-import:${owner}`, async () => {
-    if (database !== db || owner !== cloud.userId || cloud.worker) throw new Error('client_account_changed');
+    if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
     await database.transaction('rw', database.table('_cloudMeta'), async () => {
       const row = await database.table('_cloudMeta').get('library-import'), draft = row?.value;
       const reference = draft?.source.archive?.courseFiles?.find((row: any) => row.id === id);

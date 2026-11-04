@@ -220,8 +220,7 @@
 /* ── 消息流 ───────────────────────────────────────────────────────────── */
 .course-chat__messages {
   overflow-anchor: none;
-  /* 直接裁掉输入区内的消息，不靠背景遮挡；边界随输入区高度同步变化。 */
-  clip-path: inset(0 0 var(--chat-composer-clip-height, 108px) 0);
+  /* 消息继续滚到浮动输入栏背后，底部由渐进模糊衔接，不做硬裁切。 */
   /* 首屏消息让出浮动顶栏，再留 28px 阅读间距；吸顶标题单独贴顶栏下沿，
      不继承首屏的阅读间距。 */
   --reasoning-sticky-gap: 28px;
@@ -938,6 +937,68 @@
   padding: 8px max(20px, calc((100% - var(--course-chat-column)) / 2))
     max(12px, env(safe-area-inset-bottom));
   background: transparent;
+}
+
+/* 只处理输入卡中线以下的背景：负层级留在 wrap 的层叠上下文内，
+   不模糊输入卡、底部圆角或阴影，也不挡住两侧和底边透出的消息。 */
+.course-chat__composer-blur {
+  position: absolute;
+  inset: var(--chat-composer-blur-top, 50%) 0 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.course-chat--empty .course-chat__composer-blur {
+  display: none;
+}
+
+.course-chat__composer-blur::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent, color-mix(in oklch, var(--background-secondary) 24%, transparent));
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and ((mask-image: linear-gradient(#000, transparent)) or (-webkit-mask-image: linear-gradient(#000, transparent))) {
+  .course-chat__composer-blur > span {
+    position: absolute;
+    inset: 0;
+    -webkit-backdrop-filter: blur(var(--composer-blur));
+    backdrop-filter: blur(var(--composer-blur));
+    -webkit-mask-image: var(--composer-blur-mask);
+    mask-image: var(--composer-blur-mask);
+  }
+
+  .course-chat__composer-blur > span:nth-child(1) {
+    --composer-blur: 1px;
+    --composer-blur-mask: linear-gradient(to bottom, transparent, #000 35%);
+  }
+
+  .course-chat__composer-blur > span:nth-child(2) {
+    --composer-blur: 4px;
+    --composer-blur-mask: linear-gradient(to bottom, transparent 15%, #000 60%);
+  }
+
+  .course-chat__composer-blur > span:nth-child(3) {
+    --composer-blur: 12px;
+    --composer-blur-mask: linear-gradient(to bottom, transparent 35%, #000 85%);
+  }
+
+  .course-chat__composer-blur > span:nth-child(4) {
+    --composer-blur: 24px;
+    --composer-blur-mask: linear-gradient(to bottom, transparent 60%, #000);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .course-chat__composer-blur > span {
+    display: none;
+  }
+
+  .course-chat__composer-blur::after {
+    background: var(--background-secondary);
+  }
 }
 
 /* ── 回到底部 ─────────────────────────────────────────────────────────────

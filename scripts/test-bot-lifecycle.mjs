@@ -10,6 +10,7 @@ import { BotRunner } from '../apps/api/src/agent/runner.ts';
 import { UsageLedger, DEFAULT_BOT_BUDGET } from '../apps/api/src/agent/budget.ts';
 import { StudyTools } from '../apps/api/src/agent/study.ts';
 import { CloudRecords } from '../apps/api/src/cloud/records.ts';
+import { freezeTaskModel } from '../apps/api/src/agent/task-model.ts';
 
 async function until(fn) { for (let i = 0; i < 400; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 10)); } throw new Error('Lifecycle timeout'); }
 const batch = (...calls) => Response.json({ choices: [{ message: { tool_calls: calls.map(([name, args]) => ({ id: crypto.randomUUID(), type: 'function', function: { name, arguments: JSON.stringify(args) } })) } }], usage: { prompt_tokens: 20, completion_tokens: 20 } });
@@ -24,7 +25,11 @@ async function fixture(test) {
     const defaults = config.get(owner, true);
     const configure = (policy = {}) => config.save(owner, { ...defaults, modelRevision: config.get(owner, true).modelRevision, providers: [{ id: 'fake', name: 'Fake', baseUrl: 'https://fake.invalid/v1', protocol: 'openai-chat', apiKey: 'fake', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fake', model: 'fake' }, botBudget: DEFAULT_BOT_BUDGET, policy: { ...defaults.policy, shell: 'allow', ...policy } });
     configure();
-    const proxy = { enqueue: () => runner?.enqueue(), cancel: id => runner?.cancel(id) };
+    const proxy = { enqueue: () => runner?.enqueue(), cancel: id => runner?.cancel(id), freezeModel: (id, owner, explicit, sessionDefault) => {
+      const frozen = freezeTaskModel(store, owner, config.get(owner), 'bot', explicit, sessionDefault);
+      store.db.prepare('UPDATE runs SET model_snapshot=? WHERE id=?').run(JSON.stringify(frozen), id);
+      return frozen;
+    } };
     const service = new BotApplicationService(store, proxy), thread = service.create(owner, 'bot', 'Lifecycle');
     const m = service.send(owner, thread.id, { clientNonce: 'start', content: 'Execute' });
     const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(m.id).id;

@@ -244,6 +244,7 @@ export interface ChatSessionRow {
   archived?: boolean;
   /** Stable routing affinity; not a cache identifier for individual requests. */
   promptCacheKey?: string;
+  defaultModel?: import('@wangke/contracts/cloud').TaskModelSelection | null;
   /** Durable whole-turn cut. Advances only on overflow, with headroom. */
   contextCheckpoint?: { fromId: number; source: string; prefixHash?: string };
   contextOmissions?: Array<[number, string]>;
@@ -642,13 +643,10 @@ export class WangkeDB extends Dexie {
 }
 
 export let db = new WangkeDB();
-/** UI edits and executor writes must never share an upload queue. A Worker token
- * authorizes its leased task, not arbitrary edits made by another browser realm.
- * The old interactive database/outbox is intentionally retained unchanged. */
-export function cloudDatabaseName(owner: string, executor = false) {
-  return `${executor ? 'wangke-cloud-executor-' : 'wangke-cloud-'}${owner}`;
-}
-export function useCloudDatabase(owner: string, executor = false) {
+/** Historical executor databases are opened read-only by the recovery exporter. */
+export const legacyExecutorDatabaseName = (owner: string) => `wangke-cloud-executor-${owner}`;
+export const cloudDatabaseName = (owner: string) => `wangke-cloud-${owner}`;
+export function useCloudDatabase(owner: string) {
   db.close();
-  db = new WangkeDB(cloudDatabaseName(owner, executor), true);
+  db = new WangkeDB(cloudDatabaseName(owner), true);
 }

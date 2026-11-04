@@ -19,7 +19,7 @@ export default function SidebarAccount({ settingsTestId }: { settingsTestId: str
   const [loggingOut, setLoggingOut] = useState(false);
 
   const logout = async () => {
-    if (loggingOut || !cloud.enabled || cloud.worker) return;
+    if (loggingOut || !cloud.enabled) return;
     setLoggingOut(true);
     try {
       const { logoutCloud } = await import('../cloud/logout');
@@ -59,7 +59,7 @@ export default function SidebarAccount({ settingsTestId }: { settingsTestId: str
               <Sym name="archive" /><Label>{t('account.archived')}</Label>
             </Dropdown.Item>
             <Dropdown.Item id="logout" textValue={t('account.logout')} data-testid="account-menu-logout"
-              isDisabled={!cloud.enabled || cloud.worker || loggingOut}>
+              isDisabled={!cloud.enabled || loggingOut}>
               <Sym name="logout" /><Label>{t('account.logout')}</Label>
             </Dropdown.Item>
           </Dropdown.Menu>

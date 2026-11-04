@@ -51,26 +51,6 @@ let RuntimeJsonRemoteCodec$schema23$value
 const RuntimeJsonRemoteCodec$schema23 = () => (RuntimeJsonRemoteCodec$schema23$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema23())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))]))
 let RuntimeJsonRemoteCodec$schema24$value
 const RuntimeJsonRemoteCodec$schema24 = () => (RuntimeJsonRemoteCodec$schema24$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema24())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema24()))]))
-let RuntimeJsonRemoteCodec$schema25$value
-const RuntimeJsonRemoteCodec$schema25 = () => (RuntimeJsonRemoteCodec$schema25$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema25())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema25()))]))
-let RuntimeJsonRemoteCodec$schema26$value
-const RuntimeJsonRemoteCodec$schema26 = () => (RuntimeJsonRemoteCodec$schema26$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))
-let RuntimeJsonRemoteCodec$schema27$value
-const RuntimeJsonRemoteCodec$schema27 = () => (RuntimeJsonRemoteCodec$schema27$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema27())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema27()))]))
-let RuntimeJsonRemoteCodec$schema28$value
-const RuntimeJsonRemoteCodec$schema28 = () => (RuntimeJsonRemoteCodec$schema28$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema28())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema28()))]))
-let RuntimeJsonRemoteCodec$schema29$value
-const RuntimeJsonRemoteCodec$schema29 = () => (RuntimeJsonRemoteCodec$schema29$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema29())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema29()))]))
-let RuntimeJsonRemoteCodec$schema30$value
-const RuntimeJsonRemoteCodec$schema30 = () => (RuntimeJsonRemoteCodec$schema30$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))
-let RuntimeJsonRemoteCodec$schema31$value
-const RuntimeJsonRemoteCodec$schema31 = () => (RuntimeJsonRemoteCodec$schema31$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema31())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema31()))]))
-let RuntimeJsonRemoteCodec$schema32$value
-const RuntimeJsonRemoteCodec$schema32 = () => (RuntimeJsonRemoteCodec$schema32$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema32())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema32()))]))
-let RuntimeJsonRemoteCodec$schema33$value
-const RuntimeJsonRemoteCodec$schema33 = () => (RuntimeJsonRemoteCodec$schema33$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema33())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema33()))]))
-let RuntimeJsonRemoteCodec$schema34$value
-const RuntimeJsonRemoteCodec$schema34 = () => (RuntimeJsonRemoteCodec$schema34$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema34())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema34()))]))
 let _wangke_remote_host_clientRuntime_command_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_command_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_command_parameter_0$schema$value ??= z.object({
   'target': z.union([z.undefined(), z.literal("method"), z.literal("action")]).optional(),
@@ -79,10 +59,10 @@ const _wangke_remote_host_clientRuntime_command_parameter_0$schema = () => (_wan
   'instanceId': z.string(),
   'revision': z.number(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema20())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema20()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema9()))])),
 }))
 let _wangke_remote_host_clientRuntime_command_result$schema$value
-const _wangke_remote_host_clientRuntime_command_result$schema = () => (_wangke_remote_host_clientRuntime_command_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema21())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema21()))]))
+const _wangke_remote_host_clientRuntime_command_result$schema = () => (_wangke_remote_host_clientRuntime_command_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema10())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema10()))]))
 let _wangke_remote_host_clientRuntime_commitRecords_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_commitRecords_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_commitRecords_parameter_0$schema$value ??= z.object({
   'operationId': z.string(),
@@ -90,8 +70,8 @@ const _wangke_remote_host_clientRuntime_commitRecords_parameter_0$schema = () =>
   'id': z.string(),
   'table': z.string(),
   'key': z.union([z.string(), z.number()]),
-  'before': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema12())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))]))]),
-  'after': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema12())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))]))]),
+  'before': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema()))]))]),
+  'after': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema()))]))]),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 })),
 }))
@@ -104,6 +84,143 @@ const _wangke_remote_host_clientRuntime_commitRecords_result$schema = () => (_wa
   'revision': z.number(),
 })),
 }))
+let _wangke_remote_host_clientRuntime_delegation_parameter_0$schema$value
+const _wangke_remote_host_clientRuntime_delegation_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_delegation_parameter_0$schema$value ??= z.union([z.object({
+  'action': z.literal("bot.default"),
+  'threadId': z.string(),
+  'expected': z.union([z.literal(null), z.object({
+  'modelRef': z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.object({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]),
+  'value': z.union([z.literal(null), z.object({
+  'modelRef': z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.object({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]),
+}), z.object({
+  'action': z.literal("bot.read"),
+  'threadId': z.string(),
+}), z.object({
+  'action': z.literal("models"),
+  'query': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'action': z.literal("create"),
+  'operationId': z.string(),
+  'parentTaskId': z.union([z.undefined(), z.string()]).optional(),
+  'parentRunId': z.union([z.undefined(), z.string()]).optional(),
+  'goal': z.string(),
+  'constraints': z.array(z.string()),
+  'completionCriteria': z.array(z.string()),
+  'context': z.array(z.object({
+  'source': z.string(),
+  'version': z.string(),
+  'text': z.string(),
+})),
+  'modelSelection': z.union([z.undefined(), z.object({
+  'modelRef': z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.object({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]).optional(),
+  'dependsOn': z.union([z.undefined(), z.array(z.string())]).optional(),
+  'background': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+}), z.object({
+  'action': z.union([z.literal("read"), z.literal("cancel"), z.literal("promote")]),
+  'taskId': z.string(),
+}), z.object({
+  'action': z.literal("session.create"),
+  'operationId': z.string(),
+  'title': z.string(),
+  'defaultModel': z.union([z.undefined(), z.object({
+  'modelRef': z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.object({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]).optional(),
+  'sourceSessionId': z.union([z.undefined(), z.number()]).optional(),
+  'sourceMessageId': z.union([z.undefined(), z.number()]).optional(),
+  'originTaskId': z.union([z.undefined(), z.string()]).optional(),
+  'originRunId': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'action': z.literal("session.read"),
+  'sessionId': z.number(),
+}), z.object({
+  'action': z.literal("session.default"),
+  'sessionId': z.number(),
+  'expected': z.union([z.literal(null), z.object({
+  'modelRef': z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.object({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]),
+  'value': z.union([z.literal(null), z.object({
+  'modelRef': z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.object({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]),
+}), z.object({
+  'action': z.literal("session.send"),
+  'operationId': z.string(),
+  'sessionId': z.number(),
+  'text': z.string(),
+  'modelSelection': z.union([z.undefined(), z.object({
+  'modelRef': z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.object({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]).optional(),
+  'parentTaskId': z.union([z.undefined(), z.string()]).optional(),
+  'parentRunId': z.union([z.undefined(), z.string()]).optional(),
+  'background': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]))
+let _wangke_remote_host_clientRuntime_delegation_result$schema$value
+const _wangke_remote_host_clientRuntime_delegation_result$schema = () => (_wangke_remote_host_clientRuntime_delegation_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema14())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema14()))]))
 let _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_editLearning_parameter_0$schema$value ??= z.object({
   'operationId': z.string(),
@@ -117,26 +234,26 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => 
   'role': z.union([z.literal("user"), z.literal("assistant")]),
   'content': z.string(),
   'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
+  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
   'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
+  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
   'reasoning': z.union([z.undefined(), z.string()]).optional(),
   'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
+  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
   'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
   'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
+  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
 })]),
   'value': z.union([z.literal(null), z.object({
   'id': z.number(),
@@ -146,26 +263,26 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => 
   'role': z.union([z.literal("user"), z.literal("assistant")]),
   'content': z.string(),
   'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
+  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
   'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
+  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
   'reasoning': z.union([z.undefined(), z.string()]).optional(),
   'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
+  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
   'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
   'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]).optional(),
+  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]).optional(),
+  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
+  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]).optional(),
 })]),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
@@ -480,7 +597,7 @@ const _wangke_remote_host_clientRuntime_read_parameter_0$schema = () => (_wangke
   'instanceId': z.string(),
   'revision': z.number(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema5()))])),
 }), z.object({
   'kind': z.literal("pluginQueries"),
   'pluginId': z.string(),
@@ -489,7 +606,7 @@ const _wangke_remote_host_clientRuntime_read_parameter_0$schema = () => (_wangke
   'queries': z.array(z.object({
   'key': z.string(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema5()))])),
 })),
 }), z.object({
   'kind': z.literal("task"),
@@ -499,7 +616,7 @@ let _wangke_remote_host_clientRuntime_read_result$schema$value
 const _wangke_remote_host_clientRuntime_read_result$schema = () => (_wangke_remote_host_clientRuntime_read_result$schema$value ??= z.object({
   'type': z.literal("snapshot"),
   'revision': z.number(),
-  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema17())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema17()))]),
+  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema6()))]),
 }))
 let _wangke_remote_host_clientRuntime_receipt_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_receipt_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_receipt_parameter_0$schema$value ??= z.string())
@@ -513,20 +630,11 @@ const _wangke_remote_host_clientRuntime_receipt_result$schema = () => (_wangke_r
   'code': z.string(),
 }), z.object({
   'status': z.literal("completed"),
-  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema22())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema22()))]),
+  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema11())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema11()))]),
 }), z.object({
   'status': z.literal("failed"),
   'code': z.string(),
 })]))
-let _wangke_remote_host_clientRuntime_reconcileInteraction_parameter_0$schema$value
-const _wangke_remote_host_clientRuntime_reconcileInteraction_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_reconcileInteraction_parameter_0$schema$value ??= z.object({
-  'taskId': z.string(),
-  'sequence': z.number(),
-  'observed': z.string(),
-  'action': z.union([z.literal("settle"), z.literal("resume"), z.literal("hold")]),
-}))
-let _wangke_remote_host_clientRuntime_reconcileInteraction_result$schema$value
-const _wangke_remote_host_clientRuntime_reconcileInteraction_result$schema = () => (_wangke_remote_host_clientRuntime_reconcileInteraction_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema()))]))
 let _wangke_remote_host_clientRuntime_recordsPage_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_recordsPage_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_recordsPage_parameter_0$schema$value ??= z.number())
 let _wangke_remote_host_clientRuntime_recordsPage_result$schema$value
@@ -534,7 +642,7 @@ const _wangke_remote_host_clientRuntime_recordsPage_result$schema = () => (_wang
   'records': z.array(z.object({
   'table': z.string(),
   'key': z.union([z.string(), z.number()]),
-  'value': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema11())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema11()))]))]),
+  'value': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema24())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema24()))]))]),
   'revision': z.number(),
 })),
   'cursor': z.number(),
@@ -596,7 +704,7 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
   'drop': z.array(z.number()),
 })]).optional(),
   'folderId': z.union([z.undefined(), z.number()]).optional(),
-  'kind': z.union([z.undefined(), z.literal("material"), z.literal("video")]).optional(),
+  'kind': z.union([z.undefined(), z.literal("video"), z.literal("material")]).optional(),
   'materialFormat': z.union([z.undefined(), z.literal("pdf"), z.literal("docx"), z.literal("md"), z.literal("html")]).optional(),
   'unitCount': z.union([z.undefined(), z.number()]).optional(),
   'lastUnit': z.union([z.undefined(), z.number()]).optional(),
@@ -623,7 +731,7 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
   'fileMappings': z.union([z.undefined(), z.array(z.object({
   'courseId': z.string(),
   'expected': z.literal(null),
-  'sourceReference': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]),
+  'sourceReference': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]),
   'blob': z.object({
   '$file': z.string(),
   'type': z.union([z.undefined(), z.string()]).optional(),
@@ -760,26 +868,26 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
   'role': z.union([z.literal("user"), z.literal("assistant")]),
   'content': z.string(),
   'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]))]).optional(),
+  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]).optional(),
+  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]))]).optional(),
   'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]))]).optional(),
+  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]))]).optional(),
+  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]))]).optional(),
   'reasoning': z.union([z.undefined(), z.string()]).optional(),
   'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
+  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]))]).optional(),
+  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]))]).optional(),
+  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]).optional(),
+  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]).optional(),
+  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]).optional(),
+  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]).optional(),
   'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
   'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
+  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]).optional(),
+  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]))]).optional(),
+  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]))]).optional(),
+  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]).optional(),
+  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]).optional(),
 })),
   'skills': z.array(z.object({
   'id': z.number(),
@@ -977,7 +1085,7 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
 })]),
 }))
 let _wangke_remote_host_clientRuntime_resourceCommand_result$schema$value
-const _wangke_remote_host_clientRuntime_resourceCommand_result$schema = () => (_wangke_remote_host_clientRuntime_resourceCommand_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema4())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema4()))]))
+const _wangke_remote_host_clientRuntime_resourceCommand_result$schema = () => (_wangke_remote_host_clientRuntime_resourceCommand_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema17())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema17()))]))
 let _wangke_remote_host_clientRuntime_savePluginLayout_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_savePluginLayout_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_savePluginLayout_parameter_0$schema$value ??= z.object({
   'content': z.string(),
@@ -1008,23 +1116,39 @@ const _wangke_remote_host_clientRuntime_setPreferences_parameter_0$schema = () =
   'operationId': z.string(),
   'changes': z.array(z.object({
   'key': z.union([z.literal("contextWindow"), z.literal("asrConcurrency"), z.literal("thinkingEnabled"), z.literal("thinkingEffort"), z.literal("captionScale"), z.literal("agentRounds"), z.literal("agentInstructions"), z.literal("danmakuEnabled"), z.literal("customRates"), z.literal("shortcuts"), z.literal("theme"), z.literal("uiLanguage"), z.literal("accentColor"), z.literal("fontScale"), z.literal("dynamicColor"), z.literal("studyTrackingEnabled"), z.literal("studyIdleMinutes"), z.literal("htmlRemoteAssets"), z.literal("favorites"), z.literal("savedModels"), z.literal("userName")]),
-  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema5()))]),
-  'expected': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema5()))]),
+  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema18())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema18()))]),
+  'expected': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema18())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema18()))]),
 })),
 }))
 let _wangke_remote_host_clientRuntime_setPreferences_result$schema$value
 const _wangke_remote_host_clientRuntime_setPreferences_result$schema = () => (_wangke_remote_host_clientRuntime_setPreferences_result$schema$value ??= z.object({
-  'values': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema6()))])),
+  'values': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema19())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema19()))])),
 }))
 let _wangke_remote_host_clientRuntime_submitTask_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_submitTask_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_submitTask_parameter_0$schema$value ??= z.object({
   'operationId': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema9()))])),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema22())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema22()))])),
 }))
 let _wangke_remote_host_clientRuntime_submitTask_result$schema$value
 const _wangke_remote_host_clientRuntime_submitTask_result$schema = () => (_wangke_remote_host_clientRuntime_submitTask_result$schema$value ??= z.object({
+  'frozenModel': z.union([z.undefined(), z.object({
+  'selectionSource': z.union([z.literal("task"), z.literal("session"), z.literal("purpose"), z.literal("account")]),
+  'fallbackPolicy': z.union([z.literal("strict"), z.literal("configured")]),
+  'candidates': z.array(z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+})),
+  'policy': z.union([z.undefined(), z.object({
+  'maxAttemptsPerCandidate': z.union([z.undefined(), z.number()]).optional(),
+  'fallbackOn': z.union([z.undefined(), z.array(z.union([z.literal("auth_failed"), z.literal("quota_exhausted"), z.literal("rate_limited"), z.literal("timeout"), z.literal("network"), z.literal("server_error"), z.literal("context_exceeded"), z.literal("content_policy"), z.literal("invalid_request"), z.literal("model_not_found"), z.literal("incomplete_response"), z.literal("cancelled")]))]).optional(),
+  'maxChainMs': z.union([z.undefined(), z.number()]).optional(),
+  'allowCrossProvider': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]).optional(),
+  'configurationRevision': z.union([z.undefined(), z.string()]).optional(),
+  'thinkingLevel': z.union([z.literal("none"), z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh"), z.literal("max")]),
+})]).optional(),
   'source': z.union([z.undefined(), z.object({
   'kind': z.union([z.literal("app"), z.literal("bot")]),
   'name': z.union([z.undefined(), z.string()]).optional(),
@@ -1032,12 +1156,12 @@ const _wangke_remote_host_clientRuntime_submitTask_result$schema = () => (_wangk
   'resourceName': z.union([z.undefined(), z.string()]).optional(),
   'executor': z.union([z.undefined(), z.literal("node"), z.literal("browser")]).optional(),
   'id': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("interrupted")]),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema10())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema10()))])),
-  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema10())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema10()))]))]),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema10())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema10()))]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed"), z.literal("interrupted")]),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema23())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))])),
+  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema23())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))]))]),
+  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema23())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
 }))
@@ -1049,6 +1173,22 @@ const _wangke_remote_host_clientRuntime_taskAdmission_result$schema = () => (_wa
 }), z.object({
   'status': z.literal("accepted"),
   'task': z.object({
+  'frozenModel': z.union([z.undefined(), z.object({
+  'selectionSource': z.union([z.literal("task"), z.literal("session"), z.literal("purpose"), z.literal("account")]),
+  'fallbackPolicy': z.union([z.literal("strict"), z.literal("configured")]),
+  'candidates': z.array(z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+})),
+  'policy': z.union([z.undefined(), z.object({
+  'maxAttemptsPerCandidate': z.union([z.undefined(), z.number()]).optional(),
+  'fallbackOn': z.union([z.undefined(), z.array(z.union([z.literal("auth_failed"), z.literal("quota_exhausted"), z.literal("rate_limited"), z.literal("timeout"), z.literal("network"), z.literal("server_error"), z.literal("context_exceeded"), z.literal("content_policy"), z.literal("invalid_request"), z.literal("model_not_found"), z.literal("incomplete_response"), z.literal("cancelled")]))]).optional(),
+  'maxChainMs': z.union([z.undefined(), z.number()]).optional(),
+  'allowCrossProvider': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]).optional(),
+  'configurationRevision': z.union([z.undefined(), z.string()]).optional(),
+  'thinkingLevel': z.union([z.literal("none"), z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh"), z.literal("max")]),
+})]).optional(),
   'source': z.union([z.undefined(), z.object({
   'kind': z.union([z.literal("app"), z.literal("bot")]),
   'name': z.union([z.undefined(), z.string()]).optional(),
@@ -1056,12 +1196,12 @@ const _wangke_remote_host_clientRuntime_taskAdmission_result$schema = () => (_wa
   'resourceName': z.union([z.undefined(), z.string()]).optional(),
   'executor': z.union([z.undefined(), z.literal("node"), z.literal("browser")]).optional(),
   'id': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("interrupted")]),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema8())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema8()))])),
-  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema8())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema8()))]))]),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema8())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema8()))]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed"), z.literal("interrupted")]),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema21())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema21()))])),
+  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema21())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema21()))]))]),
+  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema21())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema21()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
 }),
@@ -1126,7 +1266,7 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0$schema = () => (_wangk
   'instanceId': z.string(),
   'revision': z.number(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema18())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema18()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema7())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema7()))])),
 }), z.object({
   'kind': z.literal("pluginQueries"),
   'pluginId': z.string(),
@@ -1135,7 +1275,7 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0$schema = () => (_wangk
   'queries': z.array(z.object({
   'key': z.string(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema18())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema18()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema7())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema7()))])),
 })),
 }), z.object({
   'kind': z.literal("task"),
@@ -1145,14 +1285,14 @@ let _wangke_remote_host_clientRuntime_watch_result$schema$value
 const _wangke_remote_host_clientRuntime_watch_result$schema = () => (_wangke_remote_host_clientRuntime_watch_result$schema$value ??= z.union([z.object({
   'type': z.literal("snapshot"),
   'revision': z.number(),
-  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema19())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema19()))]),
+  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema8())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema8()))]),
 }), z.object({
   'type': z.literal("delta"),
   'baseRevision': z.number(),
   'revision': z.number(),
   'changes': z.array(z.object({
   'path': z.array(z.string()),
-  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema19())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema19()))]).optional(),
+  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema8())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema8()))]).optional(),
   'remove': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
 })),
 })]))
@@ -1172,7 +1312,7 @@ const _wangke_remote_host_clientRuntime_watchBot_result$schema = () => (_wangke_
 }), z.object({
   'type': z.literal("thread.activity"),
   'activity': z.union([z.literal(null), z.object({
-  'phase': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("model"), z.literal("tools"), z.literal("waiting_event")]),
+  'phase': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("model"), z.literal("tools")]),
   'tools': z.array(z.object({
   'id': z.string(),
   'name': z.string(),
@@ -1232,7 +1372,7 @@ const _wangke_remote_host_clientRuntime_watchBot_result$schema = () => (_wangke_
   'id': z.string(),
   'threadId': z.string(),
   'mode': z.union([z.literal("bot"), z.literal("chat")]),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("waiting_event")]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed")]),
   'createdAt': z.string(),
   'startedAt': z.union([z.literal(null), z.string()]),
   'completedAt': z.union([z.literal(null), z.string()]),
@@ -1248,7 +1388,7 @@ const _wangke_remote_host_clientRuntime_watchBot_result$schema = () => (_wangke_
   'id': z.string(),
   'threadId': z.string(),
   'mode': z.union([z.literal("bot"), z.literal("chat")]),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("waiting_event")]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed")]),
   'createdAt': z.string(),
   'startedAt': z.union([z.literal(null), z.string()]),
   'completedAt': z.union([z.literal(null), z.string()]),
@@ -1260,7 +1400,7 @@ const _wangke_remote_host_clientRuntime_watchBot_result$schema = () => (_wangke_
   'id': z.string(),
   'threadId': z.string(),
   'mode': z.union([z.literal("bot"), z.literal("chat")]),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("waiting_event")]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed")]),
   'createdAt': z.string(),
   'startedAt': z.union([z.literal(null), z.string()]),
   'completedAt': z.union([z.literal(null), z.string()]),
@@ -1272,7 +1412,7 @@ const _wangke_remote_host_clientRuntime_watchBot_result$schema = () => (_wangke_
   'id': z.string(),
   'threadId': z.string(),
   'mode': z.union([z.literal("bot"), z.literal("chat")]),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("waiting_event")]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed")]),
   'createdAt': z.string(),
   'startedAt': z.union([z.literal(null), z.string()]),
   'completedAt': z.union([z.literal(null), z.string()]),
@@ -1298,7 +1438,7 @@ const _wangke_remote_host_clientRuntime_watchFileIntents_result$schema = () => (
   'revision': z.number(),
   'changes': z.array(z.object({
   'path': z.array(z.string()),
-  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema7())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema7()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema7()))]).optional(),
+  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema20())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema20()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema20()))]).optional(),
   'remove': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
 })),
 })]))
@@ -1309,7 +1449,7 @@ const _wangke_remote_host_clientRuntime_watchRecords_result$schema = () => (_wan
   'records': z.array(z.object({
   'table': z.string(),
   'key': z.union([z.string(), z.number()]),
-  'value': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema15())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema15()))]))]),
+  'value': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema4())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema4()))]))]),
   'revision': z.number(),
 })),
   'cursor': z.number(),
@@ -1337,14 +1477,14 @@ const _wangke_remote_host_clientRuntime_watchSession_result$schema = () => (_wan
   'revision': z.number(),
   'changes': z.array(z.object({
   'path': z.array(z.string()),
-  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema14())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema14()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema14()))]).optional(),
+  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]).optional(),
   'remove': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
 })),
 }), z.object({
   'type': z.literal("snapshot"),
   'revision': z.number(),
   'value': z.object({
-  'session': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema14())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema14()))])),
+  'session': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))])),
   'rows': z.array(z.object({
   'id': z.number(),
   'sessionId': z.number(),
@@ -1352,10 +1492,26 @@ const _wangke_remote_host_clientRuntime_watchSession_result$schema = () => (_wan
   'role': z.string(),
   'content': z.string(),
   'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'data': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema14())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema14()))])),
+  'data': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))])),
 })),
   'hasOlder': z.boolean(),
   'tasks': z.array(z.object({
+  'frozenModel': z.union([z.undefined(), z.object({
+  'selectionSource': z.union([z.literal("task"), z.literal("session"), z.literal("purpose"), z.literal("account")]),
+  'fallbackPolicy': z.union([z.literal("strict"), z.literal("configured")]),
+  'candidates': z.array(z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+})),
+  'policy': z.union([z.undefined(), z.object({
+  'maxAttemptsPerCandidate': z.union([z.undefined(), z.number()]).optional(),
+  'fallbackOn': z.union([z.undefined(), z.array(z.union([z.literal("auth_failed"), z.literal("quota_exhausted"), z.literal("rate_limited"), z.literal("timeout"), z.literal("network"), z.literal("server_error"), z.literal("context_exceeded"), z.literal("content_policy"), z.literal("invalid_request"), z.literal("model_not_found"), z.literal("incomplete_response"), z.literal("cancelled")]))]).optional(),
+  'maxChainMs': z.union([z.undefined(), z.number()]).optional(),
+  'allowCrossProvider': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]).optional(),
+  'configurationRevision': z.union([z.undefined(), z.string()]).optional(),
+  'thinkingLevel': z.union([z.literal("none"), z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh"), z.literal("max")]),
+})]).optional(),
   'source': z.union([z.undefined(), z.object({
   'kind': z.union([z.literal("app"), z.literal("bot")]),
   'name': z.union([z.undefined(), z.string()]).optional(),
@@ -1363,12 +1519,12 @@ const _wangke_remote_host_clientRuntime_watchSession_result$schema = () => (_wan
   'resourceName': z.union([z.undefined(), z.string()]).optional(),
   'executor': z.union([z.undefined(), z.literal("node"), z.literal("browser")]).optional(),
   'id': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("interrupted")]),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema14())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema14()))])),
-  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema14())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema14()))]))]),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema14())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema14()))]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed"), z.literal("interrupted")]),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))])),
+  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]))]),
+  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema3()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
 })),
@@ -1387,8 +1543,24 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
 }), z.object({
   'type': z.literal("baseline"),
   'cursor': z.number(),
-  'session': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))])),
+  'session': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])),
   'tasks': z.array(z.object({
+  'frozenModel': z.union([z.undefined(), z.object({
+  'selectionSource': z.union([z.literal("task"), z.literal("session"), z.literal("purpose"), z.literal("account")]),
+  'fallbackPolicy': z.union([z.literal("strict"), z.literal("configured")]),
+  'candidates': z.array(z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+})),
+  'policy': z.union([z.undefined(), z.object({
+  'maxAttemptsPerCandidate': z.union([z.undefined(), z.number()]).optional(),
+  'fallbackOn': z.union([z.undefined(), z.array(z.union([z.literal("auth_failed"), z.literal("quota_exhausted"), z.literal("rate_limited"), z.literal("timeout"), z.literal("network"), z.literal("server_error"), z.literal("context_exceeded"), z.literal("content_policy"), z.literal("invalid_request"), z.literal("model_not_found"), z.literal("incomplete_response"), z.literal("cancelled")]))]).optional(),
+  'maxChainMs': z.union([z.undefined(), z.number()]).optional(),
+  'allowCrossProvider': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]).optional(),
+  'configurationRevision': z.union([z.undefined(), z.string()]).optional(),
+  'thinkingLevel': z.union([z.literal("none"), z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh"), z.literal("max")]),
+})]).optional(),
   'source': z.union([z.undefined(), z.object({
   'kind': z.union([z.literal("app"), z.literal("bot")]),
   'name': z.union([z.undefined(), z.string()]).optional(),
@@ -1396,12 +1568,12 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
   'resourceName': z.union([z.undefined(), z.string()]).optional(),
   'executor': z.union([z.undefined(), z.literal("node"), z.literal("browser")]).optional(),
   'id': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("interrupted")]),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))])),
-  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))]))]),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed"), z.literal("interrupted")]),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])),
+  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]),
+  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
 })),
@@ -1416,7 +1588,7 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
   'role': z.string(),
   'content': z.string(),
   'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'data': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))])),
+  'data': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])),
 })),
 }), z.object({
   'type': z.literal("ready"),
@@ -1435,11 +1607,27 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
   'role': z.string(),
   'content': z.string(),
   'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'data': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))])),
+  'data': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])),
 })]),
 })),
-  'session': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))])),
+  'session': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])),
   'tasks': z.array(z.object({
+  'frozenModel': z.union([z.undefined(), z.object({
+  'selectionSource': z.union([z.literal("task"), z.literal("session"), z.literal("purpose"), z.literal("account")]),
+  'fallbackPolicy': z.union([z.literal("strict"), z.literal("configured")]),
+  'candidates': z.array(z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+})),
+  'policy': z.union([z.undefined(), z.object({
+  'maxAttemptsPerCandidate': z.union([z.undefined(), z.number()]).optional(),
+  'fallbackOn': z.union([z.undefined(), z.array(z.union([z.literal("auth_failed"), z.literal("quota_exhausted"), z.literal("rate_limited"), z.literal("timeout"), z.literal("network"), z.literal("server_error"), z.literal("context_exceeded"), z.literal("content_policy"), z.literal("invalid_request"), z.literal("model_not_found"), z.literal("incomplete_response"), z.literal("cancelled")]))]).optional(),
+  'maxChainMs': z.union([z.undefined(), z.number()]).optional(),
+  'allowCrossProvider': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]).optional(),
+  'configurationRevision': z.union([z.undefined(), z.string()]).optional(),
+  'thinkingLevel': z.union([z.literal("none"), z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh"), z.literal("max")]),
+})]).optional(),
   'source': z.union([z.undefined(), z.object({
   'kind': z.union([z.literal("app"), z.literal("bot")]),
   'name': z.union([z.undefined(), z.string()]).optional(),
@@ -1447,12 +1635,12 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
   'resourceName': z.union([z.undefined(), z.string()]).optional(),
   'executor': z.union([z.undefined(), z.literal("node"), z.literal("browser")]).optional(),
   'id': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("interrupted")]),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))])),
-  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))]))]),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed"), z.literal("interrupted")]),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))])),
+  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]))]),
+  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
 })),
@@ -1466,13 +1654,29 @@ const _wangke_remote_host_clientRuntime_watchTask_result$schema = () => (_wangke
   'revision': z.number(),
   'changes': z.array(z.object({
   'path': z.array(z.string()),
-  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema24())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema24()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema24()))]).optional(),
+  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))]).optional(),
   'remove': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
 })),
 }), z.object({
   'type': z.literal("snapshot"),
   'revision': z.number(),
   'value': z.object({
+  'frozenModel': z.union([z.undefined(), z.object({
+  'selectionSource': z.union([z.literal("task"), z.literal("session"), z.literal("purpose"), z.literal("account")]),
+  'fallbackPolicy': z.union([z.literal("strict"), z.literal("configured")]),
+  'candidates': z.array(z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+})),
+  'policy': z.union([z.undefined(), z.object({
+  'maxAttemptsPerCandidate': z.union([z.undefined(), z.number()]).optional(),
+  'fallbackOn': z.union([z.undefined(), z.array(z.union([z.literal("auth_failed"), z.literal("quota_exhausted"), z.literal("rate_limited"), z.literal("timeout"), z.literal("network"), z.literal("server_error"), z.literal("context_exceeded"), z.literal("content_policy"), z.literal("invalid_request"), z.literal("model_not_found"), z.literal("incomplete_response"), z.literal("cancelled")]))]).optional(),
+  'maxChainMs': z.union([z.undefined(), z.number()]).optional(),
+  'allowCrossProvider': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]).optional(),
+  'configurationRevision': z.union([z.undefined(), z.string()]).optional(),
+  'thinkingLevel': z.union([z.literal("none"), z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh"), z.literal("max")]),
+})]).optional(),
   'source': z.union([z.undefined(), z.object({
   'kind': z.union([z.literal("app"), z.literal("bot")]),
   'name': z.union([z.undefined(), z.string()]).optional(),
@@ -1480,12 +1684,12 @@ const _wangke_remote_host_clientRuntime_watchTask_result$schema = () => (_wangke
   'resourceName': z.union([z.undefined(), z.string()]).optional(),
   'executor': z.union([z.undefined(), z.literal("node"), z.literal("browser")]).optional(),
   'id': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("interrupted")]),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema24())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema24()))])),
-  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema24())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema24()))]))]),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema24())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema24()))]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed"), z.literal("interrupted")]),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))])),
+  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))]))]),
+  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema13())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema13()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
 }),
@@ -1497,7 +1701,7 @@ const _wangke_remote_host_clientRuntime_watchTasks_result$schema = () => (_wangk
   'revision': z.number(),
   'changes': z.array(z.object({
   'path': z.array(z.string()),
-  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema23())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))]).optional(),
+  'value': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema12())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))]).optional(),
   'remove': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
 })),
 }), z.object({
@@ -1505,6 +1709,22 @@ const _wangke_remote_host_clientRuntime_watchTasks_result$schema = () => (_wangk
   'revision': z.number(),
   'value': z.object({
   'tasks': z.array(z.object({
+  'frozenModel': z.union([z.undefined(), z.object({
+  'selectionSource': z.union([z.literal("task"), z.literal("session"), z.literal("purpose"), z.literal("account")]),
+  'fallbackPolicy': z.union([z.literal("strict"), z.literal("configured")]),
+  'candidates': z.array(z.object({
+  'providerId': z.string(),
+  'model': z.string(),
+})),
+  'policy': z.union([z.undefined(), z.object({
+  'maxAttemptsPerCandidate': z.union([z.undefined(), z.number()]).optional(),
+  'fallbackOn': z.union([z.undefined(), z.array(z.union([z.literal("auth_failed"), z.literal("quota_exhausted"), z.literal("rate_limited"), z.literal("timeout"), z.literal("network"), z.literal("server_error"), z.literal("context_exceeded"), z.literal("content_policy"), z.literal("invalid_request"), z.literal("model_not_found"), z.literal("incomplete_response"), z.literal("cancelled")]))]).optional(),
+  'maxChainMs': z.union([z.undefined(), z.number()]).optional(),
+  'allowCrossProvider': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]).optional(),
+  'configurationRevision': z.union([z.undefined(), z.string()]).optional(),
+  'thinkingLevel': z.union([z.literal("none"), z.literal("minimal"), z.literal("low"), z.literal("medium"), z.literal("high"), z.literal("xhigh"), z.literal("max")]),
+})]).optional(),
   'source': z.union([z.undefined(), z.object({
   'kind': z.union([z.literal("app"), z.literal("bot")]),
   'name': z.union([z.undefined(), z.string()]).optional(),
@@ -1512,646 +1732,17 @@ const _wangke_remote_host_clientRuntime_watchTasks_result$schema = () => (_wangk
   'resourceName': z.union([z.undefined(), z.string()]).optional(),
   'executor': z.union([z.undefined(), z.literal("node"), z.literal("browser")]).optional(),
   'id': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("interrupted")]),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema23())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))])),
-  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema23())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))]))]),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema23())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema23()))]),
+  'status': z.union([z.literal("cancelled"), z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("waiting_event"), z.literal("completed"), z.literal("failed"), z.literal("interrupted")]),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema12())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))])),
+  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema12())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))]))]),
+  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema12())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
 })),
 }),
 })]))
-let _wangke_remote_host_executorRuntime_admitBlob_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_admitBlob_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_admitBlob_parameter_0$schema$value ??= z.object({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'sha256': z.string(),
-  'size': z.number(),
-  'contentType': z.string(),
-}))
-let _wangke_remote_host_executorRuntime_admitBlob_result$schema$value
-const _wangke_remote_host_executorRuntime_admitBlob_result$schema = () => (_wangke_remote_host_executorRuntime_admitBlob_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema28())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema28()))]))
-let _wangke_remote_host_executorRuntime_beginExecution_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_beginExecution_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_beginExecution_parameter_0$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_beginExecution_result$schema$value
-const _wangke_remote_host_executorRuntime_beginExecution_result$schema = () => (_wangke_remote_host_executorRuntime_beginExecution_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema25())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema25()))]))
-let _wangke_remote_host_executorRuntime_commitArtifacts_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_commitArtifacts_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_commitArtifacts_parameter_0$schema$value ??= z.object({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'products': z.array(z.union([z.object({
-  'kind': z.literal("conversationMessage"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'videoId': z.string(),
-  'sessionId': z.number(),
-  'role': z.union([z.literal("user"), z.literal("assistant")]),
-  'content': z.string(),
-  'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'reasoning': z.union([z.undefined(), z.string()]).optional(),
-  'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'videoId': z.string(),
-  'sessionId': z.number(),
-  'role': z.union([z.literal("user"), z.literal("assistant")]),
-  'content': z.string(),
-  'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'reasoning': z.union([z.undefined(), z.string()]).optional(),
-  'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema30())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema30()))]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("conversationSession"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'title': z.string(),
-  'createdAt': z.number(),
-  'contextCourseIds': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
-  'skillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'pinnedSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'mcpServerIds': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'pinned': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'archived': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'promptCacheKey': z.union([z.undefined(), z.string()]).optional(),
-  'contextCheckpoint': z.union([z.undefined(), z.object({
-  'fromId': z.number(),
-  'source': z.string(),
-  'prefixHash': z.union([z.undefined(), z.string()]).optional(),
-})]).optional(),
-  'contextOmissions': z.union([z.undefined(), z.array(z.tuple([z.number(), z.string()]))]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'title': z.string(),
-  'createdAt': z.number(),
-  'contextCourseIds': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
-  'skillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'pinnedSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'mcpServerIds': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'pinned': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'archived': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'promptCacheKey': z.union([z.undefined(), z.string()]).optional(),
-  'contextCheckpoint': z.union([z.undefined(), z.object({
-  'fromId': z.number(),
-  'source': z.string(),
-  'prefixHash': z.union([z.undefined(), z.string()]).optional(),
-})]).optional(),
-  'contextOmissions': z.union([z.undefined(), z.array(z.tuple([z.number(), z.string()]))]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("transcriptSegment"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'idx': z.number(),
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-  'status': z.union([z.literal(0), z.literal(1)]),
-  'cues': z.union([z.undefined(), z.array(z.object({
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-}))]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'idx': z.number(),
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-  'status': z.union([z.literal(0), z.literal(1)]),
-  'cues': z.union([z.undefined(), z.array(z.object({
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-}))]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("subtitleTrack"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'lang': z.string(),
-  'lanDoc': z.string(),
-  'primary': z.union([z.undefined(), z.literal(0), z.literal(1)]).optional(),
-  'cues': z.array(z.object({
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-})),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'lang': z.string(),
-  'lanDoc': z.string(),
-  'primary': z.union([z.undefined(), z.literal(0), z.literal(1)]).optional(),
-  'cues': z.array(z.object({
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-})),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("materialBlock"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'materialId': z.string(),
-  'idx': z.number(),
-  'unit': z.number(),
-  'unitLabel': z.string(),
-  'text': z.string(),
-  'kind': z.union([z.literal("body"), z.literal("title"), z.literal("table"), z.literal("caption")]),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'materialId': z.string(),
-  'idx': z.number(),
-  'unit': z.number(),
-  'unitLabel': z.string(),
-  'text': z.string(),
-  'kind': z.union([z.literal("body"), z.literal("title"), z.literal("table"), z.literal("caption")]),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("slideFrame"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'ts': z.number(),
-  'blob': z.object({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'kind': z.union([z.literal("slide"), z.literal("other")]),
-  'caption': z.union([z.undefined(), z.string()]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'ts': z.number(),
-  'blob': z.object({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'kind': z.union([z.literal("slide"), z.literal("other")]),
-  'caption': z.union([z.undefined(), z.string()]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("courseCover"),
-  'expected': z.union([z.literal(null), z.object({
-  'videoId': z.string(),
-  'blob': z.object({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'w': z.number(),
-  'h': z.number(),
-  'ts': z.number(),
-  'source': z.union([z.literal("user"), z.literal("slide"), z.literal("auto"), z.literal("material-page"), z.literal("material-title")]),
-  'createdAt': z.number(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'videoId': z.string(),
-  'blob': z.object({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'w': z.number(),
-  'h': z.number(),
-  'ts': z.number(),
-  'source': z.union([z.literal("user"), z.literal("slide"), z.literal("auto"), z.literal("material-page"), z.literal("material-title")]),
-  'createdAt': z.number(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("handoutDocument"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'createdAt': z.number(),
-  'title': z.string(),
-  'blob': z.object({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'outlineJson': z.string(),
-  'sectionsJson': z.union([z.undefined(), z.string()]).optional(),
-  'usedSkills': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'readPos': z.union([z.undefined(), z.object({
-  'anchor': z.string(),
-  'offset': z.number(),
-})]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'createdAt': z.number(),
-  'title': z.string(),
-  'blob': z.object({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'outlineJson': z.string(),
-  'sectionsJson': z.union([z.undefined(), z.string()]).optional(),
-  'usedSkills': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'readPos': z.union([z.undefined(), z.object({
-  'anchor': z.string(),
-  'offset': z.number(),
-})]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("candidateCard"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'q': z.string(),
-  'a': z.string(),
-  'time': z.number(),
-  'status': z.union([z.literal(0), z.literal(2), z.literal(1)]),
-  'createdAt': z.number(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'q': z.string(),
-  'a': z.string(),
-  'time': z.number(),
-  'status': z.union([z.literal(0), z.literal(2), z.literal(1)]),
-  'createdAt': z.number(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("courseComment"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'time': z.number(),
-  'author': z.string(),
-  'role': z.union([z.literal("ask"), z.literal("answer"), z.literal("note")]),
-  'text': z.string(),
-  'parentId': z.union([z.undefined(), z.number()]).optional(),
-  'createdAt': z.number(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'time': z.number(),
-  'author': z.string(),
-  'role': z.union([z.literal("ask"), z.literal("answer"), z.literal("note")]),
-  'text': z.string(),
-  'parentId': z.union([z.undefined(), z.number()]).optional(),
-  'createdAt': z.number(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("courseDanmaku"),
-  'expected': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'time': z.number(),
-  'text': z.string(),
-})]),
-  'value': z.union([z.literal(null), z.object({
-  'id': z.number(),
-  'videoId': z.string(),
-  'time': z.number(),
-  'text': z.string(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.object({
-  'kind': z.literal("courseDerivation"),
-  'courseId': z.string(),
-  'expected': z.object({
-  'status': z.union([z.undefined(), z.literal("new"), z.literal("transcribing"), z.literal("transcribed"), z.literal("error")]).optional(),
-  'transcriptionPaused': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'unitCount': z.union([z.undefined(), z.number()]).optional(),
-  'scanned': z.union([z.undefined(), z.literal(1)]).optional(),
-  'empty': z.union([z.undefined(), z.literal(1)]).optional(),
-  'coverState': z.union([z.undefined(), z.literal("pending"), z.literal("done"), z.literal("skipped")]).optional(),
-  'dominantColor': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'value': z.object({
-  'status': z.union([z.undefined(), z.literal("new"), z.literal("transcribing"), z.literal("transcribed"), z.literal("error")]).optional(),
-  'transcriptionPaused': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'unitCount': z.union([z.undefined(), z.number()]).optional(),
-  'scanned': z.union([z.undefined(), z.literal(1)]).optional(),
-  'empty': z.union([z.undefined(), z.literal(1)]).optional(),
-  'coverState': z.union([z.undefined(), z.literal("pending"), z.literal("done"), z.literal("skipped")]).optional(),
-  'dominantColor': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-})])),
-}))
-let _wangke_remote_host_executorRuntime_commitArtifacts_result$schema$value
-const _wangke_remote_host_executorRuntime_commitArtifacts_result$schema = () => (_wangke_remote_host_executorRuntime_commitArtifacts_result$schema$value ??= z.object({
-  'accepted': z.array(z.string()),
-  'versions': z.array(z.object({
-  'table': z.string(),
-  'key': z.union([z.string(), z.number()]),
-  'revision': z.number(),
-})),
-}))
-let _wangke_remote_host_executorRuntime_complete_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_complete_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_complete_parameter_0$schema$value ??= z.object({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'outcome': z.union([z.object({
-  'status': z.literal("completed"),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema33())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema33()))]),
-}), z.object({
-  'status': z.literal("failed"),
-  'error': z.string(),
-})]),
-}))
-let _wangke_remote_host_executorRuntime_complete_result$schema$value
-const _wangke_remote_host_executorRuntime_complete_result$schema = () => (_wangke_remote_host_executorRuntime_complete_result$schema$value ??= z.object({
-  'taskId': z.string(),
-  'status': z.union([z.literal("completed"), z.literal("failed")]),
-}))
-let _wangke_remote_host_executorRuntime_deliverInteraction_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_deliverInteraction_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_deliverInteraction_parameter_0$schema$value ??= z.object({
-  'taskId': z.string(),
-  'sequence': z.number(),
-  'phase': z.union([z.literal("rejected"), z.literal("begin"), z.literal("executing"), z.literal("applied"), z.literal("uncertain")]),
-}))
-let _wangke_remote_host_executorRuntime_deliverInteraction_result$schema$value
-const _wangke_remote_host_executorRuntime_deliverInteraction_result$schema = () => (_wangke_remote_host_executorRuntime_deliverInteraction_result$schema$value ??= z.object({
-  'sequence': z.number(),
-  'phase': z.union([z.literal("rejected"), z.literal("applied"), z.literal("uncertain"), z.literal("started")]),
-}))
-let _wangke_remote_host_executorRuntime_read_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_read_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_read_parameter_0$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_read_result$schema$value
-const _wangke_remote_host_executorRuntime_read_result$schema = () => (_wangke_remote_host_executorRuntime_read_result$schema$value ??= z.object({
-  'source': z.union([z.undefined(), z.object({
-  'kind': z.union([z.literal("app"), z.literal("bot")]),
-  'name': z.union([z.undefined(), z.string()]).optional(),
-})]).optional(),
-  'resourceName': z.union([z.undefined(), z.string()]).optional(),
-  'executor': z.union([z.undefined(), z.literal("node"), z.literal("browser")]).optional(),
-  'id': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
-  'resource': z.string(),
-  'status': z.union([z.literal("queued"), z.literal("running"), z.literal("waiting_user"), z.literal("completed"), z.literal("failed"), z.literal("cancelled"), z.literal("interrupted")]),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema31())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema31()))])),
-  'progress': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema31())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema31()))]))]),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema31())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema31()))]),
-  'error': z.union([z.literal(null), z.string()]),
-  'createdAt': z.string(),
-}))
-let _wangke_remote_host_executorRuntime_receipt_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_receipt_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_receipt_parameter_0$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_receipt_parameter_1$schema$value
-const _wangke_remote_host_executorRuntime_receipt_parameter_1$schema = () => (_wangke_remote_host_executorRuntime_receipt_parameter_1$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_receipt_result$schema$value
-const _wangke_remote_host_executorRuntime_receipt_result$schema = () => (_wangke_remote_host_executorRuntime_receipt_result$schema$value ??= z.union([z.object({
-  'status': z.literal("missing"),
-}), z.object({
-  'status': z.literal("pending"),
-}), z.object({
-  'status': z.literal("uncertain"),
-  'code': z.string(),
-}), z.object({
-  'status': z.literal("completed"),
-  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema34())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema34()))]),
-}), z.object({
-  'status': z.literal("failed"),
-  'code': z.string(),
-})]))
-let _wangke_remote_host_executorRuntime_report_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_report_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_report_parameter_0$schema$value ??= z.object({
-  'taskId': z.string(),
-  'progress': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema32())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema32()))])),
-}))
-let _wangke_remote_host_executorRuntime_report_result$schema$value
-const _wangke_remote_host_executorRuntime_report_result$schema = () => (_wangke_remote_host_executorRuntime_report_result$schema$value ??= z.object({
-  'leaseExpiresAt': z.string(),
-}))
-let _wangke_remote_host_executorRuntime_resetConversation_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_resetConversation_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_resetConversation_parameter_0$schema$value ??= z.object({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'mode': z.union([z.literal("continue"), z.literal("retry")]),
-}))
-let _wangke_remote_host_executorRuntime_resetConversation_result$schema$value
-const _wangke_remote_host_executorRuntime_resetConversation_result$schema = () => (_wangke_remote_host_executorRuntime_resetConversation_result$schema$value ??= z.object({
-  'mode': z.union([z.literal("continue"), z.literal("retry")]),
-  'sessionId': z.number(),
-  'target': z.object({
-  'id': z.number(),
-  'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'videoId': z.string(),
-  'sessionId': z.number(),
-  'role': z.union([z.literal("user"), z.literal("assistant")]),
-  'content': z.string(),
-  'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'reasoning': z.union([z.undefined(), z.string()]).optional(),
-  'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-}),
-  'user': z.object({
-  'id': z.number(),
-  'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'videoId': z.string(),
-  'sessionId': z.number(),
-  'role': z.union([z.literal("user"), z.literal("assistant")]),
-  'content': z.string(),
-  'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'reasoning': z.union([z.undefined(), z.string()]).optional(),
-  'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-}),
-  'removed': z.array(z.object({
-  'id': z.number(),
-  'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'videoId': z.string(),
-  'sessionId': z.number(),
-  'role': z.union([z.literal("user"), z.literal("assistant")]),
-  'content': z.string(),
-  'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'reasoning': z.union([z.undefined(), z.string()]).optional(),
-  'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema26())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))])), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema26()))]).optional(),
-})),
-}))
-let _wangke_remote_host_executorRuntime_resourceCommand_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_resourceCommand_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_resourceCommand_parameter_0$schema$value ??= z.object({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'permissionId': z.string(),
-  'operation': z.union([z.object({
-  'kind': z.literal("saveMarkdown"),
-  'courseId': z.string(),
-  'text': z.string(),
-  'expected': z.string(),
-  'name': z.union([z.undefined(), z.string()]).optional(),
-  'folderId': z.union([z.undefined(), z.number()]).optional(),
-  'createOnly': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-}), z.object({
-  'kind': z.literal("organizeCourses"),
-  'folders': z.array(z.object({
-  'name': z.string(),
-  'courseIds': z.array(z.string()),
-})),
-})]),
-}))
-let _wangke_remote_host_executorRuntime_resourceCommand_result$schema$value
-const _wangke_remote_host_executorRuntime_resourceCommand_result$schema = () => (_wangke_remote_host_executorRuntime_resourceCommand_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema29())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema29()))]))
-let _wangke_remote_host_executorRuntime_watchAuthorization_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_watchAuthorization_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_watchAuthorization_parameter_0$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_watchAuthorization_parameter_1$schema$value
-const _wangke_remote_host_executorRuntime_watchAuthorization_parameter_1$schema = () => (_wangke_remote_host_executorRuntime_watchAuthorization_parameter_1$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_watchAuthorization_result$schema$value
-const _wangke_remote_host_executorRuntime_watchAuthorization_result$schema = () => (_wangke_remote_host_executorRuntime_watchAuthorization_result$schema$value ??= z.object({
-  'permissionId': z.string(),
-  'status': z.union([z.literal("pending"), z.literal("approved"), z.literal("rejected"), z.literal("consumed"), z.literal("finished"), z.literal("expired")]),
-}))
-let _wangke_remote_host_executorRuntime_watchInteractions_parameter_0$schema$value
-const _wangke_remote_host_executorRuntime_watchInteractions_parameter_0$schema = () => (_wangke_remote_host_executorRuntime_watchInteractions_parameter_0$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_watchInteractions_result$schema$value
-const _wangke_remote_host_executorRuntime_watchInteractions_result$schema = () => (_wangke_remote_host_executorRuntime_watchInteractions_result$schema$value ??= z.object({
-  'type': z.union([z.literal("baseline"), z.literal("commands")]),
-  'taskId': z.string(),
-  'cursor': z.number(),
-  'commands': z.array(z.object({
-  'sequence': z.number(),
-  'nonce': z.string(),
-  'action': z.union([z.literal("answerAsk"), z.literal("confirmPlan"), z.literal("cancelPlan")]),
-  'target': z.string(),
-  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema27())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema27()))]),
-  'attempt': z.union([z.undefined(), z.number()]).optional(),
-})),
-}))
 let closed$RuntimeJsonRemoteCodec$schema$value
 const closed$RuntimeJsonRemoteCodec$schema = () => (closed$RuntimeJsonRemoteCodec$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))
 let closed$RuntimeJsonRemoteCodec$schema2$value
@@ -2168,12 +1759,6 @@ let closed$RuntimeJsonRemoteCodec$schema7$value
 const closed$RuntimeJsonRemoteCodec$schema7 = () => (closed$RuntimeJsonRemoteCodec$schema7$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7()))]))
 let closed$RuntimeJsonRemoteCodec$schema8$value
 const closed$RuntimeJsonRemoteCodec$schema8 = () => (closed$RuntimeJsonRemoteCodec$schema8$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema8())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema8()))]))
-let closed$RuntimeJsonRemoteCodec$schema9$value
-const closed$RuntimeJsonRemoteCodec$schema9 = () => (closed$RuntimeJsonRemoteCodec$schema9$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))
-let closed$RuntimeJsonRemoteCodec$schema10$value
-const closed$RuntimeJsonRemoteCodec$schema10 = () => (closed$RuntimeJsonRemoteCodec$schema10$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema10())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema10()))]))
-let closed$RuntimeJsonRemoteCodec$schema11$value
-const closed$RuntimeJsonRemoteCodec$schema11 = () => (closed$RuntimeJsonRemoteCodec$schema11$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema11())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema11()))]))
 let _wangke_remote_host_clientRuntime_command_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_command_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_command_parameter_0_strict$schema$value ??= z.strictObject({
   'target': z.union([z.undefined(), z.literal("method"), z.literal("action")]).optional(),
@@ -2182,7 +1767,7 @@ const _wangke_remote_host_clientRuntime_command_parameter_0_strict$schema = () =
   'instanceId': z.string(),
   'revision': z.number(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema8())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema8()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema4())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema4()))])),
 }))
 let _wangke_remote_host_clientRuntime_commitRecords_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_commitRecords_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_commitRecords_parameter_0_strict$schema$value ??= z.strictObject({
@@ -2191,11 +1776,146 @@ const _wangke_remote_host_clientRuntime_commitRecords_parameter_0_strict$schema 
   'id': z.string(),
   'table': z.string(),
   'key': z.union([z.string(), z.number()]),
-  'before': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]),
-  'after': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]),
+  'before': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]),
+  'after': z.union([z.literal(null), z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 })),
 }))
+let _wangke_remote_host_clientRuntime_delegation_parameter_0_strict$schema$value
+const _wangke_remote_host_clientRuntime_delegation_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_delegation_parameter_0_strict$schema$value ??= z.union([z.strictObject({
+  'action': z.literal("bot.default"),
+  'threadId': z.string(),
+  'expected': z.union([z.literal(null), z.strictObject({
+  'modelRef': z.strictObject({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.strictObject({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]),
+  'value': z.union([z.literal(null), z.strictObject({
+  'modelRef': z.strictObject({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.strictObject({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]),
+}), z.strictObject({
+  'action': z.literal("bot.read"),
+  'threadId': z.string(),
+}), z.strictObject({
+  'action': z.literal("models"),
+  'query': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'action': z.literal("create"),
+  'operationId': z.string(),
+  'parentTaskId': z.union([z.undefined(), z.string()]).optional(),
+  'parentRunId': z.union([z.undefined(), z.string()]).optional(),
+  'goal': z.string(),
+  'constraints': z.array(z.string()),
+  'completionCriteria': z.array(z.string()),
+  'context': z.array(z.strictObject({
+  'source': z.string(),
+  'version': z.string(),
+  'text': z.string(),
+})),
+  'modelSelection': z.union([z.undefined(), z.strictObject({
+  'modelRef': z.strictObject({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.strictObject({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]).optional(),
+  'dependsOn': z.union([z.undefined(), z.array(z.string())]).optional(),
+  'background': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+}), z.strictObject({
+  'action': z.union([z.literal("read"), z.literal("cancel"), z.literal("promote")]),
+  'taskId': z.string(),
+}), z.strictObject({
+  'action': z.literal("session.create"),
+  'operationId': z.string(),
+  'title': z.string(),
+  'defaultModel': z.union([z.undefined(), z.strictObject({
+  'modelRef': z.strictObject({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.strictObject({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]).optional(),
+  'sourceSessionId': z.union([z.undefined(), z.number()]).optional(),
+  'sourceMessageId': z.union([z.undefined(), z.number()]).optional(),
+  'originTaskId': z.union([z.undefined(), z.string()]).optional(),
+  'originRunId': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'action': z.literal("session.read"),
+  'sessionId': z.number(),
+}), z.strictObject({
+  'action': z.literal("session.default"),
+  'sessionId': z.number(),
+  'expected': z.union([z.literal(null), z.strictObject({
+  'modelRef': z.strictObject({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.strictObject({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]),
+  'value': z.union([z.literal(null), z.strictObject({
+  'modelRef': z.strictObject({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.strictObject({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]),
+}), z.strictObject({
+  'action': z.literal("session.send"),
+  'operationId': z.string(),
+  'sessionId': z.number(),
+  'text': z.string(),
+  'modelSelection': z.union([z.undefined(), z.strictObject({
+  'modelRef': z.strictObject({
+  'providerId': z.string(),
+  'model': z.string(),
+}),
+  'presetId': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict")]).optional(),
+}), z.strictObject({
+  'presetId': z.string(),
+  'modelRef': z.undefined().optional(),
+  'fallbackPolicy': z.union([z.undefined(), z.literal("strict"), z.literal("configured")]).optional(),
+})]).optional(),
+  'parentTaskId': z.union([z.undefined(), z.string()]).optional(),
+  'parentRunId': z.union([z.undefined(), z.string()]).optional(),
+  'background': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
+})]))
 let _wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema$value ??= z.strictObject({
   'operationId': z.string(),
@@ -2209,26 +1929,26 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema =
   'role': z.union([z.literal("user"), z.literal("assistant")]),
   'content': z.string(),
   'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
+  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
   'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
+  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
   'reasoning': z.union([z.undefined(), z.string()]).optional(),
   'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
+  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
   'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
   'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
+  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
 })]),
   'value': z.union([z.literal(null), z.strictObject({
   'id': z.number(),
@@ -2238,26 +1958,26 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema =
   'role': z.union([z.literal("user"), z.literal("assistant")]),
   'content': z.string(),
   'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
+  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
   'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
+  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
   'reasoning': z.union([z.undefined(), z.string()]).optional(),
   'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
+  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
   'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
   'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema()))]).optional(),
+  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]))]).optional(),
+  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
+  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema5()))]).optional(),
 })]),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
@@ -2550,7 +2270,7 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
   'instanceId': z.string(),
   'revision': z.number(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))])),
 }), z.strictObject({
   'kind': z.literal("pluginQueries"),
   'pluginId': z.string(),
@@ -2559,7 +2279,7 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
   'queries': z.array(z.strictObject({
   'key': z.string(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))])),
 })),
 }), z.strictObject({
   'kind': z.literal("task"),
@@ -2567,13 +2287,6 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
 })]))
 let _wangke_remote_host_clientRuntime_receipt_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_receipt_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_receipt_parameter_0_strict$schema$value ??= z.string())
-let _wangke_remote_host_clientRuntime_reconcileInteraction_parameter_0_strict$schema$value
-const _wangke_remote_host_clientRuntime_reconcileInteraction_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_reconcileInteraction_parameter_0_strict$schema$value ??= z.strictObject({
-  'taskId': z.string(),
-  'sequence': z.number(),
-  'observed': z.string(),
-  'action': z.union([z.literal("settle"), z.literal("resume"), z.literal("hold")]),
-}))
 let _wangke_remote_host_clientRuntime_recordsPage_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_recordsPage_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_recordsPage_parameter_0_strict$schema$value ??= z.number())
 let _wangke_remote_host_clientRuntime_resolveFileIntent_parameter_0_strict$schema$value
@@ -2619,7 +2332,7 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0_strict$schem
   'drop': z.array(z.number()),
 })]).optional(),
   'folderId': z.union([z.undefined(), z.number()]).optional(),
-  'kind': z.union([z.undefined(), z.literal("material"), z.literal("video")]).optional(),
+  'kind': z.union([z.undefined(), z.literal("video"), z.literal("material")]).optional(),
   'materialFormat': z.union([z.undefined(), z.literal("pdf"), z.literal("docx"), z.literal("md"), z.literal("html")]).optional(),
   'unitCount': z.union([z.undefined(), z.number()]).optional(),
   'lastUnit': z.union([z.undefined(), z.number()]).optional(),
@@ -2646,7 +2359,7 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0_strict$schem
   'fileMappings': z.union([z.undefined(), z.array(z.strictObject({
   'courseId': z.string(),
   'expected': z.literal(null),
-  'sourceReference': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]),
+  'sourceReference': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]),
   'blob': z.strictObject({
   '$file': z.string(),
   'type': z.union([z.undefined(), z.string()]).optional(),
@@ -2783,26 +2496,26 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0_strict$schem
   'role': z.union([z.literal("user"), z.literal("assistant")]),
   'content': z.string(),
   'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
+  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]).optional(),
+  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]))]).optional(),
   'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
+  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]))]).optional(),
+  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]))]).optional(),
   'reasoning': z.union([z.undefined(), z.string()]).optional(),
   'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]).optional(),
+  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]))]).optional(),
+  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]))]).optional(),
+  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]).optional(),
+  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]).optional(),
+  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]).optional(),
+  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]).optional(),
   'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
   'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema2()))]).optional(),
+  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]).optional(),
+  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]))]).optional(),
+  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]))]).optional(),
+  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]).optional(),
+  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema6()))]).optional(),
 })),
   'skills': z.array(z.strictObject({
   'id': z.number(),
@@ -3011,16 +2724,16 @@ const _wangke_remote_host_clientRuntime_setPreferences_parameter_0_strict$schema
   'operationId': z.string(),
   'changes': z.array(z.strictObject({
   'key': z.union([z.literal("contextWindow"), z.literal("asrConcurrency"), z.literal("thinkingEnabled"), z.literal("thinkingEffort"), z.literal("captionScale"), z.literal("agentRounds"), z.literal("agentInstructions"), z.literal("danmakuEnabled"), z.literal("customRates"), z.literal("shortcuts"), z.literal("theme"), z.literal("uiLanguage"), z.literal("accentColor"), z.literal("fontScale"), z.literal("dynamicColor"), z.literal("studyTrackingEnabled"), z.literal("studyIdleMinutes"), z.literal("htmlRemoteAssets"), z.literal("favorites"), z.literal("savedModels"), z.literal("userName")]),
-  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema3()))]),
-  'expected': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema3()))]),
+  'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7()))]),
+  'expected': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7()))]),
 })),
 }))
 let _wangke_remote_host_clientRuntime_submitTask_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_submitTask_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_submitTask_parameter_0_strict$schema$value ??= z.strictObject({
   'operationId': z.string(),
-  'kind': z.union([z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("material"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
+  'kind': z.union([z.literal("material"), z.literal("chat"), z.literal("qa"), z.literal("transcribe"), z.literal("handout"), z.literal("cards"), z.literal("comments"), z.literal("danmaku"), z.literal("cover"), z.literal("artifactEdit"), z.literal("handoutEdit"), z.literal("modelOnce")]),
   'resource': z.string(),
-  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema4())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema4()))])),
+  'input': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema8())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema8()))])),
 }))
 let _wangke_remote_host_clientRuntime_taskAdmission_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_taskAdmission_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_taskAdmission_parameter_0_strict$schema$value ??= z.string())
@@ -3084,7 +2797,7 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0_strict$schema = () => 
   'instanceId': z.string(),
   'revision': z.number(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema3()))])),
 }), z.strictObject({
   'kind': z.literal("pluginQueries"),
   'pluginId': z.string(),
@@ -3093,7 +2806,7 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0_strict$schema = () => 
   'queries': z.array(z.strictObject({
   'key': z.string(),
   'method': z.string(),
-  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema7()))])),
+  'args': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema3())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema3()))])),
 })),
 }), z.strictObject({
   'kind': z.literal("task"),
@@ -3127,462 +2840,6 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_parameter_0_strict$s
 }))
 let _wangke_remote_host_clientRuntime_watchTask_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_watchTask_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_watchTask_parameter_0_strict$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_admitBlob_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_admitBlob_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_admitBlob_parameter_0_strict$schema$value ??= z.strictObject({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'sha256': z.string(),
-  'size': z.number(),
-  'contentType': z.string(),
-}))
-let _wangke_remote_host_executorRuntime_beginExecution_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_beginExecution_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_beginExecution_parameter_0_strict$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_commitArtifacts_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_commitArtifacts_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_commitArtifacts_parameter_0_strict$schema$value ??= z.strictObject({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'products': z.array(z.union([z.strictObject({
-  'kind': z.literal("conversationMessage"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'videoId': z.string(),
-  'sessionId': z.number(),
-  'role': z.union([z.literal("user"), z.literal("assistant")]),
-  'content': z.string(),
-  'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'reasoning': z.union([z.undefined(), z.string()]).optional(),
-  'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'taskId': z.union([z.undefined(), z.string()]).optional(),
-  'videoId': z.string(),
-  'sessionId': z.number(),
-  'role': z.union([z.literal("user"), z.literal("assistant")]),
-  'content': z.string(),
-  'createdAt': z.number(),
-  'modelTrace': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'modelRequests': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'explicitSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'images': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'attachments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'reasoning': z.union([z.undefined(), z.string()]).optional(),
-  'reasoningMs': z.union([z.undefined(), z.number()]).optional(),
-  'tools': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'responseSegments': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'quiz': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'ask': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'folderPlan': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'resume': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'interrupted': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'interruptReason': z.union([z.undefined(), z.string()]).optional(),
-  'widget': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'widgets': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'legacyHtmlWorks': z.union([z.undefined(), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]))]).optional(),
-  'widgetState': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-  'widgetStates': z.union([z.undefined(), z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))])), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema9()))]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("conversationSession"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'title': z.string(),
-  'createdAt': z.number(),
-  'contextCourseIds': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
-  'skillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'pinnedSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'mcpServerIds': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'pinned': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'archived': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'promptCacheKey': z.union([z.undefined(), z.string()]).optional(),
-  'contextCheckpoint': z.union([z.undefined(), z.strictObject({
-  'fromId': z.number(),
-  'source': z.string(),
-  'prefixHash': z.union([z.undefined(), z.string()]).optional(),
-})]).optional(),
-  'contextOmissions': z.union([z.undefined(), z.array(z.tuple([z.number(), z.string()]))]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'title': z.string(),
-  'createdAt': z.number(),
-  'contextCourseIds': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
-  'skillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'pinnedSkillIds': z.union([z.undefined(), z.array(z.number())]).optional(),
-  'mcpServerIds': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'pinned': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'archived': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'promptCacheKey': z.union([z.undefined(), z.string()]).optional(),
-  'contextCheckpoint': z.union([z.undefined(), z.strictObject({
-  'fromId': z.number(),
-  'source': z.string(),
-  'prefixHash': z.union([z.undefined(), z.string()]).optional(),
-})]).optional(),
-  'contextOmissions': z.union([z.undefined(), z.array(z.tuple([z.number(), z.string()]))]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("transcriptSegment"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'idx': z.number(),
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-  'status': z.union([z.literal(0), z.literal(1)]),
-  'cues': z.union([z.undefined(), z.array(z.strictObject({
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-}))]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'idx': z.number(),
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-  'status': z.union([z.literal(0), z.literal(1)]),
-  'cues': z.union([z.undefined(), z.array(z.strictObject({
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-}))]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("subtitleTrack"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'lang': z.string(),
-  'lanDoc': z.string(),
-  'primary': z.union([z.undefined(), z.literal(0), z.literal(1)]).optional(),
-  'cues': z.array(z.strictObject({
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-})),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'lang': z.string(),
-  'lanDoc': z.string(),
-  'primary': z.union([z.undefined(), z.literal(0), z.literal(1)]).optional(),
-  'cues': z.array(z.strictObject({
-  'start': z.number(),
-  'end': z.number(),
-  'text': z.string(),
-})),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("materialBlock"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'materialId': z.string(),
-  'idx': z.number(),
-  'unit': z.number(),
-  'unitLabel': z.string(),
-  'text': z.string(),
-  'kind': z.union([z.literal("body"), z.literal("title"), z.literal("table"), z.literal("caption")]),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'materialId': z.string(),
-  'idx': z.number(),
-  'unit': z.number(),
-  'unitLabel': z.string(),
-  'text': z.string(),
-  'kind': z.union([z.literal("body"), z.literal("title"), z.literal("table"), z.literal("caption")]),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("slideFrame"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'ts': z.number(),
-  'blob': z.strictObject({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'kind': z.union([z.literal("slide"), z.literal("other")]),
-  'caption': z.union([z.undefined(), z.string()]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'ts': z.number(),
-  'blob': z.strictObject({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'kind': z.union([z.literal("slide"), z.literal("other")]),
-  'caption': z.union([z.undefined(), z.string()]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("courseCover"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'videoId': z.string(),
-  'blob': z.strictObject({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'w': z.number(),
-  'h': z.number(),
-  'ts': z.number(),
-  'source': z.union([z.literal("user"), z.literal("slide"), z.literal("auto"), z.literal("material-page"), z.literal("material-title")]),
-  'createdAt': z.number(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'videoId': z.string(),
-  'blob': z.strictObject({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'w': z.number(),
-  'h': z.number(),
-  'ts': z.number(),
-  'source': z.union([z.literal("user"), z.literal("slide"), z.literal("auto"), z.literal("material-page"), z.literal("material-title")]),
-  'createdAt': z.number(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("handoutDocument"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'createdAt': z.number(),
-  'title': z.string(),
-  'blob': z.strictObject({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'outlineJson': z.string(),
-  'sectionsJson': z.union([z.undefined(), z.string()]).optional(),
-  'usedSkills': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'readPos': z.union([z.undefined(), z.strictObject({
-  'anchor': z.string(),
-  'offset': z.number(),
-})]).optional(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'createdAt': z.number(),
-  'title': z.string(),
-  'blob': z.strictObject({
-  '$file': z.string(),
-  'type': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'outlineJson': z.string(),
-  'sectionsJson': z.union([z.undefined(), z.string()]).optional(),
-  'usedSkills': z.union([z.undefined(), z.array(z.string())]).optional(),
-  'readPos': z.union([z.undefined(), z.strictObject({
-  'anchor': z.string(),
-  'offset': z.number(),
-})]).optional(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("candidateCard"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'q': z.string(),
-  'a': z.string(),
-  'time': z.number(),
-  'status': z.union([z.literal(0), z.literal(2), z.literal(1)]),
-  'createdAt': z.number(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'q': z.string(),
-  'a': z.string(),
-  'time': z.number(),
-  'status': z.union([z.literal(0), z.literal(2), z.literal(1)]),
-  'createdAt': z.number(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("courseComment"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'time': z.number(),
-  'author': z.string(),
-  'role': z.union([z.literal("ask"), z.literal("answer"), z.literal("note")]),
-  'text': z.string(),
-  'parentId': z.union([z.undefined(), z.number()]).optional(),
-  'createdAt': z.number(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'time': z.number(),
-  'author': z.string(),
-  'role': z.union([z.literal("ask"), z.literal("answer"), z.literal("note")]),
-  'text': z.string(),
-  'parentId': z.union([z.undefined(), z.number()]).optional(),
-  'createdAt': z.number(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("courseDanmaku"),
-  'expected': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'time': z.number(),
-  'text': z.string(),
-})]),
-  'value': z.union([z.literal(null), z.strictObject({
-  'id': z.number(),
-  'videoId': z.string(),
-  'time': z.number(),
-  'text': z.string(),
-})]),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-}), z.strictObject({
-  'kind': z.literal("courseDerivation"),
-  'courseId': z.string(),
-  'expected': z.strictObject({
-  'status': z.union([z.undefined(), z.literal("new"), z.literal("transcribing"), z.literal("transcribed"), z.literal("error")]).optional(),
-  'transcriptionPaused': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'unitCount': z.union([z.undefined(), z.number()]).optional(),
-  'scanned': z.union([z.undefined(), z.literal(1)]).optional(),
-  'empty': z.union([z.undefined(), z.literal(1)]).optional(),
-  'coverState': z.union([z.undefined(), z.literal("pending"), z.literal("done"), z.literal("skipped")]).optional(),
-  'dominantColor': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'value': z.strictObject({
-  'status': z.union([z.undefined(), z.literal("new"), z.literal("transcribing"), z.literal("transcribed"), z.literal("error")]).optional(),
-  'transcriptionPaused': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-  'unitCount': z.union([z.undefined(), z.number()]).optional(),
-  'scanned': z.union([z.undefined(), z.literal(1)]).optional(),
-  'empty': z.union([z.undefined(), z.literal(1)]).optional(),
-  'coverState': z.union([z.undefined(), z.literal("pending"), z.literal("done"), z.literal("skipped")]).optional(),
-  'dominantColor': z.union([z.undefined(), z.string()]).optional(),
-}),
-  'mutationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
-})])),
-}))
-let _wangke_remote_host_executorRuntime_complete_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_complete_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_complete_parameter_0_strict$schema$value ??= z.strictObject({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'outcome': z.union([z.strictObject({
-  'status': z.literal("completed"),
-  'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema11())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema11()))]),
-}), z.strictObject({
-  'status': z.literal("failed"),
-  'error': z.string(),
-})]),
-}))
-let _wangke_remote_host_executorRuntime_deliverInteraction_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_deliverInteraction_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_deliverInteraction_parameter_0_strict$schema$value ??= z.strictObject({
-  'taskId': z.string(),
-  'sequence': z.number(),
-  'phase': z.union([z.literal("rejected"), z.literal("begin"), z.literal("executing"), z.literal("applied"), z.literal("uncertain")]),
-}))
-let _wangke_remote_host_executorRuntime_read_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_read_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_read_parameter_0_strict$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_receipt_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_receipt_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_receipt_parameter_0_strict$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_receipt_parameter_1_strict$schema$value
-const _wangke_remote_host_executorRuntime_receipt_parameter_1_strict$schema = () => (_wangke_remote_host_executorRuntime_receipt_parameter_1_strict$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_report_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_report_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_report_parameter_0_strict$schema$value ??= z.strictObject({
-  'taskId': z.string(),
-  'progress': z.record(z.string(), z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => closed$RuntimeJsonRemoteCodec$schema10())), z.record(z.string(), z.lazy(() => closed$RuntimeJsonRemoteCodec$schema10()))])),
-}))
-let _wangke_remote_host_executorRuntime_resetConversation_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_resetConversation_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_resetConversation_parameter_0_strict$schema$value ??= z.strictObject({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'permissionId': z.union([z.undefined(), z.string()]).optional(),
-  'mode': z.union([z.literal("continue"), z.literal("retry")]),
-}))
-let _wangke_remote_host_executorRuntime_resourceCommand_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_resourceCommand_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_resourceCommand_parameter_0_strict$schema$value ??= z.strictObject({
-  'taskId': z.string(),
-  'operationId': z.string(),
-  'permissionId': z.string(),
-  'operation': z.union([z.strictObject({
-  'kind': z.literal("saveMarkdown"),
-  'courseId': z.string(),
-  'text': z.string(),
-  'expected': z.string(),
-  'name': z.union([z.undefined(), z.string()]).optional(),
-  'folderId': z.union([z.undefined(), z.number()]).optional(),
-  'createOnly': z.union([z.undefined(), z.literal(false), z.literal(true)]).optional(),
-}), z.strictObject({
-  'kind': z.literal("organizeCourses"),
-  'folders': z.array(z.strictObject({
-  'name': z.string(),
-  'courseIds': z.array(z.string()),
-})),
-})]),
-}))
-let _wangke_remote_host_executorRuntime_watchAuthorization_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_watchAuthorization_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_watchAuthorization_parameter_0_strict$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_watchAuthorization_parameter_1_strict$schema$value
-const _wangke_remote_host_executorRuntime_watchAuthorization_parameter_1_strict$schema = () => (_wangke_remote_host_executorRuntime_watchAuthorization_parameter_1_strict$schema$value ??= z.string())
-let _wangke_remote_host_executorRuntime_watchInteractions_parameter_0_strict$schema$value
-const _wangke_remote_host_executorRuntime_watchInteractions_parameter_0_strict$schema = () => (_wangke_remote_host_executorRuntime_watchInteractions_parameter_0_strict$schema$value ??= z.string())
 
 const $remote = createTypertRemoteInfo({
   package: '@wangke/remote-host',
@@ -3614,7 +2871,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_command_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":196,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":143,"column":3},
     },
     'clientRuntime/commitRecords': {
       service: 'clientRuntime',
@@ -3643,7 +2900,36 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_commitRecords_result$schema,
         jsonSchema: {"type":"object","properties":{"accepted":{"type":"array","items":{"type":"string"}},"versions":{"type":"array","items":{"type":"object","properties":{"table":{"type":"string"},"key":{"oneOf":[{"type":"string"},{"type":"number"}]},"revision":{"type":"number"}},"required":["table","key","revision"],"additionalProperties":true}}},"required":["accepted","versions"],"additionalProperties":true},
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":154,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":101,"column":3},
+    },
+    'clientRuntime/delegation': {
+      service: 'clientRuntime',
+      invocation: { kind: 'direct' },
+      parameters: [
+        {
+          name: 'request',
+          source: 'json',
+          codec: {
+            mode: 'strict',
+            typeSymbol: '@wangke/contracts/client-runtime#DelegationCommand',
+            create: _wangke_remote_host_clientRuntime_delegation_parameter_0$schema,
+            jsonSchemaError: 'typert tool schema: unsupported undefined value',
+          },
+          strictCodec: {
+            mode: 'strict',
+            typeSymbol: '@wangke/contracts/client-runtime#DelegationCommand',
+            create: _wangke_remote_host_clientRuntime_delegation_parameter_0_strict$schema,
+            jsonSchemaError: 'typert tool schema: unsupported undefined value',
+          },
+        },
+      ],
+      result: {
+        mode: 'strict',
+        typeSymbol: '@wangke/contracts/client-runtime#RuntimeJson',
+        create: _wangke_remote_host_clientRuntime_delegation_result$schema,
+        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
+      },
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":49,"column":3},
     },
     'clientRuntime/editLearning': {
       service: 'clientRuntime',
@@ -3672,7 +2958,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_editLearning_result$schema,
         jsonSchema: {"type":"object","properties":{"accepted":{"type":"array","items":{"type":"string"}},"versions":{"type":"array","items":{"type":"object","properties":{"table":{"type":"string"},"key":{"oneOf":[{"type":"string"},{"type":"number"}]},"revision":{"type":"number"}},"required":["table","key","revision"],"additionalProperties":true}}},"required":["accepted","versions"],"additionalProperties":true},
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":104,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":51,"column":3},
     },
     'clientRuntime/fileIntent': {
       service: 'clientRuntime',
@@ -3701,7 +2987,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_fileIntent_result$schema,
         jsonSchema: {"oneOf":[{"type":"null","const":null},{"type":"object","properties":{"id":{"type":"string"},"path":{"type":"string"},"content":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"expected":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"observed":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"current":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"status":{"type":"string","enum":["pending","applied","conflict","superseded","discarded"]},"createdAt":{"type":"string"},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"successorId":{"oneOf":[{"type":"null","const":null},{"type":"string"}]}},"required":["id","path","content","expected","observed","current","status","createdAt","completedAt","successorId"],"additionalProperties":true}]},
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":121,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":68,"column":3},
     },
     'clientRuntime/read': {
       service: 'clientRuntime',
@@ -3730,7 +3016,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_read_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":183,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":130,"column":3},
     },
     'clientRuntime/receipt': {
       service: 'clientRuntime',
@@ -3759,36 +3045,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_receipt_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":201,"column":3},
-    },
-    'clientRuntime/reconcileInteraction': {
-      service: 'clientRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'request',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#InteractionReconcile',
-            create: _wangke_remote_host_clientRuntime_reconcileInteraction_parameter_0$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"sequence":{"type":"number"},"observed":{"type":"string"},"action":{"type":"string","enum":["settle","resume","hold"]}},"required":["taskId","sequence","observed","action"],"additionalProperties":true},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#InteractionReconcile',
-            create: _wangke_remote_host_clientRuntime_reconcileInteraction_parameter_0_strict$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"sequence":{"type":"number"},"observed":{"type":"string"},"action":{"type":"string","enum":["settle","resume","hold"]}},"required":["taskId","sequence","observed","action"],"additionalProperties":false},
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#RuntimeJson',
-        create: _wangke_remote_host_clientRuntime_reconcileInteraction_result$schema,
-        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":102,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":148,"column":3},
     },
     'clientRuntime/recordsPage': {
       service: 'clientRuntime',
@@ -3817,7 +3074,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_recordsPage_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":149,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":96,"column":3},
     },
     'clientRuntime/resolveFileIntent': {
       service: 'clientRuntime',
@@ -3878,7 +3135,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_resolveFileIntent_result$schema,
         jsonSchema: {"type":"object","properties":{"id":{"type":"string"},"path":{"type":"string"},"content":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"expected":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"observed":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"current":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"status":{"type":"string","enum":["pending","applied","conflict","superseded","discarded"]},"createdAt":{"type":"string"},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"successorId":{"oneOf":[{"type":"null","const":null},{"type":"string"}]}},"required":["id","path","content","expected","observed","current","status","createdAt","completedAt","successorId"],"additionalProperties":true},
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":134,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":81,"column":3},
     },
     'clientRuntime/resourceCommand': {
       service: 'clientRuntime',
@@ -3907,7 +3164,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_resourceCommand_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":108,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":55,"column":3},
     },
     'clientRuntime/savePluginLayout': {
       service: 'clientRuntime',
@@ -3936,7 +3193,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_savePluginLayout_result$schema,
         jsonSchema: {"type":"object","properties":{"path":{"type":"string"},"name":{"type":"string"},"content":{"type":"string"},"revision":{"type":"number"},"updatedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"status":{"type":"string"},"scope":{"type":"string"},"scopeId":{"type":"string"},"source":{"type":"string"},"summary":{"type":"string"},"kind":{"type":"string"},"slug":{"type":"string"},"version":{"type":"string"},"sha256":{"type":"string"},"enabled":{"type":"boolean","enum":[false,true]}},"required":["path","name","content","revision","updatedAt"],"additionalProperties":true},
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":106,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":53,"column":3},
     },
     'clientRuntime/setPreferences': {
       service: 'clientRuntime',
@@ -3965,7 +3222,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_setPreferences_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":116,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":63,"column":3},
     },
     'clientRuntime/submitTask': {
       service: 'clientRuntime',
@@ -3994,7 +3251,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_submitTask_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":144,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":91,"column":3},
     },
     'clientRuntime/taskAdmission': {
       service: 'clientRuntime',
@@ -4023,7 +3280,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_taskAdmission_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":139,"column":3},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":86,"column":3},
     },
     'clientRuntime/watch': {
       service: 'clientRuntime',
@@ -4054,7 +3311,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_watch_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":188,"column":10},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":135,"column":10},
     },
     'clientRuntime/watchBot': {
       service: 'clientRuntime',
@@ -4099,9 +3356,9 @@ const $remote = createTypertRemoteInfo({
         mode: 'strict',
         typeSymbol: '@wangke/contracts/client-runtime#BotJournalFrame',
         create: _wangke_remote_host_clientRuntime_watchBot_result$schema,
-        jsonSchema: {"oneOf":[{"type":"object","properties":{"type":{"type":"string","const":"ready"},"cursor":{"type":"number"}},"required":["type","cursor"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"event"},"cursor":{"type":"number"},"event":{"oneOf":[{"type":"object","properties":{"type":{"type":"string","const":"thread.state_invalidated"}},"required":["type"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"thread.activity"},"activity":{"oneOf":[{"type":"null","const":null},{"type":"object","properties":{"phase":{"type":"string","enum":["queued","running","waiting_user","model","tools","waiting_event"]},"tools":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":true}},"activeTools":{"type":"number"},"completedTools":{"type":"number"}},"required":["phase","tools","activeTools","completedTools"],"additionalProperties":true}]}},"required":["type","activity"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"resync.required"}},"required":["type"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"message.pending"},"message":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"clientNonce":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"seq":{"type":"number"},"role":{"type":"string","enum":["user","assistant","system","tool"]},"kind":{"type":"string","enum":["text","progress","attachment","widget","question","approval","web_sources"]},"content":{"type":"string"},"createdAt":{"type":"string"},"replyTo":{"oneOf":[{"type":"null","const":null},{"type":"string"}]}},"required":["id","threadId","clientNonce","seq","role","kind","content","createdAt","replyTo"],"additionalProperties":true}},"required":["type","message"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"message.accepted"},"message":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"clientNonce":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"seq":{"type":"number"},"role":{"type":"string","enum":["user","assistant","system","tool"]},"kind":{"type":"string","enum":["text","progress","attachment","widget","question","approval","web_sources"]},"content":{"type":"string"},"createdAt":{"type":"string"},"replyTo":{"oneOf":[{"type":"null","const":null},{"type":"string"}]}},"required":["id","threadId","clientNonce","seq","role","kind","content","createdAt","replyTo"],"additionalProperties":true}},"required":["type","message"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"message.updated"},"message":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"clientNonce":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"seq":{"type":"number"},"role":{"type":"string","enum":["user","assistant","system","tool"]},"kind":{"type":"string","enum":["text","progress","attachment","widget","question","approval","web_sources"]},"content":{"type":"string"},"createdAt":{"type":"string"},"replyTo":{"oneOf":[{"type":"null","const":null},{"type":"string"}]}},"required":["id","threadId","clientNonce","seq","role","kind","content","createdAt","replyTo"],"additionalProperties":true}},"required":["type","message"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"message.reaction"},"messageId":{"type":"string"},"reaction":{"type":"string"},"active":{"type":"boolean"}},"required":["type","messageId","reaction","active"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.started"},"run":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"mode":{"type":"string","enum":["bot","chat"]},"status":{"type":"string","enum":["queued","running","waiting_user","completed","failed","cancelled","waiting_event"]},"createdAt":{"type":"string"},"startedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"errorCode":{"oneOf":[{"type":"null","const":null},{"type":"string","enum":["model_not_configured","model_request_failed","invalid_structured_response"]}]}},"required":["id","threadId","mode","status","createdAt","startedAt","completedAt"],"additionalProperties":true}},"required":["type","run"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.progress"},"runId":{"type":"string"},"text":{"type":"string"}},"required":["type","runId","text"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.waiting_user"},"run":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"mode":{"type":"string","enum":["bot","chat"]},"status":{"type":"string","enum":["queued","running","waiting_user","completed","failed","cancelled","waiting_event"]},"createdAt":{"type":"string"},"startedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"errorCode":{"oneOf":[{"type":"null","const":null},{"type":"string","enum":["model_not_configured","model_request_failed","invalid_structured_response"]}]}},"required":["id","threadId","mode","status","createdAt","startedAt","completedAt"],"additionalProperties":true}},"required":["type","run"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.completed"},"run":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"mode":{"type":"string","enum":["bot","chat"]},"status":{"type":"string","enum":["queued","running","waiting_user","completed","failed","cancelled","waiting_event"]},"createdAt":{"type":"string"},"startedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"errorCode":{"oneOf":[{"type":"null","const":null},{"type":"string","enum":["model_not_configured","model_request_failed","invalid_structured_response"]}]}},"required":["id","threadId","mode","status","createdAt","startedAt","completedAt"],"additionalProperties":true}},"required":["type","run"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.failed"},"run":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"mode":{"type":"string","enum":["bot","chat"]},"status":{"type":"string","enum":["queued","running","waiting_user","completed","failed","cancelled","waiting_event"]},"createdAt":{"type":"string"},"startedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"errorCode":{"oneOf":[{"type":"null","const":null},{"type":"string","enum":["model_not_configured","model_request_failed","invalid_structured_response"]}]}},"required":["id","threadId","mode","status","createdAt","startedAt","completedAt"],"additionalProperties":true},"error":{"type":"string"}},"required":["type","run","error"],"additionalProperties":true}]}},"required":["type","cursor","event"],"additionalProperties":true}]},
+        jsonSchema: {"oneOf":[{"type":"object","properties":{"type":{"type":"string","const":"ready"},"cursor":{"type":"number"}},"required":["type","cursor"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"event"},"cursor":{"type":"number"},"event":{"oneOf":[{"type":"object","properties":{"type":{"type":"string","const":"thread.state_invalidated"}},"required":["type"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"thread.activity"},"activity":{"oneOf":[{"type":"null","const":null},{"type":"object","properties":{"phase":{"type":"string","enum":["queued","running","waiting_user","waiting_event","model","tools"]},"tools":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"}},"required":["id","name"],"additionalProperties":true}},"activeTools":{"type":"number"},"completedTools":{"type":"number"}},"required":["phase","tools","activeTools","completedTools"],"additionalProperties":true}]}},"required":["type","activity"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"resync.required"}},"required":["type"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"message.pending"},"message":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"clientNonce":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"seq":{"type":"number"},"role":{"type":"string","enum":["user","assistant","system","tool"]},"kind":{"type":"string","enum":["text","progress","attachment","widget","question","approval","web_sources"]},"content":{"type":"string"},"createdAt":{"type":"string"},"replyTo":{"oneOf":[{"type":"null","const":null},{"type":"string"}]}},"required":["id","threadId","clientNonce","seq","role","kind","content","createdAt","replyTo"],"additionalProperties":true}},"required":["type","message"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"message.accepted"},"message":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"clientNonce":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"seq":{"type":"number"},"role":{"type":"string","enum":["user","assistant","system","tool"]},"kind":{"type":"string","enum":["text","progress","attachment","widget","question","approval","web_sources"]},"content":{"type":"string"},"createdAt":{"type":"string"},"replyTo":{"oneOf":[{"type":"null","const":null},{"type":"string"}]}},"required":["id","threadId","clientNonce","seq","role","kind","content","createdAt","replyTo"],"additionalProperties":true}},"required":["type","message"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"message.updated"},"message":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"clientNonce":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"seq":{"type":"number"},"role":{"type":"string","enum":["user","assistant","system","tool"]},"kind":{"type":"string","enum":["text","progress","attachment","widget","question","approval","web_sources"]},"content":{"type":"string"},"createdAt":{"type":"string"},"replyTo":{"oneOf":[{"type":"null","const":null},{"type":"string"}]}},"required":["id","threadId","clientNonce","seq","role","kind","content","createdAt","replyTo"],"additionalProperties":true}},"required":["type","message"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"message.reaction"},"messageId":{"type":"string"},"reaction":{"type":"string"},"active":{"type":"boolean"}},"required":["type","messageId","reaction","active"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.started"},"run":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"mode":{"type":"string","enum":["bot","chat"]},"status":{"type":"string","enum":["cancelled","queued","running","waiting_user","waiting_event","completed","failed"]},"createdAt":{"type":"string"},"startedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"errorCode":{"oneOf":[{"type":"null","const":null},{"type":"string","enum":["model_not_configured","model_request_failed","invalid_structured_response"]}]}},"required":["id","threadId","mode","status","createdAt","startedAt","completedAt"],"additionalProperties":true}},"required":["type","run"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.progress"},"runId":{"type":"string"},"text":{"type":"string"}},"required":["type","runId","text"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.waiting_user"},"run":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"mode":{"type":"string","enum":["bot","chat"]},"status":{"type":"string","enum":["cancelled","queued","running","waiting_user","waiting_event","completed","failed"]},"createdAt":{"type":"string"},"startedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"errorCode":{"oneOf":[{"type":"null","const":null},{"type":"string","enum":["model_not_configured","model_request_failed","invalid_structured_response"]}]}},"required":["id","threadId","mode","status","createdAt","startedAt","completedAt"],"additionalProperties":true}},"required":["type","run"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.completed"},"run":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"mode":{"type":"string","enum":["bot","chat"]},"status":{"type":"string","enum":["cancelled","queued","running","waiting_user","waiting_event","completed","failed"]},"createdAt":{"type":"string"},"startedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"errorCode":{"oneOf":[{"type":"null","const":null},{"type":"string","enum":["model_not_configured","model_request_failed","invalid_structured_response"]}]}},"required":["id","threadId","mode","status","createdAt","startedAt","completedAt"],"additionalProperties":true}},"required":["type","run"],"additionalProperties":true},{"type":"object","properties":{"type":{"type":"string","const":"run.failed"},"run":{"type":"object","properties":{"id":{"type":"string"},"threadId":{"type":"string"},"mode":{"type":"string","enum":["bot","chat"]},"status":{"type":"string","enum":["cancelled","queued","running","waiting_user","waiting_event","completed","failed"]},"createdAt":{"type":"string"},"startedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"completedAt":{"oneOf":[{"type":"null","const":null},{"type":"string"}]},"errorCode":{"oneOf":[{"type":"null","const":null},{"type":"string","enum":["model_not_configured","model_request_failed","invalid_structured_response"]}]}},"required":["id","threadId","mode","status","createdAt","startedAt","completedAt"],"additionalProperties":true},"error":{"type":"string"}},"required":["type","run","error"],"additionalProperties":true}]}},"required":["type","cursor","event"],"additionalProperties":true}]},
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":206,"column":10},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":153,"column":10},
     },
     'clientRuntime/watchFileIntents': {
       service: 'clientRuntime',
@@ -4116,7 +3373,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_watchFileIntents_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":126,"column":10},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":73,"column":10},
     },
     'clientRuntime/watchRecords': {
       service: 'clientRuntime',
@@ -4147,7 +3404,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_watchRecords_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":175,"column":10},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":122,"column":10},
     },
     'clientRuntime/watchSession': {
       service: 'clientRuntime',
@@ -4178,7 +3435,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_watchSession_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":167,"column":10},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":114,"column":10},
     },
     'clientRuntime/watchSessionJournal': {
       service: 'clientRuntime',
@@ -4209,7 +3466,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":159,"column":10},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":106,"column":10},
     },
     'clientRuntime/watchTask': {
       service: 'clientRuntime',
@@ -4240,7 +3497,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_watchTask_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":222,"column":10},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":169,"column":10},
     },
     'clientRuntime/watchTasks': {
       service: 'clientRuntime',
@@ -4255,391 +3512,7 @@ const $remote = createTypertRemoteInfo({
         create: _wangke_remote_host_clientRuntime_watchTasks_result$schema,
         jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
       },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":214,"column":10},
-    },
-    'executorRuntime/admitBlob': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'request',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorBlobAdmission',
-            create: _wangke_remote_host_executorRuntime_admitBlob_parameter_0$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"operationId":{"type":"string"},"sha256":{"type":"string"},"size":{"type":"number"},"contentType":{"type":"string"}},"required":["taskId","operationId","sha256","size","contentType"],"additionalProperties":true},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorBlobAdmission',
-            create: _wangke_remote_host_executorRuntime_admitBlob_parameter_0_strict$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"operationId":{"type":"string"},"sha256":{"type":"string"},"size":{"type":"number"},"contentType":{"type":"string"}},"required":["taskId","operationId","sha256","size","contentType"],"additionalProperties":false},
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#RuntimeJson',
-        create: _wangke_remote_host_executorRuntime_admitBlob_result$schema,
-        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":54,"column":3},
-    },
-    'executorRuntime/beginExecution': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'taskId',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/beginExecution:taskId',
-            create: _wangke_remote_host_executorRuntime_beginExecution_parameter_0$schema,
-            jsonSchema: {"type":"string"},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/beginExecution:taskId',
-            create: _wangke_remote_host_executorRuntime_beginExecution_parameter_0_strict$schema,
-            jsonSchema: {"type":"string"},
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#RuntimeJson',
-        create: _wangke_remote_host_executorRuntime_beginExecution_result$schema,
-        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":39,"column":3},
-    },
-    'executorRuntime/commitArtifacts': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'request',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorArtifacts',
-            create: _wangke_remote_host_executorRuntime_commitArtifacts_parameter_0$schema,
-            jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorArtifacts',
-            create: _wangke_remote_host_executorRuntime_commitArtifacts_parameter_0_strict$schema,
-            jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#RuntimeRecordsReceipt',
-        create: _wangke_remote_host_executorRuntime_commitArtifacts_result$schema,
-        jsonSchema: {"type":"object","properties":{"accepted":{"type":"array","items":{"type":"string"}},"versions":{"type":"array","items":{"type":"object","properties":{"table":{"type":"string"},"key":{"oneOf":[{"type":"string"},{"type":"number"}]},"revision":{"type":"number"}},"required":["table","key","revision"],"additionalProperties":true}}},"required":["accepted","versions"],"additionalProperties":true},
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":58,"column":3},
-    },
-    'executorRuntime/complete': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'request',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorCompletion',
-            create: _wangke_remote_host_executorRuntime_complete_parameter_0$schema,
-            jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorCompletion',
-            create: _wangke_remote_host_executorRuntime_complete_parameter_0_strict$schema,
-            jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#ExecutorCompletionReceipt',
-        create: _wangke_remote_host_executorRuntime_complete_result$schema,
-        jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"status":{"type":"string","enum":["completed","failed"]}},"required":["taskId","status"],"additionalProperties":true},
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":64,"column":3},
-    },
-    'executorRuntime/deliverInteraction': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'request',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorInteractionDelivery',
-            create: _wangke_remote_host_executorRuntime_deliverInteraction_parameter_0$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"sequence":{"type":"number"},"phase":{"type":"string","enum":["rejected","begin","executing","applied","uncertain"]}},"required":["taskId","sequence","phase"],"additionalProperties":true},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorInteractionDelivery',
-            create: _wangke_remote_host_executorRuntime_deliverInteraction_parameter_0_strict$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"sequence":{"type":"number"},"phase":{"type":"string","enum":["rejected","begin","executing","applied","uncertain"]}},"required":["taskId","sequence","phase"],"additionalProperties":false},
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#ExecutorInteractionReceipt',
-        create: _wangke_remote_host_executorRuntime_deliverInteraction_result$schema,
-        jsonSchema: {"type":"object","properties":{"sequence":{"type":"number"},"phase":{"type":"string","enum":["rejected","applied","uncertain","started"]}},"required":["sequence","phase"],"additionalProperties":true},
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":48,"column":3},
-    },
-    'executorRuntime/read': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'taskId',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/read:taskId',
-            create: _wangke_remote_host_executorRuntime_read_parameter_0$schema,
-            jsonSchema: {"type":"string"},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/read:taskId',
-            create: _wangke_remote_host_executorRuntime_read_parameter_0_strict$schema,
-            jsonSchema: {"type":"string"},
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#RuntimeTask',
-        create: _wangke_remote_host_executorRuntime_read_result$schema,
-        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":60,"column":3},
-    },
-    'executorRuntime/receipt': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'taskId',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/receipt:taskId',
-            create: _wangke_remote_host_executorRuntime_receipt_parameter_0$schema,
-            jsonSchema: {"type":"string"},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/receipt:taskId',
-            create: _wangke_remote_host_executorRuntime_receipt_parameter_0_strict$schema,
-            jsonSchema: {"type":"string"},
-          },
-        },
-        {
-          name: 'operationId',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/receipt:operationId',
-            create: _wangke_remote_host_executorRuntime_receipt_parameter_1$schema,
-            jsonSchema: {"type":"string"},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/receipt:operationId',
-            create: _wangke_remote_host_executorRuntime_receipt_parameter_1_strict$schema,
-            jsonSchema: {"type":"string"},
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#RuntimeReceipt',
-        create: _wangke_remote_host_executorRuntime_receipt_result$schema,
-        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":66,"column":3},
-    },
-    'executorRuntime/report': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'request',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorReport',
-            create: _wangke_remote_host_executorRuntime_report_parameter_0$schema,
-            jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorReport',
-            create: _wangke_remote_host_executorRuntime_report_parameter_0_strict$schema,
-            jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/remote-host#executorRuntime/report:result',
-        create: _wangke_remote_host_executorRuntime_report_result$schema,
-        jsonSchema: {"type":"object","properties":{"leaseExpiresAt":{"type":"string"}},"required":["leaseExpiresAt"],"additionalProperties":true},
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":62,"column":3},
-    },
-    'executorRuntime/resetConversation': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'request',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorConversationReset',
-            create: _wangke_remote_host_executorRuntime_resetConversation_parameter_0$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"operationId":{"type":"string"},"permissionId":{"type":"string"},"mode":{"type":"string","enum":["continue","retry"]}},"required":["taskId","operationId","mode"],"additionalProperties":true},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorConversationReset',
-            create: _wangke_remote_host_executorRuntime_resetConversation_parameter_0_strict$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"operationId":{"type":"string"},"permissionId":{"type":"string"},"mode":{"type":"string","enum":["continue","retry"]}},"required":["taskId","operationId","mode"],"additionalProperties":false},
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#ExecutorConversationResetReceipt',
-        create: _wangke_remote_host_executorRuntime_resetConversation_result$schema,
-        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":46,"column":3},
-    },
-    'executorRuntime/resourceCommand': {
-      service: 'executorRuntime',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'request',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorResourceCommand',
-            create: _wangke_remote_host_executorRuntime_resourceCommand_parameter_0$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"operationId":{"type":"string"},"permissionId":{"type":"string"},"operation":{"oneOf":[{"type":"object","properties":{"kind":{"type":"string","const":"saveMarkdown"},"courseId":{"type":"string"},"text":{"type":"string"},"expected":{"type":"string"},"name":{"type":"string"},"folderId":{"type":"number"},"createOnly":{"type":"boolean","enum":[false,true]}},"required":["kind","courseId","text","expected"],"additionalProperties":true},{"type":"object","properties":{"kind":{"type":"string","const":"organizeCourses"},"folders":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"courseIds":{"type":"array","items":{"type":"string"}}},"required":["name","courseIds"],"additionalProperties":true}}},"required":["kind","folders"],"additionalProperties":true}]}},"required":["taskId","operationId","permissionId","operation"],"additionalProperties":true},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/contracts/client-runtime#ExecutorResourceCommand',
-            create: _wangke_remote_host_executorRuntime_resourceCommand_parameter_0_strict$schema,
-            jsonSchema: {"type":"object","properties":{"taskId":{"type":"string"},"operationId":{"type":"string"},"permissionId":{"type":"string"},"operation":{"oneOf":[{"type":"object","properties":{"kind":{"type":"string","const":"saveMarkdown"},"courseId":{"type":"string"},"text":{"type":"string"},"expected":{"type":"string"},"name":{"type":"string"},"folderId":{"type":"number"},"createOnly":{"type":"boolean","enum":[false,true]}},"required":["kind","courseId","text","expected"],"additionalProperties":false},{"type":"object","properties":{"kind":{"type":"string","const":"organizeCourses"},"folders":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"courseIds":{"type":"array","items":{"type":"string"}}},"required":["name","courseIds"],"additionalProperties":false}}},"required":["kind","folders"],"additionalProperties":false}]}},"required":["taskId","operationId","permissionId","operation"],"additionalProperties":false},
-          },
-        },
-      ],
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#RuntimeJson',
-        create: _wangke_remote_host_executorRuntime_resourceCommand_result$schema,
-        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":56,"column":3},
-    },
-    'executorRuntime/watchAuthorization': {
-      service: 'executorRuntime',
-      mode: 'stream',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'taskId',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/watchAuthorization:taskId',
-            create: _wangke_remote_host_executorRuntime_watchAuthorization_parameter_0$schema,
-            jsonSchema: {"type":"string"},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/watchAuthorization:taskId',
-            create: _wangke_remote_host_executorRuntime_watchAuthorization_parameter_0_strict$schema,
-            jsonSchema: {"type":"string"},
-          },
-        },
-        {
-          name: 'permissionId',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/watchAuthorization:permissionId',
-            create: _wangke_remote_host_executorRuntime_watchAuthorization_parameter_1$schema,
-            jsonSchema: {"type":"string"},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/watchAuthorization:permissionId',
-            create: _wangke_remote_host_executorRuntime_watchAuthorization_parameter_1_strict$schema,
-            jsonSchema: {"type":"string"},
-          },
-        },
-      ],
-      cancellation: { parameter: 'signal' },
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#ExecutorAuthorizationFrame',
-        create: _wangke_remote_host_executorRuntime_watchAuthorization_result$schema,
-        jsonSchema: {"type":"object","properties":{"permissionId":{"type":"string"},"status":{"type":"string","enum":["pending","approved","rejected","consumed","finished","expired"]}},"required":["permissionId","status"],"additionalProperties":true},
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":42,"column":10},
-    },
-    'executorRuntime/watchInteractions': {
-      service: 'executorRuntime',
-      mode: 'stream',
-      invocation: { kind: 'direct' },
-      parameters: [
-        {
-          name: 'taskId',
-          source: 'json',
-          codec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/watchInteractions:taskId',
-            create: _wangke_remote_host_executorRuntime_watchInteractions_parameter_0$schema,
-            jsonSchema: {"type":"string"},
-          },
-          strictCodec: {
-            mode: 'strict',
-            typeSymbol: '@wangke/remote-host#executorRuntime/watchInteractions:taskId',
-            create: _wangke_remote_host_executorRuntime_watchInteractions_parameter_0_strict$schema,
-            jsonSchema: {"type":"string"},
-          },
-        },
-      ],
-      cancellation: { parameter: 'signal' },
-      result: {
-        mode: 'strict',
-        typeSymbol: '@wangke/contracts/client-runtime#ExecutorInteractionsFrame',
-        create: _wangke_remote_host_executorRuntime_watchInteractions_result$schema,
-        jsonSchemaError: 'typert tool schema: recursive selected type requires a supported JSON value declaration',
-      },
-      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":50,"column":10},
+      sourceLocation: {"file":"packages/remote-host/src/index.ts","line":161,"column":10},
     },
   },
 }, z)
@@ -4668,8 +3541,8 @@ export const TYPERT = {
         "members": [
           {
             "kind": "method",
-            "name": "reconcileInteraction",
-            "signature": "@Remote reconcileInteraction(request: import('@wangke/contracts/client-runtime').InteractionReconcile): Promise<RuntimeJson>"
+            "name": "delegation",
+            "signature": "@Remote delegation(request: DelegationCommand): Promise<RuntimeJson>"
           },
           {
             "kind": "method",
@@ -4799,8 +3672,12 @@ export const TYPERT = {
             "declaration": "export type ConversationMode = 'chat' | 'bot';"
           },
           {
-            "name": "InteractionReconcile",
-            "declaration": "export interface InteractionReconcile {\n    taskId: string;\n    sequence: number;\n    observed: string;\n    action: 'settle' | 'resume' | 'hold';\n}"
+            "name": "DelegationCommand",
+            "declaration": "export type DelegationCommand = { action: 'bot.default'; threadId: string; expected: import('./model-gateway.js').TaskModelSelection | null; value: import('./model-gateway.js').TaskModelSelection | null; } | { action: 'bot.read'; threadId: string; } | { action: 'models'; query?: string; } | { action: 'create'; operationId: string; parentTaskId?: string; parentRunId?: string; goal: string; constraints: string[]; completionCriteria: string[]; context: { source: string; version: string; text: string; }[]; modelSelection?: import('./model-gateway.js').TaskModelSelection; dependsOn?: string[]; background?: boolean; } | { action: 'read' | 'cancel' | 'promote'; taskId: string; } | { action: 'session.create'; operationId: string; title: string; defaultModel?: import('./model-gateway.js').TaskModelSelection; sourceSessionId?: number; sourceMessageId?: number; originTaskId?: string; originRunId?: string; } | { action: 'session.read'; sessionId: number; } | { action: 'session.default'; sessionId: number; expected: import('./model-gateway.js').TaskModelSelection | null; value: import('./model-gateway.js').TaskModelSelection | null; } | { action: 'session.send'; operationId: string; sessionId: number; text: string; modelSelection?: import('./model-gateway.js').TaskModelSelection; parentTaskId?: string; parentRunId?: string; background?: boolean; };"
+          },
+          {
+            "name": "FrozenTaskModel",
+            "declaration": "export type FrozenTaskModel = { selectionSource: 'task' | 'session' | 'purpose' | 'account'; fallbackPolicy: 'strict' | 'configured'; candidates: ModelRef[]; policy?: ModelPreset['policy']; configurationRevision?: string; thinkingLevel: ModelThinkingLevel; };"
           },
           {
             "name": "LearningBlob",
@@ -4881,6 +3758,30 @@ export const TYPERT = {
           {
             "name": "MessageRole",
             "declaration": "export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';"
+          },
+          {
+            "name": "ModelCandidate",
+            "declaration": "export interface ModelCandidate {\n    ref: ModelRef;\n    enabled?: boolean;\n    weight?: number;\n    tags?: string[];\n}"
+          },
+          {
+            "name": "ModelErrorClass",
+            "declaration": "export type ModelErrorClass = 'auth_failed' | 'quota_exhausted' | 'rate_limited' | 'timeout' | 'network' | 'server_error' | 'context_exceeded' | 'content_policy' | 'invalid_request' | 'model_not_found' | 'incomplete_response' | 'cancelled';"
+          },
+          {
+            "name": "ModelPreset",
+            "declaration": "export interface ModelPreset {\n    id: string;\n    name: string;\n    purposes: ModelPurpose[];\n    candidates: ModelCandidate[];\n    policy?: { maxAttemptsPerCandidate?: number; fallbackOn?: ModelErrorClass[]; maxChainMs?: number; allowCrossProvider?: boolean; };\n}"
+          },
+          {
+            "name": "ModelPurpose",
+            "declaration": "export type ModelPurpose = 'chat' | 'bot' | 'vision' | 'asr' | 'decision' | 'memory';"
+          },
+          {
+            "name": "ModelRef",
+            "declaration": "export type ModelRef = { providerId: string; model: string; };"
+          },
+          {
+            "name": "ModelThinkingLevel",
+            "declaration": "export type ModelThinkingLevel = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';"
           },
           {
             "name": "PreferenceKey",
@@ -4980,7 +3881,7 @@ export const TYPERT = {
           },
           {
             "name": "RuntimeTask",
-            "declaration": "export type RuntimeTask = { source?: { kind: 'app' | 'bot'; name?: string; }; resourceName?: string; executor?: 'node' | 'browser'; id: string; kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce'; resource: string; status: 'queued' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; input: { [key: string]: RuntimeJson; }; progress: { [key: string]: RuntimeJson; } | null; result: RuntimeJson; error: string | null; createdAt: string; };"
+            "declaration": "export type RuntimeTask = { frozenModel?: import('./model-gateway.js').FrozenTaskModel; source?: { kind: 'app' | 'bot'; name?: string; }; resourceName?: string; executor?: 'node' | 'browser'; id: string; kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce'; resource: string; status: 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; input: { [key: string]: RuntimeJson; }; progress: { [key: string]: RuntimeJson; } | null; result: RuntimeJson; error: string | null; createdAt: string; };"
           },
           {
             "name": "RuntimeTaskAdmission",
@@ -5017,236 +3918,10 @@ export const TYPERT = {
           {
             "name": "SystemDocument",
             "declaration": "export interface SystemDocument {\n    path: string;\n    name: string;\n    content: string;\n    revision: number;\n    updatedAt: string | null;\n    status?: string;\n    scope?: string;\n    scopeId?: string;\n    source?: string;\n    summary?: string;\n    kind?: string;\n    slug?: string;\n    version?: string;\n    sha256?: string;\n    enabled?: boolean;\n}"
-          }
-        ]
-      },
-      {
-        "description": "Task/lease capability service, never an account principal.",
-        "summary": "Task/lease capability service, never an account principal.",
-        "tags": [
-          {
-            "name": "typert",
-            "comment": "service executorRuntime",
-            "text": "@typert service executorRuntime"
-          }
-        ],
-        "jsDoc": "/** Task/lease capability service, never an account principal.\n * @typert service executorRuntime\n */",
-        "key": "executorRuntime",
-        "exportName": "ExecutorRuntimeService",
-        "members": [
-          {
-            "kind": "method",
-            "name": "beginExecution",
-            "signature": "@Remote beginExecution(taskId: string): Promise<RuntimeJson>"
           },
           {
-            "kind": "method",
-            "name": "watchAuthorization",
-            "signature": "@Remote({ mode: 'stream' }) async *watchAuthorization(taskId: string, permissionId: string, signal: AbortSignal): AsyncIterable<ExecutorAuthorizationFrame>"
-          },
-          {
-            "kind": "method",
-            "name": "resetConversation",
-            "signature": "@Remote resetConversation(request: ExecutorConversationReset): Promise<ExecutorConversationResetReceipt>"
-          },
-          {
-            "kind": "method",
-            "name": "deliverInteraction",
-            "signature": "@Remote deliverInteraction(request: ExecutorInteractionDelivery): Promise<ExecutorInteractionReceipt>"
-          },
-          {
-            "kind": "method",
-            "name": "watchInteractions",
-            "signature": "@Remote({ mode: 'stream' }) async *watchInteractions(taskId: string, signal: AbortSignal): AsyncIterable<ExecutorInteractionsFrame>"
-          },
-          {
-            "kind": "method",
-            "name": "admitBlob",
-            "signature": "@Remote admitBlob(request: ExecutorBlobAdmission): Promise<RuntimeJson>"
-          },
-          {
-            "kind": "method",
-            "name": "resourceCommand",
-            "signature": "@Remote resourceCommand(request: ExecutorResourceCommand): Promise<RuntimeJson>"
-          },
-          {
-            "kind": "method",
-            "name": "commitArtifacts",
-            "signature": "@Remote commitArtifacts(request: ExecutorArtifacts): Promise<RuntimeRecordsReceipt>"
-          },
-          {
-            "kind": "method",
-            "name": "read",
-            "signature": "@Remote read(taskId: string): Promise<RuntimeTask>"
-          },
-          {
-            "kind": "method",
-            "name": "report",
-            "signature": "@Remote report(request: ExecutorReport): Promise<{ leaseExpiresAt: string }>"
-          },
-          {
-            "kind": "method",
-            "name": "complete",
-            "signature": "@Remote complete(request: ExecutorCompletion): Promise<ExecutorCompletionReceipt>"
-          },
-          {
-            "kind": "method",
-            "name": "receipt",
-            "signature": "@Remote receipt(taskId: string, operationId: string): Promise<RuntimeReceipt>"
-          }
-        ],
-        "types": [
-          {
-            "name": "ExecutorArtifacts",
-            "declaration": "export interface ExecutorArtifacts {\n    taskId: string;\n    operationId: string;\n    products: LearningProductCommand[];\n}"
-          },
-          {
-            "name": "ExecutorAuthorizationFrame",
-            "declaration": "export interface ExecutorAuthorizationFrame {\n    permissionId: string;\n    status: 'pending' | 'approved' | 'rejected' | 'consumed' | 'finished' | 'expired';\n}"
-          },
-          {
-            "name": "ExecutorBlobAdmission",
-            "declaration": "export interface ExecutorBlobAdmission {\n    taskId: string;\n    operationId: string;\n    sha256: string;\n    size: number;\n    contentType: string;\n}"
-          },
-          {
-            "name": "ExecutorCompletion",
-            "declaration": "export interface ExecutorCompletion {\n    taskId: string;\n    operationId: string;\n    outcome: { status: 'completed'; result: RuntimeJson; } | { status: 'failed'; error: string; };\n}"
-          },
-          {
-            "name": "ExecutorCompletionReceipt",
-            "declaration": "export interface ExecutorCompletionReceipt {\n    taskId: string;\n    status: 'completed' | 'failed';\n}"
-          },
-          {
-            "name": "ExecutorConversationReset",
-            "declaration": "export interface ExecutorConversationReset {\n    taskId: string;\n    operationId: string;\n    permissionId?: string;\n    mode: 'continue' | 'retry';\n}"
-          },
-          {
-            "name": "ExecutorConversationResetReceipt",
-            "declaration": "export interface ExecutorConversationResetReceipt {\n    mode: 'continue' | 'retry';\n    sessionId: number;\n    target: LearningMessage;\n    user: LearningMessage;\n    removed: LearningMessage[];\n}"
-          },
-          {
-            "name": "ExecutorInteraction",
-            "declaration": "export interface ExecutorInteraction {\n    sequence: number;\n    nonce: string;\n    action: 'answerAsk' | 'confirmPlan' | 'cancelPlan';\n    target: string;\n    value: RuntimeJson;\n    attempt?: number;\n}"
-          },
-          {
-            "name": "ExecutorInteractionDelivery",
-            "declaration": "export interface ExecutorInteractionDelivery {\n    taskId: string;\n    sequence: number;\n    phase: 'begin' | 'executing' | 'applied' | 'rejected' | 'uncertain';\n}"
-          },
-          {
-            "name": "ExecutorInteractionReceipt",
-            "declaration": "export interface ExecutorInteractionReceipt {\n    sequence: number;\n    phase: 'started' | 'applied' | 'rejected' | 'uncertain';\n}"
-          },
-          {
-            "name": "ExecutorInteractionsFrame",
-            "declaration": "export interface ExecutorInteractionsFrame {\n    type: 'baseline' | 'commands';\n    taskId: string;\n    cursor: number;\n    commands: ExecutorInteraction[];\n}"
-          },
-          {
-            "name": "ExecutorReport",
-            "declaration": "export interface ExecutorReport {\n    taskId: string;\n    progress: { [key: string]: RuntimeJson; };\n}"
-          },
-          {
-            "name": "ExecutorResourceCommand",
-            "declaration": "export interface ExecutorResourceCommand {\n    taskId: string;\n    operationId: string;\n    permissionId: string;\n    operation: Extract<import('./resources.js').ResourceOperation, { kind: 'saveMarkdown' | 'organizeCourses'; }>;\n}"
-          },
-          {
-            "name": "LearningBlob",
-            "declaration": "export interface LearningBlob {\n    $file: string;\n    type?: string;\n}"
-          },
-          {
-            "name": "LearningBlock",
-            "declaration": "export interface LearningBlock {\n    id: number;\n    materialId: string;\n    idx: number;\n    unit: number;\n    unitLabel: string;\n    text: string;\n    kind: 'body' | 'title' | 'table' | 'caption';\n}"
-          },
-          {
-            "name": "LearningCard",
-            "declaration": "export interface LearningCard {\n    id: number;\n    videoId: string;\n    q: string;\n    a: string;\n    time: number;\n    status: 0 | 1 | 2;\n    createdAt: number;\n}"
-          },
-          {
-            "name": "LearningComment",
-            "declaration": "export interface LearningComment {\n    id: number;\n    videoId: string;\n    time: number;\n    author: string;\n    role: 'ask' | 'answer' | 'note';\n    text: string;\n    parentId?: number;\n    createdAt: number;\n}"
-          },
-          {
-            "name": "LearningCourseState",
-            "declaration": "export interface LearningCourseState {\n    status?: 'new' | 'transcribing' | 'transcribed' | 'error';\n    transcriptionPaused?: boolean;\n    unitCount?: number;\n    scanned?: 1;\n    empty?: 1;\n    coverState?: 'pending' | 'done' | 'skipped';\n    dominantColor?: string;\n}"
-          },
-          {
-            "name": "LearningCover",
-            "declaration": "export interface LearningCover {\n    videoId: string;\n    blob: LearningBlob;\n    w: number;\n    h: number;\n    ts: number;\n    source: 'user' | 'slide' | 'auto' | 'material-page' | 'material-title';\n    createdAt: number;\n}"
-          },
-          {
-            "name": "LearningDanmaku",
-            "declaration": "export interface LearningDanmaku {\n    id: number;\n    videoId: string;\n    time: number;\n    text: string;\n}"
-          },
-          {
-            "name": "LearningFrame",
-            "declaration": "export interface LearningFrame {\n    id: number;\n    videoId: string;\n    ts: number;\n    blob: LearningBlob;\n    kind: 'slide' | 'other';\n    caption?: string;\n}"
-          },
-          {
-            "name": "LearningHandout",
-            "declaration": "export interface LearningHandout {\n    id: number;\n    videoId: string;\n    createdAt: number;\n    title: string;\n    blob: LearningBlob;\n    outlineJson: string;\n    sectionsJson?: string;\n    usedSkills?: string[];\n    readPos?: { anchor: string; offset: number; };\n}"
-          },
-          {
-            "name": "LearningInk",
-            "declaration": "export interface LearningInk {\n    id: string;\n    materialId: string;\n    surface: string;\n    tool: 'pen' | 'highlight';\n    color: string;\n    width: number;\n    height: number;\n    points: { x: number; y: number; pressure: number; }[];\n    createdAt: number;\n    renderer?: 'freehand-v1';\n    nib?: 'pressure' | 'ballpoint' | 'brush';\n    opacity?: number;\n    smoothing?: number;\n    input?: 'touch' | 'pen' | 'mouse';\n    anchor?: { start: number; end: number; exact: string; prefix: string; suffix: string; unit: number; endUnit?: number; unitLabel: string; source: 'pdf' | 'docx' | 'md' | 'html'; };\n    rects?: { x: number; y: number; w: number; h: number; }[];\n}"
-          },
-          {
-            "name": "LearningMessage",
-            "declaration": "export interface LearningMessage {\n    id: number;\n    taskId?: string;\n    videoId: string;\n    sessionId: number;\n    role: 'user' | 'assistant';\n    content: string;\n    createdAt: number;\n    modelTrace?: RuntimeJson;\n    modelRequests?: RuntimeJson[];\n    explicitSkillIds?: number[];\n    images?: RuntimeJson[];\n    attachments?: RuntimeJson[];\n    reasoning?: string;\n    reasoningMs?: number;\n    tools?: RuntimeJson[];\n    responseSegments?: RuntimeJson[];\n    quiz?: RuntimeJson;\n    ask?: RuntimeJson;\n    folderPlan?: RuntimeJson;\n    resume?: RuntimeJson;\n    interrupted?: boolean;\n    interruptReason?: string;\n    widget?: RuntimeJson;\n    widgets?: RuntimeJson[];\n    legacyHtmlWorks?: RuntimeJson[];\n    widgetState?: RuntimeJson;\n    widgetStates?: RuntimeJson;\n}"
-          },
-          {
-            "name": "LearningProduct",
-            "declaration": "export type LearningProduct = { kind: 'conversationMessage'; expected: LearningMessage | null; value: LearningMessage | null; } | { kind: 'conversationSession'; expected: LearningSession | null; value: LearningSession | null; } | { kind: 'transcriptSegment'; expected: LearningSegment | null; value: LearningSegment | null; } | { kind: 'subtitleTrack'; expected: LearningTrack | null; value: LearningTrack | null; } | { kind: 'materialBlock'; expected: LearningBlock | null; value: LearningBlock | null; } | { kind: 'slideFrame'; expected: LearningFrame | null; value: LearningFrame | null; } | { kind: 'courseCover'; expected: LearningCover | null; value: LearningCover | null; } | { kind: 'handoutDocument'; expected: LearningHandout | null; value: LearningHandout | null; } | { kind: 'candidateCard'; expected: LearningCard | null; value: LearningCard | null; } | { kind: 'courseComment'; expected: LearningComment | null; value: LearningComment | null; } | { kind: 'courseDanmaku'; expected: LearningDanmaku | null; value: LearningDanmaku | null; } | { kind: 'courseDerivation'; courseId: string; expected: LearningCourseState; value: LearningCourseState; };"
-          },
-          {
-            "name": "LearningProductCommand",
-            "declaration": "export type LearningProductCommand = LearningProduct & { mutationId: string; permissionId?: string; baseRevision?: number; };"
-          },
-          {
-            "name": "LearningSegment",
-            "declaration": "export interface LearningSegment {\n    id: number;\n    videoId: string;\n    idx: number;\n    start: number;\n    end: number;\n    text: string;\n    status: 0 | 1;\n    cues?: { start: number; end: number; text: string; }[];\n}"
-          },
-          {
-            "name": "LearningSession",
-            "declaration": "export interface LearningSession {\n    id: number;\n    videoId: string;\n    title: string;\n    createdAt: number;\n    contextCourseIds?: string[];\n    projectFolderId?: number;\n    skillIds?: number[];\n    pinnedSkillIds?: number[];\n    mcpServerIds?: string[];\n    pinned?: boolean;\n    archived?: boolean;\n    promptCacheKey?: string;\n    contextCheckpoint?: { fromId: number; source: string; prefixHash?: string; };\n    contextOmissions?: [number, string][];\n}"
-          },
-          {
-            "name": "LearningSkill",
-            "declaration": "export interface LearningSkill {\n    id: number;\n    name: string;\n    description: string;\n    body: string;\n    enabled: 0 | 1;\n    builtin: 0 | 1;\n    updatedAt: number;\n    mcpRequired?: string[];\n}"
-          },
-          {
-            "name": "LearningSkillReference",
-            "declaration": "export interface LearningSkillReference {\n    id: number;\n    skillId: number;\n    path: string;\n    body: string;\n}"
-          },
-          {
-            "name": "LearningTrack",
-            "declaration": "export interface LearningTrack {\n    id: number;\n    videoId: string;\n    lang: string;\n    lanDoc: string;\n    primary?: 0 | 1;\n    cues: { start: number; end: number; text: string; }[];\n}"
-          },
-          {
-            "name": "LibraryImport",
-            "declaration": "export interface LibraryImport {\n    sourceId: string;\n    courses: { id: string; name: string; size: number; mimeType: string; duration: number; createdAt: number; status: 'new' | 'transcribing' | 'transcribed' | 'error'; transcriptionPaused?: boolean; biliSource?: { bvid: string; aid: number; cid: number; page: number; }; lastPosition?: number; finished?: 0 | 1; fileDeleted?: 1; pinned?: 0 | 1; skillOverride?: { pin: number[]; drop: number[]; }; folderId?: number; kind?: 'video' | 'material'; materialFormat?: 'pdf' | 'docx' | 'md' | 'html'; unitCount?: number; lastUnit?: number; scanned?: 1; empty?: 1; htmlView?: 'raw' | 'blocks'; dominantColor?: string; coverState?: 'pending' | 'done' | 'skipped'; }[];\n    folders: { id: number; name: string; createdAt: number; parentId?: number; color?: 'blue' | 'green' | 'yellow' | 'orange' | 'red' | 'purple' | 'gray'; }[];\n    files: { id: string; blob: LearningBlob; }[];\n    fileMappings?: { courseId: string; expected: null; sourceReference: RuntimeJson; blob: LearningBlob; sha256: string; size: number; contentType: string; }[];\n    segments: LearningSegment[];\n    tracks: LearningTrack[];\n    blocks: LearningBlock[];\n    frames: LearningFrame[];\n    covers: LearningCover[];\n    handouts: LearningHandout[];\n    cards: LearningCard[];\n    comments: LearningComment[];\n    danmakus: LearningDanmaku[];\n    sessions: LearningSession[];\n    messages: LearningMessage[];\n    skills: LearningSkill[];\n    references: LearningSkillReference[];\n    annotations: LearningInk[];\n    studyDays: { date: string; seconds: number; updatedAt: number; }[];\n}"
-          },
-          {
-            "name": "ResourceFolderColor",
-            "declaration": "export type ResourceFolderColor = (typeof RESOURCE_FOLDER_COLORS)[number];"
-          },
-          {
-            "name": "ResourceOperation",
-            "declaration": "export type ResourceOperation = { kind: 'importLibraryBlob'; sourceId: string; size: number; sha256: string; contentType: string; } | { kind: 'importLibrary'; library: import('./library-import.js').LibraryImport; } | { kind: 'createFolder'; name: string; } | { kind: 'createDirectory'; projectId: string; path: string; } | { kind: 'upload'; projectId: string; path: string; size: number; sha256: string; contentType: string; } | { kind: 'recordMediaDuration'; courseId: string; duration: number; } | { kind: 'recordPlayback'; courseId: string; position: number; finished?: boolean; } | { kind: 'recordReadingPosition'; courseId: string; unit: number; } | { kind: 'setReadingView'; courseId: string; view: 'raw' | 'blocks'; } | { kind: 'setCourseSkills'; courseId: string; pin: number[]; drop: number[]; } | { kind: 'setCoursePinned'; courseId: string; pinned: boolean; } | { kind: 'pauseTranscription'; courseId: string; } | { kind: 'setVideoSource'; courseId: string; source: { bvid: string; aid: number; cid: number; page: number; }; } | { kind: 'importSubtitles'; courseId: string; primary: boolean; segments: { idx: number; start: number; end: number; text: string; status: 0 | 1; cues?: { start: number; end: number; text: string; }[]; }[]; tracks: { lang: string; lanDoc: string; primary?: 0 | 1; cues: { start: number; end: number; text: string; }[]; }[]; } | { kind: 'renameFolder'; projectId: string; name: string; } | { kind: 'folderColor'; projectId: string; path: string; color: ResourceFolderColor; } | { kind: 'move'; projectId: string; path: string; targetProjectId: string; target: string; revision: string; } | { kind: 'remove'; projectId: string; path: string; revision: string; } | { kind: 'trash' | 'restore' | 'deleteTrash'; projectId: string; } | { kind: 'saveCourseText'; courseId: string; text: string; expected: string; } | { kind: 'saveMarkdown'; courseId: string; text: string; expected: string; name?: string; folderId?: number; createOnly?: boolean; } | { kind: 'organizeCourses'; folders: { name: string; courseIds: string[]; }[]; } | { kind: 'moveLibrarySelection'; placements: { key: string; parent: number | null; target: number | null; }[]; } | { kind: 'saveProjectText'; projectId: string; path: string; text: string; expectedRevision: string | null; };"
-          },
-          {
-            "name": "RuntimeJson",
-            "declaration": "export type RuntimeJson = null | boolean | number | string | RuntimeJson[] | { [key: string]: RuntimeJson; };"
-          },
-          {
-            "name": "RuntimeReceipt",
-            "declaration": "export type RuntimeReceipt = { status: 'missing'; } | { status: 'pending'; } | { status: 'uncertain'; code: string; } | { status: 'completed'; value: RuntimeJson; } | { status: 'failed'; code: string; };"
-          },
-          {
-            "name": "RuntimeRecordsReceipt",
-            "declaration": "export interface RuntimeRecordsReceipt {\n    accepted: string[];\n    versions: { table: string; key: string | number; revision: number; }[];\n}"
-          },
-          {
-            "name": "RuntimeTask",
-            "declaration": "export type RuntimeTask = { source?: { kind: 'app' | 'bot'; name?: string; }; resourceName?: string; executor?: 'node' | 'browser'; id: string; kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce'; resource: string; status: 'queued' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; input: { [key: string]: RuntimeJson; }; progress: { [key: string]: RuntimeJson; } | null; result: RuntimeJson; error: string | null; createdAt: string; };"
+            "name": "TaskModelSelection",
+            "declaration": "export type TaskModelSelection = { modelRef: ModelRef; presetId?: never; fallbackPolicy?: 'strict'; } | { presetId: string; modelRef?: never; fallbackPolicy?: 'strict' | 'configured'; };"
           }
         ]
       }

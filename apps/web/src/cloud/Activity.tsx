@@ -18,7 +18,7 @@ export default function CloudActivity() {
   const [retrying, setRetrying] = useState<string>();
   const [retryError, setRetryError] = useState('');
   useEffect(() => {
-    if (!cloud.enabled || cloud.worker) return;
+    if (!cloud.enabled) return;
     const account = cloud.userId;
     let stopped = false, dirty = true, off: (() => void) | undefined, release: (() => void) | undefined;
     let refresh = () => {};
@@ -76,10 +76,10 @@ export default function CloudActivity() {
   }, []);
   if (!cloud.enabled) return null;
   return <>
-    {!cloud.worker ? <FileIntentRecovery /> : null}
-    {!cloud.worker ? <PreferenceRecovery /> : null}
-    {!cloud.worker ? <ExecutorRecovery /> : null}
-    {!cloud.worker ? <ResourceRecovery /> : null}
+    <FileIntentRecovery />
+    <PreferenceRecovery />
+    <ExecutorRecovery />
+    <ResourceRecovery />
     {error ? <p role="alert" className="bg-surface p-3 text-danger">{error}</p> : null}
     {commands.map(({ command }) => <section key={command.operationId} role="alert" className="bg-surface p-3">
       <p>发送尚未确认。原命令已保留，未自动重复执行。</p>

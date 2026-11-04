@@ -67,7 +67,11 @@ export class ModelAdapter {
   decodeAudio(body: unknown) {
     const text = body && typeof body === 'object' && 'text' in body ? body.text : undefined;
     if (typeof text !== 'string') throw new ModelFailure('model_empty_response');
-    return { text, calls: [] };
+    const raw = body && typeof body === 'object' && 'segments' in body ? body.segments : undefined;
+    const segments = Array.isArray(raw) ? raw.slice(0, 10000).flatMap(c =>
+      c && Number.isFinite(c.start) && Number.isFinite(c.end) && c.end > c.start && typeof c.text === 'string'
+        ? [{ start: c.start as number, end: c.end as number, text: c.text as string }] : []) : undefined;
+    return { text, calls: [], ...(segments?.length ? { segments } : {}) };
   }
   /** Bind opaque multipart uploads to the selected, accounted model. Parsing is
    * bounded before any credential-bearing request; a consumed stream stays non-replayable. */

@@ -107,7 +107,7 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
   // original snapshot before saving, rather than overwriting concurrent answers.
   useEffect(() => {
     if (format !== 'md') return;
-    if (cloud.enabled && !cloud.worker) {
+    if (cloud.enabled) {
       const path = systemMaterialPath(materialId);
       return followDocument(path ? { kind: 'systemDocument', path } : { kind: 'courseDocument', courseId: materialId }, document => {
         const content = document.content ?? document.text;

@@ -9,6 +9,7 @@ import { framePatch } from '../utils/framePatch';
 import { createContinuationFilter } from '@wangke/study-core/continuation';
 import type { ProcessPhase } from '../utils/responseProcess';
 import { getSettings } from './settings';
+import { taskModelChoice, taskModelKey, useTaskModel } from './taskModel';
 import { db, type AskUserState, type ChatRow, type ChatSessionRow, type ChatToolCall, type FolderPlanState, type TurnResume } from './db';
 import { noAnswerNotice, type AgentStopInfo } from '../harness/agent';
 import { resolveMaxRounds } from '../harness/loopGuard';
@@ -30,7 +31,7 @@ import { modelTrace } from '@wangke/study-core/model/transcript';
 import { sessionCacheKey } from './modelHistory';
 import type { WidgetPayload } from '../harness/widgetRuntime';
 import type { ChatAttachment } from '../chat/attachments';
-import { useChatAttachments } from './chatAttachments';
+import { ATTACHMENTS_PENDING_ERROR, useChatAttachments } from './chatAttachments';
 import { normalizeCourseContextIds } from '../harness/courseContext';
 import type { ChatProject } from '../projects/chatProjects';
 import { SessionTimelineModel, SessionQueueModel, type SessionQueueItem } from '@wangke/client-core';
@@ -1358,12 +1359,14 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     const key: ViewKey = resume ? resume.sessionId : (target ?? state.activeId ?? 0);
     const view = readView(key);
     const isActive = key === activeKey();
-    const fromComposer = suppliedAttachments === undefined && target === undefined && !resume && !view.pendingAsk;
-    const pendingFiles = fromComposer ? useChatAttachments.getState().items : [];
-    if (pendingFiles.some((item) => !item.value)) {
-      useChatAttachments.setState({ error: '请等待附件就绪，或重试 / 移除失败的附件后发送' });
+    const composerSubmission = suppliedAttachments === undefined && target === undefined && !resume;
+    const fromComposer = composerSubmission && !view.pendingAsk;
+    const composerFiles = composerSubmission ? useChatAttachments.getState().items : [];
+    if (composerFiles.some((item) => !item.value || !!item.error)) {
+      useChatAttachments.setState({ error: ATTACHMENTS_PENDING_ERROR });
       return;
     }
+    const pendingFiles = fromComposer ? composerFiles : [];
     let attachments = suppliedAttachments ?? pendingFiles.flatMap((item) => item.value ? [item.value] : []);
     const text = rawText.trim() || (attachments.length ? '请分析这些附件。' : '');
     const consumeAttachments = () => { if (fromComposer) useChatAttachments.getState().consume(attachments.map((file) => file.id)); };
@@ -1383,8 +1386,11 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     let selectedSkills = explicitSkillIds(suppliedSkills ?? (fromComposer ? view.turnSkillIds : []));
 
     if (remoteTasks()) {
+      const modelSelection = queuedCommand?.modelSelection ?? taskModelChoice(target ?? state.activeId);
+      const thinkingLevel = queuedCommand?.thinkingLevel ?? (getSettings().thinkingEnabled ? getSettings().thinkingEffort : 'none');
       if (view.loading && !view.pendingAsk && !resume && !queuedCommand && (mode ?? state.sendMode) !== 'steer') {
-        sessionQueue().enqueue(key, text, attachments, selectedSkills);
+        const operationId = crypto.randomUUID();
+        sessionQueue().enqueue(key, text, attachments, selectedSkills, { id: operationId, operationId, text, modelSelection, thinkingLevel });
         consumeAttachments();
         if (fromComposer) writeView(key, { turnSkillIds: [] });
         if (isActive && fromComposer) set({ draft: '' });
@@ -1426,7 +1432,8 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         writeView(id, { messages, loading: true, historyError: null }); markRunning(id, true);
         if (fromComposer && activeKey() === id) set({ draft: '' });
         const settings = getSettings();
-        const task = await queueAdapter.submit(id, queuedCommand ?? { id: submissionKey, operationId: submissionKey, text, attachments, explicitSkillIds: selectedSkills }, { sessionId: id, text, mode: mode ?? state.sendMode, resume, attachments, explicitSkillIds: selectedSkills, modelRef: settings.llmModel, thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none' }, queuedCommand?.explicitRetry);
+        const task = await queueAdapter.submit(id, queuedCommand ?? { id: submissionKey, operationId: submissionKey, text, attachments, explicitSkillIds: selectedSkills, modelSelection, thinkingLevel }, { sessionId: id, text, mode: mode ?? state.sendMode, resume, attachments, explicitSkillIds: selectedSkills, ...(modelSelection ? { modelSelection: JSON.parse(JSON.stringify(modelSelection)) } : {}), thinkingLevel }, queuedCommand?.explicitRetry);
+        if (!queuedCommand && taskModelChoice(target ?? state.activeId) === modelSelection) useTaskModel.getState().set(taskModelKey(target ?? state.activeId));
         if (!queueAdapter.current()) return;
         timeline(id).accept(submissionKey, task.id);
         followSession(id);
@@ -2343,23 +2350,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (state.loading) return;
     const message = state.messages.find((m) => m.key === key);
     const sessionId = state.activeId;
-    if (cloud.worker) {
-      // This command has no caller-selected rows: the server derives its exact
-      // terminal target from the admitted task and archives the old result.
-      const task = await (await (await import('../cloud/executor-runtime')).executorRuntime()).read();
-      const mode = task.input.action;
-      if (mode !== 'continue' && mode !== 'retry') throw new Error('executor_retry_action_denied');
-      const receipt = await (await import('../cloud/executor-conversation')).resetTaskConversation(mode);
-      if (receipt.sessionId !== sessionId || receipt.target.id !== task.input.rowId) throw new Error('executor_retry_target_changed');
-      if (mode === 'continue') {
-        if (!message || message.rowId !== receipt.target.id) throw new Error('executor_continue_target_missing');
-        await continueInterrupted(key, message, sessionId!); return;
-      }
-      const removed = new Set(receipt.removed.map(row => row.id));
-      set(s => ({ messages: s.messages.filter(row => !removed.has(row.rowId!)) }));
-      await get().send(receipt.user.content, undefined, receipt.sessionId, undefined, (receipt.user.attachments ?? []) as unknown as ChatAttachment[], receipt.user.explicitSkillIds ?? []);
-      return;
-    }
     if (!message) return;
 
     /**
@@ -2450,7 +2440,8 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         writeView(sessionId, { messages: readView(sessionId).messages.map(item => item.key === key ? { ...item, pendingOperationId: operationId } : item) });
         try {
           const settings = getSettings();
-          const task = await adapter.submit(sessionId, { id: operationId, operationId, text: '继续回答', action: 'continue', rowId: message.rowId }, { sessionId, rowId: message.rowId, action: 'continue', modelRef: settings.llmModel, thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none' }, !!message.pendingOperationId);
+          const selection = taskModelChoice(sessionId);
+          const task = await adapter.submit(sessionId, { id: operationId, operationId, text: '继续回答', action: 'continue', rowId: message.rowId }, { sessionId, rowId: message.rowId, action: 'continue', ...(selection ? { modelSelection: JSON.parse(JSON.stringify(selection)) } : {}), thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none' }, !!message.pendingOperationId);
           if (!adapter.current()) return;
           writeView(sessionId, { messages: readView(sessionId).messages.map(item => item.key === key
             ? { ...item, taskId: task.id, pendingOperationId: undefined, streaming: true, interrupted: false, interruptReason: undefined } : item) });
@@ -2583,7 +2574,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (!message?.ask || message.ask.picked != null) return;
     const answer = validateAskAnswer(message.ask, option);
     const picked = askAnswerText(answer);
-    if (cloud.worker && message.rowId != null) await reviseConversationMessage(message.rowId, row => { if (row.ask) row.ask = { ...row.ask, picked, answer }; });
     set((s) => ({
       messages: s.messages.map((m) =>
         m.key === pendingAsk.messageKey && m.ask
@@ -2646,10 +2636,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       set({ planApplying: true });
       try {
         const result = await applyFolderPlan(plan);
-        if (cloud.worker) {
-          const rowId = get().messages.find(m => m.key === pendingPlan.messageKey)?.rowId;
-          if (rowId != null) await reviseConversationMessage(rowId, row => { if (row.folderPlan) row.folderPlan.applied = 1; });
-        }
         set((s) => ({
           planApplying: false,
           messages: s.messages.map((m) =>
@@ -2680,10 +2666,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     set({ planApplying: true });
     try {
       const result = await applyFolderPlan(plan);
-      if (cloud.worker) {
-        const rowId = get().messages.find(m => m.key === pendingPlan.messageKey)?.rowId;
-        if (rowId != null) await reviseConversationMessage(rowId, row => { if (row.folderPlan) row.folderPlan.applied = 1; });
-      }
       set((s) => ({
         planApplying: false,
         messages: s.messages.map((m) =>
@@ -2715,10 +2697,6 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (remoteTasks()) { await commandServerChat(get().activeId, 'cancelPlan'); return; }
     const { pendingPlan } = get();
     if (!pendingPlan) return;
-    if (cloud.worker) {
-      const rowId = get().messages.find(m => m.key === pendingPlan.messageKey)?.rowId;
-      if (rowId != null) await reviseConversationMessage(rowId, row => { if (row.folderPlan) row.folderPlan.applied = 2; });
-    }
     set((s) => ({
       messages: s.messages.map((m) =>
         m.key === pendingPlan.messageKey && m.folderPlan

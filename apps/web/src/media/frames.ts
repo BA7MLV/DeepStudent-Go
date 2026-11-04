@@ -1,3 +1,4 @@
+import { frameTimes, coverTimes, bestCover } from '@wangke/study-core/media/frame-policy';
 export interface ExtractedFrame {
   ts: number; // 秒
   blob: Blob; // JPEG
@@ -57,10 +58,7 @@ export async function extractFrames(
     const duration = video.duration;
     if (!duration || !isFinite(duration)) throw new Error('无法读取视频时长');
 
-    const timestamps: number[] = [];
-    for (let t = Math.min(2, duration * 0.02); t < duration - 1; t += interval) {
-      timestamps.push(t);
-    }
+    const timestamps = frameTimes(duration, interval);
 
     const scale = Math.min(1, 640 / video.videoWidth);
     const canvas = document.createElement('canvas');
@@ -323,16 +321,7 @@ export async function pickCoverFrame(
     if (!duration || !isFinite(duration) || duration <= 0) throw new Error('无法读取视频时长');
     if (!video.videoWidth || !video.videoHeight) throw new Error('无法读取视频分辨率');
 
-    const start = Math.min(3, duration * 0.02);
-    const span = Math.min(duration * 0.4, COVER_WINDOW_MAX);
-    const end = Math.max(start, Math.min(duration - 0.2, start + span));
-    const timestamps: number[] = [];
-    for (let i = 0; i < COVER_CANDIDATES; i++) {
-      // 候选数写成 1 时退化成「只取起点」，用 max 兜住除零，不必为它单独分支
-      const step = Math.max(1, COVER_CANDIDATES - 1);
-      const t = start + ((end - start) * i) / step;
-      timestamps.push(Math.max(0, Math.round(t * 100) / 100));
-    }
+    const timestamps = coverTimes(duration);
 
     const sw = PROBE_EDGE;
     const sh = Math.max(1, Math.round((sw * video.videoHeight) / video.videoWidth));
@@ -375,21 +364,7 @@ export async function pickCoverFrame(
 
     if (raws.length === 0) throw new Error('无法从视频中取到任何一帧');
 
-    const lapMin = Math.min(...raws.map((r) => r.lap));
-    const lapMax = Math.max(...raws.map((r) => r.lap));
-    const lapSpan = lapMax - lapMin;
-    let best = raws[0];
-    let bestScore = -1;
-    for (const r of raws) {
-      const sharp = lapSpan > 1e-6 ? (r.lap - lapMin) / lapSpan : 1;
-      // 亮度是硬门槛（乘），清晰度与稳定性内部加权
-      const score = luminanceBand(r.mean) * (0.55 * sharp + 0.45 * r.stab);
-      // 严格大于：并列时保留更早的候选——课程首页通常就在开头
-      if (score > bestScore + 1e-9) {
-        bestScore = score;
-        best = r;
-      }
-    }
+    const best = bestCover(raws);
 
     const scale = Math.min(1, COVER_EDGE / Math.max(video.videoWidth, video.videoHeight));
     const canvas = document.createElement('canvas');

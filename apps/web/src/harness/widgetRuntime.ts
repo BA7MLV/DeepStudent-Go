@@ -42,7 +42,7 @@ import { SANDBOX_THEME_SCRIPT } from '../sandbox/protocol';
 import { normalizeWidgetState, type WidgetState } from './widgetState.ts';
 import type { WidgetTheme } from './widgetTheme.ts';
 import { MAX_WIDGET_DIAGNOSTICS, widgetResourceLabel } from './widgetDiagnostics.ts';
-import { validateWidgetPayload } from './widgetProtocol.ts';
+import { validateWidgetPayload, readWidgetAnswerFeedback, acceptsWidgetFeedback, type WidgetAnswerFeedback } from './widgetProtocol.ts';
 import { MAX_WIDGET_DOC } from './widget.ts';
 import type { WidgetLib, WidgetPayload } from '@wangke/study-core/widgets';
 export type { WidgetLib, WidgetPayload } from '@wangke/study-core/widgets';
@@ -78,6 +78,7 @@ export const WIDGET_MSG = {
   answerDraft: 'wbw:answer-draft',
   answerSync: 'wbw:answer-sync',
   answerSubmit: 'wbw:answer-submit',
+  answerFeedback: 'wbw:answer-feedback',
   selection: 'wbw:selection',
   scroll: 'wbw:scroll',
 } as const;
@@ -94,6 +95,17 @@ const BRIDGE = `
   var initial = __WBW_INITIAL__;
   var state = initial.state;
   var answerInput = initial.answerInput || null;
+  var readFeedback = ${readWidgetAnswerFeedback.toString()};
+  var acceptsFeedback = ${acceptsWidgetFeedback.toString()};
+  var answerFeedback = readFeedback(initial.answerFeedback);
+  function feedback(value) {
+    var next = readFeedback(value);
+    if (!next || !acceptsFeedback(answerFeedback, next)) return;
+    answerFeedback = next;
+    renderFeedback();
+    window.dispatchEvent(new CustomEvent('wbw:feedbackchange', { detail: copy(next) }));
+    schedule();
+  }
   var display = { width: 0, height: 560 };
   var pending = new Map(), sequence = 0, saves = Promise.resolve();
   function copy(value) { return JSON.parse(JSON.stringify(value)); }
@@ -181,8 +193,9 @@ const BRIDGE = `
     window.dispatchEvent(new CustomEvent('wbw:themechange', { detail: { dark: dark } }));
   }
   window.addEventListener('message', function (event) {
-    if (event.source !== parent || !event.data || event.data.instance !== initial.instance) return;
+    if (!event.isTrusted || event.source !== parent || !event.data || event.data.instance !== initial.instance) return;
     var data = event.data, value = data.payload;
+    if (data.__wbw === ${JSON.stringify(WIDGET_MSG.answerFeedback)}) feedback(value);
     if (data.__wbw === ${JSON.stringify(WIDGET_MSG.image)} && value && typeof value.ref === 'string') {
       var images = materialImages.get(value.ref);
       if (!images) return;
@@ -246,11 +259,26 @@ const BRIDGE = `
     post(${JSON.stringify(WIDGET_MSG.height)}, Math.max(80, h + gutter));
   }
   function schedule() { if (!raf) raf = requestAnimationFrame(report); }
+  function renderFeedback() {
+    if (!document.body || !answerFeedback) return;
+    var box = document.getElementById('wbw-host-feedback');
+    if (!box) {
+      box = document.createElement('section'); box.id = 'wbw-host-feedback';
+      box.setAttribute('role', 'status'); document.body.appendChild(box);
+    }
+    var f = answerFeedback;
+    var labels = { pending: '待核验', correct: '回答正确', incorrect: '回答错误', partial: '部分正确', review: '参考批改（非权威）' };
+    box.textContent = labels[f.status] + (f.authoritative ? ' · 宿主判定' : ' · 非权威，不计分')
+      + (f.correctAnswer !== undefined ? '\\n参考答案：' + JSON.stringify(f.correctAnswer) : '')
+      + (f.explanation ? '\\n' + f.explanation : '');
+    box.style.whiteSpace = 'pre-wrap';
+  }
   var api = {
     get display() { return copy(display); },
     get widgetState() { return copy(state); },
     get persistent() { return initial.persistent; },
     get answerInput() { return copy(answerInput); },
+    get answerFeedback() { return copy(answerFeedback); },
     setAnswerDraft: function (answer) {
       if (!answerInput || answerInput.submitted) return Promise.reject(new Error('此处不能修改题目作答'));
       if (!navigator.userActivation || !navigator.userActivation.isActive)
@@ -292,6 +320,7 @@ const BRIDGE = `
   setTheme(initial.theme || initial.dark);
   new ResizeObserver(schedule).observe(document.documentElement);
   document.addEventListener('DOMContentLoaded', function () {
+    renderFeedback();
     document.querySelectorAll('img[data-wbw-image]').forEach(function (image) {
       var ref = image.getAttribute('data-wbw-image');
       var images = materialImages.get(ref) || [];
@@ -397,6 +426,7 @@ export async function buildWidgetDocument(payload: WidgetPayload, options: {
   dark?: boolean; theme?: WidgetTheme; state?: WidgetState | null; persistent?: boolean;
   /** Only a draft, not a grading/persistence capability. Never include answer keys. */
   answerInput?: { answer: unknown; submitted: boolean; question?: unknown };
+  answerFeedback?: WidgetAnswerFeedback | null;
 } = {}): Promise<string> {
   validateWidgetPayload(payload);
   const libs = [...new Set(payload.libs ?? [])];
@@ -411,6 +441,7 @@ export async function buildWidgetDocument(payload: WidgetPayload, options: {
   // Escape '<' as well as line separators: saved strings must never terminate the bootstrap script.
   const initial = JSON.stringify({ instance: options.instance ?? '', dark: options.dark === true, theme: options.theme, persistent: options.persistent === true,
     answerInput: options.answerInput,
+    answerFeedback: readWidgetAnswerFeedback(options.answerFeedback),
     state: options.state == null ? null : normalizeWidgetState(options.state) })
     .replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   const document = `<!doctype html>

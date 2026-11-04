@@ -23,7 +23,7 @@ export default function McpConfigReader() {
   }, [t]);
 
   useEffect(() => {
-    if (cloud.enabled && !cloud.worker) return followDocument<SystemDocument>({ kind: 'systemDocument', path: MCP_PATH }, next => {
+    if (cloud.enabled) return followDocument<SystemDocument>({ kind: 'systemDocument', path: MCP_PATH }, next => {
       setDocument(next);
       setEditor(current => current ?? { base: next, text: next.content });
     }, error => setError(message(error)));

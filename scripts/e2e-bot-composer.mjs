@@ -80,15 +80,30 @@ try {
   await page.getByRole('menuitem', { name: '上传图片', exact: true }).waitFor();
   await page.keyboard.press('Escape');
   const before = store.db.prepare('SELECT COUNT(*) n FROM messages WHERE thread_id=? AND role=\'user\'').get(thread.id).n;
+  let releaseDraftUpload;
+  const draftUploadGate = new Promise(resolve => { releaseDraftUpload = resolve; });
+  const holdDraftUpload = async route => {
+    if (decodeURIComponent(route.request().headers()['x-file-name'] ?? '') === 'draft.png') await draftUploadGate;
+    await route.continue();
+  };
+  await page.route('**/api/v1/files', holdDraftUpload);
   await panel.getByTestId('bot-image-input').setInputFiles([{ name: 'draft.png', mimeType: 'image/png', buffer: png }]);
   await panel.getByTestId('chat-attachment').waitFor();
   assert.equal(store.db.prepare('SELECT COUNT(*) n FROM messages WHERE thread_id=? AND role=\'user\'').get(thread.id).n, before, 'selection does not send');
+  await panel.getByRole('status', { name: '图片上传中', exact: true }).waitFor();
   await input.fill('和图片一起发送');
+  assert.equal(await panel.getByRole('button', { name: '发送', exact: true }).isDisabled(), true);
+  await input.press('Enter');
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM messages WHERE thread_id=? AND role='user'").get(thread.id).n, before, 'uploading attachments block keyboard sends');
   await open(other.id); await input.fill('另一段草稿');
   assert.equal(await panel.getByTestId('chat-attachment').count(), 0);
   await open(thread.id); await input.filter({ hasText: '' }).waitFor();
   assert.equal(await input.inputValue(), '和图片一起发送');
   assert.equal(await panel.getByTestId('chat-attachment').count(), 1, 'drafts are conversation-scoped');
+  releaseDraftUpload();
+  await panel.locator('[data-testid="chat-attachment"][data-state="ready"]').waitFor();
+  assert.equal(await panel.locator('.chat-image-pending__overlay').count(), 0, 'ready previews have no upload badge');
+  await page.unroute('**/api/v1/files', holdDraftUpload);
   await input.press('Enter');
   await panel.locator('.bot-messages').getByText('附件已收到。', { exact: true }).waitFor({ timeout: 20000 });
   assert.equal(await panel.getByTestId('chat-attachment').count(), 0);
@@ -103,6 +118,7 @@ try {
     const data = new DataTransfer(); data.items.add(new File([bytes], 'pasted.png', { type: 'image/png' }));
     element.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
   }, png.toString('base64'));
+  await panel.getByTestId('chat-attachment').hover();
   await panel.getByRole('button', { name: '移除附件 pasted.png', exact: true }).click();
   await panel.locator('.study-composer').evaluate(element => {
     const data = new DataTransfer(); data.items.add(new File(['notes'], 'notes.txt', { type: 'text/plain' }));
@@ -130,7 +146,12 @@ try {
   await panel.locator('.chat-attachments__error').waitFor();
   assert.equal(await panel.getByTestId('chat-attachment').count(), 2);
   assert.equal(await input.inputValue(), '两个附件');
-  await panel.getByRole('button', { name: '发送', exact: true }).waitFor();
+  assert.equal(await panel.getByRole('button', { name: '发送', exact: true }).isDisabled(), true);
+  const failedCount = store.db.prepare("SELECT COUNT(*) n FROM messages WHERE thread_id=? AND role='user'").get(thread.id).n;
+  await input.press('Enter');
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM messages WHERE thread_id=? AND role='user'").get(thread.id).n, failedCount, 'failed attachments block keyboard sends');
+  await panel.getByRole('button', { name: '重试', exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="bot-panel"] [data-testid="chat-attachment"][data-state="ready"]').length === 2);
   const retryAccepted = page.waitForResponse(response => response.url().endsWith(`/threads/${thread.id}/messages`) && response.request().method() === 'POST');
   await input.press('Enter');
   assert.equal((await retryAccepted).status(), 201);
@@ -151,6 +172,7 @@ try {
   await panel.getByTestId('bot-image-input').setInputFiles({ name: 'new-thread.png', mimeType: 'image/png', buffer: png });
   assert.equal(store.db.prepare('SELECT COUNT(*) n FROM threads').get().n, threadCount, 'picking a file does not create a conversation');
   await input.fill('新会话图片');
+  await panel.locator('[data-testid="chat-attachment"][data-state="ready"]').waitFor();
   const created = page.waitForResponse(response => /\/threads\/[^/]+\/messages$/.test(response.url()) && response.request().method() === 'POST');
   await input.press('Enter');
   const createdMessage = await (await created).json();
@@ -171,6 +193,7 @@ try {
     const card = await panel.locator('.study-composer').boundingBox();
     assert.ok(card.x >= 0 && card.x + card.width <= width + 1, `composer fits ${width}px viewport`);
     assert.ok(card.y + card.height <= 901, 'composer stays above the viewport bottom');
+    await panel.getByTestId('chat-attachment').hover();
     await panel.getByRole('button', { name: '移除附件 preview.png', exact: true }).click();
     await input.fill('');
   }

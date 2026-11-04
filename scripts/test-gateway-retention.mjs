@@ -15,7 +15,7 @@ const cfg = new CloudConfiguration(store, path.join(root, 'config'));
 const owner = 'retention-owner', at = new Date().toISOString();
 store.db.prepare('INSERT INTO users VALUES(?,?,?)').run(owner, owner, at);
 store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,role,system_prompt,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('agent', owner, 'Fake', '', '', at, at);
-const bot = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+const bot = new BotApplicationService(store, { enqueue() {}, cancel() {}, freezeModel() {} });
 const plugin = () => ({ manifest: { id: 'test-channel', version: 1, name: 'Fake', configFields: [{ key: 'token', label: 'Token', secret: true, required: false, write: 'replace-or-preserve' }], loginSteps: [{ action: 'login', label: 'Login', fields: ['code'] }], loginConfigFields: ['token'], loginPublicFields: ['status'], capabilities: { direct: true, groups: false, files: false, images: false, proactive: 'yes', deduplicationWindowMs: 0 } }, validate() {}, async login() { return { status: 'ok', token: 'PRIVATE', unknownSecret: 'NEVER-RETURN' }; }, async start() {}, async stop() {}, async send() { return 'sent'; } });
 const gateway = new GatewayCore(store, cfg, bot, { 'test-channel': plugin }, root);
 try {

@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./media/text-cover": { "types": "./src/media/textCover.ts", "default": "./dist/media/textCover.js" },
+    "./media/frame-policy": { "types": "./src/media/framePolicy.ts", "default": "./dist/media/framePolicy.js" },
+    "./media/vad": { "types": "./src/media/vad.ts", "default": "./dist/media/vad.js" },
+    "./vad/model": "./assets/vad/silero_vad_legacy.onnx",
+    "./bilibili/wire": { "types": "./src/bilibili/wire.ts", "default": "./dist/bilibili/wire.js" },
+    "./bilibili/dmview": { "types": "./src/bilibili/dmview.ts", "default": "./dist/bilibili/dmview.js" },
+    "./bilibili/subtitle": { "types": "./src/bilibili/subtitle.ts", "default": "./dist/bilibili/subtitle.js" },
     "./model/client": { "types": "./src/api/modelClient.ts", "default": "./dist/api/modelClient.js" },
     "./model/types": { "types": "./src/api/modelTypes.ts", "default": "./dist/api/modelTypes.js" },
     "./model/meta": { "types": "./src/api/modelMeta.ts", "default": "./dist/api/modelMeta.js" },
@@ -17,6 +24,9 @@
     "./generation/text": { "types": "./src/pipelines/textGeneration.ts", "default": "./dist/pipelines/textGeneration.js" },
     "./handout/rewrite": { "types": "./src/handout/rewrite.ts", "default": "./dist/handout/rewrite.js" },
     "./handout/ir": { "types": "./src/handout/ir.ts", "default": "./dist/handout/ir.js" },
+    "./handout/docx": { "types": "./src/handout/docx.ts", "default": "./dist/handout/docx.js" },
+    "./handout/render": { "types": "./src/handout/render.ts", "default": "./dist/handout/render.js" },
+    "./handout/styles": { "types": "./src/handout/styles.ts", "default": "./dist/handout/styles.js" },
     "./prompts": { "types": "./src/harness/prompts.ts", "default": "./dist/harness/prompts.js" },
     "./display": { "types": "./src/harness/displayEnvironment.ts", "default": "./dist/harness/displayEnvironment.js" },
     "./comments": { "types": "./src/harness/comments.ts", "default": "./dist/harness/comments.js" },
@@ -51,6 +61,6 @@
     "./skills/builtin/*": "./assets/builtin/*"
   },
   "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json", "build": "tsc -p tsconfig.json" },
-  "dependencies": { "fflate": "^0.8.3", "ts-fsrs": "^5.4.2" },
+  "dependencies": { "docx": "^8.5.0", "fflate": "^0.8.3", "ts-fsrs": "^5.4.2" },
   "devDependencies": { "typescript": "^7.0.2" }
 }

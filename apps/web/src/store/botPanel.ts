@@ -16,6 +16,7 @@ function readOpen(): boolean {
 interface BotPanelState {
   open: boolean;
   auxiliary: 'bot' | 'plugins';
+  /** Host-side extension seam; the default chat UI has no component launcher. */
   setAuxiliary: (kind: 'bot' | 'plugins') => void;
   /** 外部链接（网关「接管」、#/bot?thread=）要求打开的线程；Bot 栏消费后清空。 */
   requestedThread: string | null;

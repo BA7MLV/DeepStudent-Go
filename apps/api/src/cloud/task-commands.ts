@@ -6,6 +6,7 @@ import type { CloudConfiguration } from './config.js';
 import { PluginFiles } from '../plugins/files.js';
 import { taskDto, TASK_KINDS } from './tasks.js';
 import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
+import { freezeTaskModel, requireNativeTaskModel } from '../agent/task-model.js';
 
 /** Durable admission shared by HTTP compatibility and generated commands. No
  * model is invoked here; the executor later claims the committed queue row. */
@@ -19,11 +20,18 @@ export function submitOwnerTask(store: DatabaseStore, records: CloudRecords, con
       if (previous.kind !== command.kind || previous.resource !== resource || !isDeepStrictEqual(JSON.parse(previous.input), input)) throw new Error('task_nonce_conflict');
       return taskDto(previous);
     }
-    if (['chat', 'qa'].includes(command.kind) && !records.get(owner, 'chatSessions', Number(input.sessionId))) throw new Error('session_not_found');
+    const session = ['chat', 'qa'].includes(command.kind) ? records.get(owner, 'chatSessions', Number(input.sessionId)) : undefined;
+    if (['chat', 'qa'].includes(command.kind) && (!session || session.archived)) throw new Error('session_not_found');
     const active = store.db.prepare("SELECT * FROM cloud_tasks WHERE owner_id=? AND kind=? AND resource=? AND status IN ('queued','running','waiting_user')").get(owner, command.kind, resource);
     if (active && !['chat', 'qa', 'modelOnce', 'artifactEdit', 'handoutEdit'].includes(command.kind)) return taskDto(active);
     const id = crypto.randomUUID(), now = new Date().toISOString();
     store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at) VALUES(?,?,?,?,?,?,'queued',?,?)").run(id, owner, command.operationId, command.kind, resource, JSON.stringify(input), now, now);
+    if (['chat', 'qa', 'modelOnce', 'artifactEdit', 'handoutEdit', 'cards', 'comments', 'danmaku', 'handout'].includes(command.kind)) {
+      const explicit = input.modelSelection ?? (input.modelRef ? { modelRef: input.modelRef } : command.kind === 'modelOnce' && input.providerId && input.model ? { modelRef: { providerId: input.providerId, model: input.model } } : undefined);
+      const frozen = freezeTaskModel(store, owner, configuration.get(owner), 'chat', explicit, session?.defaultModel, input.thinkingLevel);
+      requireNativeTaskModel(frozen);
+      store.db.prepare('UPDATE cloud_tasks SET model_snapshot=? WHERE id=?').run(JSON.stringify(frozen), id);
+    }
     configuration.audit(owner, 'task.created', { id, kind: command.kind, resource });
     return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(id));
   });

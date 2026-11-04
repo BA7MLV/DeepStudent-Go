@@ -41,7 +41,7 @@ function MaterialPractice({ materialId, endpoint, draftScope, call, useProjectio
   const active = selected ?? practices[0]?.id;
   return <>
     <div className="learning-plugin__actions"><button type="button" disabled={busy || tasks.some(t => ['queued', 'running', 'waiting_user'].includes(t.status))} onClick={() => void start('practice.generate')}>生成 AI 练习</button><button type="button" disabled={busy || tasks.some(t => t.origin?.actionId === 'practice.extract' && ['queued', 'running', 'waiting_user'].includes(t.status))} onClick={() => void start('practice.extract')}>提取原题为题库</button><button type="button" disabled={busy} onClick={() => void start('practice.present')}>打开原题题库</button></div>
-    <p className="text-sm text-muted">原题提取复用原问答与题库编辑工具，需要在线的浏览器工作器及原读写授权；排队不代表后台已经提取。已保存部分可打开题库，完整覆盖范围请查看“插件原题提取”会话。</p>
+    <p className="text-sm text-muted">原题由服务器逐页提取，经原读写授权保存；关闭浏览器不影响任务，排队不代表已完成。已保存部分可打开题库，实际覆盖范围请查看“插件原题提取”会话。</p>
     <p className="text-sm text-muted">AI 练习仅供参考，不冒充原题或已核验答案。原题按题库声明保留原文、已核验、AI 参考和缺失答案标记。</p>
     {error || projection.error ? <p role="alert">{error || projection.error}</p> : null}
     {tasks.map(t => <p key={t.id}>{t.artifacts ? t.artifacts.kind === 'question-bank' ? `题库现有 ${t.artifacts.count} 道原题 · ${t.artifacts.coverage}` : `已保存 ${t.artifacts.count} 道练习` : t.origin?.actionId === 'practice.extract' ? `原题提取：${t.status}（执行结束不代表题库保存成功）` : t.status}{t.error ? ` · ${t.error}` : ''}{t.deliveryError ? ` · 产物尚未确认：${t.deliveryError}` : ''}</p>)}

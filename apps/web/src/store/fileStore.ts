@@ -192,7 +192,7 @@ export async function getCourseFile(id: string, dirName: string = DIR_VIDEOS): P
     const resource = await db.table('courseFiles').get(id);
     if (resource?.resourceProjectId) {
       const response = await fetch(apiUrl(`/api/v1/resources/courses/${encodeURIComponent(id)}`), {
-        credentials: 'include', headers: cloud.workerToken ? { authorization: `Bearer ${cloud.workerToken}` } : {},
+        credentials: 'include',
       });
       if (response.status === 404) return null;
       if (!response.ok) throw new Error(`读取文件失败（${response.status}）`);

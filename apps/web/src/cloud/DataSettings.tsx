@@ -89,7 +89,7 @@ export default function DataSettings() {
 
   return (
     <>
-      {!cloud.worker && <ServerStorageCard />}
+      <ServerStorageCard />
       <SectionCard title="同步" testId="cloud-sync-card">
         <SettingRow label="状态">
           <span className={`text-sm ${sync.error ? 'text-danger' : 'text-muted'}`} role="status">{syncLabel}</span>
@@ -101,15 +101,13 @@ export default function DataSettings() {
               onPress={() => void run('conflict', resolveCloudConflict, '已采用服务器版本，本机副本已下载')}>采用服务器版本</Button>
           </SettingRow>
         )}
-        {!cloud.worker && (
           <SettingRow label="旧版浏览器数据">
             <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void importLegacy()}>导入</Button>
             <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('export-import', async () => (await import('./migrate')).exportLibraryImport())}>导出导入快照</Button>
           </SettingRow>
-        )}
       </SectionCard>
 
-      {!cloud.worker && <Suspense fallback={null}><LibraryImportFiles /></Suspense>}
+      <Suspense fallback={null}><LibraryImportFiles /></Suspense>
 
       <ArchivedSessionsCard />
 
@@ -128,13 +126,11 @@ export default function DataSettings() {
         <SettingRow label="退出登录">
           <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void logout()} data-testid="cloud-logout">退出</Button>
         </SettingRow>
-        {!cloud.worker && (
           <SettingRow label="重置云端数据" testId="cloud-reset-card">
             <Button size="sm" variant="danger" isDisabled={busy !== null} onPress={() => void reset()} data-testid="cloud-reset-button">
               {busy === 'reset' ? '正在重置…' : '重置'}
             </Button>
           </SettingRow>
-        )}
       </SectionCard>
     </>
   );

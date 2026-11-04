@@ -4,6 +4,9 @@ import { parseBotAttachments } from '@wangke/contracts';
 import type { DatabaseStore } from '../storage/database.js';
 import type { BotRunner } from './runner.js';
 import type { ProjectRepository } from '../projects/repository.js';
+import type { TaskModelSelection } from '@wangke/contracts/cloud';
+import { isDeepStrictEqual } from 'node:util';
+import { validateTaskModelSelection } from './task-model.js';
 const now = () => new Date().toISOString();
 type AppendedMessage = { id: string; threadId: string; clientNonce: string | null; seq: number; role: string; kind: string; content: string; replyTo: string | null; createdAt: string };
 /** Shared, owner-scoped entry point for Web and IM. No synthetic HTTP credentials. */
@@ -38,7 +41,7 @@ export class BotApplicationService {
     return dto;
     });
   }
-  send(owner: string, threadId: string, input: { clientNonce: string; kind?: string; content: string; replyTo?: string; target?: { kind: 'run' | 'question'; runId?: string; questionId?: string } }) {
+  send(owner: string, threadId: string, input: { clientNonce: string; kind?: string; content: string; replyTo?: string; modelSelection?: TaskModelSelection; target?: { kind: 'run' | 'question'; runId?: string; questionId?: string } }) {
     const thread = this.thread(owner, threadId);
     if (thread.archived) throw new Error('thread_archived');
     if (thread.project_id) {
@@ -46,6 +49,7 @@ export class BotApplicationService {
       this.projects.authorize(owner, thread.project_id, thread.agent_id);
     }
     if (!input.clientNonce || input.clientNonce.length > 200 || typeof input.content !== 'string' || input.content.length > 100000) throw new Error('invalid_message');
+    const acceptedCommand = { kind: input.kind ?? 'text', content: input.content, replyTo: input.replyTo ?? null, modelSelection: validateTaskModelSelection(input.modelSelection) ?? null, target: input.target ?? null };
     if (input.kind === 'attachment') {
       const parsed = parseBotAttachments(input.content);
       if (!parsed) throw new Error('invalid_message');
@@ -57,8 +61,13 @@ export class BotApplicationService {
     }
     const message = this.store.transaction(() => {
       const old = this.store.db.prepare('SELECT * FROM messages WHERE thread_id=? AND client_nonce=?').get(threadId, input.clientNonce) as any;
-      if (old) return { id: old.id, threadId, clientNonce: old.client_nonce, seq: old.seq, role: old.role, kind: old.kind, content: old.content, replyTo: old.reply_to, createdAt: old.created_at, deduplicated: true };
+      if (old) {
+        if (old.task_command ? !isDeepStrictEqual(JSON.parse(old.task_command), acceptedCommand) : old.content !== input.content || old.kind !== acceptedCommand.kind || (old.reply_to ?? null) !== acceptedCommand.replyTo || acceptedCommand.modelSelection !== null || acceptedCommand.target !== null) throw new Error('message_nonce_conflict');
+        const run = this.store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=? UNION SELECT run_id AS id FROM run_inputs WHERE message_id=?').get(old.id, old.id) as { id: string } | undefined;
+        return { id: old.id, threadId, clientNonce: old.client_nonce, seq: old.seq, role: old.role, kind: old.kind, content: old.content, replyTo: old.reply_to, createdAt: old.created_at, deduplicated: true, ...(run ? { receipt: { messageId: old.id, runId: run.id, disposition: 'deduplicated' } } : {}) };
+      }
       const dto = this.append(threadId, 'user', input.kind ?? 'text', input.content, input.clientNonce, input.replyTo ?? null);
+      this.store.db.prepare('UPDATE messages SET task_command=? WHERE id=?').run(JSON.stringify(acceptedCommand), dto.id);
       if (thread.mode === 'bot') {
         const requested = new Set(Array.from(input.content.matchAll(/@([^\s@,，。！？!?]{1,64})/g), m => m[1].toLocaleLowerCase()));
         const agents = this.store.db.prepare('SELECT a.id,a.name FROM agent_profiles a JOIN thread_participants p ON p.agent_id=a.id WHERE p.thread_id=? AND a.enabled=1').all(threadId) as any[];
@@ -69,6 +78,7 @@ export class BotApplicationService {
         else if (input.replyTo) targetRun = this.store.db.prepare("SELECT r.* FROM runs r JOIN messages m ON m.id=r.trigger_message_id WHERE m.id=? AND r.thread_id=? AND r.status IN ('queued','running','waiting_user','waiting_event') UNION SELECT r.* FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE q.message_id=? AND r.thread_id=? AND q.status='pending'").get(input.replyTo, threadId, input.replyTo, threadId);
         if (input.target && (!targetRun || ['completed', 'failed', 'cancelled'].includes(targetRun.status))) throw new Error('target_expired');
         if (targetRun) {
+          if (acceptedCommand.modelSelection) throw new Error('task_model_requires_new_attempt');
           if (targetRun.status === 'waiting_user' && input.target?.kind === 'run') throw new Error('target_waiting_for_specific_answer');
           this.store.db.prepare('INSERT INTO run_inputs(message_id,run_id,source_seq,created_at) VALUES(?,?,?,?)').run(dto.id, targetRun.id, dto.seq, dto.createdAt);
            if (input.target?.kind === 'question') {
@@ -84,8 +94,9 @@ export class BotApplicationService {
            }
           return { ...dto, deduplicated: false, receipt: { messageId: dto.id, runId: targetRun.id, disposition: input.target?.kind === 'question' ? 'answered' : 'appended' } };
         }
-        const runId = crypto.randomUUID();
-        this.store.db.prepare('INSERT INTO runs(id,thread_id,mode,status,created_at,trigger_message_id) VALUES(?,?,?,?,?,?)').run(runId, threadId, 'bot', 'queued', dto.createdAt, dto.id);
+         const runId = crypto.randomUUID();
+         this.store.db.prepare('INSERT INTO runs(id,thread_id,mode,status,created_at,trigger_message_id) VALUES(?,?,?,?,?,?)').run(runId, threadId, 'bot', 'queued', dto.createdAt, dto.id);
+         this.runner.freezeModel(runId, owner, input.modelSelection, thread.default_model ? JSON.parse(thread.default_model) : undefined);
         return { ...dto, deduplicated: false, receipt: { messageId: dto.id, runId, disposition: 'created' } };
       }
       return { ...dto, deduplicated: false };

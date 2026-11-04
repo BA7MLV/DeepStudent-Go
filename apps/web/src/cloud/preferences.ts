@@ -94,7 +94,7 @@ export async function startPreferences() {
   stopPreferences();
   const current = generation, owner = cloud.userId, database = db;
   await loadPreferences();
-  if (cloud.worker || current !== generation) return;
+  if (current !== generation) return;
   const runtime = await serverRuntime(owner);
   if (current !== generation || owner !== cloud.userId || database !== db || !isCurrentServerRuntime(runtime)) return;
   const initial = await runtime.read({ kind: 'preferences' });
@@ -136,7 +136,7 @@ export async function startPreferences() {
 
 export async function flushPreferences() {
   await writing;
-  if (cloud.enabled && !cloud.worker) await drainPreferences();
+  if (cloud.enabled) await drainPreferences();
 }
 
 async function drainPreferences() {

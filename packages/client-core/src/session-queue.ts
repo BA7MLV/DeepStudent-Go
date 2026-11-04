@@ -1,4 +1,6 @@
 export interface SessionQueueItem<Attachment> {
+  modelSelection?: import('@wangke/contracts/cloud').TaskModelSelection;
+  thinkingLevel?: import('@wangke/contracts/cloud').ModelThinkingLevel;
   id: string;
   /** Stable command identity, also used after reload and explicit retry. */
   operationId?: string;

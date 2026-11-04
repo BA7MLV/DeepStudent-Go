@@ -16,11 +16,11 @@ export function accountedFetch(ledger: UsageLedger, base: Omit<RequestAttributio
     if (!provider) { if (modelEndpoint && base.run) throw new Error('model_attribution_missing'); return fetcher(url, init); }
     const body = native ? { model: native.model } : typeof init?.body === 'string' ? JSON.parse(init.body) as { model?: string; max_tokens?: number; max_output_tokens?: number } : undefined;
     if (!body || typeof body.model !== 'string') throw new Error('model_attribution_missing');
-    if (!base.run) return observeModelFetch(ledger.store, base.owner, provider.id, body.model, fetcher, url, init);
     const model = ledger.model(base.owner, { providerId: provider.id, model: body.model });
     const request = native ? { total: native.reserveTokens, body: undefined } : boundedRequest(body, endpoint, model.outputTokens);
-    checkRequestCapacity(request.total, Math.min(model.contextTokens, ledger.limits(base.owner, base.run).contextTokens));
     const attribution = { ...base, provider: provider.id, model: body.model };
+    if (!base.run && !ledger.taskBudgeted(base.owner, base.task)) return observeModelFetch(ledger.store, base.owner, provider.id, body.model, fetcher, url, init, ledger.observation(attribution, request.total));
+    checkRequestCapacity(request.total, Math.min(model.contextTokens, ledger.limits(base.owner, base.run).contextTokens));
     const id = ledger.reserve(attribution, ++attempt, request.total);
     try {
       const pendingResponse = fetcher(url, { ...init, body: native ? init?.body : JSON.stringify(request.body) });

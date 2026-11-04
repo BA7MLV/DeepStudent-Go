@@ -34,7 +34,7 @@ export function browserChatQueue() {
   const server = API_BASE_URL || (typeof location === 'undefined' ? 'local' : location.origin);
   const remote = remoteTasks();
   const serverExecution = remote ? createServerChatExecution() : undefined;
-  const namespace = JSON.stringify([server, account, remote ? 'server' : 'local', cloud.worker ? cloud.taskId : 'interactive']);
+  const namespace = JSON.stringify([server, account, remote ? 'server' : 'local', 'interactive']);
   const draft = draftOwner;
   const draftId = `session-draft:${namespace}:${draft}`;
   const prefix = `session-queue:${namespace}:`;
@@ -64,7 +64,7 @@ export function browserChatQueue() {
   const commands = SessionQueueModel.commands<ChatAttachment, RuntimeTaskSubmit, CloudTask>(journal, {
     current,
     prepare: (request, item) => request.input.action === 'continue' ? request : {
-      ...request, input: { ...request.input, text: item.text, attachments: JSON.parse(JSON.stringify(item.attachments ?? [])), explicitSkillIds: item.explicitSkillIds ?? [] },
+      ...request, input: { ...request.input, text: item.text, attachments: JSON.parse(JSON.stringify(item.attachments ?? [])), explicitSkillIds: item.explicitSkillIds ?? [], ...(item.modelSelection ? { modelSelection: JSON.parse(JSON.stringify(item.modelSelection)) } : {}), ...(item.thinkingLevel ? { thinkingLevel: item.thinkingLevel } : {}) },
     },
     receipt: operationId => { check(); if (!serverExecution) throw new Error('server_execution_required'); return serverExecution.receipt(operationId); },
     submit: request => {

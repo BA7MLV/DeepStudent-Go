@@ -6,11 +6,12 @@ import type { DatabaseStore } from '../storage/database.js';
 import type { CloudConfiguration } from './config.js';
 import type { CloudRecords } from './records.js';
 import { ProjectError, ProjectFiles } from '../projects/files.js';
+import { ProjectRepository } from '../projects/repository.js';
 import type { WebSearchService } from '../web-search/service.js';
 import type { PluginService } from '../plugins/service.js';
 import type { McpManager } from '../mcp/manager.js';
 
-export type ExecutorKind = 'node' | 'browser';
+export type ExecutorKind = 'node';
 export interface TaskContext {
   task: CloudTask;
   owner: string;
@@ -28,21 +29,10 @@ export interface TaskContext {
 }
 export type TaskExecutor = (context: TaskContext) => Promise<unknown>;
 
-/**
- * Model orchestration belongs to the API process.  Browser workers are only
- * used for capabilities that genuinely require browser APIs or a UI surface.
- */
-const nodeKinds = new Set(['chat', 'qa', 'cards', 'comments', 'danmaku', 'modelOnce', 'artifactEdit', 'handoutEdit']);
-/** Routing is explicit: a failed native job must never replay itself in a browser. */
+/** All persistent cloud orchestration is server owned. Static local execution
+ * is a separate adapter, never a cloud error fallback. */
 export function executorFor(task: CloudTask, video: Record<string, any> | null): ExecutorKind {
-  // Original question-bank QA needs browser resource/image/edit tools that the
-  // native read-only QA adapter does not implement. No fallback replay.
-  if (task.kind === 'qa' && task.input.pluginExtraction === true) return 'browser';
-  if (task.kind === 'handout' && task.input.botStudyText === true) return 'node';
-  if (nodeKinds.has(task.kind)) return 'node';
-  if (task.kind === 'material' && ['md', 'docx'].includes(String(task.input.format))) return 'node';
-  // All media decoding/rendering belongs to the user's browser, including covers.
-  return 'browser';
+  return 'node';
 }
 
 export function taskRows(context: TaskContext, table: string, field?: string, value?: unknown): Record<string, any>[] {
@@ -88,8 +78,17 @@ export function taskCourseFile(context: TaskContext, id: string) {
   const mapped = context.store.db.prepare('SELECT f.project_id,f.path FROM resource_files f JOIN projects p ON p.id=f.project_id AND p.owner_id=f.owner_id WHERE f.owner_id=? AND f.course_id=?')
     .get(context.owner, id) as { project_id: string; path: string } | undefined;
   let opened: { fd: number; size: number; revision: string };
+  let legacyFileId: string | undefined;
   let files: ProjectFiles | undefined;
+  const assertAccess=()=>{
+    const parent=context.store.db.prepare('SELECT parent_run_id FROM cloud_tasks WHERE id=? AND owner_id=?').get(context.task.id,context.owner) as {parent_run_id:string|null}|undefined;
+    if(!parent?.parent_run_id||!mapped)return;
+    const thread=context.store.db.prepare('SELECT t.agent_id FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=? AND t.owner_id=?').get(parent.parent_run_id,context.owner) as {agent_id:string|null}|undefined;
+    new ProjectRepository(context.store,path.join(context.filesDir,'projects')).authorize(context.owner,mapped.project_id,thread?.agent_id??null,'read');
+  };
+  assertAccess();
   if (mapped) {
+    if (context.store.db.prepare('SELECT 1 FROM projects WHERE id=? AND archived=1').get(mapped.project_id)) throw new ProjectError('project_archived',409);
     if (process.platform !== 'linux' && context.store.db.prepare('SELECT 1 FROM project_executions WHERE project_id=?').get(mapped.project_id)) throw new ProjectError('project_busy', 409);
     files = new ProjectFiles(path.join(context.filesDir, 'projects'));
     try { opened = files.open(mapped.project_id, mapped.path); }
@@ -98,6 +97,7 @@ export function taskCourseFile(context: TaskContext, id: string) {
     const edited = context.records.get(context.owner, 'files', id);
     const original = context.records.get(context.owner, 'courseFiles', id);
     if (!edited && !original) return null;
+    legacyFileId = edited ? (edited.blob as { $file?: string })?.$file : String(original!.fileId);
     const filename = taskFile(context, edited ? edited.blob : { $file: original!.fileId });
     const fd = fs.openSync(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
     opened = { fd, size: fs.fstatSync(fd).size, revision: '' };
@@ -105,7 +105,19 @@ export function taskCourseFile(context: TaskContext, id: string) {
   let closed = false;
   return { fd: opened.fd, size: opened.size, filename: `${process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd'}/${opened.fd}`,
     assertCurrent() {
-      if (!mapped || !files) return;
+      context.checkActive();
+      assertAccess();
+      const course = context.records.get(context.owner, 'videos', id);
+      if (!course || course.fileDeleted) throw new Error('course_file_unavailable');
+      if (!mapped || !files) {
+        const edited = context.records.get(context.owner, 'files', id), original = context.records.get(context.owner, 'courseFiles', id);
+        const currentId = edited ? (edited.blob as { $file?: string })?.$file : original?.fileId;
+        if (currentId !== legacyFileId) throw new Error('course_file_conflict');
+        return;
+      }
+      const mapping = context.store.db.prepare('SELECT project_id,path FROM resource_files WHERE owner_id=? AND course_id=?').get(context.owner, id) as { project_id: string; path: string } | undefined;
+       if (!mapping || mapping.project_id !== mapped.project_id || mapping.path !== mapped.path) throw new ProjectError('project_file_conflict', 409);
+       if (context.store.db.prepare('SELECT 1 FROM projects WHERE id=? AND archived=1').get(mapped.project_id)) throw new ProjectError('project_archived',409);
       const current = files.open(mapped.project_id, mapped.path);
       try { if (current.revision !== opened.revision) throw new ProjectError('project_file_conflict', 409); }
       finally { fs.closeSync(current.fd); }

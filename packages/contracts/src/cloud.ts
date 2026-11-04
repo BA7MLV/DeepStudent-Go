@@ -1,4 +1,5 @@
 /** Shared cloud protocol. Table names are an allowlist, never SQL identifiers. */
+export type { TaskModelSelection, FrozenTaskModel } from './model-gateway.js';
 export type { ModelUsageSource, ModelUsageCounts, ModelUsageReport } from './model-usage.js';
 export type { ModelProtocol, ModelThinkingLevel, ModelProviderState, ModelPurpose, ModelRef, ModelDeployment, ModelErrorClass, ModelCandidate, ModelPreset, ModelRouteDefaults, ModelTool, ModelCall, ModelMessage, ModelImage, ModelAudio, ModelGatewayInput, ModelGatewayRequest, ModelAttemptSummary, ModelGatewayResult } from './model-gateway.js';
 
@@ -110,6 +111,7 @@ export interface CloudConfig {
 }
 export type CloudTaskKind = 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce';
 export interface CloudTask {
+  frozenModel?: import('./model-gateway.js').FrozenTaskModel;
   /** Server-derived provenance; absent on older servers. */
   source?: { kind: 'app' | 'bot'; name?: string };
   /** Display name of the owned course, when available in task listings. */
@@ -119,7 +121,7 @@ export interface CloudTask {
   id: string;
   kind: CloudTaskKind;
   resource: string;
-  status: 'queued' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  status: 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   input: Record<string, unknown>;
   progress: Record<string, unknown> | null;
   result: unknown;

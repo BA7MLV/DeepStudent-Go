@@ -8,6 +8,7 @@ import { Markdown as XMarkdown } from './markdown/Markdown';
 import { canGradeQuizQuestion, canUpdateQuizPick, formatQuizAnswer, gradeQuizAnswer, hasVerifiedQuizAnswer, isQuizAnswered, optionLetter,
   questionType, quizExplanation, quizPickAnswer, quizPickResult, validQuizAnswer, type QuizAnswer, type QuizData, type QuizPick, type QuizQuestion } from '../harness/quiz';
 import QuestionInput, { emptyQuizAnswer } from './QuestionInput';
+import { quizAnswerFeedback } from '../harness/quizFeedback';
 import { MaterialImage, SourceImage } from './MaterialImage';
 import { materialSourceHref } from '../materials/imageRefs';
 import { linkifyTimestamps, parseTs } from '../utils/linkify';
@@ -226,7 +227,7 @@ export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = tru
                 );
               })}
             </div> : <>
-              <QuestionInput question={q} value={draft} disabled={!available || isDone} onChange={(value) => {
+              <QuestionInput question={q} value={draft} disabled={!available || isDone} answerFeedback={quizAnswerFeedback(q, pick)} onSubmit={value => answer(qi, { answer: value })} onChange={(value) => {
                 const next = { ...drafts, [qi]: value }; setDrafts(next);
                 if (draftStorageKey) try {
                   const serialized = JSON.stringify(next);
@@ -262,6 +263,7 @@ export default function QuizCard({ quiz, picks, onAnswer, onSeek, seekable = tru
                   stem: q.stem, type: q.type, options: q.options, matches: q.matches, parts: q.parts?.map(({ presentation: _html, ...part }) => part), source: q.source,
                   answerSource: q.answerSource, referenceAnswer: q.answer, explanation: q.explanation, myAnswer: quizPickAnswer(pick),
                 })}`)}>请求 AI 参考批改（发送消息）</Button>}
+                {!gradable && onReview && <p className="quiz-source">AI 建议将在聊天中显示，尚不能自动回填此交互页面；此题保持待核验，不影响成绩或自动错题记录。</p>}
                 {/* 解析正文：与问答正文同一条渲染链路（XMarkdown）+ 时间戳链接化。
                     解析常常是「一句话 + 一张图」，所以独占一行而不是接在判定语后面的同行文本。 */}
                 <div className="quiz-explain__md" data-testid="quiz-explain-md">

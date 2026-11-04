@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { fixtureBrowserDomain } from './fixture-domain.mjs';
-import { addPlugin, assertCreationHint } from './plugin-tools.mjs';
+import { addPlugin, assertCreationHint, openChatPlugins } from './plugin-tools.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,6 +30,9 @@ const { CloudRecords } = await import('../apps/api/src/cloud/records.ts');
 const { CloudConfiguration } = await import('../apps/api/src/cloud/config.ts');
 const { CloudTaskRunner } = await import('../apps/api/src/cloud/tasks.ts');
 const { receiveFile } = await import('../apps/api/src/cloud/files.ts');
+const {PluginService}=await import('../apps/api/src/plugins/service.ts');
+const {ProjectRepository}=await import('../apps/api/src/projects/repository.ts');
+const {ResourceFiles}=await import('../apps/api/src/projects/resources.ts');
 const botFixtureFetch = async (_url, init) => {
   const body = JSON.parse(init.body);
   if (body.messages?.some(m => m.role === 'user' && String(m.content).includes('逐页提取这份资料的原题'))) {
@@ -45,7 +48,7 @@ const botFixtureFetch = async (_url, init) => {
   return Response.json({ choices: [{ message: { role: 'assistant', content: '模板 Bot 任务已真实完成。' }, finish_reason: 'stop' }] });
 };
 let app = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: botFixtureFetch });
-let browser, web, store, learningRunner;
+let browser, web, store, learningRunner,learningService;
 let failed = false;
 const errors = [];
 const diagnostics = [];
@@ -118,7 +121,9 @@ try {
   new CloudRecords(store).apply(owner, [{ id: 'bank-material', table: 'videos', key: bankId, before: null, after: { ...material, id: bankId, name: '原题题库.md' } }, { id: 'bank-file', table: 'files', key: bankId, before: null, after: { id: bankId, blob: { $file: bankFile.id } } }]);
   const configuration = new CloudConfiguration(store, path.join(directory, 'config'));
   configuration.save(owner, { ...configuration.get(owner), policy: { ...configuration.get(owner).policy, read: 'allow', write: 'allow' }, providers: [{ id: 'fixture', name: 'Fixture', protocol: 'openai-chat', apiKey: 'fixture', baseUrl: 'https://fixture.example/v1', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture-model' } });
-   learningRunner = new CloudTaskRunner(store, { configuration, fetch: async (_url, init) => Response.json({ choices: [{ message: { content: String(init.body).includes('学习练习生成器') ? JSON.stringify({ questions: [{ ...bankQuestion, stem: 'AI 练习验收：如何确认产物保存？' }] }) : JSON.parse(init.body).max_tokens === 6000 ? '# 插件讲义验收\n\n讲义来自原资料执行器，并保存到原产物。' : '[{"time":"00:10","q":"如何确认插件生成成功？","a":"读取真实产物和持久完成收据。"}]' } }] }) });
+    learningRunner = new CloudTaskRunner(store, { configuration, fetch: async (_url, init) => Response.json({ choices: [{ message: { content: String(init.body).includes('本次仅提取第') ? '```quiz\n'+JSON.stringify({questions:[{...bankQuestion,stem:'服务器提取已保存部分；保留用户原有题目与笔记。'}]})+'\n```' : String(init.body).includes('学习练习生成器') ? JSON.stringify({ questions: [{ ...bankQuestion, stem: 'AI 练习验收：如何确认产物保存？' }] }) : JSON.parse(init.body).max_tokens === 6000 ? '# 插件讲义验收\n\n讲义来自原资料执行器，并保存到原产物。' : '[{"time":"00:10","q":"如何确认插件生成成功？","a":"读取真实产物和持久完成收据。"}]' } }] }) });
+  learningService=new PluginService(store,undefined,learningRunner,{filesDir:process.env.FILES_DIR,resources:new ResourceFiles(new ProjectRepository(store,path.join(process.env.FILES_DIR,'projects')),process.env.FILES_DIR)});
+  learningRunner.pluginService=learningService;
   learningRunner.start(origin);
   const page = await context.newPage();
   context.on('page', tracePage);
@@ -139,7 +144,7 @@ try {
   await shared.getByText('真实跨位置共享待办', { exact: true }).waitFor();
   const independent = todos.nth(1).frameLocator('iframe'); assert.equal(await independent.getByText('真实跨位置共享待办', { exact: true }).count(), 0);
   const chat = await context.newPage(); await chat.goto(`${origin}/#/chat`); await chat.getByTestId('course-chat-page').waitFor();
-  await chat.getByRole('button', { name: '组件', exact: true }).click();
+  await openChatPlugins(chat);
   const chatTodo = chat.locator('[data-plugin-slot="chat.sidepanel"] [data-plugin-instance="legacy-todo"]').frameLocator('iframe');
   await chatTodo.getByText('真实跨位置共享待办', { exact: true }).waitFor(); await chatTodo.getByRole('checkbox').check();
   await shared.getByRole('checkbox').waitFor(); await page.waitForTimeout(5500); assert.equal(await shared.getByRole('checkbox').isChecked(), true);
@@ -427,17 +432,17 @@ try {
      await reader.getByTestId('panel-chat-add').click();
      await reader.getByTestId('question-bank-extract').click();
      await oldPracticeDialog.getByRole('button', { name: '提取原题为题库', exact: true }).click();
-     try { await oldPracticeDialog.getByText('题库现有 1 道原题', { exact: false }).waitFor({ timeout: 60000 }); }
+      try { await oldPracticeDialog.getByText('题库现有 3 道原题', { exact: false }).waitFor({ timeout: 60000 }); }
      catch (error) {
        await reader.screenshot({ path: path.join(output, 'extraction-failure.png') });
        throw new Error(`${error.message}\nExtraction tasks: ${JSON.stringify(store.db.prepare("SELECT t.status,t.error,t.progress,t.result,l.error AS delivery_error FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE l.action_id='practice.extract'").all())}\nPermissions: ${JSON.stringify(store.db.prepare("SELECT capability,status,arguments FROM cloud_permissions WHERE task_id IN (SELECT task_id FROM plugin_learning_tasks WHERE action_id='practice.extract')").all())}\nDialog: ${await oldPracticeDialog.innerText()}`);
      }
      const extraction = store.db.prepare("SELECT t.*,l.result AS artifacts FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE l.owner_id=? AND l.action_id='practice.extract'").get(owner);
-     assert.equal(extraction.executor, 'browser'); assert.equal(extraction.status, 'completed');
+      assert.equal(extraction.executor, 'node'); assert.equal(extraction.status, 'completed');
      assert.equal(JSON.parse(extraction.artifacts).kind, 'question-bank');
       const savedBank = await fixtureBrowserDomain(context.request, origin, 'read', { kind: 'courseDocument', courseId: bankId });
       const savedText = savedBank.value.text;
-     assert.ok(savedText.includes('浏览器提取已保存部分')); assert.ok(savedText.includes(bankQuestion.stem), 'original QA edit preserves the original bank');
+      assert.ok(savedText.includes('服务器提取已保存部分')); assert.ok(savedText.includes(bankQuestion.stem), 'server extraction preserves the original bank');
      // Keyboard stays in the modal, Escape returns to the intact reader draft.
      await oldPracticeDialog.getByRole('button', { name: '关闭', exact: true }).focus();
      for (let i = 0; i < 6; i++) {
@@ -482,7 +487,11 @@ try {
    await toolsHost.getByRole('button', { name: '生成讲义/摘要', exact: true }).click();
    await page.getByTestId('confirm-dialog').getByRole('button', { name: '继续', exact: true }).click();
     await toolsHost.getByText('生成讲义/摘要 · 执行结束，请查看原产物', { exact: false }).waitFor({ timeout: 30000 });
-   const legacyHandout = await page.evaluate(async id => {
+    // Warm the lazy local pipeline before dispatch: Vite may reload once when
+    // discovering its media dependencies. Never replay the command on a reload.
+    try {await page.evaluate(()=>import('/src/pipelines/handout.ts'));}
+    catch(error){if(!String(error).includes('Execution context was destroyed'))throw error;await page.waitForLoadState();await page.getByTestId('board-plugin-material-tools').waitFor();}
+    const legacyHandout = await page.evaluate(async id => {
      const { runHandout } = await import('/src/pipelines/handout.ts');
      return runHandout(id, () => {});
    }, material.id);
@@ -538,4 +547,4 @@ try {
     } catch { /* A closing tab has no useful diagnostics. */ }
   }
   throw error;
-} finally { await learningRunner?.close(); await browser?.close(); await web?.close(); await app.close(); store?.close(); if (!failed) fs.rmSync(directory, { recursive: true, force: true }); }
+} finally { await learningRunner?.close();await learningService?.close(); await browser?.close(); await web?.close(); await app.close(); store?.close(); if (!failed) fs.rmSync(directory, { recursive: true, force: true }); }

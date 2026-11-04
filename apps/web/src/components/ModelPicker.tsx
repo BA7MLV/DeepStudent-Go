@@ -12,6 +12,8 @@ import { ModelCapabilities } from './ModelCapabilities';
 import { overflowTitleProps } from '../ui/overflowTitle';
 
 interface Props {
+  value?: ModelRef;
+  onChange?: (value: ModelRef) => void;
   slot: ModelSlot;
   /** 当前值（对应的全局槽位字段名） */
   field: 'asrModel' | 'llmModel' | 'visionModel' | 'decisionModel';
@@ -86,9 +88,11 @@ export default function ModelPicker({
   showThinking = false,
   thinkingDepthDisabled,
   onClose,
+  value: controlledValue,
+  onChange,
 }: Props) {
   const settings = useSettings();
-  const value = settings[field];
+  const value = controlledValue ?? settings[field];
   const favs = settings.favorites[slot];
   // 收藏夹不含当前值时并入当前值（去重、过滤空串），保证选中态始终可见、有效
   const candidates: ModelRef[] = [
@@ -104,6 +108,7 @@ export default function ModelPicker({
   const catalogOf = (id: string) => settingsCatalogOf(settings, id);
 
   const pick = (ref: ModelRef) => {
+    if (onChange) { onChange(ref); return; }
     // 切文本模型时按能力表回填上下文窗口默认值（仍可手改），与设置页行为一致
     if (field === 'llmModel') {
       settings.update({

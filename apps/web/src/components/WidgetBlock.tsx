@@ -13,7 +13,7 @@ import { MAX_WIDGET_DIAGNOSTICS, readWidgetDiagnostic, WIDGET_READY_TIMEOUT_MS, 
 import { loadWidgetImages, widgetImageReferences } from '../harness/widgetImages';
 import { copyText } from '../utils/clipboard';
 import { toast } from '../ui';
-import { validateWidgetPayload } from '../harness/widgetProtocol';
+import { validateWidgetPayload, readWidgetAnswerFeedback, acceptsWidgetFeedback, type WidgetAnswerFeedback } from '../harness/widgetProtocol';
 
 /**
  * 沙箱 widget 的宿主壳：一个 `sandbox="allow-scripts"` 的 iframe。
@@ -53,6 +53,7 @@ interface Props {
   htmlActions?: { sourceOpen: boolean; sourceId: string; toggleSource(): void; copySource(): void };
   /** Popouts inherit the originating surface's locally scoped palette and typography. */
   appearance?: WidgetTheme;
+  answerFeedback?: WidgetAnswerFeedback | null;
   /** Question-scoped draft only. The student confirms submission in the trusted host UI. */
   answerInput?: { answer: unknown; submitted: boolean; question?: unknown; onDraft: (raw: unknown) => void; onSubmit?: (raw: unknown) => Promise<void> };
 }
@@ -66,9 +67,11 @@ export const WIDGET_PREVIEW_MSG = {
   payload: 'widget-preview:payload',
   prompt: 'widget-preview:prompt',
   result: 'widget-preview:result',
+  feedback: 'widget-preview:feedback',
 } as const;
 
 export type WidgetPreviewMessage =
+  | { type: typeof WIDGET_PREVIEW_MSG.feedback; feedback: WidgetAnswerFeedback }
   | { type: typeof WIDGET_PREVIEW_MSG.ready }
   | { type: typeof WIDGET_PREVIEW_MSG.payload; payload: WidgetPayload; dark: boolean; appearance?: WidgetTheme; rowId?: number; canPrompt?: boolean; surface?: 'html' }
   | { type: typeof WIDGET_PREVIEW_MSG.prompt; text: string; requestId: number }
@@ -129,7 +132,7 @@ function RejectedWidget({ error, source, retry, editActions }: { error: string; 
   </div>;
 }
 
-function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabled = false, allowPopout = true, editActions, htmlActions, appearance, answerInput, onRerun }: Props & { onRerun(): void }) {
+function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabled = false, allowPopout = true, editActions, htmlActions, appearance, answerInput, answerFeedback, onRerun }: Props & { onRerun(): void }) {
   const [instance] = useState(createPreviewToken);
   const [diagnostics, setDiagnostics] = useState<WidgetDiagnostic[]>([]);
   const diagnosticKeys = useRef(new Set<string>());
@@ -167,6 +170,11 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
   const [ready, setReady] = useState(false);
   const [selection, setSelection] = useState<{ text: string; context: string } | null>(null);
   const answerSubmitting = useRef(false);
+  const lastAnswerRequest = useRef(0);
+  const feedbackRef = useRef<WidgetAnswerFeedback | null>(null);
+  const feedback = readWidgetAnswerFeedback(answerFeedback);
+  if (feedback && acceptsWidgetFeedback(feedbackRef.current, feedback)) feedbackRef.current = feedback;
+  const feedbackKey = JSON.stringify(feedbackRef.current);
   const [doc, setDoc] = useState('');
   const [failed, setFailed] = useState('');
   const [session, setSession] = useState<WidgetSession | null | undefined>(rowId == null ? null : undefined);
@@ -257,6 +265,7 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
     setFailed('');
     if (!appearance && hostRef.current) themeRef.current = readWidgetTheme(hostRef.current, darkRef.current);
     buildWidgetDocument(payload, { instance, dark: darkRef.current, theme: themeRef.current, state: stateRef.current, persistent: session != null,
+      answerFeedback: feedbackRef.current,
       answerInput: answerInputRef.current ? { answer: answerInputRef.current.answer, submitted: answerInputRef.current.submitted, question: answerInputRef.current.question } : undefined })
       .then((d) => { clearTimeout(timer); if (!cancelled) setDoc(d); })
       .catch((e) => { clearTimeout(timer); if (!cancelled) setFailed(e instanceof Error ? e.message : String(e)); });
@@ -291,6 +300,13 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
     if (answerInput) post(WIDGET_MSG.answerSync, { answer: answerInput.answer, submitted: answerInput.submitted, question: answerInput.question });
   }, [answerInput, post]);
 
+  useEffect(() => {
+    const value = feedbackRef.current;
+    if (!value) return;
+    post(WIDGET_MSG.answerFeedback, value);
+    previewChannelRef.current?.postMessage({ type: WIDGET_PREVIEW_MSG.feedback, feedback: value } satisfies WidgetPreviewMessage);
+  }, [feedbackKey, post]);
+
   // Observe actual computed host tokens, including local course palettes and root font scale.
   // Messages never replace srcdoc: parameter values and local execution survive.
   useEffect(() => {
@@ -319,6 +335,7 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
       const message = event.data;
       if (!message || typeof message.type !== 'string') return;
       if (message.type === WIDGET_PREVIEW_MSG.ready) {
+        if (feedbackRef.current) channel.postMessage({ type: WIDGET_PREVIEW_MSG.feedback, feedback: feedbackRef.current } satisfies WidgetPreviewMessage);
         channel.postMessage({
           type: WIDGET_PREVIEW_MSG.payload,
           payload: payloadRef.current,
@@ -454,11 +471,15 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
         post(WIDGET_MSG.theme, themeRef.current ?? darkRef.current);
         post(WIDGET_MSG.sync, stateRef.current);
         post(WIDGET_MSG.persistent, session != null);
+        if (feedbackRef.current) post(WIDGET_MSG.answerFeedback, feedbackRef.current);
         if (answerInputRef.current) post(WIDGET_MSG.answerSync, { answer: answerInputRef.current.answer, submitted: answerInputRef.current.submitted, question: answerInputRef.current.question });
       } else if (d.__wbw === WIDGET_MSG.answerDraft || d.__wbw === WIDGET_MSG.answerSubmit) {
         const request = d.payload as { requestId?: number; value?: unknown } | null;
-        if (!Number.isSafeInteger(request?.requestId)) return;
+        if (!Number.isSafeInteger(request?.requestId) || request!.requestId! <= lastAnswerRequest.current) return;
+        lastAnswerRequest.current = request!.requestId!;
         try {
+          const encoded = JSON.stringify(request?.value);
+          if (!encoded || encoded.length > 32768 || new TextEncoder().encode(encoded).length > 32768) throw new Error('答案超过 32 KiB');
           const input = answerInputRef.current;
           if (!input || input.submitted || disabledRef.current || answerSubmitting.current || document.visibilityState !== 'visible'
             || !frameRef.current.getClientRects().length || document.activeElement !== frameRef.current) throw new Error('此处不能修改题目作答');

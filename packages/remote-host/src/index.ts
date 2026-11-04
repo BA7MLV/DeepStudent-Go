@@ -10,65 +10,12 @@ import type { RuntimeFileIntent, RuntimeFileIntentsFrame } from '@wangke/contrac
 import type { PreferencesCommand, PreferencesProjection } from '@wangke/contracts/client-runtime';
 import type { ResourceCommand } from '@wangke/contracts/resources';
 import type { SavePluginLayout, SystemDocument } from '@wangke/contracts/system';
-import type { ExecutorReport, ExecutorCompletion, ExecutorCompletionReceipt } from '@wangke/contracts/client-runtime';
-import type { ExecutorArtifacts, ExecutorResourceCommand } from '@wangke/contracts/client-runtime';
 import type { ClientLearningCommand } from '@wangke/contracts/client-runtime';
-import type { ExecutorBlobAdmission } from '@wangke/contracts/client-runtime';
-import type { ExecutorConversationReset, ExecutorConversationResetReceipt, ExecutorInteractionsFrame, ExecutorInteractionDelivery, ExecutorInteractionReceipt, ExecutorAuthorizationFrame } from '@wangke/contracts/client-runtime';
-
-export interface ExecutorDomain {
-  beginExecution(ctx: Context, taskId: string): Promise<RuntimeJson>;
-  watchAuthorization(ctx: Context, taskId: string, permissionId: string, signal: AbortSignal): AsyncIterable<ExecutorAuthorizationFrame>;
-  resetConversation(ctx: Context, request: ExecutorConversationReset): Promise<ExecutorConversationResetReceipt>;
-  watchInteractions(ctx: Context, taskId: string, signal: AbortSignal): AsyncIterable<ExecutorInteractionsFrame>;
-  deliverInteraction(ctx: Context, request: ExecutorInteractionDelivery): Promise<ExecutorInteractionReceipt>;
-  admitBlob(ctx: Context, request: ExecutorBlobAdmission): Promise<RuntimeJson>;
-  resourceCommand(ctx: Context, request: ExecutorResourceCommand): Promise<RuntimeJson>;
-  commitArtifacts(ctx: Context, request: ExecutorArtifacts): Promise<RuntimeRecordsReceipt>;
-  read(ctx: Context, taskId: string): Promise<RuntimeTask>;
-  report(ctx: Context, request: ExecutorReport): Promise<{ leaseExpiresAt: string }>;
-  complete(ctx: Context, request: ExecutorCompletion): Promise<ExecutorCompletionReceipt>;
-  receipt(ctx: Context, taskId: string, operationId: string): Promise<RuntimeReceipt>;
-}
-
-/** Task/lease capability service, never an account principal.
- * @typert service executorRuntime
- */
-export class ExecutorRuntimeService extends TypertRemoteService {
-  @Remote
-  beginExecution(taskId: string): Promise<RuntimeJson> { return this.domain.beginExecution(this.ctx, taskId); }
-  constructor(ctx: Context, private readonly domain: ExecutorDomain) { super(ctx, 'executorRuntime'); }
-  @Remote({ mode: 'stream' })
-  async *watchAuthorization(taskId: string, permissionId: string, signal: AbortSignal): AsyncIterable<ExecutorAuthorizationFrame> {
-    yield* this.domain.watchAuthorization(this.ctx, taskId, permissionId, signal);
-  }
-  @Remote
-  resetConversation(request: ExecutorConversationReset): Promise<ExecutorConversationResetReceipt> { return this.domain.resetConversation(this.ctx, request); }
-  @Remote
-  deliverInteraction(request: ExecutorInteractionDelivery): Promise<ExecutorInteractionReceipt> { return this.domain.deliverInteraction(this.ctx, request); }
-  @Remote({ mode: 'stream' })
-  async *watchInteractions(taskId: string, signal: AbortSignal): AsyncIterable<ExecutorInteractionsFrame> {
-    yield* this.domain.watchInteractions(this.ctx, taskId, signal);
-  }
-  @Remote
-  admitBlob(request: ExecutorBlobAdmission): Promise<RuntimeJson> { return this.domain.admitBlob(this.ctx, request); }
-  @Remote
-  resourceCommand(request: ExecutorResourceCommand): Promise<RuntimeJson> { return this.domain.resourceCommand(this.ctx, request); }
-  @Remote
-  commitArtifacts(request: ExecutorArtifacts): Promise<RuntimeRecordsReceipt> { return this.domain.commitArtifacts(this.ctx, request); }
-  @Remote
-  read(taskId: string): Promise<RuntimeTask> { return this.domain.read(this.ctx, taskId); }
-  @Remote
-  report(request: ExecutorReport): Promise<{ leaseExpiresAt: string }> { return this.domain.report(this.ctx, request); }
-  @Remote
-  complete(request: ExecutorCompletion): Promise<ExecutorCompletionReceipt> { return this.domain.complete(this.ctx, request); }
-  @Remote
-  receipt(taskId: string, operationId: string): Promise<RuntimeReceipt> { return this.domain.receipt(this.ctx, taskId, operationId); }
-}
+import type { DelegationCommand } from '@wangke/contracts/client-runtime';
 
 /** The API owns the implementation; this seam carries no credentials or database. */
 export interface RuntimeDomain {
-  reconcileInteraction(owner: string, request: import('@wangke/contracts/client-runtime').InteractionReconcile): Promise<RuntimeJson>;
+  delegation(owner: string, request: DelegationCommand): Promise<RuntimeJson>;
   editLearning(owner: string, request: ClientLearningCommand): Promise<RuntimeRecordsReceipt>;
   savePluginLayout(owner: string, request: SavePluginLayout): Promise<SystemDocument>;
   resourceCommand(owner: string, request: ResourceCommand): Promise<RuntimeJson>;
@@ -99,7 +46,7 @@ export interface RuntimeDomain {
  */
 export class ClientRuntimeService extends TypertRemoteService {
   @Remote
-  reconcileInteraction(request: import('@wangke/contracts/client-runtime').InteractionReconcile): Promise<RuntimeJson> { return this.domain.reconcileInteraction(this.domain.owner(this.ctx), request); }
+  delegation(request: DelegationCommand): Promise<RuntimeJson> { return this.domain.delegation(this.domain.owner(this.ctx), request); }
   @Remote
   editLearning(request: ClientLearningCommand): Promise<RuntimeRecordsReceipt> { return this.domain.editLearning(this.domain.owner(this.ctx), request); }
   @Remote

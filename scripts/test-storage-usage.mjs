@@ -88,7 +88,6 @@ test('storage API requires account authentication, denies workers and reads live
   const { root, paths } = fixture();
   Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: paths.dataDir, FILES_DIR: paths.filesDir, BOOTSTRAP_SECRET_FILE: path.join(paths.configDir, 'bootstrap-secret'), CLOUD_WORKER_DISABLED: '1' });
   const { buildServer } = await import('../apps/api/src/server.ts');
-  const { workerTokens } = await import('../apps/api/src/cloud/workerAuth.ts');
   const app = buildServer({ dbPath: paths.dbPath });
   try {
     assert.equal((await app.inject('/api/v1/cloud/storage')).statusCode, 401);
@@ -109,7 +108,6 @@ test('storage API requires account authentication, denies workers and reads live
     const after = await read();
     assert.equal(after.categories.find(c => c.id === 'files').bytes - before.categories.find(c => c.id === 'files').bytes, 4096);
     assert.equal(after.partial, false);
-    workerTokens.set('storage-worker', { id: login.json().user.id, taskId: 'not-needed', expiresAt: Date.now() + 60000 });
-    assert.equal((await app.inject({ url: '/api/v1/cloud/storage', headers: { authorization: 'Bearer storage-worker' } })).statusCode, 403);
-  } finally { workerTokens.delete('storage-worker'); await app.close(); fs.rmSync(root, { recursive: true, force: true }); }
+    assert.equal((await app.inject({ url: '/api/v1/cloud/storage', headers: { authorization: 'Bearer storage-worker' } })).statusCode, 401);
+  } finally { await app.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });

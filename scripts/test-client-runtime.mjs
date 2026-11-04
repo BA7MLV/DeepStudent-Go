@@ -395,7 +395,7 @@ try {
   assert.equal(conflict.error.code, 'client/conflict');
   const { BotApplicationService } = await import('../apps/api/src/agent/service.ts');
   const { BotMessageHistory } = await import('../apps/api/src/agent/message-history.ts');
-  const bot = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  const bot = new BotApplicationService(store, { enqueue() {}, cancel() {}, freezeModel() {} });
   const thread = bot.create(owner, 'bot', 'Shared journal');
   bot.append(thread.id, 'user', 'text', 'Baseline');
   const baseline = new BotMessageHistory(store).snapshot(thread.id);
@@ -521,6 +521,9 @@ try {
   await waitModel(sessionModel, () => sessionModel.getSnapshot().revision > sessionRevision, 'session history pushed');
   assert.equal(sessionModel.projection().rows.at(-1).content, 'pushed conversation history');
   const taskCommand = { operationId: 'session-admission-00000001', kind: 'chat', resource: `session:${sessionId}`, input: { sessionId, text: 'typed admission only' } };
+  const { CloudConfiguration } = await import('../apps/api/src/cloud/config.ts');
+  const taskConfiguration = new CloudConfiguration(store, directory);
+  taskConfiguration.save(owner, { ...taskConfiguration.get(owner), providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://fixture.invalid/v1', protocol: 'openai-chat', apiKey: 'fixture-only', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture' } });
   const admitted = await runtime.submitTask(taskCommand);
   assert.deepEqual(await runtime.taskAdmission(taskCommand.operationId), { status: 'accepted', task: admitted });
   assert.deepEqual(await runtime.taskAdmission('never-admitted-command'), { status: 'missing' });

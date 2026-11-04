@@ -22,7 +22,6 @@ export type { BotThreadProjection } from './bot-history.js';
 export { SessionTimelineModel } from './session.js';
 export { BotFollowModel } from './bot-follow.js';
 export { DurableCommands } from './durable-commands.js';
-export { createExecutorRuntime } from './executor.js';
 export type { DurableCommand, CommandJournal } from './durable-commands.js';
 import type { RuntimeSessionProjection } from '@wangke/contracts/client-runtime';
 import type { PreferencesCommand } from '@wangke/contracts/client-runtime';
@@ -279,13 +278,6 @@ export async function createClientRuntime(identity: { server: string; account: s
       if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
       return result.value;
     },
-    reconcileInteraction: async (request: import('@wangke/contracts/client-runtime').InteractionReconcile) => {
-      if (disposed) throw new Error('client_runtime_disposed');
-      const result = await ctx.remote.clientRuntime.reconcileInteraction(request);
-      if (disposed) throw new Error('client_runtime_disposed');
-      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
-      return result.value;
-    },
     resourceCommand: async (request: import('@wangke/contracts/resources').ResourceCommand) => {
       if (disposed) throw new Error('client_runtime_disposed');
       const result = await ctx.remote.clientRuntime.resourceCommand(request);
@@ -323,6 +315,13 @@ export async function createClientRuntime(identity: { server: string; account: s
     recordsPage: async (after: number) => {
       if (disposed) throw new Error('client_runtime_disposed');
       const result = await ctx.remote.clientRuntime.recordsPage(after);
+      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
+      if (disposed) throw new Error('client_runtime_disposed');
+      return result.value;
+    },
+    delegation: async (request: import('@wangke/contracts/client-runtime').DelegationCommand) => {
+      if (disposed) throw new Error('client_runtime_disposed');
+      const result = await ctx.remote.clientRuntime.delegation(request);
       if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
       if (disposed) throw new Error('client_runtime_disposed');
       return result.value;

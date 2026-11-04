@@ -20,7 +20,13 @@ export function legacyModelPresets(config: CloudConfig): { modelPresets: ModelPr
 export class ModelTargetResolver {
   constructor(readonly config: (owner: string) => CloudConfig,
     readonly overrides?: (owner: string, providerId: string, model: string) => ModelOverrides | undefined) {}
-  resolve(request: Pick<ModelGatewayRequest, 'owner' | 'purpose' | 'presetId' | 'modelRef'>) {
+  resolve(request: Pick<ModelGatewayRequest, 'owner' | 'purpose' | 'presetId' | 'modelRef' | 'frozenModel'>): { preset: ModelPreset | undefined; candidates: { adapter: ModelAdapter; privacy: string; allowFallback: boolean }[] } {
+    if (request.frozenModel) {
+      const snapshot = request.frozenModel;
+      const candidates = snapshot.candidates.map(modelRef => this.resolve({ owner: request.owner, purpose: request.purpose, modelRef }).candidates[0]);
+      if (!candidates.length) throw new Error('model_not_configured');
+      return { preset: { id: 'task-snapshot', name: 'Task snapshot', purposes: [request.purpose], candidates: snapshot.candidates.map(ref => ({ ref })), policy: snapshot.policy }, candidates };
+    }
     const config = this.config(request.owner);
     const legacy = legacyModelPresets(config);
     const presets = config.modelPresets ?? legacy.modelPresets;

@@ -49,7 +49,7 @@ export class ModelGateway {
   private event(event: RouteEvent) {
     try { this.options.event?.(event); } catch { /* observational only; never replay on observer failure */ }
   }
-  target(request: Pick<ModelGatewayRequest, 'owner' | 'purpose' | 'presetId' | 'modelRef'>) {
+  target(request: Pick<ModelGatewayRequest, 'owner' | 'purpose' | 'presetId' | 'modelRef' | 'frozenModel'>) {
     return this.resolver.resolve(request).candidates[0].adapter.target;
   }
   health(owner: string) {
@@ -236,6 +236,6 @@ export class ModelGateway {
     return fail(lastClass);
   }
   private withDefaults(request: ModelGatewayRequest): ModelGatewayRequest {
-    return { ...request, thinkingLevel: normalizeThinkingLevel(request.thinkingLevel) ?? this.options.defaults?.(request.owner, request.purpose).thinkingLevel };
+    return { ...request, thinkingLevel: request.frozenModel?.thinkingLevel ?? normalizeThinkingLevel(request.thinkingLevel) ?? this.options.defaults?.(request.owner, request.purpose).thinkingLevel };
   }
 }

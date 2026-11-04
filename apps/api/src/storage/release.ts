@@ -13,7 +13,7 @@ export function inspectDatabase(db: Database.Database) {
  * attempt against the replacement, including after a restored database starts. */
 export function fenceRemoteWorkers(db: Database.Database) {
   db.transaction(() => {
-    db.prepare("UPDATE cloud_tasks SET status=CASE WHEN executor='browser' THEN 'queued' ELSE 'interrupted' END,worker_id=NULL,lease_expires_at=NULL,updated_at=? WHERE status IN ('running','waiting_user')").run(new Date().toISOString());
+    db.prepare("UPDATE cloud_tasks SET status='interrupted',worker_id=NULL,lease_expires_at=NULL,updated_at=? WHERE status IN ('running','waiting_user')").run(new Date().toISOString());
     db.prepare("UPDATE cloud_permissions SET status='expired' WHERE status IN ('pending','approved','consumed')").run();
   })();
 }

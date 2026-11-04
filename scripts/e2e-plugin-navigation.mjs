@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
-import { addPlugin, assertCreationHint, changePlugin, editLayout, pluginTool } from './plugin-tools.mjs';
+import { addPlugin, assertCreationHint, changePlugin, editLayout, pluginTool, openChatPlugins } from './plugin-tools.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/plugin-navigation-'));
 const output = path.join(os.tmpdir(), 'opencode/create-mode-screenshots'); fs.mkdirSync(output, { recursive: true });
@@ -109,7 +109,7 @@ try {
   const afterSelection = await secondClient.evaluate(async () => { const s = (await import('/src/store/courseChat.ts')).useCourseChat.getState(); return { scope: s.skillIds, messages: s.messages.length, selected: s.turnSkillIds }; });
   assert.deepEqual(afterSelection.scope, beforeSelection.scope); assert.equal(afterSelection.messages, beforeSelection.messages);
   assert.equal(afterSelection.selected.length, 1);
-  await secondClient.getByRole('button', { name: '组件', exact: true }).click();
+  await openChatPlugins(secondClient);
   const chatCounter = secondClient.locator('[data-plugin-instance="created-counter"]').frameLocator('iframe');
   await chatCounter.locator('output').getByText('1', { exact: true }).waitFor();
   await chatCounter.getByRole('button', { name: '加一', exact: true }).click(); await counter.locator('output').getByText('2', { exact: true }).waitFor();

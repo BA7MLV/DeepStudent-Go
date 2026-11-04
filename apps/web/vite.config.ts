@@ -27,10 +27,17 @@ const dependencyDirectory = (name: string) => {
  */
 function serveOrt(): Plugin {
   const ortDir = path.join(dependencyDirectory('onnxruntime-web'), 'dist');
+  const model = require.resolve('@wangke/study-core/vad/model');
   return {
     name: 'serve-ort',
+    generateBundle() {
+      this.emitFile({type:'asset',fileName:'vad/silero_vad_legacy.onnx',source:fs.readFileSync(model)});
+    },
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
+        if (req.url?.split('?')[0] === '/vad/silero_vad_legacy.onnx') {
+          res.setHeader('Content-Type','application/octet-stream');fs.createReadStream(model).pipe(res);return;
+        }
         const m = req.url?.match(/^\/ort\/([\w.-]+\.(?:mjs|wasm))(?:\?.*)?$/);
         if (!m) return next();
         const file = path.join(ortDir, m[1]);

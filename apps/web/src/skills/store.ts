@@ -64,9 +64,6 @@ async function doEnsureBuiltinSkills(): Promise<void> {
   // 整体放进一个 rw 事务：IndexedDB 会把同库的 rw 事务串行化，
   // 于是「查—插」不会被另一个并发调用穿插（上面的闸门管同页并发，这层管跨调用/跨标签页）。
   await db.transaction('rw', [db.skills, db.skillRefs], async () => {
-    // Builtins are bundled code. Workers may prepare a private copy, never publish
-    // skill changes using their task's data-mutation authority.
-    if (cloud.worker) markCloudApply();
     for (const s of [...LEGACY_HANDOUT_SKILLS, ...BUILTIN_SKILLS]) {
       let row = await db.skills.filter((r) => r.name === s.name && !!r.builtin).first();
       if (row?.id != null) {

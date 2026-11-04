@@ -11,7 +11,7 @@ const events = new Map(), timers = new Map(), storage = new Map([['plugin-draft:
 let nextTimer = 0, requests = 0, resolveRequest;
 const module = { exports: {} };
 const context = vm.createContext({ module, exports: module.exports, console, Date, Map, Set, Promise, JSON, Error,
-  require: () => ({ request: () => { requests++; return new Promise(resolve => { resolveRequest = resolve; }); } }),
+  require: () => ({ readRendererPluginAsset: () => { requests++; return new Promise(resolve => { resolveRequest = resolve; }); } }),
   window: { addEventListener: (name, callback) => events.set(name, callback) },
   document: { hidden: false },
   sessionStorage: { ...Object.fromEntries(storage), removeItem(key) { storage.delete(key); delete this[key]; } },

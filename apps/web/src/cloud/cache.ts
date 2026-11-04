@@ -1,6 +1,5 @@
 import Dexie, { type DBCoreTransaction } from 'dexie';
 import { CLOUD_TABLES, type CloudMutation } from '@wangke/contracts/cloud';
-import { cloud } from './state';
 
 export const cloudApplyTransactions = new WeakSet<DBCoreTransaction>();
 export interface OutboxRow extends CloudMutation { sequence?: number; transaction: string; executorTaskId?: string }
@@ -23,9 +22,8 @@ export function installCloudCache(database: Dexie) {
           ...table,
           async mutate(original) {
             if (cloudApplyTransactions.has(original.trans)) return table.mutate(original);
-            if (cloud.worker) throw new Error('executor_product_command_required');
             if (name === 'preferences') throw new Error('preferences_domain_command_required');
-            if (!cloud.worker && !['chats', 'chatSessions', 'skills', 'skillRefs', 'materialInk', 'cards', 'handouts', 'studyDays'].includes(name)) throw new Error('domain_command_required');
+            if (!['chats', 'chatSessions', 'skills', 'skillRefs', 'materialInk', 'cards', 'handouts', 'studyDays'].includes(name)) throw new Error('domain_command_required');
             let req = original;
             const pk = table.schema.primaryKey;
             if ((req.type === 'add' || req.type === 'put') && pk.autoIncrement) {
@@ -48,8 +46,6 @@ export function installCloudCache(database: Dexie) {
             const values = afterKeys.flatMap((key, i) => result.failures[i] ? [] : [{
               transaction: tx!, id: crypto.randomUUID(), table: name, key,
                before: before[i] ?? null, after: after[i] ?? null,
-               ...(cloud.worker && cloud.taskId ? { executorTaskId: cloud.taskId } : {}),
-               ...(cloud.worker && cloud.permissionId ? { permissionId: cloud.permissionId } : {}),
             } satisfies OutboxRow]);
             if (values.length) {
               const saved = await core.table('_cloudOutbox').mutate({ type: 'add', trans: req.trans, values });

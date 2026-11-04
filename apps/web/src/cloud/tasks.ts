@@ -17,7 +17,6 @@ export async function submitCloudTask(kind: CloudTaskKind, resource: string, inp
   const account = cloud.userId;
   await flushCloud();
   if (account !== cloud.userId) throw new Error('client_account_changed');
-  if (cloud.worker) return cloudRequest('/tasks', { method: 'POST', body: JSON.stringify({ nonce: operationId, kind, resource, input }) });
   const { serverRuntime, isCurrentServerRuntime } = await import('../client/bootstrap');
   if (account !== cloud.userId) throw new Error('client_account_changed');
   const database = db;
@@ -53,7 +52,7 @@ export async function submitCloudTask(kind: CloudTaskKind, resource: string, inp
 /** Read-only startup reconciliation. Missing admission is kept uncertain for an
  * explicit retry with the same stored operation, never silently re-enqueued. */
 export async function reconcileTaskAdmissions(): Promise<string[]> {
-  if (!cloud.enabled || cloud.worker) return [];
+  if (!cloud.enabled) return [];
   const account = cloud.userId;
   usePendingTaskCommands.setState({ commands: [] });
   const database = db;
@@ -112,15 +111,15 @@ export async function runCloudTask<T>(kind: CloudTaskKind, resource: string, inp
 /** Observe an already dispatched plugin task without submitting a second job. */
 export async function waitCloudTask<T>(task: CloudTask, onProgress?: (p: any) => void, signal?: AbortSignal): Promise<T> {
   signal?.throwIfAborted();
-  if (!cloud.enabled || cloud.worker) throw new Error('server_task_observer_required');
+  if (!cloud.enabled) throw new Error('server_task_observer_required');
   const account = cloud.userId;
   const { isCurrentServerRuntime, serverRuntime } = await import('../client/bootstrap');
   signal?.throwIfAborted();
-  if (!cloud.enabled || cloud.worker || cloud.userId !== account) throw new Error('client_account_changed');
+  if (!cloud.enabled || cloud.userId !== account) throw new Error('client_account_changed');
   const runtime = await serverRuntime(account);
   signal?.throwIfAborted();
   const assertCurrent = () => {
-    if (!isCurrentServerRuntime(runtime) || !cloud.enabled || cloud.worker || cloud.userId !== runtime.identity.account) throw new Error('client_account_changed');
+    if (!isCurrentServerRuntime(runtime) || !cloud.enabled || cloud.userId !== runtime.identity.account) throw new Error('client_account_changed');
   };
   assertCurrent();
   // Serialize cache/widget work while the Model coalesces transient progress.

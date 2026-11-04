@@ -110,7 +110,7 @@ try {
   const external = resources.list(owner).entries.find(entry => entry.name === 'external.mp4');
   const course = records.get(owner, 'videos', external.courseId);
   put('videos', external.courseId, { ...course, duration: 900 });
-  assert.equal(executorFor({ ...context.task, kind: 'cover', input: { videoId: external.courseId } }, course), 'browser', 'Bot-created video covers use browser decoding too');
+  assert.equal(executorFor({ ...context.task, kind: 'cover', input: { videoId: external.courseId } }, course), 'node', 'Bot-created video covers use the server executor too');
   console.log('Resource compatibility: native parsing, pinned subprocess I/O, worker write-through, legacy deletion/CAS/recreation, move preflight and video names OK');
 } finally {
   store.close(); fs.rmSync(directory, { recursive: true, force: true });

@@ -13,9 +13,11 @@ const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yv
 console.log(`Auto subtitles evidence: ${directory}`);
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 delete process.env.CLOUD_WORKER_DISABLED;
-let calls = 0, mode = 'success';
+let calls = 0, mode = 'success',subtitleFrame;
 const { buildServer } = await import('../apps/api/src/server.ts');
 const api = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: async (url, init) => {
+  if(String(url).endsWith('/DmView'))return new Response(subtitleFrame);
+  if(String(url).startsWith('https://aisubtitle.hdslb.com/'))return Response.json({body:[{from:0,to:2,content:'B站原始字幕'}]});
   assert.match(String(url), /audio\/transcriptions$/);
   calls++;
   assert.ok(init.body, 'browser supplies an audio file');
@@ -74,7 +76,7 @@ try {
     console.error(JSON.stringify(await call('GET', '/cloud/tasks')));
     throw new Error(`Timed out: ${label}`);
   };
-  await until(() => page.locator('iframe[data-browser-worker]').count(), 'normal app hosts browser worker');
+  assert.equal(await page.locator('iframe[data-browser-worker]').count(),0,'cloud executor iframe is retired');
   await page.locator('input[type=file]').setInputFiles({ name: '自动字幕.mp4', mimeType: 'video/mp4', buffer: fs.readFileSync(fixture) });
   let videoId;
   await until(async () => {
@@ -85,7 +87,7 @@ try {
   const tasks = async () => (await call('GET', '/cloud/tasks')).tasks.filter(t => t.input.videoId === videoId);
   await until(async () => (await tasks()).some(t => t.kind === 'transcribe' && t.status === 'completed'), 'automatic transcription finishes');
   await until(async () => (await tasks()).some(t => t.kind === 'cover' && t.status === 'completed'), 'browser cover finishes');
-  assert.ok((await tasks()).every(t => t.executor === 'browser'));
+  assert.ok((await tasks()).every(t => t.executor === 'node'));
   assert.equal((await tasks()).filter(t => t.kind === 'transcribe').length, 1);
   const record = async (table, id = videoId) => (await call('GET', `/cloud/record?table=${table}&key=${encodeURIComponent(JSON.stringify(id))}`)).value;
   assert.equal((await record('videos')).status, 'transcribed');
@@ -100,15 +102,21 @@ try {
   await page.getByTestId('resource-list').waitFor();
   await page.waitForTimeout(2000);
   assert.equal(calls, beforeReload, 'completed subtitles must not be retranscribed on reload');
-  console.log('✓ Upload auto-starts actual browser decoding/VAD, mock ASR, persisted captions and real cover; reload does not repeat ASR');
+  console.log('✓ Upload auto-starts server Silero/ASR and cover; reload does not repeat ASR');
 
   // Only the top frame gets the bridge, like user-script managers configured
   // without all-frames. The worker must reuse it and avoid ASR entirely.
   const message = encodeMessage([fieldBytes(3, encodeMessage(['ai-zh', 'ai-en'].map(lan => fieldBytes(3, encodeMessage([
-    fieldBytes(3, utf8(lan)), fieldBytes(4, utf8(lan)), fieldBytes(5, utf8(`https://aisubtitle.hdslb.com/${lan}`)),
+    fieldBytes(3, utf8(lan)), fieldBytes(4, utf8(lan)), fieldBytes(5, utf8(`https://aisubtitle.hdslb.com/bfs/${lan}`)),
   ]))))) ]);
   const frame = new Uint8Array(message.length + 5);
   new DataView(frame.buffer).setUint32(1, message.length, false); frame.set(message, 5);
+  subtitleFrame=frame;
+  const clearSegments=async()=>{
+    const {DatabaseStore}=await import('../apps/api/src/storage/database.ts');const db=new DatabaseStore(path.join(directory,'db.sqlite'));
+    try{const rows=db.db.prepare("SELECT record_key,value FROM cloud_records WHERE owner_id=? AND table_name='segments' AND value IS NOT NULL").all(fixtureOwner).filter(r=>JSON.parse(r.value).videoId===videoId);await seedFixtureRecords(directory,fixtureOwner,rows.map(r=>({id:crypto.randomUUID(),table:'segments',key:JSON.parse(r.record_key),before:JSON.parse(r.value),after:null})));}finally{db.close();}
+  };
+  await clearSegments();
   await page.evaluate(bytes => {
     window.__wangkeBiliBridge = { version: 'test', fetch: async url => {
       const data = url.includes('/DmView') ? new Uint8Array(bytes) : new TextEncoder().encode(JSON.stringify({ body: [{ from: 0, to: 2, content: 'B站原始字幕' }] }));
@@ -125,9 +133,10 @@ try {
     const { db } = await import('/src/store/db.ts');
     return await db.subtitleTracks.where('videoId').equals(id).count() === 2;
   }, videoId), 'both original subtitle language tracks persist');
-  console.log('✓ Bilibili originals work in the automatic iframe via parent bridge, without ASR');
+  console.log('✓ Server Bilibili originals preserve both language tracks without ASR');
 
   mode = 'error';
+  await clearSegments();
   // Clear the source/completed marker to exercise ASR failure, keeping the video.
   const withSource = await record('videos');
   await seedFixtureRecords(directory, fixtureOwner, [{ id: crypto.randomUUID(), table: 'videos', key: videoId, before: withSource,
@@ -168,39 +177,22 @@ try {
     { id: crypto.randomUUID(), table: 'videos', key: faultCourseId, before: null, after: { id: faultCourseId, name: '丢响应转写', size: binary.json().sizeBytes, mimeType: 'video/mp4', duration: 20, createdAt: 1, status: 'new' } },
     { id: crypto.randomUUID(), table: 'files', key: faultCourseId, before: null, after: { id: faultCourseId, blob: { $file: binary.json().id, type: 'video/mp4' } } },
   ]);
-  let loseSegment = true;
-  const faultOperations = [];
-  await context.route('**/api/executorRuntime/commitArtifacts', async route => {
-    const request = route.request().postDataJSON().payload.args.request;
-    const target = request.products.some(product => product.kind === 'transcriptSegment' && product.value?.videoId === faultCourseId && product.value?.status === 1);
-    if (target) faultOperations.push(request);
-    const response = await route.fetch();
-    if (target && loseSegment) {
-      assert.equal(response.status(), 200); assert.equal((await response.json()).result.ok, true);
-      loseSegment = false; await route.abort('failed');
-    } else await route.fulfill({ response });
-  });
-  const faultTask = await call('POST', '/cloud/tasks', { nonce: crypto.randomUUID(), kind: 'transcribe', resource: `course:${faultCourseId}`, input: { videoId: faultCourseId } });
-  await until(async () => ['failed', 'completed'].includes((await call('GET', `/cloud/tasks/${faultTask.id}`)).status), 'transcription response-loss reconciliation');
-  fs.writeFileSync(path.join(directory, 'response-loss-observed.json'), JSON.stringify({ faultTask, faultOperations }, null, 2));
-  assert.equal(loseSegment, false, 'actual decoder/VAD/ASR producer reached transcript commit');
-  const lost = faultOperations[0], replays = faultOperations.filter(request => request.operationId === lost.operationId);
-  assert.equal(replays.length, 2, 'failure checkpoint first resolves the original idempotent receipt');
-  assert.deepEqual(replays[0], replays[1], 'exact original task/operation/mutation/expected/value retained');
-  for (const request of faultOperations.filter(request => request.operationId !== lost.operationId)) assert.equal(faultOperations.filter(row => row.operationId === request.operationId).length, 1, 'other parallel ASR segments are not duplicate resubmissions');
-  const observedCommits = faultOperations.length;
-  await page.reload(); await page.getByTestId('study-assistant-toggle').waitFor();
-  await page.waitForTimeout(2000);
-  assert.equal(faultOperations.length, observedCommits, 'acknowledged transcripts are not resubmitted on reload');
-  const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');
-  const evidenceStore = new DatabaseStore(path.join(directory, 'db.sqlite'));
+  // Remote transcript commit/lease no longer exists. Exercise lost submit
+  // response against the durable server nonce and persisted checkpoint instead.
+  const command={ nonce:crypto.randomUUID(),kind:'transcribe',resource:`course:${faultCourseId}`,input:{videoId:faultCourseId} };
+  const faultTask=await call('POST','/cloud/tasks',command);
+  assert.equal((await call('POST','/cloud/tasks',command)).id,faultTask.id,'lost submit response uses the original task');
+  await until(async()=> (await call('GET',`/cloud/tasks/${faultTask.id}`)).status==='completed','server transcript checkpoint');
+  const countBeforeReplay=calls;
+  const {DatabaseStore}=await import('../apps/api/src/storage/database.ts');const evidenceStore=new DatabaseStore(path.join(directory,'db.sqlite'));
+  const checkpoints=()=>evidenceStore.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='segments' AND value IS NOT NULL").all(fixtureOwner).map(r=>JSON.parse(r.value)).filter(r=>r.videoId===faultCourseId);
   try {
-    const originalMutation = faultOperations[0].products.find(product => product.kind === 'transcriptSegment');
-    const saved = evidenceStore.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='segments' AND record_key=?").get(fixtureOwner, JSON.stringify(originalMutation.value.id));
-    assert.equal(JSON.parse(saved.value).text, originalMutation.value.text);
-  } finally { evidenceStore.close(); }
-  fs.writeFileSync(path.join(directory, 'response-loss.json'), JSON.stringify({ pass: true, faultTask, faultOperations, errors, checks: ['actual browser decoder/VAD/ASR producer', 'committed transcript response lost', 'same original receipt and mutation identities', 'reload no duplicate', 'persistent transcript bytes/text'] }, null, 2));
-  console.log(`✓ Actual transcript committed-response loss/receipt/reload passed (${directory})`);
+    const before=checkpoints();assert.ok(before.length&&before.every(s=>s.status===1&&s.text.includes('自动字幕测试成功')));
+    await call('POST','/cloud/tasks',{...command,nonce:crypto.randomUUID()});
+    await page.reload();await page.waitForTimeout(2000);
+    assert.equal(calls,countBeforeReplay,'completed checkpoints never repeat ASR across reload/new command');assert.deepEqual(checkpoints(),before,'original transcript ids, times, cues and text are preserved');
+  }finally{evidenceStore.close();}
+  fs.writeFileSync(path.join(directory,'server-checkpoints.json'),JSON.stringify({pass:true,faultTask,errors},null,2));
 } finally {
   await browser?.close(); await vite?.close(); await api.close();
   // Retain both successful and failed runs for independent review.

@@ -4,6 +4,8 @@ import { Avatar, Button, Dropdown, ListBox, Modal, Spinner, cn } from '@heroui/r
 import { PageLoader, PageShell, Sym, toast, promptDialog, popconfirm } from '../ui';
 import { openSettings } from '../components/settingsDialogStore';
 import { cloud } from '../cloud/state';
+import TaskModelPicker from '../components/TaskModelPicker';
+import { taskModelChoice } from '../store/taskModel';
 import { MoreMenu, type MenuAction } from '../ui';
 import { useBotPanel } from '../store/botPanel';
 import { serverClient, type ApprovalDto, type ThreadDetail, type Session, type ThreadQuestionDto } from '../api/serverClient';
@@ -338,6 +340,8 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const setDraft = (value: string) => setDrafts(old => ({ ...old, [draftKey]: value }));
   const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, BotDraftFile[]>>({});
   const draftFiles = attachmentDrafts[draftKey] ?? [];
+  const attachmentsPending = draftFiles.some(file => !file.uploaded || !!file.error);
+  const uploadFlights = useRef(new Set<string>());
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const positionedThread = useRef(activeId);
@@ -522,7 +526,8 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const mergeThread = (updated: ThreadDto) => setThreads(old => old.map(thread => thread.id === updated.id ? { ...thread, ...updated } : thread));
 
   const send = async () => {
-    if (!canChat || (!draft.trim() && !draftFiles.length) || sendLock.current || (activeId && !active)) return;
+    const modelSelection = taskModelChoice(activeId);
+    if (!canChat || attachmentsPending || (!draft.trim() && !draftFiles.length) || sendLock.current || (activeId && !active)) return;
     sendLock.current = true; setSendBusy(true);
     const content = draft.trim();
     const nonce = crypto.randomUUID();
@@ -540,40 +545,21 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
         setDrafts(old => { const next = { ...old, [target.id]: old[sourceKey] ?? '' }; delete next[sourceKey]; return next; });
         setAttachmentDrafts(old => { const next = { ...old, [target.id]: old[sourceKey] ?? [] }; delete next[sourceKey]; return next; });
       }
-      const uploaded = await Promise.allSettled(files.map(async item => {
-        if (item.uploaded) return item.uploaded;
-        try {
-          let uploadedFile: BotAttachment;
-          if (projectId) {
-            const result = await serverClient.uploadProjectFile(projectId, item.file.name, item.file);
-            uploadedFile = { projectId, projectPath: result.path, originalName: item.file.name, mimeType: item.file.type, sizeBytes: item.file.size };
-          } else {
-            const result = await serverClient.uploadFile(item.file);
-            uploadedFile = { fileId: result.id, originalName: result.originalName, mimeType: result.mimeType, sizeBytes: result.sizeBytes };
-          }
-          setAttachmentDrafts(old => ({ ...old, [target.id]: (old[target.id] ?? []).map(file => file.id === item.id ? { ...file, uploaded: uploadedFile, error: undefined } : file) }));
-          return uploadedFile;
-        } catch (error) {
-          setAttachmentDrafts(old => ({ ...old, [target.id]: (old[target.id] ?? []).map(file => file.id === item.id ? { ...file, error: projectError(error) } : file) }));
-          throw error;
-        }
-      }));
-      const failed = uploaded.find(result => result.status === 'rejected');
-      if (failed?.status === 'rejected') throw failed.reason;
-      const attachments = uploaded.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+      // Files upload on selection; never create/send a conversation for a partial batch.
+      const attachments = files.map(item => item.uploaded!);
       const payload = attachments.length ? JSON.stringify({ ...attachments[0], attachments, caption: content }) : content;
       // Do not append across a trimmed, unloaded gap while the reader is in history.
       if (target.id === activeId && !await history.jumpLatest()) throw new Error('load_failed');
       history.setReading(true, scrollRef.current?.scrollTop ?? 0);
       pending = appendPending(target.id, attachments.length ? 'attachment' : 'text', payload, nonce);
-      // Keep edits made during upload. A failed send restores the submitted draft.
+      // Keep edits made during submission. A failed send restores the submitted draft.
       if ((drafts[sourceKey] ?? '').trim() === content) {
         clearedDraft = true;
         setDrafts(old => old[target.id]?.trim() === content ? { ...old, [target.id]: '' } : old);
       }
       settlePending(target.id, pending.id, await (attachments.length
-         ? serverClient.sendAttachment(target.id, payload, nonce, messageTarget)
-         : serverClient.sendMessage(target.id, payload, nonce, messageTarget)));
+         ? serverClient.sendAttachment(target.id, payload, nonce, messageTarget, undefined, modelSelection)
+         : serverClient.sendMessage(target.id, payload, nonce, messageTarget, undefined, modelSelection)));
        setMessageTarget(undefined);
       setAttachmentDrafts(old => ({ ...old, [target.id]: (old[target.id] ?? []).filter(item => !files.some(file => file.id === item.id)) }));
       setRunning(old => ({ ...old, [target.id]: true }));
@@ -589,12 +575,36 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     } finally { sendLock.current = false; setSendBusy(false); }
   };
 
+  const uploadDraftFile = async (item: BotDraftFile) => {
+    if (item.uploaded || uploadFlights.current.has(item.id)) return;
+    uploadFlights.current.add(item.id);
+    // Locate by ID so switching conversations or creating a thread cannot misroute completion.
+    const patch = (updates: Partial<BotDraftFile>) => setAttachmentDrafts(old => Object.fromEntries(
+      Object.entries(old).map(([key, files]) => [key, files.some(file => file.id === item.id)
+        ? files.map(file => file.id === item.id ? { ...file, ...updates } : file) : files]),
+    ));
+    patch({ error: undefined });
+    try {
+      let uploaded: BotAttachment;
+      if (projectId) {
+        const result = await serverClient.uploadProjectFile(projectId, item.file.name, item.file);
+        uploaded = { projectId, projectPath: result.path, originalName: item.file.name, mimeType: item.file.type, sizeBytes: item.file.size };
+      } else {
+        const result = await serverClient.uploadFile(item.file);
+        uploaded = { fileId: result.id, originalName: result.originalName, mimeType: result.mimeType, sizeBytes: result.sizeBytes };
+      }
+      patch({ uploaded, error: undefined });
+    } catch (error) { patch({ error: projectError(error) }); }
+    finally { uploadFlights.current.delete(item.id); }
+  };
+
   const addFiles = (files: File[]) => {
     if (!canChat) return;
     if (files.some(file => !file.size || file.size > 20 * 1024 * 1024)) { toast.error('附件不能为空，单个附件不能超过 20 MB'); return; }
     if (files.length + draftFiles.length > MAX_BOT_ATTACHMENTS) { toast.error(`最多添加 ${MAX_BOT_ATTACHMENTS} 个附件`); return; }
     const items = files.map(file => ({ id: crypto.randomUUID(), file }));
     setAttachmentDrafts(old => ({ ...old, [draftKey]: [...(old[draftKey] ?? []), ...items].slice(0, MAX_BOT_ATTACHMENTS) }));
+    for (const item of items) void uploadDraftFile(item);
   };
 
   const react = useCallback(async (messageId: string) => {
@@ -700,7 +710,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   }
 
   if (!session?.authenticated) {
-    return frame(<AccessForm initialized={status.initialized} onDone={reload} />);
+    return frame(<AccessForm initialized={status.initialized} hasPasskey={status.hasPasskey} onDone={reload} />);
   }
 
   /* ── 菜单 ── */
@@ -793,6 +803,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       onSubmit={() => void send()}
       disabled={!canChat || Boolean(activeId && !active)}
       sending={sendBusy}
+      attachmentsPending={attachmentsPending}
       hasAttachments={draftFiles.length > 0}
        busy={activeRunning}
        onStop={() => void stop()}
@@ -801,7 +812,8 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       onScope={active && !projectId ? () => setMcpOpen(true) : undefined}
       onSettings={() => projectId ? setSettingsOpen(true) : openSettings(cloud.enabled ? 'bot' : 'agent')}
       attachLabel={t('botHome.attach')}
-       accessory={<>
+        accessory={<>
+          <TaskModelPicker sessionId={activeId} />
          {messageTarget && <div className="imsg-composer__target" role="status">
            <span>{messageTarget.kind === 'question' ? t('botHome.answerTarget') : t('botHome.continueTarget')}</span>
            <Button size="sm" variant="tertiary" onPress={clearTarget}>{t('botHome.clearTarget')}</Button>
@@ -809,7 +821,9 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
          {activeRunTarget && !messageTarget && <div className="imsg-composer__target">
            <Button size="sm" variant="tertiary" onPress={continueRun}>{t('botHome.continueCurrent')}</Button>
          </div>}
-         {draftFiles.length ? <BotAttachmentDraft files={draftFiles} sending={sendBusy} onRemove={id => setAttachmentDrafts(old => ({ ...old, [draftKey]: (old[draftKey] ?? []).filter(file => file.id !== id) }))} /> : null}
+          {draftFiles.length ? <BotAttachmentDraft files={draftFiles} sending={sendBusy}
+            onRetry={id => { const item = draftFiles.find(file => file.id === id); if (item) void uploadDraftFile(item); }}
+            onRemove={id => setAttachmentDrafts(old => ({ ...old, [draftKey]: (old[draftKey] ?? []).filter(file => file.id !== id) }))} /> : null}
        </>}
     />
   </>;

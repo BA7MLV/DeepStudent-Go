@@ -28,7 +28,8 @@ async function fixture(fn, policy = {}) {
     store.db.prepare('INSERT INTO users VALUES(?,?,?)').run(owner, owner, at);
     const config = new CloudConfiguration(store, path.join(root, 'config')), defaults = config.get(owner, true);
     config.save(owner, { ...defaults, providers: [{ id: 'fake', name: 'Fake', baseUrl: 'https://fake.invalid/v1', protocol: 'openai-chat', apiKey: 'fake', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fake', model: 'fake' }, botBudget: DEFAULT_BOT_BUDGET, policy: { ...defaults.policy, read: 'allow', write: 'allow', ...policy } });
-    const service = new BotApplicationService(store, { enqueue: () => runner?.enqueue(), cancel: id => runner?.cancel(id) });
+    const admission = new BotRunner(store, { configuration: config });
+    const service = new BotApplicationService(store, { enqueue: () => runner?.enqueue(), cancel: id => runner?.cancel(id), freezeModel: (...args) => admission.freezeModel(...args) });
     const thread = service.create(owner, 'bot', 'Parallel test');
     const message = service.send(owner, thread.id, { clientNonce: 'start', content: 'Read independently' });
     const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id).id;

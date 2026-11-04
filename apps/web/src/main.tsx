@@ -100,12 +100,10 @@ async function boot() {
     } else {
       const [bootstrap, session] = await Promise.all([serverClient.bootstrapStatus(), serverClient.session()]);
       if (session.authenticated && session.user) {
-        const worker = new URLSearchParams(location.search).has('cloud-worker');
-        await startCloud(session.user.id, worker);
-        if (worker) { await import('./cloud/worker'); await (await import('./cloud/workerClient')).startBrowserWorker(); return; }
+        await startCloud(session.user.id);
       }
       window.addEventListener('cloud-session-expired', stopCloud);
-      bootView = <CloudGate initialized={bootstrap.initialized} authenticated={session.authenticated} initialSecret={bootstrap.initialized ? '' : bootstrapSecret} />;
+      bootView = <CloudGate initialized={bootstrap.initialized} authenticated={session.authenticated} hasPasskey={bootstrap.hasPasskey} initialSecret={bootstrap.initialized ? '' : bootstrapSecret} />;
     }
   } catch (error) {
     bootView = <CloudGate initialized authenticated={false} error={(error as Error).message} />;

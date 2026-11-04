@@ -19,7 +19,7 @@ const errorText: Record<string, string> = {
   bootstrap_closed: '已经初始化过了，请直接登录',
 };
 
-export default function AccessForm({ initialized, onDone }: { initialized: boolean; onDone: () => void }) {
+export default function AccessForm({ initialized, hasPasskey = false, onDone }: { initialized: boolean; hasPasskey?: boolean; onDone: () => void }) {
   const [password, setPassword] = useState('');
   const [secret, setSecret] = useState('');
   const [error, setError] = useState('');
@@ -106,12 +106,12 @@ export default function AccessForm({ initialized, onDone }: { initialized: boole
         <Button type="submit" variant="primary" fullWidth isDisabled={busy || passkeyBusy}>
           {busy ? <Spinner size="sm" color="current" /> : initialized ? '登录' : '继续'}
         </Button>
-        {initialized && (
+        {initialized && hasPasskey ? (
           <Button type="button" variant="tertiary" fullWidth onPress={() => void passkeyLogin()} isDisabled={busy || passkeyBusy}>
             {passkeyBusy ? <Spinner size="sm" color="current" /> : <Sym name="key" />}
             使用 Passkey
           </Button>
-        )}
+        ) : null}
       </form>
     </div>
   );

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { addPlugin, assertCreationHint } from './plugin-tools.mjs';
+import { addPlugin, assertCreationHint, openChatPlugins } from './plugin-tools.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,7 +43,7 @@ try {
   const catalog = await (await context.request.get(`${origin}/api/v1/plugins`)).json();
   const chat = await context.newPage(); await chat.goto(`${origin}/#/chat`); await chat.getByTestId('course-chat-page').waitFor();
   await chat.evaluate(async project => { const { useCourseChat } = await import('/src/store/courseChat.ts'); await useCourseChat.getState().setProject(project); }, { folderId: catalog.scopes.projectFolders.find(p => p.projectId === a.id).folderId, name: a.name });
-  await chat.getByRole('button', { name: '组件', exact: true }).click();
+  await openChatPlugins(chat);
   await chat.locator('[data-plugin-slot="chat.sidepanel"]').frameLocator('iframe').getByText('仅项目A共享', { exact: true }).waitFor();
   await chat.evaluate(async () => { const { useCourseChat } = await import('/src/store/courseChat.ts'); await useCourseChat.getState().setProject(null); });
   await chat.locator(`[data-plugin-instance="${id}"]`).waitFor({ state: 'detached' });

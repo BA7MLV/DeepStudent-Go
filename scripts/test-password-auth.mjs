@@ -28,10 +28,13 @@ const reset = (input, target = dbPath) => new Promise((resolve, reject) => {
   child.stdin.end(input);
 });
 try {
+  const hasPasskey = async () => (await app.inject({ method: 'GET', url: '/api/v1/bootstrap/status' })).json().hasPasskey;
+  assert.equal(await hasPasskey(), false, 'uninitialized deployments have no Passkey login');
   assert.equal((await login({ password: oldPassword })).statusCode, 401);
   assert.equal((await reset(`${newPassword}\n${newPassword}\n`)).code, 1, 'uninitialized instances must use bootstrap instead of recovery');
   const secret = fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim();
   assert.equal((await app.inject({ method: 'POST', url: '/api/v1/bootstrap/initialize', headers: { 'x-bootstrap-secret': secret }, payload: { adminPassword: oldPassword } })).statusCode, 201);
+  assert.equal(await hasPasskey(), false, 'initialization alone must not enable Passkey login');
   const response = await login({ password: oldPassword });
   assert.equal(response.statusCode, 200, 'login only requires a password');
   const userId = response.json().user.id;
@@ -50,6 +53,7 @@ try {
   db = new Database(dbPath);
   const timestamp = new Date().toISOString();
   db.prepare('INSERT INTO passkey_credentials(id,user_id,public_key,counter,created_at) VALUES(?,?,?,?,?)').run('preserved-passkey', userId, Buffer.from('fixture'), 0, timestamp);
+  assert.equal(await hasPasskey(), true, 'registered Passkeys enable the login option');
   db.prepare('INSERT INTO webauthn_challenges(id,kind,challenge,created_at,expires_at) VALUES(?,?,?,?,?)').run('pending-login', 'authentication', 'pending-challenge', timestamp, '2099-01-01T00:00:00.000Z');
   const originalHash = db.prepare('SELECT password_hash FROM password_credentials').get().password_hash;
   for (const input of [`${newPassword}\nmismatch\n`, 'too-short\ntoo-short\n', `${'x'.repeat(257)}\n${'x'.repeat(257)}\n`, `${newPassword}\n`]) {
@@ -69,6 +73,7 @@ try {
   assert.equal((await app.inject({ method: 'POST', url: `/api/v1/pairing/${pairing.code}/exchange`, payload: {} })).statusCode, 403, 'old approved pairing revoked');
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM webauthn_challenges').get().count, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM passkey_credentials').get().count, 1);
+  assert.equal(await hasPasskey(), true, 'password recovery preserves Passkey availability');
   assert.equal(fs.readFileSync(marker, 'utf8'), 'keep original files');
   assert.equal((await login({ password: oldPassword })).statusCode, 401, 'old password no longer works');
   const newLogin = await login({ password: newPassword });
@@ -87,6 +92,10 @@ try {
   assert.equal((await login({ password: newPassword })).statusCode, 200, 'new password persists after restart');
   assert.equal(fs.existsSync(process.env.BOOTSTRAP_SECRET_FILE), false, 'recovery never reopens bootstrap');
   assert.equal((await app.inject({ method: 'GET', url: '/api/v1/bootstrap/status' })).json().initialized, true);
+  assert.equal(await hasPasskey(), true, 'Passkey availability persists after restart');
+  const currentLogin = await login({ password: newPassword });
+  assert.equal((await app.inject({ method: 'DELETE', url: '/api/v1/cloud/passkeys/preserved-passkey', headers: { cookie: currentLogin.headers['set-cookie'].split(';')[0] } })).statusCode, 200);
+  assert.equal(await hasPasskey(), false, 'removing the last Passkey hides the login option again');
   console.log('Password-only login, CSRF, safe CLI reset, credential revocation, data preservation and restart passed');
 } finally {
   db?.close();

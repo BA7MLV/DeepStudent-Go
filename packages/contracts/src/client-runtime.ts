@@ -27,13 +27,14 @@ export interface RuntimePatch { path: string[]; value?: RuntimeJson; remove?: bo
 export type RuntimeFrame = RuntimeSnapshot | { type: 'delta'; baseRevision: number; revision: number; changes: RuntimePatch[] };
 /** Durable task facts; arbitrary executor payloads are JSON, never JS objects. */
 export type RuntimeTask = {
+  frozenModel?: import('./model-gateway.js').FrozenTaskModel;
   source?: { kind: 'app' | 'bot'; name?: string };
   resourceName?: string;
   executor?: 'node' | 'browser';
   id: string;
   kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce';
   resource: string;
-  status: 'queued' | 'running' | 'waiting_user' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+   status: 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   input: { [key: string]: RuntimeJson };
   progress: { [key: string]: RuntimeJson } | null;
   result: RuntimeJson;
@@ -119,8 +120,6 @@ export type LearningProduct =
   | { kind: 'courseDanmaku'; expected: LearningDanmaku | null; value: LearningDanmaku | null }
   | { kind: 'courseDerivation'; courseId: string; expected: LearningCourseState; value: LearningCourseState };
 export type LearningProductCommand = LearningProduct & { mutationId: string; permissionId?: string; baseRevision?: number };
-export interface ExecutorArtifacts { taskId: string; operationId: string; products: LearningProductCommand[] }
-export interface ExecutorBlobAdmission { taskId: string; operationId: string; sha256: string; size: number; contentType: string }
 export interface LearningSkill { id: number; name: string; description: string; body: string; enabled: 0 | 1; builtin: 0 | 1; updatedAt: number; mcpRequired?: string[] }
 export interface LearningSkillReference { id: number; skillId: number; path: string; body: string }
 export interface LearningInk { id: string; materialId: string; surface: string; tool: 'pen' | 'highlight'; color: string; width: number; height: number; points: { x: number; y: number; pressure: number }[]; createdAt: number; renderer?: 'freehand-v1'; nib?: 'pressure' | 'ballpoint' | 'brush'; opacity?: number; smoothing?: number; input?: 'touch' | 'pen' | 'mouse'; anchor?: { start: number; end: number; exact: string; prefix: string; suffix: string; unit: number; endUnit?: number; unitLabel: string; source: 'pdf' | 'docx' | 'md' | 'html' }; rects?: { x: number; y: number; w: number; h: number }[] }
@@ -172,6 +171,17 @@ export interface RuntimeTaskSubmit {
   resource: string;
   input: { [key: string]: RuntimeJson };
 }
+/** Commands share one durable backend across Chat, Bot and IM. IDs are exact, never display names. */
+export type DelegationCommand =
+  | { action: 'bot.default'; threadId: string; expected: import('./model-gateway.js').TaskModelSelection | null; value: import('./model-gateway.js').TaskModelSelection | null }
+  | { action: 'bot.read'; threadId: string }
+  | { action: 'models'; query?: string }
+  | { action: 'create'; operationId: string; parentTaskId?: string; parentRunId?: string; goal: string; constraints: string[]; completionCriteria: string[]; context: { source: string; version: string; text: string }[]; modelSelection?: import('./model-gateway.js').TaskModelSelection; dependsOn?: string[]; background?: boolean }
+  | { action: 'read' | 'cancel' | 'promote'; taskId: string }
+  | { action: 'session.create'; operationId: string; title: string; defaultModel?: import('./model-gateway.js').TaskModelSelection; sourceSessionId?: number; sourceMessageId?: number; originTaskId?: string; originRunId?: string }
+  | { action: 'session.read'; sessionId: number }
+  | { action: 'session.default'; sessionId: number; expected: import('./model-gateway.js').TaskModelSelection | null; value: import('./model-gateway.js').TaskModelSelection | null }
+  | { action: 'session.send'; operationId: string; sessionId: number; text: string; modelSelection?: import('./model-gateway.js').TaskModelSelection; parentTaskId?: string; parentRunId?: string; background?: boolean };
 export type RuntimeTaskAdmission = { status: 'missing' } | { status: 'accepted'; task: RuntimeTask };
 
 export type PreferenceKey = 'contextWindow' | 'asrConcurrency' | 'thinkingEnabled' | 'thinkingEffort' | 'captionScale'
@@ -182,17 +192,3 @@ export interface PreferencesCommand {
   changes: { key: PreferenceKey; value: RuntimeJson; expected: RuntimeJson }[];
 }
 export interface PreferencesProjection { values: { [key: string]: RuntimeJson } }
-
-export interface ExecutorReport { taskId: string; progress: { [key: string]: RuntimeJson } }
-export interface ExecutorCompletion { taskId: string; operationId: string; outcome: { status: 'completed'; result: RuntimeJson } | { status: 'failed'; error: string } }
-export interface ExecutorCompletionReceipt { taskId: string; status: 'completed' | 'failed' }
-
-/** No row selector: the target is fixed by the admitted chat task's rowId. */
-export interface ExecutorConversationReset { taskId: string; operationId: string; permissionId?: string; mode: 'continue' | 'retry' }
-export interface ExecutorConversationResetReceipt { mode: 'continue' | 'retry'; sessionId: number; target: LearningMessage; user: LearningMessage; removed: LearningMessage[] }
-export interface ExecutorInteraction { sequence: number; nonce: string; action: 'answerAsk' | 'confirmPlan' | 'cancelPlan'; target: string; value: RuntimeJson; attempt?: number }
-export interface ExecutorInteractionsFrame { type: 'baseline' | 'commands'; taskId: string; cursor: number; commands: ExecutorInteraction[] }
-export interface ExecutorInteractionDelivery { taskId: string; sequence: number; phase: 'begin' | 'executing' | 'applied' | 'rejected' | 'uncertain' }
-export interface ExecutorInteractionReceipt { sequence: number; phase: 'started' | 'applied' | 'rejected' | 'uncertain' }
-export interface ExecutorAuthorizationFrame { permissionId: string; status: 'pending' | 'approved' | 'rejected' | 'consumed' | 'finished' | 'expired' }
-export interface InteractionReconcile { taskId: string; sequence: number; observed: string; action: 'settle' | 'resume' | 'hold' }

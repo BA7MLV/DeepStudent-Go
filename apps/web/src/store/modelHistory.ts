@@ -11,7 +11,7 @@ export async function sessionCacheKey(sessionId: number): Promise<string> {
     await patchConversationSession(sessionId, { promptCacheKey: key });
     return key;
   };
-  return cloud.worker ? save() : db.transaction('rw', db.chatSessions, save);
+  return db.transaction('rw', db.chatSessions, save);
 }
 
 /** Whole turns, durable cut, 20% headroom. A short new question cannot resurrect

@@ -12,6 +12,7 @@ import { PluginFiles } from '../plugins/files.js';
 import { learningTaskProvider } from '@wangke/contracts/learning-plugins';
 import { fileOperationId as operationFileId, receiveFile } from '../cloud/files.js';
 import { taskDto } from '../cloud/tasks.js';
+import { cancelOwnerTask } from '../cloud/task-cancellation.js';
 import { mediaMime } from '../cloud/image.js';
 import { validateStudyMutation } from './tools/study-validation.js';
 import { createModelGateway } from './model-gateway-factory.js';
@@ -23,6 +24,8 @@ import { notebookTools } from './notebook-tools.js';
 import { ContextGovernor } from './context-governor.js';
 import { resultBudgetSchema } from './result-budget.js';
 import { prepareVisionImage } from './vision.js';
+import { TaskDelegationService } from '../cloud/delegation.js';
+import { DELEGATION_TOOLS } from './delegation-tools.js';
 
 export interface StudyContext {
   owner: string; thread: string; run: string; step: string; signal: AbortSignal;
@@ -59,6 +62,28 @@ export class StudyTools {
   readonly plugins = new Map<string, StudyToolPlugin>();
   constructor(readonly store: DatabaseStore, readonly config: CloudConfiguration, readonly filesDir: string, readonly fetcher: typeof fetch = fetch) {
     const records = new CloudRecords(store);
+    const delegation = new TaskDelegationService(store, config);
+    for (const definition of DELEGATION_TOOLS) this.register({ name: definition.function.name, description: definition.function.description,
+      properties: (definition.function.parameters as any).properties, required: (definition.function.parameters as any).required,
+      capability: () => 'read', execute: async (args, c) => {
+        c.checkActive();
+        if (definition.function.name === 'models_discover') return delegation.models(c.owner, args.query);
+        if (args.action === 'wait') {
+          if (!Array.isArray(args.taskIds) || !args.taskIds.length || args.taskIds.length > 8) throw new Error('invalid_task_ids');
+          const ids = [...new Set(args.taskIds as string[])];
+          const tasks = ids.map(id => store.db.prepare('SELECT t.* FROM cloud_tasks t JOIN task_delegations d ON d.task_id=t.id WHERE t.id=? AND t.owner_id=? AND d.parent_run_id=?').get(id, c.owner, c.run) as any);
+          if (tasks.some(t => !t)) throw new Error('task_not_owned_by_run');
+          if (tasks.every(t => ['completed','failed','cancelled','interrupted'].includes(t.status))) return { tasks: tasks.map(taskDto), waiting: false };
+          const existing = store.db.prepare('SELECT id FROM run_waits WHERE run_id=? AND step_id=?').get(c.run, c.step) as any;
+          const id = existing?.id ?? crypto.randomUUID();
+          if (!existing) store.db.prepare("INSERT INTO run_waits(id,run_id,step_id,task_ids,status,created_at) VALUES(?,?,?,?,'waiting',?)").run(id, c.run, c.step, JSON.stringify(ids), new Date().toISOString());
+          return { waiting: true, waitId: id, taskIds: ids };
+        }
+        // Command and parent identities come from the tool envelope, never model arguments.
+        const command = { ...args, ...(['create','session.create','session.send'].includes(args.action) ? { operationId: `delegate:${c.step}` } : {}), ...(['create','session.send'].includes(args.action) ? { parentRunId: c.run } : {}), ...(args.action === 'session.create' ? { originRunId: c.run } : {}) };
+        return delegation.command(c.owner, command);
+      },
+    });
     for (const plugin of notebookTools(store)) this.register(plugin);
     this.register({ name: 'board_threads', description: 'List owned active Bot conversations with exact thread IDs for /system/board plugin schedules. Includes currentThreadId; never guess IDs. Read /system/board/README.md for the schedule format, then use edit on the plugin schedules.json. This only lists conversations, it does not schedule or grant permissions.', properties: { offset: { type: 'integer', minimum: 0 } }, required: [], capability: () => 'read', systemResource: true, execute: async (a, c) => {
       c.checkActive();
@@ -144,7 +169,7 @@ export class StudyTools {
       }
       const task = store.db.prepare('SELECT * FROM cloud_tasks WHERE id=? AND owner_id=?').get(a.taskId, c.owner) as any;
       if (!task) throw new Error('task_not_found');
-      if (a.action === 'cancel') store.db.prepare("UPDATE cloud_tasks SET status='cancelled' WHERE id=? AND status IN ('queued','running','waiting_user')").run(a.taskId);
+      if (a.action === 'cancel') cancelOwnerTask(store, c.owner, a.taskId);
       else if (a.action !== 'status') throw new Error('invalid_action');
       return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(a.taskId));
     } });

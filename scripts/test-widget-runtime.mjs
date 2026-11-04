@@ -26,13 +26,13 @@ const listen = (type, fn) => {
 let attributes = 0;
 const parent = { postMessage: data => messages.push(data) };
 const context = {
-  parent, document: { body: null, documentElement: { style: { setProperty() {} }, setAttribute() { attributes++; } }, addEventListener: listen },
+  parent, document: { body: null, documentElement: { classList: { toggle() {} }, style: { setProperty() {} }, setAttribute() { attributes++; } }, addEventListener: listen },
   ResizeObserver: class { observe() {} }, MutationObserver: class { observe() {} },
   CustomEvent: class {}, requestAnimationFrame: () => 1, setTimeout, clearTimeout, URL,
   window: { addEventListener: listen, dispatchEvent() {} }, navigator: {},
 };
 vm.runInNewContext(bootstrap, context);
-const emit = (type, event) => handlers.get(type)?.forEach(fn => fn(event));
+const emit = (type, event) => handlers.get(type)?.forEach(fn => fn({ isTrusted: true, ...event }));
 emit('error', { target: context.window, message: 'initialization broke' });
 emit('error', { target: context.window, message: 'initialization broke' });
 emit('unhandledrejection', { reason: new Error('async broke') });

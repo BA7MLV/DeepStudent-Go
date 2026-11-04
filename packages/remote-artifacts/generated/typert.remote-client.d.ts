@@ -5,7 +5,7 @@ import type {
   TypertRemoteInfo,
   TypertRemoteMethod,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { BotJournalFrame, ClientLearningCommand, ExecutorArtifacts, ExecutorAuthorizationFrame, ExecutorBlobAdmission, ExecutorCompletion, ExecutorCompletionReceipt, ExecutorConversationReset, ExecutorConversationResetReceipt, ExecutorInteractionDelivery, ExecutorInteractionReceipt, ExecutorInteractionsFrame, ExecutorReport, ExecutorResourceCommand, InteractionReconcile, PreferencesCommand, PreferencesProjection, RuntimeCommand, RuntimeFileIntent, RuntimeFileIntentsFrame, RuntimeFrame, RuntimeJson, RuntimeRead, RuntimeReceipt, RuntimeRecordsCommit, RuntimeRecordsPage, RuntimeRecordsReceipt, RuntimeSessionFrame, RuntimeSnapshot, RuntimeTask, RuntimeTaskAdmission, RuntimeTaskFrame, RuntimeTasksFrame, RuntimeTaskSubmit, SessionJournalFrame, SessionJournalRequest } from '@wangke/contracts/client-runtime'
+import type { BotJournalFrame, ClientLearningCommand, DelegationCommand, PreferencesCommand, PreferencesProjection, RuntimeCommand, RuntimeFileIntent, RuntimeFileIntentsFrame, RuntimeFrame, RuntimeJson, RuntimeRead, RuntimeReceipt, RuntimeRecordsCommit, RuntimeRecordsPage, RuntimeRecordsReceipt, RuntimeSessionFrame, RuntimeSnapshot, RuntimeTask, RuntimeTaskAdmission, RuntimeTaskFrame, RuntimeTasksFrame, RuntimeTaskSubmit, SessionJournalFrame, SessionJournalRequest } from '@wangke/contracts/client-runtime'
 import type { ResourceCommand } from '@wangke/contracts/resources'
 import type { SavePluginLayout, SystemDocument } from '@wangke/contracts/system'
 
@@ -13,11 +13,11 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$636c69656e7452756e74696d65 {
     command: (request: RuntimeCommand) => Promise<RemoteResult<RuntimeJson>>
     commitRecords: (request: RuntimeRecordsCommit) => Promise<RemoteResult<RuntimeRecordsReceipt>>
+    delegation: (request: DelegationCommand) => Promise<RemoteResult<RuntimeJson>>
     editLearning: (request: ClientLearningCommand) => Promise<RemoteResult<RuntimeRecordsReceipt>>
     fileIntent: (id: string) => Promise<RemoteResult<RuntimeFileIntent | null>>
     read: (request: RuntimeRead) => Promise<RemoteResult<RuntimeSnapshot>>
     receipt: (operationId: string) => Promise<RemoteResult<RuntimeReceipt>>
-    reconcileInteraction: (request: import('@wangke/contracts/client-runtime').InteractionReconcile) => Promise<RemoteResult<RuntimeJson>>
     recordsPage: (after: number) => Promise<RemoteResult<RuntimeRecordsPage>>
     resolveFileIntent: (id: string, observed: string | null, action: 'retry' | 'discard') => Promise<RemoteResult<RuntimeFileIntent>>
     resourceCommand: (request: ResourceCommand) => Promise<RemoteResult<RuntimeJson>>
@@ -34,28 +34,14 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     watchTask: (taskId: string, signal?: AbortSignal) => RemoteStreamHandle<RuntimeTaskFrame, never>
     watchTasks: (signal?: AbortSignal) => RemoteStreamHandle<RuntimeTasksFrame, never>
   }
-  interface TypertRemoteNamespace$6578656375746f7252756e74696d65 {
-    admitBlob: (request: ExecutorBlobAdmission) => Promise<RemoteResult<RuntimeJson>>
-    beginExecution: (taskId: string) => Promise<RemoteResult<RuntimeJson>>
-    commitArtifacts: (request: ExecutorArtifacts) => Promise<RemoteResult<RuntimeRecordsReceipt>>
-    complete: (request: ExecutorCompletion) => Promise<RemoteResult<ExecutorCompletionReceipt>>
-    deliverInteraction: (request: ExecutorInteractionDelivery) => Promise<RemoteResult<ExecutorInteractionReceipt>>
-    read: (taskId: string) => Promise<RemoteResult<RuntimeTask>>
-    receipt: (taskId: string, operationId: string) => Promise<RemoteResult<RuntimeReceipt>>
-    report: (request: ExecutorReport) => Promise<RemoteResult<{ leaseExpiresAt: string; }>>
-    resetConversation: (request: ExecutorConversationReset) => Promise<RemoteResult<ExecutorConversationResetReceipt>>
-    resourceCommand: (request: ExecutorResourceCommand) => Promise<RemoteResult<RuntimeJson>>
-    watchAuthorization: (taskId: string, permissionId: string, signal?: AbortSignal) => RemoteStreamHandle<ExecutorAuthorizationFrame, never>
-    watchInteractions: (taskId: string, signal?: AbortSignal) => RemoteStreamHandle<ExecutorInteractionsFrame, never>
-  }
   interface TypertRemoteMap {
     'clientRuntime/command': (request: RuntimeCommand) => Promise<RemoteResult<RuntimeJson>>
     'clientRuntime/commitRecords': (request: RuntimeRecordsCommit) => Promise<RemoteResult<RuntimeRecordsReceipt>>
+    'clientRuntime/delegation': (request: DelegationCommand) => Promise<RemoteResult<RuntimeJson>>
     'clientRuntime/editLearning': (request: ClientLearningCommand) => Promise<RemoteResult<RuntimeRecordsReceipt>>
     'clientRuntime/fileIntent': (id: string) => Promise<RemoteResult<RuntimeFileIntent | null>>
     'clientRuntime/read': (request: RuntimeRead) => Promise<RemoteResult<RuntimeSnapshot>>
     'clientRuntime/receipt': (operationId: string) => Promise<RemoteResult<RuntimeReceipt>>
-    'clientRuntime/reconcileInteraction': (request: import('@wangke/contracts/client-runtime').InteractionReconcile) => Promise<RemoteResult<RuntimeJson>>
     'clientRuntime/recordsPage': (after: number) => Promise<RemoteResult<RuntimeRecordsPage>>
     'clientRuntime/resolveFileIntent': (id: string, observed: string | null, action: 'retry' | 'discard') => Promise<RemoteResult<RuntimeFileIntent>>
     'clientRuntime/resourceCommand': (request: ResourceCommand) => Promise<RemoteResult<RuntimeJson>>
@@ -71,33 +57,20 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'clientRuntime/watchSessionJournal': (request: SessionJournalRequest, signal?: AbortSignal) => RemoteStreamHandle<SessionJournalFrame, never>
     'clientRuntime/watchTask': (taskId: string, signal?: AbortSignal) => RemoteStreamHandle<RuntimeTaskFrame, never>
     'clientRuntime/watchTasks': (signal?: AbortSignal) => RemoteStreamHandle<RuntimeTasksFrame, never>
-    'executorRuntime/admitBlob': (request: ExecutorBlobAdmission) => Promise<RemoteResult<RuntimeJson>>
-    'executorRuntime/beginExecution': (taskId: string) => Promise<RemoteResult<RuntimeJson>>
-    'executorRuntime/commitArtifacts': (request: ExecutorArtifacts) => Promise<RemoteResult<RuntimeRecordsReceipt>>
-    'executorRuntime/complete': (request: ExecutorCompletion) => Promise<RemoteResult<ExecutorCompletionReceipt>>
-    'executorRuntime/deliverInteraction': (request: ExecutorInteractionDelivery) => Promise<RemoteResult<ExecutorInteractionReceipt>>
-    'executorRuntime/read': (taskId: string) => Promise<RemoteResult<RuntimeTask>>
-    'executorRuntime/receipt': (taskId: string, operationId: string) => Promise<RemoteResult<RuntimeReceipt>>
-    'executorRuntime/report': (request: ExecutorReport) => Promise<RemoteResult<{ leaseExpiresAt: string; }>>
-    'executorRuntime/resetConversation': (request: ExecutorConversationReset) => Promise<RemoteResult<ExecutorConversationResetReceipt>>
-    'executorRuntime/resourceCommand': (request: ExecutorResourceCommand) => Promise<RemoteResult<RuntimeJson>>
-    'executorRuntime/watchAuthorization': (taskId: string, permissionId: string, signal?: AbortSignal) => RemoteStreamHandle<ExecutorAuthorizationFrame, never>
-    'executorRuntime/watchInteractions': (taskId: string, signal?: AbortSignal) => RemoteStreamHandle<ExecutorInteractionsFrame, never>
   }
   interface TypertRemoteNamespaceMap {
     'clientRuntime': TypertRemoteNamespace$636c69656e7452756e74696d65
-    'executorRuntime': TypertRemoteNamespace$6578656375746f7252756e74696d65
   }
 }
 
 export declare const TYPERT_REMOTE: TypertRemoteInfo<{
   readonly 'clientRuntime/command': TypertRemoteMethod<{ readonly 'request': RuntimeCommand }, RuntimeJson>
   readonly 'clientRuntime/commitRecords': TypertRemoteMethod<{ readonly 'request': RuntimeRecordsCommit }, RuntimeRecordsReceipt>
+  readonly 'clientRuntime/delegation': TypertRemoteMethod<{ readonly 'request': DelegationCommand }, RuntimeJson>
   readonly 'clientRuntime/editLearning': TypertRemoteMethod<{ readonly 'request': ClientLearningCommand }, RuntimeRecordsReceipt>
   readonly 'clientRuntime/fileIntent': TypertRemoteMethod<{ readonly 'id': string }, RuntimeFileIntent | null>
   readonly 'clientRuntime/read': TypertRemoteMethod<{ readonly 'request': RuntimeRead }, RuntimeSnapshot>
   readonly 'clientRuntime/receipt': TypertRemoteMethod<{ readonly 'operationId': string }, RuntimeReceipt>
-  readonly 'clientRuntime/reconcileInteraction': TypertRemoteMethod<{ readonly 'request': import('@wangke/contracts/client-runtime').InteractionReconcile }, RuntimeJson>
   readonly 'clientRuntime/recordsPage': TypertRemoteMethod<{ readonly 'after': number }, RuntimeRecordsPage>
   readonly 'clientRuntime/resolveFileIntent': TypertRemoteMethod<{ readonly 'id': string; readonly 'observed': string | null; readonly 'action': 'retry' | 'discard' }, RuntimeFileIntent>
   readonly 'clientRuntime/resourceCommand': TypertRemoteMethod<{ readonly 'request': ResourceCommand }, RuntimeJson>
@@ -113,18 +86,6 @@ export declare const TYPERT_REMOTE: TypertRemoteInfo<{
   readonly 'clientRuntime/watchSessionJournal': TypertRemoteMethod<{ readonly 'request': SessionJournalRequest }, SessionJournalFrame, 'stream'>
   readonly 'clientRuntime/watchTask': TypertRemoteMethod<{ readonly 'taskId': string }, RuntimeTaskFrame, 'stream'>
   readonly 'clientRuntime/watchTasks': TypertRemoteMethod<{  }, RuntimeTasksFrame, 'stream'>
-  readonly 'executorRuntime/admitBlob': TypertRemoteMethod<{ readonly 'request': ExecutorBlobAdmission }, RuntimeJson>
-  readonly 'executorRuntime/beginExecution': TypertRemoteMethod<{ readonly 'taskId': string }, RuntimeJson>
-  readonly 'executorRuntime/commitArtifacts': TypertRemoteMethod<{ readonly 'request': ExecutorArtifacts }, RuntimeRecordsReceipt>
-  readonly 'executorRuntime/complete': TypertRemoteMethod<{ readonly 'request': ExecutorCompletion }, ExecutorCompletionReceipt>
-  readonly 'executorRuntime/deliverInteraction': TypertRemoteMethod<{ readonly 'request': ExecutorInteractionDelivery }, ExecutorInteractionReceipt>
-  readonly 'executorRuntime/read': TypertRemoteMethod<{ readonly 'taskId': string }, RuntimeTask>
-  readonly 'executorRuntime/receipt': TypertRemoteMethod<{ readonly 'taskId': string; readonly 'operationId': string }, RuntimeReceipt>
-  readonly 'executorRuntime/report': TypertRemoteMethod<{ readonly 'request': ExecutorReport }, { leaseExpiresAt: string; }>
-  readonly 'executorRuntime/resetConversation': TypertRemoteMethod<{ readonly 'request': ExecutorConversationReset }, ExecutorConversationResetReceipt>
-  readonly 'executorRuntime/resourceCommand': TypertRemoteMethod<{ readonly 'request': ExecutorResourceCommand }, RuntimeJson>
-  readonly 'executorRuntime/watchAuthorization': TypertRemoteMethod<{ readonly 'taskId': string; readonly 'permissionId': string }, ExecutorAuthorizationFrame, 'stream'>
-  readonly 'executorRuntime/watchInteractions': TypertRemoteMethod<{ readonly 'taskId': string }, ExecutorInteractionsFrame, 'stream'>
 }>
 export default TYPERT_REMOTE
 //# sourceMappingURL=typert.remote-client.d.ts.map

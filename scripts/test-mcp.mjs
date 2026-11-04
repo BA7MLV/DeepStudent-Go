@@ -9,7 +9,6 @@ import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { McpRepository } from '../apps/api/src/mcp/repository.ts';
 import { McpManager } from '../apps/api/src/mcp/manager.ts';
-import { workerTokens } from '../apps/api/src/cloud/workerAuth.ts';
 import { BotRunner } from '../apps/api/src/agent/runner.ts';
 import { mcpResultText } from '../packages/contracts/src/mcp.ts';
 
@@ -134,17 +133,17 @@ try {
     mutate(sessionId, null, session);
     const taskId = crypto.randomUUID(), token = crypto.randomUUID(), timestamp = new Date().toISOString();
     apiStore.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at) VALUES(?,?,?,?,?,?,'running',?,?)").run(taskId, apiOwner, token, kind, `session:${sessionId}`, JSON.stringify({ sessionId }), timestamp, timestamp);
-    workerTokens.set(token, { id: apiOwner, taskId });
-    const headers = { authorization: `Bearer ${token}` };
+    const retired={authorization:`Bearer ${token}`};
+    assert.equal((await request('POST','/mcp/catalog',{sessionId},retired)).statusCode,401);
+    const headers = { cookie };
     const catalog = await request('POST', '/mcp/catalog', { sessionId }, headers);
     assert.equal(catalog.statusCode, 200, catalog.body); assert.equal(catalog.json().tools.length, 2);
     const called = await request('POST', '/mcp/call', { sessionId, name: apiTool.name, arguments: { text: kind } }, headers);
     assert.equal(called.statusCode, 200, called.body); assert.match(called.json().text, new RegExp(`fixture:${kind}`));
     assert.equal((await request('POST', '/mcp/catalog', { sessionId: 999 }, headers)).statusCode, 400);
-    assert.equal((await request('POST', '/mcp', input('worker-write'), headers)).statusCode, 403);
+    assert.equal((await request('POST', '/mcp', input('worker-write'), retired)).statusCode, 401);
     mutate(sessionId, session, { ...session, mcpServerIds: [] });
     assert.equal((await request('POST', '/mcp/call', { sessionId, name: apiTool.name, arguments: {} }, headers)).statusCode, 400);
-    workerTokens.delete(token);
   }
   const thread = (await app.inject({ method: 'POST', url: '/api/v1/threads', headers: { cookie }, payload: { mode: 'bot', title: 'MCP bot' } })).json();
   assert.equal((await request('PUT', '/mcp/scope', { threadId: thread.id, serverIds: [] })).statusCode, 200);

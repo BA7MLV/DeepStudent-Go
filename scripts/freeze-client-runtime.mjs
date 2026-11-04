@@ -48,12 +48,15 @@ const tests = [
   ['compiled-host', ['node', 'scripts/test-client-runtime-build.mjs']],
   ['licenses', ['node', 'scripts/test-client-runtime-licenses.mjs']],
   ['runtime', ts('scripts/test-client-runtime.mjs')],
-  ['products', ts('scripts/test-learning-products.mjs')],
-  ['executor-runtime', ts('scripts/test-executor-runtime.mjs')],
-  ['executor-interactions', ts('scripts/test-executor-interactions.mjs')],
-  ['executor-chat', ts('scripts/e2e-executor-chat.mjs')],
-  ['executor-entries', ts('scripts/e2e-executor-entries.mjs')],
-  ['worker-products', ts('scripts/e2e-worker-products.mjs')],
+  // Executor bearer/lease tests below belong to the retired architecture.
+  // Preserve their files as historical evidence; exercise their business and
+  // authorization contracts through the actual server producers instead.
+  ['products', ts('scripts/test-plugin-learning.mjs')],
+  ['server-routing-chat-artifacts', ts('scripts/test-task-executors.mjs')],
+  ['server-question-permissions-cas', ts('scripts/test-server-question-extraction.mjs')],
+  ['server-media-products', ts('scripts/test-server-media.mjs')],
+  ['server-media-policy', ts('scripts/test-media-policy.mjs')],
+  ['browser-closed-products-recovery', ts('scripts/e2e-server-task-execution.mjs')],
   ['node-edit', ts('scripts/test-node-chat-edit-e2e.mjs')],
   ['cloud', ts('scripts/test-cloud-e2e.mjs')],
   ['plugin-platform', ts('scripts/e2e-plugin-platform.mjs')],

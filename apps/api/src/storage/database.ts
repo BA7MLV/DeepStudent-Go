@@ -9,6 +9,7 @@ import { migrateMessageSync } from './message-sync-migration.js';
 import { migrateClientRuntime } from '../realtime/migration.js';
 import { ensureLearningResults } from '../plugins/learning-results.js';
 import { migrateFileIntents } from './file-intents.js';
+import { migrateTaskModels } from './task-model.js';
 
 const MIGRATIONS: Array<[number, string]> = [
   [1, `
@@ -586,7 +587,7 @@ export class DatabaseStore {
           if (markers.some(Boolean) && !markers.every(Boolean)) throw new Error(`schema_layout_partial_v${group.version}: restore a consistent backup before upgrading`);
           if (markers.every(Boolean)) {
             for (const table of group.tables) {
-              const evolved = (name: string) => table === 'gateway_inbox' && name === 'received_at' || table === 'bot_requests' && ['cache_creation_tokens', 'reasoning_tokens'].includes(name) || table === 'system_file_entries' && name === 'intent_id';
+              const evolved = (name: string) => table === 'gateway_inbox' && name === 'received_at' || table === 'bot_requests' && ['cache_creation_tokens', 'reasoning_tokens'].includes(name) || table === 'system_file_entries' && name === 'intent_id' || table === 'model_observations' && ['task_id', 'reserved_tokens', 'price_json'].includes(name);
               const actual = columns(this.db, table).filter(c => !evolved(c.name));
               const trusted = columns(expected, table).filter(c => !evolved(c.name));
               if (JSON.stringify(actual) !== JSON.stringify(trusted)) throw new Error(`schema_layout_untrusted_${table}`);
@@ -637,7 +638,8 @@ export class DatabaseStore {
            this.db.prepare('UPDATE resource_trash SET archived=0').run();
            this.db.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(33,?)').run(new Date().toISOString());
          }
-        migrateMessageSync(this.db);
+         migrateTaskModels(this.db);
+         migrateMessageSync(this.db);
          migrateClientRuntime(this.db);
          // Schema identity must include the learning result journal before a
          // server/plugin starts; runtime activation must not mutate the schema.

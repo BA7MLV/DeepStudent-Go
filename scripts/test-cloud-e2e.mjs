@@ -2,14 +2,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
-import { register } from 'node:module';
 import { chromium } from 'playwright';
 import { fixtureBrowserDomain } from './fixture-domain.mjs';
 
-register('./cloud-e2e-source-loader.mjs', import.meta.url);
 
 const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/cloud-e2e-');
-const evidence = { command: 'node --import tsx scripts/test-cloud-e2e.mjs', mode: 'source Vite dev + isolated source API/SQLite + source Node task runtime (test-only loader) + mock model; existing compiled shared packages', nodeVersion: process.version, startedAt: new Date().toISOString(), steps: [], errors: [] };
+const evidence = { command: 'node --import tsx scripts/test-cloud-e2e.mjs', mode: 'source Vite dev + isolated source API/SQLite + compiled Node task runtime/workers + mock model; run build:api first', nodeVersion: process.version, startedAt: new Date().toISOString(), steps: [], errors: [] };
 console.log(`Cloud E2E evidence: ${directory}`);
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/bootstrap-secret'), FILES_DIR: path.join(directory, 'files') });
 const reservation = net.createServer();
@@ -292,7 +290,7 @@ try {
   await until(async () => {
     const task = await (await a.request.get(`${origin}/api/v1/cloud/tasks/${cover.id}`)).json();
     if (task.status === 'failed') throw new Error(task.error);
-    if (task.status === 'completed') assert.equal(task.executor, 'browser');
+    if (task.status === 'completed') assert.equal(task.executor, 'node');
     return task.status === 'completed';
   }, 'browser video cover generation');
   const coverRecord = (await (await a.request.get(`${origin}/api/v1/cloud/record?table=covers&key=${encodeURIComponent(JSON.stringify(videoId))}`)).json()).value;

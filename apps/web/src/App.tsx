@@ -13,7 +13,6 @@ import { preloadOnIntent } from './utils/preload';
 import { FeedbackHost, PageLoader } from './ui';
 import { openSettingsFromHash } from './components/settingsDialogStore';
 import CloudActivity from './cloud/Activity';
-import BrowserWorkerHost from './cloud/BrowserWorkerHost';
 import { useBotPanel } from './store/botPanel';
 
 /*
@@ -119,7 +118,6 @@ export default function App() {
       <div className="live-share-host">
         <LiveShareBar />
         <CloudActivity />
-        <BrowserWorkerHost />
         <FeedbackHost />
         {/* 设置是全局弹窗而不是路由：挂在 App 根部一次，任何页面都能唤起，
             且唤起时不会把用户当前位置顶掉（见 components/SettingsModal.tsx）。 */}

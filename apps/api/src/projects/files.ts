@@ -105,6 +105,36 @@ export class ProjectFiles {
     });
   }
 
+  /** Bounded metadata revision for a settled workspace. Never follows links or
+   * reads file contents (including sockets/FIFOs created by sandbox commands).
+   * Unlike list(), every entry contributes, even an unreadable/special one. */
+  workspaceRevision(id: string) {
+    const hash = crypto.createHash('sha256');
+    let count = 0;
+    const visit = (parts: string[]) => this.directory(id, parts, directory => {
+      if (parts.length > 64) throw new ProjectError('workspace_revision_too_large', 413);
+      const before = fs.statSync(directory);
+      hash.update(JSON.stringify([parts, revision(before), before.dev, before.mode]));
+      const names: string[] = [];
+      const reader = fs.opendirSync(directory);
+      try {
+        for (let entry = reader.readSync(); entry; entry = reader.readSync()) {
+          if (++count > 20000) throw new ProjectError('workspace_revision_too_large', 413);
+          names.push(entry.name);
+        }
+      } finally { reader.closeSync(); }
+      names.sort();
+      for (const name of names) {
+        const stat = fs.lstatSync(path.join(directory, name));
+        hash.update(JSON.stringify([name, revision(stat), stat.dev, stat.mode, stat.nlink]));
+        if (stat.isDirectory()) visit([...parts, name]);
+      }
+      if (revision(before) !== revision(fs.statSync(directory))) throw new ProjectError('workspace_revision_unstable', 409);
+    });
+    visit([]);
+    return hash.digest('hex');
+  }
+
   open(id: string, value: string) {
     return this.parent(id, value, file => {
       const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);

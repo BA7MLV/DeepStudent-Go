@@ -22,7 +22,7 @@ function accessError(status: number): VideoPlaybackError {
 /** Only probe headers. The native media provider owns buffering, seeking and cancellation. */
 export async function getVideoPlaybackSource(id: string, signal: AbortSignal): Promise<VideoPlaybackSource | null> {
   signal.throwIfAborted();
-  if (cloud.enabled && !cloud.workerToken) {
+  if (cloud.enabled) {
     const src = apiUrl(`/api/v1/resources/courses/${encodeURIComponent(id)}`);
     const response = await fetch(src, { method: 'HEAD', credentials: 'include', cache: 'no-cache', signal });
     if (response.status === 404) return null;

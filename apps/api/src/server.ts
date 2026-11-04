@@ -30,8 +30,6 @@ import { BoardScheduler } from './board/scheduler.js';
 import { registerBoardRoutes } from './board/routes.js';
 import { registerPluginRoutes } from './plugins/routes.js';
 import { pluginTool } from './plugins/tool.js';
-import { workerIdentity } from './cloud/tasks.js';
-import { workerTokens, workerTokenHash } from './cloud/workerAuth.js';
 import { McpRepository } from './mcp/repository.js';
 import { McpManager } from './mcp/manager.js';
 import { registerMcpRoutes } from './mcp/routes.js';
@@ -160,7 +158,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const url = request.url.split('?')[0];
     if (held && !['/api/v1/health', '/api/v1/ready', '/api/v1/deployment/status', '/api/v1/deployment/activate'].includes(url)) return reply.code(503).send({ error: 'release_staged' });
     const write = !['GET', 'HEAD', 'OPTIONS'].includes(request.method);
-    if (draining && write && !workerIdentity(request)) {
+    if (draining && write) {
       return reply.header('retry-after', '5').code(503).send({ error: 'api_draining' });
     }
     if (!write) return;
@@ -223,8 +221,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   });
 
   function session(request: FastifyRequest) {
-    const worker = workerIdentity(request);
-    if (worker) return store.db.prepare('SELECT id,name FROM users WHERE id=?').get(worker.id);
     const cookieToken = parseCookies(request.headers.cookie).wangke_session;
     if (cookieToken) {
       const cookieSession = store.db.prepare(`SELECT s.id AS session_id, u.id, u.name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?`).get(hashToken(cookieToken), now()) as any;
@@ -242,7 +238,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     return user;
   }
   function checkOrigin(request: FastifyRequest, reply: FastifyReply) {
-    if (workerIdentity(request)) return true;
     const origin = request.headers.origin;
     if (!origin) return true;
     // Bearer token 不会被浏览器自动附带，没有 CSRF 风险；原生壳层和脚本走这条。
@@ -271,7 +266,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
      cloudRunner.pluginService = pluginService;
       const clientRuntime = registerClientRuntime(app, { store, plugins: pluginService,
          resources, configuration: cloudConfig,
-       identity: request => workerIdentity(request as FastifyRequest) ? null : session(request as FastifyRequest),
+       identity: request => session(request as FastifyRequest),
          origin: checkOrigin, canStart: () => !held && !draining, canExecute: () => !held,
         submitTask: (owner, request) => submitOwnerTask(store, cloudRecords, cloudConfig, owner, request),
         prepareRecords: owner => { if (store.db.prepare('SELECT 1 FROM resource_roots WHERE owner_id=?').get(owner)) resources.migrate(owner); } });
@@ -288,7 +283,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   app.get('/api/v1/health', async () => ({ status: 'ok', version: process.env.APP_VERSION ?? '0.1.0', cloud: true, auth: ['password', 'token', 'passkey'] }));
   app.get('/api/v1/cloud/storage', async (request, reply) => {
     if (!requireAuth(request, reply)) return;
-    if (workerIdentity(request)) return reply.code(403).send({ error: 'worker_scope_denied' });
     return readStorageUsage();
   });
   app.get('/api/v1/ready', async (_request, reply) => {
@@ -333,19 +327,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     return { releaseId, activated: true };
   });
   app.addHook('onRequest', async (request, reply) => {
-    const worker = workerIdentity(request);
-    if (worker && request.url.startsWith('/api/')) {
-      const url = request.url.split('?')[0];
-      // This facade performs task/hash/lease checks itself, including receipt-only
-      // access after terminal commit. It never grants the account facade.
-      if (request.method === 'POST' && /^\/api\/executorRuntime\/(read|report|complete|receipt|commitArtifacts|resourceCommand|admitBlob|resetConversation|deliverInteraction|beginExecution)$/.test(url)) return;
-       const read = request.method === 'GET' && (['/api/v1/cloud/status', '/api/v1/cloud/config', '/api/v1/cloud/records', '/api/v1/auth/session', '/api/v1/bootstrap/status', '/api/v1/system/file', '/api/v1/system/files'].includes(url) || /^\/api\/v1\/(files|resources\/courses)\/[^/]+$/.test(url));
-         const write = request.method === 'POST' && (['/api/v1/files', '/api/v1/cloud/mcp/catalog', '/api/v1/cloud/mcp/call', '/api/v1/cloud/web-search/catalog', '/api/v1/cloud/web-search/call', '/api/v1/system/file'].includes(url) || url.startsWith('/api/v1/cloud/models/') || [`/api/v1/cloud/tasks/${worker.taskId}/authorize`, `/api/v1/cloud/tasks/${worker.taskId}/authorize/finish`, `/api/v1/cloud/tasks/${worker.taskId}/commands/claim`].includes(url));
-      if (!read && !write) return reply.code(403).send({ error: 'worker_scope_denied' });
-      const task = store.db.prepare('SELECT status FROM cloud_tasks WHERE id=? AND owner_id=?').get(worker.taskId, worker.id) as { status: string } | undefined;
-      if (!task || !['running', 'waiting_user'].includes(task.status)) return reply.code(403).send({ error: 'worker_task_inactive' });
-      if (store.db.prepare("SELECT 1 FROM cloud_tasks t JOIN runs r ON r.id=t.parent_run_id WHERE t.id=? AND r.status IN ('cancelled','failed','paused')").get(worker.taskId)) return reply.code(403).send({ error: 'worker_parent_inactive' });
-    }
     if (request.url.split('?')[0] === '/api/v1/files' && request.method === 'POST') {
       if (!checkOrigin(request, reply)) return;
       if (!requireAuth(request, reply)) return;
@@ -354,7 +335,12 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     }
     if (request.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
   });
-   app.get('/api/v1/bootstrap/status', async () => { const initialized = repo.isInitialized(); const available = !initialized && Date.now() < bootstrap.createdAt + bootstrapTtlMs; return { initialized, bootstrapAvailable: available, expiresAt: available ? new Date(bootstrap.createdAt + bootstrapTtlMs).toISOString() : null, botSyncVersion: 1 }; });
+   app.get('/api/v1/bootstrap/status', async () => {
+     const initialized = repo.isInitialized();
+     const available = !initialized && Date.now() < bootstrap.createdAt + bootstrapTtlMs;
+     const hasPasskey = initialized && Boolean(store.db.prepare('SELECT 1 FROM passkey_credentials LIMIT 1').get());
+     return { initialized, bootstrapAvailable: available, expiresAt: available ? new Date(bootstrap.createdAt + bootstrapTtlMs).toISOString() : null, botSyncVersion: 1, hasPasskey };
+   });
   app.post<{ Body: BootstrapInitializeRequest }>('/api/v1/bootstrap/initialize', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
     if (repo.isInitialized()) return bad(reply, 410, 'bootstrap_closed');
@@ -412,7 +398,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     await runner.reset();
     clearDirectory(filesDir);
     store.resetData();
-    workerTokens.clear();
     bootstrap = replaceBootstrapSecret(secretFile);
     attempts.clear();
     reply.header('set-cookie', `wangke_session=; Path=/; HttpOnly; SameSite=${sameSite}${secureCookie ? '; Secure' : ''}; Max-Age=0`);
@@ -674,29 +659,22 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if ((encodedName !== undefined && !originalName) || originalName.length > 255 || /[\u0000\\/]/.test(originalName)) return bad(reply, 400, 'invalid_file_name');
     const mimeType = typeof mimeHeader === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(mimeHeader) ? mimeHeader.slice(0, 200) : 'application/octet-stream';
     if (request.query.operationId !== undefined) {
-      const executor = workerIdentity(request);
       const operationId = request.query.operationId;
       const admitted = store.db.prepare('SELECT digest,status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(user.id, operationId) as { digest: string; status: string; result: string } | undefined;
       if (!admitted) return bad(reply, 409, 'library_blob_not_admitted');
       const receipt = JSON.parse(admitted.result);
-      if (executor) {
-        const token = request.headers.authorization!.slice(7);
-        if (receipt.operation?.kind !== 'executorProductBlob' || receipt.operation.taskId !== executor.taskId || !admitted.digest.startsWith(`executor:${executor.taskId}:${workerTokenHash(token)}:blob:`)) return bad(reply, 403, 'executor_blob_not_admitted');
-      } else if (receipt.operation?.kind !== 'importLibraryBlob') return bad(reply, 403, 'library_blob_not_admitted');
+      if (receipt.operation?.kind !== 'importLibraryBlob') return bad(reply, 403, 'library_blob_not_admitted');
       if (admitted.status === 'completed') return reply.code(201).send(receipt.file);
       if (admitted.status !== 'pending' || receipt.phase !== 'admitted') return bad(reply, 409, 'library_blob_uncertain');
       const assertBlobPrincipal = () => {
-        if (!executor) { if (session(request)?.id !== user.id) throw new Error('library_import_account_changed'); return; }
-        const task = store.db.prepare('SELECT status,worker_id,lease_expires_at,parent_run_id FROM cloud_tasks WHERE owner_id=? AND id=?').get(user.id, executor.taskId) as any;
-        if (!workerIdentity(request) || !task || !['running', 'waiting_user'].includes(task.status) || task.worker_id !== workerTokenHash(request.headers.authorization!.slice(7)) || !Number.isFinite(Date.parse(task.lease_expires_at)) || Date.parse(task.lease_expires_at) <= Date.now()
-           || task.parent_run_id && (cloudConfig.taskPolicy(user.id, executor.taskId).write !== 'allow' || store.db.prepare("SELECT 1 FROM runs WHERE id=? AND status IN ('cancelled','failed','paused')").get(task.parent_run_id))) throw Object.assign(new Error('executor_blob_lease_expired'), { statusCode: 403 });
+        if (session(request)?.id !== user.id) throw new Error('library_import_account_changed');
       };
       assertBlobPrincipal();
       store.db.prepare('UPDATE client_commands SET result=? WHERE owner_id=? AND operation_id=?').run(JSON.stringify({ ...receipt, phase: 'receiving' }), user.id, operationId);
       try {
         const operation = receipt.operation;
         const file = await receiveFile(store, filesDir, user.id, body, 'cache-blob', operation.contentType || 'application/octet-stream', maxFileBytes, operation.size,
-          assertBlobPrincipal, fileOperationId(user.id, operationId, executor ? 'executor-product' : 'library-import'));
+          assertBlobPrincipal, fileOperationId(user.id, operationId, 'library-import'));
         if (file.sha256 !== operation.sha256 || file.sizeBytes !== operation.size) throw new Error('library_blob_hash_mismatch');
         store.db.prepare("UPDATE client_commands SET status='completed',result=? WHERE owner_id=? AND operation_id=?").run(JSON.stringify({ ...receipt, phase: 'completed', file }), user.id, operationId);
         return reply.code(201).send(file);
@@ -705,7 +683,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
         throw error;
       }
     }
-    if (workerIdentity(request)) return bad(reply, 403, 'executor_blob_admission_required');
     return reply.code(201).send(await receiveFile(store, filesDir, user.id, body, originalName, mimeType, maxFileBytes, declaredSize));
   });
   app.get<{ Params: { id: string } }>('/api/v1/files/:id', async (request, reply) => {
@@ -791,7 +768,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
     return { runs: botService.status(user.id, thread.id) };
   });
-  app.post<{ Params: { id: string }; Body: { clientNonce?: string; role?: MessageRole; kind?: string; content?: string; replyTo?: string; target?: { kind?: string; runId?: string; questionId?: string } } }>('/api/v1/threads/:id/messages', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { clientNonce?: string; role?: MessageRole; kind?: string; content?: string; replyTo?: string; modelSelection?: import('@wangke/contracts/cloud').TaskModelSelection; target?: { kind?: string; runId?: string; questionId?: string } } }>('/api/v1/threads/:id/messages', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
     const user = requireAuth(request, reply); if (!user) return;
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
@@ -820,18 +797,17 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
         })())) return bad(reply, 400, 'invalid_message');
     if (b.replyTo && !store.db.prepare('SELECT 1 FROM messages WHERE id=? AND thread_id=?').get(b.replyTo, thread.id)) return bad(reply, 400, 'invalid_reply_to');
     const makeDto = (row: any, deduplicated = false) => ({ id: row.id, threadId: row.thread_id, clientNonce: row.client_nonce, seq: row.seq, role: row.role, kind: row.kind, content: row.content, replyTo: row.reply_to, createdAt: row.created_at, ...(deduplicated ? { deduplicated: true } : {}) });
-    const existing = store.db.prepare('SELECT * FROM messages WHERE thread_id=? AND client_nonce=?').get(thread.id, nonce) as any;
-    if (existing) return makeDto(existing, true);
     if (b.target !== undefined && (!b.target || !['run', 'question'].includes(b.target.kind ?? '') || (b.target.kind === 'run' ? typeof b.target.runId !== 'string' : typeof b.target.questionId !== 'string'))) return bad(reply, 400, 'invalid_target');
     try {
-      const message = botService.send(user.id, thread.id, { clientNonce: nonce, kind, content: b.content!, replyTo: b.replyTo, target: b.target?.kind === 'run' ? { kind: 'run', runId: b.target.runId } : b.target?.kind === 'question' ? { kind: 'question', questionId: b.target.questionId } : undefined });
+      const message = botService.send(user.id, thread.id, { clientNonce: nonce, kind, content: b.content!, replyTo: b.replyTo, modelSelection: b.modelSelection, target: b.target?.kind === 'run' ? { kind: 'run', runId: b.target.runId } : b.target?.kind === 'question' ? { kind: 'question', questionId: b.target.questionId } : undefined });
       if (thread.mode === 'bot') {
         const run = (message as any).receipt?.runId ? { id: (message as any).receipt.runId } : store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id) as { id: string } | undefined;
         if (run) runner.enqueue(run.id);
       }
-      return reply.code(201).send({ ...message, deduplicated: false });
+      return reply.code(message.deduplicated ? 200 : 201).send(message);
     } catch (error: any) {
-      if (error?.message === 'target_expired' || error?.message === 'question_already_answered' || error?.message === 'target_waiting_for_specific_answer') return bad(reply, 409, error.message);
+      if (['target_expired', 'question_already_answered', 'target_waiting_for_specific_answer', 'message_nonce_conflict', 'task_model_requires_new_attempt'].includes(error?.message)) return bad(reply, 409, error.message);
+      if (error?.message === 'invalid_model_selection') return bad(reply, 400, error.message);
       if (String(error?.code) === 'SQLITE_CONSTRAINT_UNIQUE') {
         const row = store.db.prepare('SELECT * FROM messages WHERE thread_id=? AND client_nonce=?').get(thread.id, nonce) as any;
         if (row) return makeDto(row, true);

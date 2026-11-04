@@ -7,6 +7,7 @@ import { Hint, Sym, toast } from '../ui';
 import { prefersReducedMotion } from '../utils/motion';
 import ImagePreview from './ImagePreview';
 import ImageGallery from './ImageGallery';
+import AttachmentUploadStatus from './AttachmentUploadStatus';
 import './chat-attachments.css';
 
 /** The same accessible viewer serves composer thumbnails and persisted messages. */
@@ -46,19 +47,16 @@ function ChatImage({ file, images, draft = false }: { file: ChatAttachment; imag
   </>;
 }
 
-function PendingImage({ file, removing }: { file: File; removing: boolean }) {
+function PendingImage({ file, removing, error, onRetry }: { file: File; removing: boolean; error?: string; onRetry: () => void }) {
   const [preview, setPreview] = useState('');
   useEffect(() => {
     const url = URL.createObjectURL(file);
     setPreview(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
-  return <div className="chat-image chat-image--draft chat-image-pending" aria-busy="true" aria-label={file.name}>
+  return <div className="chat-image chat-image--draft chat-image-pending" aria-busy={!error} aria-label={file.name}>
     {preview && <img src={preview} alt="" />}
-    <span className="chat-image-pending__overlay" role="status" aria-label={removing ? '正在移除图片' : '图片加载中'}>
-      <span className="chat-image-pending__indicator"><Spinner size="sm" color="current" aria-hidden="true" /></span>
-      <span className="sr-only">{removing ? '正在移除图片' : '图片加载中'}</span>
-    </span>
+    <AttachmentUploadStatus label={removing ? '正在移除图片' : '图片上传中'} error={error} onRetry={onRetry} />
   </div>;
 }
 
@@ -102,11 +100,11 @@ function ChatAttachmentDraftContent() {
   const images = items.flatMap((item) => item.value?.dataUrl ? [item.value] : []);
   if (!items.length && !error) return null;
   return <div className="chat-attachments" data-testid="chat-attachment-draft" aria-label="待发送附件">
-    {items.map((item) => !item.error && (item.value?.dataUrl || /^image\/(png|jpeg|webp|gif)$/.test(item.file.type) || /\.(png|jpe?g|webp|gif)$/i.test(item.file.name)) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.value ? 'ready' : 'loading'}>
-      {item.value?.dataUrl ? <ChatImage file={item.value} images={images} draft /> : <PendingImage file={item.file} removing={item.phase === '移除中'} />}
+    {items.map((item) => (item.value?.dataUrl || /^image\/(png|jpeg|webp|gif)$/.test(item.file.type) || /\.(png|jpe?g|webp|gif)$/i.test(item.file.name)) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.error ? 'error' : item.value ? 'ready' : 'loading'}>
+      {item.value?.dataUrl && !item.error ? <ChatImage file={item.value} images={images} draft /> : <PendingImage file={item.file} removing={item.phase === '移除中'} error={item.error} onRetry={() => retry(item.id)} />}
       <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={item.phase === '移除中'} onPress={() => void remove(item.id)}><Sym name="close" /></Button>
     </div> : <div key={item.id} className="chat-attachments__item" data-testid="chat-attachment" data-state={item.error ? 'error' : item.value ? 'ready' : 'loading'}>
-      {item.value?.dataUrl ? <img className="chat-attachments__thumb" src={item.value.dataUrl} alt={item.file.name} /> : <Sym name="description" />}
+      {!item.value && !item.error ? <Spinner size="sm" aria-label="附件上传中" /> : <Sym name="description" />}
       <div className="chat-attachments__info">
         <Hint className="truncate" content={item.file.name}>{item.file.name}</Hint>
         <small role="status">{attachmentSize(item.file.size)} · {item.error ? '上传失败' : item.value ? item.value.serverId ? '已保存到服务端' : '已保存到本机' : item.phase}{item.value?.truncated ? ' · 正文已截取' : ''}</small>

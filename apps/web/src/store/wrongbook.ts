@@ -23,7 +23,7 @@ export async function readWrongbook(): Promise<string> {
   return row ? Dexie.waitFor(row.blob.text()) : EMPTY_WRONGBOOK;
 }
 export function observeWrongbook(next: (markdown: string) => void, error: (e: unknown) => void) {
-  if (cloud.enabled && !cloud.worker) {
+  if (cloud.enabled) {
     let stopped = false, off: (() => void) | undefined;
     // Do not create an empty wrongbook just by visiting its panel. The initial
     // records cache baseline precedes this view; creation follows committed data.

@@ -11,6 +11,7 @@ import { modelUsageReport } from '../apps/api/src/agent/model-observations.ts';
 import { accountedFetch } from '../apps/api/src/agent/accounted-fetch.ts';
 import { UsageLedger } from '../apps/api/src/agent/budget.ts';
 import { BotApplicationService } from '../apps/api/src/agent/service.ts';
+import { BotRunner } from '../apps/api/src/agent/runner.ts';
 
 const temporary = path.join(os.tmpdir(), 'opencode');
 fs.mkdirSync(temporary, { recursive: true });
@@ -107,7 +108,10 @@ try {
   }
   console.log('PASS: SQLite source/date/model aggregates, NULL/zero/partial usage, weighted cache/reasoning, owner isolation, restart, boundaries and API validation');
 
-  const service = new BotApplicationService(store, { enqueue() {} });
+  const configuration = new CloudConfiguration(store, path.join(root, 'config'));
+  configuration.save('owner', { ...configuration.get('owner'), providers: [{ id: 'p', name: 'Fixture', baseUrl: 'https://fake.invalid/v1', protocol: 'openai-chat', apiKey: 'fixture', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'p', model: 'm' } });
+  const admission = new BotRunner(store, { configuration });
+  const service = new BotApplicationService(store, { enqueue() {}, freezeModel: (...args) => admission.freezeModel(...args) });
   const thread = service.create('owner', 'bot', 'Usage attribution');
   const message = service.send('owner', thread.id, { clientNonce: 'usage-test', content: 'Count once' });
   const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id).id;

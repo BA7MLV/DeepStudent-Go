@@ -55,13 +55,32 @@ button.onclick = () => {
 
 宿主没有通用工具调用、读文件或业务写入 API；不要虚构这些能力。
 
+## 题卡反馈（只读 v1）
+
+正式 quiz 可从真实点击调用 `api.submitAnswer(答案)` 请求宿主确认，也可继续在题卡提交；`setAnswerDraft` 只更新草稿，不判分。
+
+`api.answerFeedback` 为 null 或 `{version:1, requestId, status, answer, correctAnswer?, explanation?, grading, authoritative, timestamp}`。requestId 是宿主作答身份，不是 RPC 序号；timestamp 是非负毫秒时间，历史作答无时间为 0。status 为 pending/correct/incorrect/partial/review；grading 为 host/ai/self。仅 host + authoritative:true 的 correct/incorrect/partial 是确定判分。pending/review、AI/self 必须非权威，不改成绩或自动写入错题。
+
+宿主在初始化、ready、提交后、异步更新时同步 `wbw:answer-feedback`；运行时提供只读 getter 与 `wbw:feedbackchange` 事件。同一运行只接收同一 requestId 且 timestamp 严格递增的更新，不允许已完成反馈回退 pending；新题/新尝试需要新的挂载身份。忽略重复、非法或超过 32 KiB/深度 16/8000 节点的反馈；requestId 最多 128 字符、解释最多 16000 字符。iframe 发出的反馈不被宿主接受，运行时也拒绝脚本合成的 MessageEvent。反馈只重绘及更新高度，不写 widgetState，不调用模型。历史结果从宿主保存的 picks 重建，独立预览通过随机 token 的 BroadcastChannel 接收只读反馈，不写入 URL；预览刷新需要原页面仍打开，提交需返回原题卡。旧 HTML 无需迁移，运行时也会展示纯文本反馈。现有客观题判分为全对/错误；partial 仅供支持真实部分评分的宿主使用，HTML 不能自行推断。
+
+```js
+function renderFeedback() {
+  const f = api.answerFeedback;
+  output.textContent = !f ? '尚未提交' : `${f.status} · ${f.authoritative ? '宿主判定' : '待核验/非权威参考'}\n${f.explanation || ''}`;
+}
+renderFeedback();
+window.addEventListener('wbw:feedbackchange', renderFeedback);
+```
+
+使用 textContent，不执行反馈中的 HTML，不自行计算对错。聊天“请求 AI 参考批改”目前没有可靠关联原 iframe 的回填通道，只发送消息并保持待核验，不能声称 AI 已回传。生成 HTML 本身不可信，不能用其自绘结果替代宿主题卡的判定。
+
 ## 正文位置
 
 show_widget 的成功回执包含 `wbw-widget` 围栏，围栏内是宿主给出的引用 ID，不是 HTML。把完整引用原样放在相关文字之间。每次调用保存独立画面、独立快照；后图不覆盖前图。引用只能展示当前消息自身的载荷，不能读取其他消息。旧消息或遗漏引用的载荷在正文末尾兼容显示，不依赖模型完美输出才能保住图形。
 
 ## 可视化 ask_user（不是正式 quiz）
 
-给 ask_user 增加可选 `presentation:{html}`，原 question/options 仍为真相。页面通过 `api.answerInput` 读取 `{answer,submitted,question}`，监听 `wbw:answerchange` 恢复选择；草稿刷新后不保留，已提交答案由宿主恢复。`setAnswerDraft` 同步原生输入，`submitAnswer` 打开宿主原题/答案确认，确认后才交给原等待工具。用户取消确认时 Promise 拒绝；不要用 sendPrompt 假装回答。正式 quiz 仍只可填草稿，由宿主提交和判分。
+给 ask_user 增加可选 `presentation:{html}`，原 question/options 仍为真相。页面通过 `api.answerInput` 读取 `{answer,submitted,question}`，监听 `wbw:answerchange` 恢复选择；草稿刷新后不保留，已提交答案由宿主恢复。`setAnswerDraft` 同步原生输入，`submitAnswer` 打开宿主原题/答案确认，确认后才交给原等待工具。用户取消确认时 Promise 拒绝；不要用 sendPrompt 假装回答。正式 quiz 也可请求宿主确认提交，判分仍只由宿主完成，详见题卡反馈协议。
 
 下例作为 presentation.html，要求原问题含 `id:"short"` 与 `id:"deep"`：
 

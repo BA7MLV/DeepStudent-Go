@@ -29,6 +29,7 @@ export interface MessageComposerProps {
   onStop?: () => void;
   onFiles?: (files: File[]) => void;
   sending?: boolean;
+  attachmentsPending?: boolean;
   hasAttachments?: boolean;
   onScope?: () => void;
   onSettings?: () => void;
@@ -54,6 +55,7 @@ const MessageComposer = forwardRef<MessageComposerHandle, MessageComposerProps>(
   onStop,
   onFiles,
   sending,
+  attachmentsPending,
   hasAttachments,
   onScope,
   onSettings,
@@ -74,7 +76,7 @@ const MessageComposer = forwardRef<MessageComposerHandle, MessageComposerProps>(
   useImperativeHandle(ref, () => ({ focus: () => inputRef.current?.focus() }), []);
 
   const hasDraft = value.trim().length > 0 || Boolean(hasAttachments);
-  const canSend = !disabled && !sending && hasDraft;
+  const canSend = !disabled && !sending && !attachmentsPending && hasDraft;
   const edit = (next: string) => { setEditVersion(version => version + 1); onChange(next); };
   const submit = () => {
     if (!canSend) return;
@@ -138,7 +140,7 @@ const MessageComposer = forwardRef<MessageComposerHandle, MessageComposerProps>(
               <Sym name={hasDraft ? 'arrow_upward' : 'stop'} filled={!hasDraft} />
             </Button>
           ) : (
-            <VoiceInput holdTargetRef={holdRef} disabled={disabled} hasText={hasDraft} editVersion={editVersion}
+            <VoiceInput holdTargetRef={holdRef} disabled={disabled || (hasDraft && attachmentsPending)} hasText={hasDraft} editVersion={editVersion}
               onStart={() => { voiceBase.current = value; }}
               onText={text => onChange(voiceBase.current ? `${voiceBase.current} ${text}` : text)} onSend={submit} />
           )}

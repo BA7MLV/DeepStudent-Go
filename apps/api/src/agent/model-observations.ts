@@ -4,13 +4,16 @@ import { modelUsage, usageCollector, type ModelUsage } from '@wangke/study-core/
 import type { ModelUsageCounts, ModelUsageReport, ModelUsageSource } from '@wangke/contracts/cloud';
 import { abortable, limitedJson } from './model-client.js';
 import { recordModelMetric } from './model-metrics.js';
+import type { BotBudget } from './budget.js';
+
+export interface ObservationAttribution { task: string; reservedTokens: number; price?: BotBudget['prices'][number] }
 
 /** Ordinary traffic is measured without applying Bot admission/billing quotas.
  * No prompt, response text, URL, credential or cache key is retained here. */
-export async function observeModelFetch(store: DatabaseStore, owner: string, provider: string, model: string, fetcher: typeof fetch, url: Parameters<typeof fetch>[0], init?: RequestInit): Promise<Response> {
+export async function observeModelFetch(store: DatabaseStore, owner: string, provider: string, model: string, fetcher: typeof fetch, url: Parameters<typeof fetch>[0], init?: RequestInit, attribution?: ObservationAttribution): Promise<Response> {
   const id = crypto.randomUUID(), collector = usageCollector();
   const started = Date.now(); let firstByteMs: number | null = null;
-  store.db.prepare('INSERT INTO model_observations(id,owner_id,provider,model,started_at,status) VALUES(?,?,?,?,?,?)').run(id, owner, provider, model, new Date().toISOString(), 'inflight');
+  store.db.prepare('INSERT INTO model_observations(id,owner_id,provider,model,started_at,status,task_id,reserved_tokens,price_json) VALUES(?,?,?,?,?,?,?,?,?)').run(id, owner, provider, model, new Date().toISOString(), 'inflight', attribution?.task ?? null, attribution?.reservedTokens ?? null, attribution?.price ? JSON.stringify(attribution.price) : null);
   let settled = false;
   const settle = (status: string, usage: ModelUsage | undefined = collector.value) => {
     if (settled) return;

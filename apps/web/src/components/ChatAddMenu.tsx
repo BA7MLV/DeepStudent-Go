@@ -12,6 +12,7 @@ import { MODAL_CONTAINER_CLASS, Sym, toast } from '../ui';
 import { handoutDraft, prepareHandoutPrompt } from '../skills/handout';
 import SkillPicker from './SkillPicker';
 import ModelPicker from './ModelPicker';
+import TaskModelPicker from './TaskModelPicker';
 import './chat-attachments.css';
 import { useTranslation } from 'react-i18next';
 
@@ -37,6 +38,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
   const mcpServerIds = useCourseChat((state) => state.mcpServerIds);
   const setMcpServerIds = useCourseChat((state) => state.setMcpServerIds);
   const loading = useCourseChat((state) => state.loading);
+  const sessionId = useCourseChat(state => state.activeId);
   const contextCourses = useCourseChat((state) => state.contextCourses);
   const project = useCourseChat((state) => state.project);
   const projectLabel = project ? `${tp('selectProject')} · ${projectDisplayName(project.name)}` : tp('selectProject');
@@ -104,7 +106,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
             <Dropdown.Item id="skills" textValue={t('skillPicker.title')}><Sym name="extension" />{t('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
           </Dropdown.Menu>
           <div className="chat-add-menu__model px-2 py-1">
-            <ModelPicker slot="chat" field="llmModel" variant="chip" showThinking thinkingDepthDisabled={loading} onClose={() => setAddOpen(false)} />
+            <TaskModelPicker sessionId={sessionId} />
           </div>
         </Dropdown.Popover>
       </Dropdown>

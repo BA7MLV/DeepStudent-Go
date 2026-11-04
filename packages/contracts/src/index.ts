@@ -69,6 +69,7 @@ export type SseEvent =
 
 export interface BootstrapStatusDto {
   botSyncVersion?: 1;
+  hasPasskey?: boolean;
   initialized: boolean;
   bootstrapAvailable: boolean;
   expiresAt: string | null;

@@ -15,13 +15,10 @@ export async function saveMarkdownMaterial(id: string, text: string, expected?: 
   if (cloud.enabled) {
     const current = expected ?? await (await getMaterialFile(id))?.text() ?? '';
     const operation = { kind: 'saveMarkdown' as const, courseId: id, text, expected: current, ...(name ? { name } : {}), ...creation };
-    let result: unknown;
-    if (cloud.worker) {
-      result = await (await import('../cloud/executor-runtime')).executeTaskResource(operation);
-    } else result = await resourceCommand(operation);
+    const result = await resourceCommand(operation);
     await flushCloud();
     useLibraryRevision.getState().bump();
-    return result as MaterialParseResult;
+    return result as unknown as MaterialParseResult;
   }
   const result = await db.transaction('rw', [db.files, db.videos, db.materialBlocks, db.table('courseFiles')], async () => {
     const row = await db.videos.get(id);

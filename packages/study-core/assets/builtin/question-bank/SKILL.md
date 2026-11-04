@@ -56,7 +56,9 @@ description: 从 PDF、Word 等资料逐页提取原题，保留原图、题号�
 
 ## 做题、批改与 HTML
 
+- 交互提交也可调用 `window.__wbw.submitAnswer(答案)` 请求宿主确认；不是直接判分。只读 `answerFeedback` 和 `wbw:feedbackchange` 提供 version:1 的 status、requestId、answer、correctAnswer、explanation、grading、authoritative、timestamp；先读 getter，再监听事件重绘，不写 widgetState。只有 authoritative:true 是确定判分；AI/self 参考和 pending/review 不计分。聊天 AI 建议目前不能可靠回填 iframe，必须保持待核验并说明限制，不声称已回传。
+
 - 有题库时使用 present_quiz(path=题库路径, offset=0, limit=5)，宿主读取文件最新版，不复制题干/答案到 questions 参数、不擅自修正或换序。用户要求继续时按上次回执的下一 offset 展示；单轮只展示一批，不能连调覆盖前面的未答题卡。重做从 offset=0 开始。
 - 在题库自己的资料问答中 path=/courses/current/material；在来源资料问答中 path=/courses/current/questions.md。若当前入口没有 present_quiz，提供题库文件链接，引导在其资料问答中开始，不能虚构工具。
 - 已核验的客观题由宿主本地判分，答后显示解析，作答随现有聊天保存；本机错题继续写入 /wrongbook.md，原图和来源一起保留。主观题/含主观小题的组合题提交后显示参考答案，学生点击“我已核对”才可按自评记录错题，标注 grading=self，不混入自动成绩。学生可点击“请求 AI 参考批改”走现有聊天，明确是参考建议，不修改确定成绩、不擅自登记自评。AI 参考答案与 missing 允许作答，但不判对错、不计分、不进错题本。用户核验后 edit 更新原题库，再新开练习；旧作答不重算。
-- HTML 可承接拖拽、连线、作图等特殊题型输入：将遵守现有 show_widget(format="html") 规范的片段保存为该题 presentation={html:"…"}。宿主复用相同沙箱与主题；点击/键盘事件中调用 window.__wbw.setAnswerDraft(答案)，返回 Promise 只表示草稿已接收。答案格式必须符合上述 type（freeform 可传文字化/JSON字符串化的作图结果）。宿主显示草稿，学生仍需点可信题卡的“提交答案”，HTML 不能静默作答、给自评分或写错题。通过 window.__wbw.answerInput.answer/submitted 及 wbw:answerchange 恢复已提交状态，禁止在 HTML 中内嵌正确答案、解析或确定判分。原图由题卡 images 显示，不能 fetch 材料或编造资源 API；不放宽网络/文件权限。无法加载或操作时“使用标准作答界面”降级。不生成独立 HTML 刷题系统，普通题优先标准控件，show_widget 仍可辅助讲解。
+- HTML 可承接拖拽、连线、作图等特殊题型输入：将遵守现有 show_widget(format="html") 规范的片段保存为该题 presentation={html:"…"}。宿主复用相同沙箱与主题；点击/键盘事件中调用 window.__wbw.setAnswerDraft(答案)，返回 Promise 只表示草稿已接收。答案格式必须符合上述 type（freeform 可传文字化/JSON字符串化的作图结果）。宿主显示草稿，学生可点可信题卡的“提交答案”或请求宿主确认提交，HTML 不能静默作答、给自评分或写错题。通过 window.__wbw.answerInput.answer/submitted 及 wbw:answerchange 恢复已提交状态，禁止在 HTML 中内嵌正确答案、解析或确定判分。原图由题卡 images 显示，不能 fetch 材料或编造资源 API；不放宽网络/文件权限。无法加载或操作时“使用标准作答界面”降级。不生成独立 HTML 刷题系统，普通题优先标准控件，show_widget 仍可辅助讲解。

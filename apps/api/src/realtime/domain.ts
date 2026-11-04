@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { inspectInteraction, reconcileInteraction } from './interaction-recovery.js';
+import { inspectInteraction } from './interaction-recovery.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SavePluginLayout, SystemDocument } from '@wangke/contracts/system';
@@ -29,6 +29,9 @@ import type { FileIntent } from '../storage/system-files.js';
 import { SystemMaterials } from '../storage/system-materials.js';
 import type { ClientLearningCommand } from '@wangke/contracts/client-runtime';
 import { clientLearningMutations } from './client-learning.js';
+import { TaskDelegationService } from '../cloud/delegation.js';
+import { CloudConfiguration } from '../cloud/config.js';
+import type { DelegationCommand } from '@wangke/contracts/client-runtime';
 
 import type {} from './errors.js';
 
@@ -42,6 +45,13 @@ const canonical = (value: unknown): string => {
 
 /** Existing plugin authorization is executed on every baseline, update and command. */
 export class ClientRuntimeDomain implements RuntimeDomain {
+  async delegation(owner: string, command: DelegationCommand): Promise<RuntimeJson> {
+    try {
+      if (!this.configuration) throw new Error('delegation_unavailable');
+      return new TaskDelegationService(this.store, this.configuration).command(owner, command);
+    }
+    catch (error) { throw this.failure(error); }
+  }
   private readonly observers = new Set<Observer>();
   private readonly journals = new Set<{ owner: string; thread: string; wake(): void }>();
   private readonly peers = new WeakMap<PeerScope, () => string | undefined>();
@@ -54,7 +64,8 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   constructor(private readonly store: DatabaseStore, private readonly plugins: PluginService,
     private readonly submit?: (owner: string, request: RuntimeTaskSubmit) => unknown,
     private readonly prepareRecords?: (owner: string) => void,
-    private readonly resources?: ResourceFiles) {
+    private readonly resources?: ResourceFiles,
+    private readonly configuration?: CloudConfiguration) {
     this.cursor = this.revision();
     this.timer = setInterval(() => this.pump(), 100);
     this.timer.unref();
@@ -557,10 +568,6 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   async resourceCommand(owner: string, request: ResourceCommand): Promise<RuntimeJson> {
     if (!this.resources) throw new Error('resource_domain_unavailable');
     return executeResourceCommand(this.resources, owner, request);
-  }
-  async reconcileInteraction(owner: string, request: import('@wangke/contracts/client-runtime').InteractionReconcile): Promise<RuntimeJson> {
-    try { return JSON.parse(JSON.stringify(reconcileInteraction(this.store, owner, request))); }
-    catch (error) { throw this.failure(error); }
   }
   /** Only synchronous SQL + durable file intents may use this transaction. */
   private async atomicCommand<T>(owner: string, operationId: string, payload: unknown, run: () => T): Promise<T> {

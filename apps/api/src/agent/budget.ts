@@ -13,6 +13,11 @@ export const DEFAULT_BOT_BUDGET: BotBudget = { contextTokens: 131072, prices: []
 export class BudgetBlocked extends Error {
   constructor(readonly code: string) { super(code); this.name = 'BudgetBlocked'; }
 }
+/** Native executors are bundled separately and have a different constructor
+ * identity. This is an internal exception boundary, never client input. */
+export function isBudgetBlocked(error: unknown): error is BudgetBlocked {
+  return error instanceof BudgetBlocked || error instanceof Error && error.name === 'BudgetBlocked' && typeof (error as BudgetBlocked).code === 'string';
+}
 export interface RequestAttribution { owner: string; run?: string; step?: string; task?: string; purpose: string; provider: string; model: string }
 export function validateBudget(value: BotBudget): BotBudget {
   if (!value || typeof value !== 'object') throw new Error('invalid_bot_budget');
@@ -24,7 +29,11 @@ export function validateBudget(value: BotBudget): BotBudget {
 }
 export class UsageLedger {
   constructor(readonly store: DatabaseStore, readonly configuration?: CloudConfiguration) {}
+  rootRun(owner: string, run?: string) {
+    return run ? (this.store.db.prepare('SELECT r.root_run_id FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=? AND t.owner_id=?').get(run, owner) as { root_run_id: string | null } | undefined)?.root_run_id ?? run : undefined;
+  }
   limits(owner: string, run?: string): BotBudget {
+    run = this.rootRun(owner, run);
     const stored = { ...this.configuration?.get(owner).botBudget };
     // Retire the old UI defaults; explicit non-default API quotas remain compatible.
     if (stored.runTokens === 250000) delete stored.runTokens;
@@ -39,6 +48,19 @@ export class UsageLedger {
     return validateBudget({ ...defaults, ...override });
   }
   model(owner: string, ref?: { providerId: string; model: string }) { return modelSettings(this.store, owner, this.configuration?.get(owner), ref); }
+  observation(a: RequestAttribution, reservedTokens: number): import('./model-observations.js').ObservationAttribution | undefined {
+    if (!a.task) return undefined;
+    this.checkAdmission(a);
+    if (!Number.isSafeInteger(reservedTokens) || reservedTokens < 1) throw new Error('invalid_request_reservation');
+    const price = this.limits(a.owner, a.run).prices.find(p => p.provider === a.provider && p.model === a.model);
+    return { task: a.task, reservedTokens, ...(price ? { price } : {}) };
+  }
+  taskBudgeted(owner: string, task?: string) {
+    if (!task) return false;
+    const limits = this.limits(owner);
+    return limits.runTokens !== undefined || limits.dayTokens !== undefined || limits.runCost !== undefined
+      || Boolean(this.store.db.prepare('SELECT 1 FROM task_delegations WHERE owner_id=? AND (task_id=? OR parent_task_id=?) UNION SELECT 1 FROM cloud_tasks WHERE owner_id=? AND id=? AND root_task_id IS NOT NULL LIMIT 1').get(owner, task, task, owner, task));
+  }
   checkAdmission(a: RequestAttribution) {
     if (a.run) {
       const row = this.store.db.prepare('SELECT r.status FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=? AND t.owner_id=?').get(a.run, a.owner) as { status: string } | undefined;
@@ -46,25 +68,40 @@ export class UsageLedger {
       const allowed = a.purpose === 'memory' ? ['completed'] : a.purpose.startsWith('study:') && a.task ? ['running', 'queued', 'waiting_user', 'waiting_event', 'completed'] : ['running'];
       if (!allowed.includes(row.status)) throw new Error('request_run_not_active');
     }
-    if (a.task && !this.store.db.prepare("SELECT 1 FROM cloud_tasks WHERE id=? AND owner_id=? AND parent_run_id=? AND status IN ('running','waiting_user')").get(a.task, a.owner, a.run ?? null)) throw new Error('request_task_not_active_or_owned');
+    if (a.task && !this.store.db.prepare("SELECT 1 FROM cloud_tasks WHERE id=? AND owner_id=? AND parent_run_id IS ? AND status IN ('running','waiting_user')").get(a.task, a.owner, a.run ?? null)) throw new Error('request_task_not_active_or_owned');
   }
   reserve(a: RequestAttribution, attempt: number, tokens: number) {
     return this.store.transaction(() => {
       if (!Number.isSafeInteger(tokens) || tokens < 1 || !Number.isSafeInteger(attempt) || attempt < 1) throw new Error('invalid_request_reservation');
       this.checkAdmission(a);
       const limits = this.limits(a.owner, a.run);
+      const rootRun = this.rootRun(a.owner, a.run);
+      const root = a.task ? (this.store.db.prepare('SELECT root_id FROM task_delegations WHERE task_id=? AND owner_id=?').get(a.task, a.owner) as { root_id: string } | undefined)?.root_id ?? (this.store.db.prepare('SELECT root_task_id FROM cloud_tasks WHERE id=? AND owner_id=?').get(a.task, a.owner) as { root_task_id: string | null } | undefined)?.root_task_id ?? a.task : undefined;
       const sum = (where: string, params: string[]) => (this.store.db.prepare(`SELECT COALESCE(SUM(COALESCE(input_tokens+output_tokens,reserved_tokens)),0) AS tokens FROM bot_requests WHERE ${where}`).get(...params) as { tokens: number }).tokens;
-      if (limits.dayTokens !== undefined && sum('owner_id=? AND started_at>=?', [a.owner, new Date().toISOString().slice(0, 10)]) + tokens > limits.dayTokens) throw new BudgetBlocked('owner_daily_token_budget');
-      if (a.run && limits.runTokens !== undefined && sum('owner_id=? AND run_id=?', [a.owner, a.run]) + tokens > limits.runTokens) throw new BudgetBlocked('run_token_budget');
+      // Ordinary pre-delegation calls stay in the original observation table.
+      // Attach physical request evidence there, then include it in admission;
+      // never copy it into bot_requests (which would double-count usage reports).
+      const observedDay = limits.dayTokens === undefined ? 0 : (this.store.db.prepare('SELECT COALESCE(SUM(COALESCE(input_tokens+output_tokens,reserved_tokens)),0) AS tokens FROM model_observations WHERE owner_id=? AND task_id IS NOT NULL AND started_at>=?').get(a.owner, new Date().toISOString().slice(0, 10)) as { tokens: number }).tokens;
+      if (limits.dayTokens !== undefined && sum('owner_id=? AND started_at>=?', [a.owner, new Date().toISOString().slice(0, 10)]) + observedDay + tokens > limits.dayTokens) throw new BudgetBlocked('owner_daily_token_budget');
+      const runScope = 'owner_id=? AND (run_id=? OR run_id IN (SELECT id FROM runs WHERE root_run_id=?))';
+      const taskScope = 'owner_id=? AND (task_id=? OR task_id IN (SELECT task_id FROM task_delegations WHERE root_id=? AND owner_id=?) OR task_id IN (SELECT id FROM cloud_tasks WHERE root_task_id=? AND owner_id=?))';
+      const runParams = [a.owner, rootRun!, rootRun!], taskParams = [a.owner, root!, root!, a.owner, root!, a.owner];
+      const observationScope = root && !a.run ? taskScope : 'owner_id=? AND task_id IN (SELECT id FROM cloud_tasks WHERE parent_run_id=? OR parent_run_id IN (SELECT id FROM runs WHERE root_run_id=?))';
+      const observationParams = root && !a.run ? taskParams : [a.owner, rootRun!, rootRun!];
+      const observed = a.run || root ? this.store.db.prepare(`SELECT input_tokens,output_tokens,cache_creation_tokens,reserved_tokens,provider,model,price_json FROM model_observations WHERE ${observationScope}`).all(...observationParams) as Array<{ input_tokens: number | null; output_tokens: number | null; cache_creation_tokens: number | null; reserved_tokens: number | null; provider: string; model: string; price_json: string | null }> : [];
+      const observedTokens = observed.reduce((n, r) => n + (r.input_tokens !== null && r.output_tokens !== null ? r.input_tokens + r.output_tokens : r.reserved_tokens ?? 0), 0);
+      if (a.run && limits.runTokens !== undefined && sum(runScope, runParams) + observedTokens + tokens > limits.runTokens) throw new BudgetBlocked('run_token_budget');
+      if (!a.run && root && limits.runTokens !== undefined && sum(taskScope, taskParams) + observedTokens + tokens > limits.runTokens) throw new BudgetBlocked('root_task_token_budget');
       const price = limits.prices.find(p => p.provider === a.provider && p.model === a.model);
       if (limits.runCost !== undefined) {
         if (!price) throw new BudgetBlocked('model_price_required');
-        const current = this.store.db.prepare('SELECT cost,input_tokens,output_tokens,reserved_tokens,provider,model,price_json FROM bot_requests WHERE owner_id=? AND run_id=?').all(a.owner, a.run ?? null) as Array<{ cost: number | null; input_tokens: number | null; output_tokens: number | null; reserved_tokens: number; provider: string; model: string; price_json: string | null }>;
+        const current = (a.run ? this.store.db.prepare(`SELECT cost,input_tokens,output_tokens,reserved_tokens,provider,model,price_json FROM bot_requests WHERE ${runScope}`).all(...runParams)
+          : root ? this.store.db.prepare(`SELECT cost,input_tokens,output_tokens,reserved_tokens,provider,model,price_json FROM bot_requests WHERE ${taskScope}`).all(...taskParams) : []) as Array<{ cost: number | null; input_tokens: number | null; output_tokens: number | null; reserved_tokens: number; provider: string; model: string; price_json: string | null }>;
         let cost = 0;
-        for (const row of current) {
+        for (const row of [...current, ...observed.map(row => ({ ...row, input_tokens: row.input_tokens === null ? null : row.input_tokens + (row.cache_creation_tokens ?? 0), cost: null }))]) {
           const p = row.price_json ? JSON.parse(row.price_json) as BotBudget['prices'][number] : limits.prices.find(p => p.provider === row.provider && p.model === row.model);
           if (!p) throw new BudgetBlocked('model_price_required');
-          cost += row.cost ?? row.reserved_tokens * Math.max(2 * p.inputPerMillion, p.outputPerMillion) / 1000000;
+          cost += row.cost ?? (row.input_tokens !== null && row.output_tokens !== null ? row.input_tokens * p.inputPerMillion + row.output_tokens * p.outputPerMillion : (row.reserved_tokens ?? 0) * Math.max(2 * p.inputPerMillion, p.outputPerMillion)) / 1000000;
         }
         if (cost + tokens * Math.max(2 * price.inputPerMillion, price.outputPerMillion) / 1000000 > limits.runCost) throw new BudgetBlocked('run_cost_budget');
       }

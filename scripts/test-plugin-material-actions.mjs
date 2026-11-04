@@ -53,7 +53,7 @@ try {
   assert.throws(() => invoke('comments', { materialId: 'a', clientNonce: 'duplicate' }), /generation_conflict/);
   assert.ok(tasks.every(task => task.executor === 'node'));
   const cover = invoke('cover', { materialId: 'a', clientNonce: 'cover', force: false });
-  assert.equal(cover.executor, 'browser'); assert.equal(cover.input.options.force, false);
+  assert.equal(cover.executor, 'node'); assert.equal(cover.input.options.force, false);
   assert.throws(() => invoke('cover', { materialId: 'a', clientNonce: 'cover', force: true }), /nonce_conflict/);
   runner.start('http://127.0.0.1:1');
   for (const task of tasks) { const row = await end(task.id); assert.equal(row.status, 'completed', row.error); }
@@ -68,5 +68,5 @@ try {
   const latest = service.files.layout(owner), disabled = JSON.parse(latest.content); disabled.disabledBuiltins = ['material-tools'];
   service.files.save(owner, latest.path, JSON.stringify(disabled), latest.content, latest.revision);
   assert.throws(() => invoke('comments', { materialId: 'a', clientNonce: 'disabled' }), /plugin_unavailable/);
-  console.log('Material plugin adapters passed: original native handout/comments/danmaku/Markdown outputs, browser cover routing, owner/material/schema guards, durable task origin, nonce binding, duplicate generation, disable revocation.');
+  console.log('Material plugin adapters passed: original native handout/comments/danmaku/Markdown outputs, server cover routing, owner/material/schema guards, durable task origin, nonce binding, duplicate generation, disable revocation.');
 } finally { await runner.close(); await service.close(); store.close(); fs.rmSync(directory, { recursive: true, force: true }); }

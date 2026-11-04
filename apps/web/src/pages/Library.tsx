@@ -301,7 +301,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const [systemError, setSystemError] = useState('');
   useEffect(() => {
     if (!inSystemFolder) return;
-    if (cloud.enabled && !cloud.worker) {
+    if (cloud.enabled) {
       let stopped = false, off: (() => void) | undefined;
       setSystemLoading(true);
       void import('../client/resources').then(({ followDocument }) => {

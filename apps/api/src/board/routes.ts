@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { BoardFiles } from './files.js';
 import type { CloudTaskRunner } from '../cloud/tasks.js';
+import { cancelOwnerTask } from '../cloud/task-cancellation.js';
 import type { BotApplicationService } from '../agent/service.js';
 import { BoardTasks } from './tasks.js';
 import { PluginFiles } from '../plugins/files.js';
@@ -52,7 +53,7 @@ export function registerBoardRoutes(app: FastifyInstance, files: BoardFiles, run
         const task = tasks.get(user.id, args.id);
         if (task.kind === 'bot') bots.cancelRun(user.id, task.runId);
         else {
-          files.store.db.prepare("UPDATE cloud_tasks SET status='cancelled',updated_at=? WHERE id=? AND owner_id=? AND status IN ('queued','running','waiting_user')").run(new Date().toISOString(), task.id, user.id);
+          cancelOwnerTask(files.store, user.id, task.id);
           await runner.cancel(task.id);
         }
         return { cancelled: tasks.get(user.id, task.id).status === 'cancelled' };

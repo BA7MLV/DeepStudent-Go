@@ -52,7 +52,7 @@ try {
   assert.equal((await app.inject({ method: 'POST', url: '/api/v1/bootstrap/initialize', headers: { 'x-bootstrap-secret': fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim() }, payload: { adminPassword: 'plugins-test-password-123' } })).statusCode, 201);
   const login = await app.inject({ method: 'POST', url: '/api/v1/auth/password/login', payload: { password: 'plugins-test-password-123' } });
   const owner = login.json().user.id, cookie = login.headers['set-cookie'].split(';')[0];
-  const api = (url, payload, headers = {}) => app.inject({ method: payload ? 'POST' : 'GET', url: `/api/v1${url}`, headers: { cookie, ...headers }, ...(payload ? { payload } : {}) });
+  const api = (url, payload, headers = {}) => app.inject({ method: payload ? 'POST' : 'GET', url: `/api/v1${url==='/plugins/layout'&&payload?'/plugins/tool':url}`, headers: { cookie, ...headers }, ...(payload ? { payload:url==='/plugins/layout'?{operation:'configure',...payload}:payload } : {}) });
   assert.equal((await app.inject({ method: 'GET', url: '/api/v1/plugins' })).statusCode, 401);
   store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
   const files = new PluginFiles(store), other = crypto.randomUUID();

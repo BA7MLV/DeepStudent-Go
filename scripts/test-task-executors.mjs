@@ -71,14 +71,14 @@ async function upload(data, name, mime = 'application/octet-stream', account = o
 try {
   assert.equal(typeof globalThis.window, 'undefined');
   for (const kind of ['transcribe', 'handout']) {
-    assert.equal(executorFor({ kind, input: {} }, null), 'browser');
+    assert.equal(executorFor({ kind, input: {} }, null), 'node');
   }
   for (const kind of ['chat', 'qa', 'artifactEdit']) {
     assert.equal(executorFor({ kind, input: {} }, null), 'node');
   }
-  assert.equal(executorFor({ kind: 'cover', input: {} }, { kind: 'material' }), 'browser');
-  assert.equal(executorFor({ kind: 'material', input: { format: 'pdf' } }, null), 'browser');
-  runner.start('http://127.0.0.1:1'); // Browser tasks remain queued; no server browser is available.
+  assert.equal(executorFor({ kind: 'cover', input: {} }, { kind: 'material' }), 'node');
+  assert.equal(executorFor({ kind: 'material', input: { format: 'pdf' } }, null), 'node');
+  runner.start('http://127.0.0.1:1');
 
   for (let i = 0; i < providers.length; i++) {
     const id = enqueue('modelOnce', { providerId: `p${i}`, model: 'native-model', options: { messages: [{ role: 'user', content: 'hello' }] }, baseUrl: 'https://untrusted.example', apiKey: 'untrusted' });
@@ -273,20 +273,17 @@ try {
   await completed(queued);
   assert.equal(get(interrupted).status, 'interrupted', 'interrupted tasks require explicit retry');
 
-  // Media stays queued for the user's browser; no native FFmpeg fallback.
-  for (const kind of ['cover', 'transcribe']) {
-    const task = enqueue(kind, { videoId }, `course:${videoId}`);
-    await until(() => get(task).executor === 'browser');
-    assert.equal(get(task).status, 'queued');
-    assert.equal(get(task).result, null);
-    store.db.prepare("UPDATE cloud_tasks SET status='cancelled' WHERE id=?").run(task);
-  }
+  // Missing media is a server failure, never a queued browser fallback.
+  const missingMedia = enqueue('cover', { videoId }, `course:${videoId}`);
+  await until(() => get(missingMedia).status === 'failed');
+  assert.equal(get(missingMedia).executor, 'node');
+  assert.equal(get(missingMedia).error, 'course_file_unavailable');
 
   const fallback = enqueue('qa', { sessionId: 1 });
   await until(() => get(fallback).status === 'failed');
   assert.equal(get(fallback).executor, 'node');
   assert.equal(get(fallback).error, '问答上下文不存在');
-  console.log('Native protocols/text/materials, durable routing/cancellation/restart and browser media queue checks passed');
+  console.log('Native protocols/text/materials, durable routing/cancellation/restart and no browser fallback checks passed');
 } finally {
   await runner.close(); store.close(); fs.rmSync(directory, { recursive: true, force: true });
 }

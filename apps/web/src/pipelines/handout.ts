@@ -14,6 +14,7 @@ import { routeHandoutSkills } from '../skills/router';
 import { enqueueCover } from './coverQueue';
 import { acquireWakeLock, releaseWakeLock } from '../utils/wakeLock';
 import { AdaptiveLimit, withAdaptiveRetry, adaptivePool } from '../utils/concurrency';
+import { frameCaption } from '@wangke/study-core/media/frame-policy';
 
 export interface HandoutProgress {
   phase: 'frames' | 'captions' | 'outline' | 'writing' | 'docx' | 'done';
@@ -115,8 +116,7 @@ async function captionFrame(
     limiter,
   );
   const text = textOf(msg);
-  const isSlide = !text.includes('类型：无') && text.length > 8;
-  const caption = text.replace(/^类型：.*$/m, '').trim().slice(0, 120) || '课程画面';
+  const {isSlide,caption} = frameCaption(text);
   return { ...frame, caption, isSlide };
 }
 

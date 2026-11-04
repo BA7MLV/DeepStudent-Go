@@ -4,7 +4,7 @@ import { pluginPath } from '@wangke/contracts/plugins';
 import { useSettings } from '../store/settings';
 import { MD_MIME } from './md';
 import { create } from 'zustand';
-import { cloud, cloudRequest, requestToolPermission } from '../cloud/state';
+import { cloud } from '../cloud/state';
 import { request, ServerApiError } from '../api/serverClient';
 import { AGENTS_PATH, MCP_PATH, MEMORY_PATH, SKILLS_PATH, memoryName, memoryPath, systemSaveArguments, type SystemDocument, type SystemDirectory } from '@wangke/contracts/system';
 
@@ -30,9 +30,7 @@ export function systemMaterialId(path: string): string | undefined {
 }
 export const systemMaterialRoute = (path: string) => `/player/${encodeURIComponent(systemMaterialId(path)!)}`;
 
-const systemRequest = <T>(path: string, init: RequestInit = {}) => request<T>(path, {
-  ...init, headers: { ...(cloud.workerToken ? { authorization: `Bearer ${cloud.workerToken}` } : {}), ...init.headers },
-});
+const systemRequest = <T>(path: string, init: RequestInit = {}) => request<T>(path, init);
 
 function remember(document: SystemDocument) {
   const previous = useSystemDocuments.getState().documents[document.path];
@@ -98,15 +96,12 @@ export async function saveSystemMarkdown(id: string, text: string, expected?: st
     if (expectedRevision !== undefined && current.revision !== expectedRevision) throw new Error('文件已在其他页面更新，请重新读取后再修改。');
     let saved: SystemDocument;
     const args = systemSaveArguments(path, text, current.content, current.revision);
-    const permissionId = await requestToolPermission('write', args);
     try {
-      saved = remember(await systemRequest<SystemDocument>('/system/file', { method: 'POST', body: JSON.stringify({ ...args, permissionId }) }));
+      saved = remember(await systemRequest<SystemDocument>('/system/file', { method: 'POST', body: JSON.stringify(args) }));
     } catch (e) {
       if (e instanceof ServerApiError && e.status === 409) throw new Error('文件已在其他页面更新，请重新读取后再修改。');
       if (e instanceof ServerApiError && e.code === 'memory_source_changed') throw new Error('记忆的来源已变化，请在 Bot 记忆管理中核实后更新。');
       throw e;
-    } finally {
-      if (permissionId) await cloudRequest(`/tasks/${cloud.taskId}/authorize/finish`, { method: 'POST', body: JSON.stringify({ permissionId }) });
     }
     await flushCloud();
     if (path === AGENTS_PATH) {

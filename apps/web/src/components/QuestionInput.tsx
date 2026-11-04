@@ -5,6 +5,7 @@ import { useSettings } from '../store/settings';
 import { Markdown } from './markdown/Markdown';
 import { MaterialImage, SourceImage } from './MaterialImage';
 import WidgetBlock from './WidgetBlock';
+import type { WidgetAnswerFeedback } from '../harness/widgetProtocol';
 
 const components = { img: SourceImage };
 
@@ -22,19 +23,24 @@ export function emptyQuizAnswer(q: QuizQuestion): QuizAnswer {
 }
 
 /** Input only: neither generated HTML nor these controls get to grade or persist an attempt. */
-export default function QuestionInput({ question: q, value, onChange, disabled = false, label = '作答' }: {
+export default function QuestionInput({ question: q, value, onChange, onSubmit, answerFeedback, disabled = false, label = '作答' }: {
   question: QuizQuestion; value: QuizAnswer; onChange: (answer: QuizAnswer) => void; disabled?: boolean; label?: string;
+  onSubmit?: (answer: QuizAnswer) => Promise<void>; answerFeedback?: WidgetAnswerFeedback | null;
 }) {
   const dark = useResolvedDark(useSettings((s) => s.theme));
   const [standard, setStandard] = useState(false);
   const type = questionType(q);
   if (q.presentation && !standard) return <div className="quiz-input">
-    <WidgetBlock payload={q.presentation} dark={dark} allowPopout={false} disabled={disabled}
+    <WidgetBlock payload={q.presentation} dark={dark} readingKey={JSON.stringify([q.stem, q.type, q.options, q.source])} disabled={disabled} answerFeedback={answerFeedback}
       answerInput={{ answer: value, submitted: disabled, onDraft: (raw) => {
         if (!validQuizAnswer(q, raw)) throw new Error('草稿格式与题型不符，请按题库约定返回答案');
         onChange(raw);
-      } }} />
-    <p className="quiz-source">此交互仅填写草稿；请核对下方内容，再点击题卡的“提交答案”。</p>
+      }, onSubmit: onSubmit ? async raw => {
+        if (!validQuizAnswer(q, raw)) throw new Error('答案格式与题型不符');
+        if (!window.confirm(`确认提交此题答案？\n${q.stem}\n作答：${JSON.stringify(raw)}`)) throw new Error('已取消提交');
+        await onSubmit(raw);
+      } : undefined }} />
+    <p className="quiz-source">交互提交需宿主确认；也可核对草稿后点击题卡的“提交答案”。判定以宿主反馈为准。</p>
     <pre className="quiz-draft" aria-label="交互作答草稿">{JSON.stringify(value, null, 2)}</pre>
     <button type="button" className="quiz-ts" onClick={() => setStandard(true)}>使用标准作答界面</button>
   </div>;

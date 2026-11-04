@@ -18,6 +18,21 @@ export async function assertCreationHint(page) {
   assert.equal(await page.locator('.plugin-manager,[data-testid="plugin-manager-dialog"]').count(), 0);
   assert.equal(await page.getByRole('button', { name: /^(添加功能|管理挂载|添加到侧边栏|从侧边栏移除)$/ }).count(), 0);
 }
+// Custom host integrations opt in to the sidepanel. The stock chat page must
+// stay free of a generic component launcher or development guidance.
+export async function openChatPlugins(page) {
+  assert.equal(await page.getByRole('button', { name: '组件', exact: true }).count(), 0);
+  assert.equal(await page.locator('[data-plugin-slot="chat.sidepanel"]').count(), 0);
+  await page.evaluate(async () => {
+    const path = '/src/store/botPanel.ts';
+    const resource = performance.getEntriesByType('resource').findLast(entry => new URL(entry.name).pathname === path);
+    const { useBotPanel } = await import(resource?.name ?? path);
+    useBotPanel.getState().setAuxiliary('plugins');
+  });
+  const slot = page.locator('[data-plugin-slot="chat.sidepanel"]');
+  await slot.waitFor();
+  assert.equal(await slot.getByTestId('plugin-creation-hint').count(), 0);
+}
 export async function addPlugin(page, options) {
   const catalog = await pluginTool(page, { operation: 'list' });
   const pkg = catalog.plugins.find(p => p.id === options.pluginId && p.enabled && !p.error);

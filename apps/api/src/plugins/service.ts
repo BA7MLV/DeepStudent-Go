@@ -5,6 +5,7 @@ import { PLUGINS_TOOL, PLUGIN_LAYOUT_PATH, PLUGIN_SURFACES } from '@wangke/contr
 import type { DatabaseStore } from '../storage/database.js';
 import type { BotApplicationService } from '../agent/service.js';
 import type { CloudTaskRunner } from '../cloud/tasks.js';
+import { cancelOwnerTask } from '../cloud/task-cancellation.js';
 import { BoardTasks } from '../board/tasks.js';
 import { PluginFiles } from './files.js';
 import { registerLearningPersistence } from './learning.js';
@@ -75,7 +76,7 @@ export class PluginService {
     if (bots && runner) this.register({ id: 'tasks.cancel', capability: 'tasks', access: 'write', schema: object({ id: text }), run: async (a, c) => {
       const task = scopedTask(c, a.id);
       if (task.kind === 'bot') bots.cancelRun(c.owner, task.runId);
-      else { store.db.prepare("UPDATE cloud_tasks SET status='cancelled',updated_at=? WHERE id=? AND owner_id=? AND status IN ('queued','running','waiting_user')").run(new Date().toISOString(), task.id, c.owner); await runner.cancel(task.id); }
+      else { cancelOwnerTask(store, c.owner, task.id); await runner.cancel(task.id); }
       return { cancelled: tasks.get(c.owner, task.id).status === 'cancelled' };
     } });
     this.learningCleanup = registerLearningPersistence(this);

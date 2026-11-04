@@ -12,7 +12,6 @@ import Dexie from 'dexie';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import type { RuntimeRecordsPage } from '@wangke/contracts/client-runtime';
 import { migrateResourceOutbox } from '../client/resources';
-import { flushLearningProducts } from './learning-products';
 
 export const useCloudSync = create<{ pending: number; error: string; syncedAt: number; recordsRevision: number }>()(() => ({ pending: 0, error: '', syncedAt: 0, recordsRevision: 0 }));
 let stopChanges: (() => void) | undefined;
@@ -28,7 +27,6 @@ let configCheckedAt = 0;
 export function applyCloudConfig(config: CloudConfig) {
   configSignature = JSON.stringify(config);
   configCheckedAt = Date.now();
-  cloud.maxSteps = config.policy.maxSteps;
   useSettings.setState({
     providers: config.providers.map(p => ({ id: p.id, name: p.name, catalogId: p.catalogId, protocol: p.protocol, serves: p.serves,
       deploymentProtocols: Object.fromEntries((p.deployments ?? []).map(d => [d.model, d.protocol])),
@@ -114,7 +112,7 @@ async function applyRecordsPage(page: RuntimeRecordsPage, signal?: AbortSignal) 
     if (page.cursor <= cursor) return true;
     for (const record of decoded) {
       if (!Object.hasOwn(CLOUD_TABLES, record.table)) throw new Error('服务器返回了未知数据表');
-      if (record.table === 'preferences' && !cloud.worker) continue;
+      if (record.table === 'preferences') continue;
       const metaId = `revision:${record.table}:${JSON.stringify(record.key)}`;
       const known = (await database.table('_cloudMeta').get(metaId))?.value ?? 0;
       // A queued stream page can predate a just-acknowledged local command.
@@ -132,9 +130,8 @@ async function applyRecordsPage(page: RuntimeRecordsPage, signal?: AbortSignal) 
 
 async function syncCycle(pull = true) {
   phase('cycle:begin');
-  if (cloud.worker) await flushLearningProducts();
   const database = db;
-  if (!cloud.worker && Date.now() - configCheckedAt > 15000) {
+  if (Date.now() - configCheckedAt > 15000) {
     const config = await cloudRequest<CloudConfig>('/config');
     configCheckedAt = Date.now();
     if (JSON.stringify(config) !== configSignature) applyCloudConfig(config);
@@ -146,7 +143,6 @@ async function syncCycle(pull = true) {
     const first = await outbox.orderBy('sequence').first();
     if (!first) break;
     const rows = await outbox.where('transaction').equals(first.transaction).toArray();
-    if (cloud.worker) throw new Error('executor_outbox_requires_reconciliation');
     useCloudSync.setState({ pending: await outbox.count() });
     const mutations = [];
     phase('cycle:encode-outbox');
@@ -165,9 +161,7 @@ async function syncCycle(pull = true) {
   let cursor = (await database.table('_cloudMeta').get('cursor'))?.value ?? 0;
   for (;;) {
     phase('cycle:read-page');
-    const page = cloud.worker
-      ? await cloudRequest<RuntimeRecordsPage>(`/records?after=${cursor}`)
-      : await (await serverRuntime(cloud.userId)).recordsPage(cursor);
+    const page = await (await serverRuntime(cloud.userId)).recordsPage(cursor);
     if (page.records.length) changed = true;
     phase('cycle:apply-page');
     const applied = await applyRecordsPage(page);
@@ -241,12 +235,11 @@ async function resolveConflictLocked() {
   retryRecords?.();
 }
 
-export async function startCloud(owner: string, worker = false) {
-  cloud.enabled = true; cloud.userId = owner; cloud.worker = worker;
-  useCloudDatabase(owner, worker);
+export async function startCloud(owner: string) {
+  cloud.enabled = true; cloud.userId = owner;
+  useCloudDatabase(owner);
   await db.open();
-  if (!worker) { await migrateResourceOutbox(); await migratePreferenceOutbox(); }
-  if (worker) await (await import('./executor-recovery')).quarantineExecutorOutbox(db);
+  await migrateResourceOutbox(); await migratePreferenceOutbox();
   useSettings.persist.setOptions({ name: `wangke-cloud-settings-${owner}` });
   // 登录前的语言不随模型配置重置；有账号语言偏好时，后续 loadPreferences 再覆盖。
   const uiLanguage = useSettings.getState().uiLanguage;
@@ -256,7 +249,7 @@ export async function startCloud(owner: string, worker = false) {
   try { await flushCloud(); }
   catch (error) {
     // Existing local edits must remain reachable through conflict recovery after reload.
-    if (worker || !(await db.table('_cloudOutbox').count())) throw error;
+    if (!(await db.table('_cloudOutbox').count())) throw error;
   }
   await startPreferences();
   stopChanges?.();
@@ -278,7 +271,7 @@ export async function startCloud(owner: string, worker = false) {
   const online = () => { void flushCloud().then(() => follow?.restart()).catch(() => {}); };
   window.addEventListener('online', online);
   stopChanges = () => { closed = true; follow?.dispose(); retryRecords = undefined; Dexie.on('storagemutated').unsubscribe(changed); window.removeEventListener('online', online); };
-  if (!worker) {
+  {
     const runtime = await serverRuntime(owner);
     if (closed) return;
     follow = runtime.followRecords({
@@ -330,10 +323,6 @@ export async function clearCloudLocalData() {
   const owner = cloud.userId;
   cloud.enabled = false;
   cloud.userId = '';
-  cloud.worker = false;
-  cloud.taskId = '';
-  cloud.workerToken = '';
-  cloud.permissionId = undefined;
   useSettings.persist.setOptions({ name: 'wangke-settings' });
   if (owner) localStorage.removeItem(`wangke-cloud-settings-${owner}`);
   useSettings.setState(useSettings.getInitialState());

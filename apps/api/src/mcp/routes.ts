@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type { DatabaseStore } from '../storage/database.js';
 import type { CloudRecords } from '../cloud/records.js';
-import { workerIdentity } from '../cloud/workerAuth.js';
 import type { McpContext, McpServerInput } from '@wangke/contracts/mcp';
 import { McpManager, mcpError } from './manager.js';
 import { mcpScope } from './scope.js';
@@ -15,17 +14,11 @@ export function registerMcpRoutes(app: FastifyInstance, deps: {
   const authorize = (request: FastifyRequest, reply: FastifyReply, admin = false) => {
     if (!['GET', 'HEAD'].includes(request.method) && !deps.checkOrigin(request, reply)) return null;
     const user = deps.requireAuth(request, reply);
-    if (user && admin && workerIdentity(request)) { reply.code(403).send({ error: 'worker_scope_denied' }); return null; }
     reply.header('cache-control', 'no-store');
     return user;
   };
   const scope = (owner: string, context: McpContext, request: FastifyRequest): string[] | undefined => {
     if (!context || (context.sessionId !== undefined) === (context.threadId !== undefined)) throw new Error('mcp_invalid_context');
-    const worker = workerIdentity(request);
-    if (worker) {
-      const task = store.db.prepare("SELECT input FROM cloud_tasks WHERE id=? AND owner_id=? AND kind IN ('chat','qa') AND status IN ('running','waiting_user')").get(worker.taskId, owner) as { input: string } | undefined;
-      if (!task || JSON.parse(task.input).sessionId !== context.sessionId || context.threadId) throw new Error('mcp_context_denied');
-    }
     return mcpScope(store, records, owner, context);
   };
   const fail = (reply: FastifyReply, error: unknown) => {

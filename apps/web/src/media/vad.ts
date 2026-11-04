@@ -1,5 +1,8 @@
 import { NonRealTimeVAD } from '@ricky0123/vad-web';
 import { configureOrt } from './ortConfig';
+import { VAD_OPTIONS } from '@wangke/study-core/media/vad';
+export { mergeSegments } from '@wangke/study-core/media/vad';
+import { mergeSegments } from '@wangke/study-core/media/vad';
 
 let vadPromise: Promise<NonRealTimeVAD> | null = null;
 
@@ -10,9 +13,9 @@ export function getVAD(): Promise<NonRealTimeVAD> {
       ortConfig: (ort) => {
         configureOrt(ort);
       },
-      minSpeechMs: 200,
+      minSpeechMs: VAD_OPTIONS.minSpeechMs,
       // 默认 redemptionMs 偏大，800ms 停顿都不会切段；调小以获得更细的字幕粒度
-      redemptionMs: 300,
+      redemptionMs: VAD_OPTIONS.redemptionMs,
     }).catch((e) => {
       vadPromise = null;
       throw e;
@@ -30,28 +33,6 @@ export interface VadSegment {
 const MAX_SEG_SECONDS = 8;
 
 /** 合并过短/过密的 VAD 段：间隔 <0.4s 合并，单段最长 8s，最短 0.5s */
-export function mergeSegments(raw: VadSegment[]): VadSegment[] {
-  const out: VadSegment[] = [];
-  for (const seg of raw) {
-    const last = out[out.length - 1];
-    if (last && seg.start - last.end < 0.4 && seg.end - last.start <= MAX_SEG_SECONDS) {
-      last.end = seg.end;
-    } else {
-      out.push({ ...seg });
-    }
-  }
-  // 过短的段并入前一段
-  const merged: VadSegment[] = [];
-  for (const seg of out) {
-    const last = merged[merged.length - 1];
-    if (seg.end - seg.start < 0.5 && last && last.end - last.start + (seg.end - seg.start) <= MAX_SEG_SECONDS) {
-      last.end = seg.end;
-    } else {
-      merged.push({ ...seg });
-    }
-  }
-  return merged;
-}
 
 /**
  * 对 16kHz s16 PCM 做语音端点检测，返回带时间戳的语音段。

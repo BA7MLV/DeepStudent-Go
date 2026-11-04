@@ -6,6 +6,7 @@ import { attachmentSize } from '../chat/attachments';
 import { Sym } from '../ui';
 import ImagePreview from './ImagePreview';
 import ImageGallery from './ImageGallery';
+import AttachmentUploadStatus from './AttachmentUploadStatus';
 import './chat-attachments.css';
 import { acquireBotImage, invalidateBotImage } from './botImageCache';
 
@@ -114,15 +115,16 @@ export function BotMessageAttachments({ files, projectId }: { files: BotAttachme
   </div>;
 }
 
-export function BotAttachmentDraft({ files, sending, onRemove }: { files: BotDraftFile[]; sending: boolean; onRemove: (id: string) => void }) {
+export function BotAttachmentDraft({ files, sending, onRemove, onRetry }: { files: BotDraftFile[]; sending: boolean; onRemove: (id: string) => void; onRetry: (id: string) => void }) {
   return <div className="chat-attachments" data-testid="chat-attachment-draft" aria-label="待发送附件">
-    {files.map(item => isImage({ originalName: item.file.name, mimeType: item.file.type }) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment">
+    {files.map(item => isImage({ originalName: item.file.name, mimeType: item.file.type }) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.error ? 'error' : item.uploaded ? 'ready' : 'loading'}>
       <AttachmentImage name={item.file.name} local={item.file} draft />
+      {(!item.uploaded || item.error) && <AttachmentUploadStatus label="图片上传中" error={item.error} onRetry={() => onRetry(item.id)} />}
       <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={sending} onPress={() => onRemove(item.id)}><Sym name="close" /></Button>
-      {item.error && <span role="alert" className="chat-attachments__error">{item.error}</span>}
-    </div> : <div key={item.id} className="chat-attachments__item" data-testid="chat-attachment">
-      <Sym name="description" />
-      <span className="chat-attachments__info"><span>{item.file.name}</span><small>{attachmentSize(item.file.size)} · {sending ? '正在发送' : '待发送'}</small>{item.error && <span role="alert" className="chat-attachments__error">{item.error}</span>}</span>
+    </div> : <div key={item.id} className="chat-attachments__item" data-testid="chat-attachment" data-state={item.error ? 'error' : item.uploaded ? 'ready' : 'loading'}>
+      {!item.uploaded && !item.error ? <Spinner size="sm" aria-label="附件上传中" /> : <Sym name="description" />}
+      <span className="chat-attachments__info"><span>{item.file.name}</span><small>{attachmentSize(item.file.size)} · {item.error ? '上传失败' : item.uploaded ? '待发送' : '上传中'}</small>{item.error && <span role="alert" className="chat-attachments__error">{item.error}</span>}</span>
+      {item.error && <Button size="sm" variant="tertiary" isDisabled={sending} onPress={() => onRetry(item.id)}>重试</Button>}
       <Button isIconOnly size="sm" variant="tertiary" aria-label={`移除附件 ${item.file.name}`} isDisabled={sending} onPress={() => onRemove(item.id)}><Sym name="close" /></Button>
     </div>)}
   </div>;

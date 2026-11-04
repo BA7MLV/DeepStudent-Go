@@ -26,7 +26,7 @@ try {
   let configuration = new CloudConfiguration(store, path.join(root, 'config'));
   const configure = budget => configuration.save(owner, { ...configuration.get(owner, true), providers: [{ id: 'fake', name: 'Fake', baseUrl: 'https://fake.invalid/v1', protocol: 'openai-chat', apiKey: 'fake', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fake', model: 'fake' }, botBudget: { ...DEFAULT_BOT_BUDGET, ...budget } });
   configure({ runTokens: 1000, dayTokens: 100000 });
-  const service = new BotApplicationService(store, { enqueue() {} });
+  const service = new BotApplicationService(store, { enqueue() {}, freezeModel() {} });
   const thread = service.create(owner, 'bot', 'Service regression');
   const message = service.send(owner, thread.id, { clientNonce: 'services', content: 'Keep my explicit constraint' });
   const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id).id;
@@ -223,7 +223,7 @@ try {
   await assert.rejects(receiveFile(store, files, other, Readable.from(['forged']), 'forged.txt', 'text/plain', 100, undefined, () => {}, operation), /not_owned/);
   await assert.rejects(receiveFile(store, files, owner, Readable.from(['revoked']), 'revoked.txt', 'text/plain', 100, undefined, () => { throw new Error('revoked_at_commit'); }), /revoked/);
   assert.equal(fs.readdirSync(files).length, 1, 'revocation after file rename leaves no new owned file or orphan');
-  const recoveredService = new BotApplicationService(store, { enqueue() {} });
+  const recoveredService = new BotApplicationService(store, { enqueue() {}, freezeModel() {} });
   recoveredService.append(thread.id, 'assistant', 'text', 'stable message', 'stable-operation');
   recoveredService.append(thread.id, 'assistant', 'text', 'stable message', 'stable-operation');
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE client_nonce='stable-operation'").get().n, 1);

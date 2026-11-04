@@ -33,8 +33,8 @@ try {
   assert.throws(() => invoke(args, other), /not_found/);
   assert.throws(() => invoke({ ...args, text: 'injected prompt' }), /invalid_plugin_arguments/);
   const task = invoke(args);
-  assert.equal(task.kind, 'qa'); assert.equal(task.executor, 'browser');
-  assert.equal(executorFor(task, records.get(owner, 'videos', 'a')), 'browser');
+  assert.equal(task.kind, 'qa'); assert.equal(task.executor, 'node');
+  assert.equal(executorFor(task, records.get(owner, 'videos', 'a')), 'node');
   assert.equal(executorFor({ ...task, input: { ...task.input, pluginExtraction: false } }, null), 'node');
   assert.equal(invoke(args).id, task.id);
   assert.equal(records.get(owner, 'chatSessions', task.input.sessionId).videoId, 'a');
@@ -48,7 +48,7 @@ try {
   reconcilePracticeExtractions(service); reconcileLearningResults(store);
   assert.equal(results()[0].artifacts, null, 'prose or an unrelated changed bank is not a save receipt');
   assert.match(results()[0].deliveryError, /save_unconfirmed/);
-  // A durable browser tool checkpoint is restored before result projection.
+  // A durable server tool checkpoint is restored before result projection.
   store.db.prepare('UPDATE cloud_tasks SET progress=? WHERE id=?').run(JSON.stringify({ questionBankSaved: true }), task.id);
   await service.close(); service = new PluginService(store, undefined, undefined, { filesDir });
   const receipt = results()[0];
@@ -63,5 +63,5 @@ try {
   reconcilePracticeExtractions(service); reconcileLearningResults(store);
   assert.match(results().find(t => t.id === second.id).deliveryError, /no_new_bank/);
   assert.equal(records.get(owner, 'files', bankId).blob.$file, file.id, 'projection never rewrites the authoritative bank');
-  console.log('Practice extraction passed: original browser QA routing, host-owned session, schema/owner/material/nonce guards, generation exclusion, real Markdown receipt, no prose-only success, restart replay and idempotency, existing-bank CAS baseline.');
+  console.log('Practice extraction passed: server QA routing, host-owned session, schema/owner/material/nonce guards, generation exclusion, real Markdown receipt, no prose-only success, restart replay and idempotency, existing-bank CAS baseline.');
 } finally { await service.close(); store.close(); fs.rmSync(directory, { recursive: true, force: true }); }

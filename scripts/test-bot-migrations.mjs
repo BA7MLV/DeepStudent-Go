@@ -120,7 +120,13 @@ try {
       const store = new DatabaseStore(filename, path.join(root, name, 'system-files'));
       let manager, runner, gateway;
       try {
-        assert.equal(store.db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get().v, 31);
+        assert.equal(store.db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get().v, 34);
+        for (const table of ['task_delegations', 'task_agent_checkpoints', 'task_session_commands', 'task_root_cancellations', 'task_tool_steps', 'run_workspace_handoffs', 'run_workspace_scopes']) {
+          assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table), `${table} survives migration and restart`);
+        }
+        for (const [table, column] of [['cloud_tasks', 'model_snapshot'], ['runs', 'model_snapshot'], ['threads', 'default_model'], ['model_observations', 'task_id'], ['model_observations', 'reserved_tokens'], ['model_observations', 'price_json']]) {
+          assert.ok(store.db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === column));
+        }
         assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='trigger' AND name LIKE 'bot_sync_%'").get().n, 7);
         assert.ok(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='web_search_config'").get());
         assert.deepEqual(store.db.pragma('foreign_key_check'), []);
@@ -202,8 +208,13 @@ try {
   const broken = path.join(root, 'broken.sqlite');
   const store = new DatabaseStore(broken); store.db.exec('DROP TABLE mcp_servers'); store.close();
   assert.throws(() => new DatabaseStore(broken), /schema_layout_partial/);
+  const malformedAttribution = path.join(root, 'malformed-attribution.sqlite');
+  const attributed = new DatabaseStore(malformedAttribution);
+  attributed.db.exec('ALTER TABLE model_observations DROP COLUMN reserved_tokens; ALTER TABLE model_observations ADD COLUMN reserved_tokens TEXT');
+  attributed.close();
+  assert.throws(() => new DatabaseStore(malformedAttribution), /schema_layout_untrusted_model_observations_reserved_tokens/);
   assert.deepEqual(unhandled, []);
-  console.log('Partial schema rejected without migration replay');
+  console.log('Partial schema and malformed additive attribution rejected without migration replay');
 } finally {
   remote.closeAllConnections(); await new Promise(resolve => remote.close(resolve));
   process.off('unhandledRejection', rejected);

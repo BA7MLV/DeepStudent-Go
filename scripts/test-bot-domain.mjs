@@ -19,7 +19,7 @@ try {
   const owner = 'domain-owner', other = 'domain-other', at = new Date().toISOString();
   for (const id of [owner, other]) store.db.prepare('INSERT INTO users VALUES(?,?,?)').run(id, id, at);
   const config = new CloudConfiguration(store, path.join(root, 'config'));
-  const service = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  const service = new BotApplicationService(store, { enqueue() {}, cancel() {}, freezeModel() {} });
   const thread = service.create(owner, 'bot', 'Domain');
   const msg = service.send(owner, thread.id, { clientNonce: 'domain', content: 'Remember course evidence' });
   const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(msg.id).id;

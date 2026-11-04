@@ -37,7 +37,7 @@ const ACTION = {
  * 云端入口：首次部署走五步引导（欢迎 → 密钥 → 管理员 → 称呼 → 选模型），之后是单页登录。
  * 每一步只有一个标题、一张 2.5D 线稿和必要的输入框；说明交给布局和图形。
  */
-export default function CloudGate({ initialized, authenticated, initialSecret = '', error: initialError = '' }: { initialized: boolean; authenticated: boolean; initialSecret?: string; error?: string }) {
+export default function CloudGate({ initialized, authenticated, hasPasskey = false, initialSecret = '', error: initialError = '' }: { initialized: boolean; authenticated: boolean; hasPasskey?: boolean; initialSecret?: string; error?: string }) {
   const { t } = useTranslation('common');
   const [ready, setReady] = useState(authenticated);
   const [setup, setSetup] = useState(!initialized || location.hash.startsWith('#/setup'));
@@ -189,7 +189,7 @@ export default function CloudGate({ initialized, authenticated, initialSecret = 
                     {busy ? <><Spinner size="sm" color="current" />{t(step === 'account' ? 'onboarding.creating' : 'onboarding.signingIn')}</>
                       : t(ACTION[step as keyof typeof ACTION])}
                   </Button>
-                  {step === 'login' && <Button className="ob__secondary" variant="ghost" size="lg" isDisabled={busy} onPress={() => void signIn(true)}>{t('onboarding.passkey')}</Button>}
+                  {step === 'login' && hasPasskey ? <Button className="ob__secondary" variant="ghost" size="lg" isDisabled={busy} onPress={() => void signIn(true)}>{t('onboarding.passkey')}</Button> : null}
                 </div>
               </form>}
           </div>

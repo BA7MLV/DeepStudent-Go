@@ -30,14 +30,6 @@ type ResourceOptions = Parameters<typeof createResourceExecutor>[0];
 export function localChatPersistence(database = browserDatabase) {
   return { snapshot: async (snapshot: Omit<ChatRow, 'id'>, rowId?: number): Promise<number> => {
     for (const widget of messageWidgets(snapshot)) validateWidgetPayload(widget);
-    if (cloud.worker) {
-      if (database !== browserDatabase) throw new Error('client_account_changed');
-      if (rowId == null) return appendConversationMessage(snapshot);
-      const previous = await database.chats.get(rowId);
-      if (!previous || previous.role !== 'assistant' || previous.sessionId !== snapshot.sessionId || previous.videoId !== snapshot.videoId) throw new Error('原回答已删除或会话已变化，作品未保存');
-      await patchConversationMessage(rowId, { ...snapshot, createdAt: previous.createdAt, interrupted: snapshot.interrupted, interruptReason: snapshot.interruptReason, resume: snapshot.resume });
-      return rowId;
-    }
     return database.transaction('rw', database.chats, async () => {
       if (rowId == null) return await database.chats.add(snapshot) as number;
       const previous = await database.chats.get(rowId);

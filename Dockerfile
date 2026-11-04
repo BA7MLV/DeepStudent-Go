@@ -20,6 +20,7 @@ RUN npm run build -w @wangke/contracts && npm run build -w @wangke/study-core &&
 RUN npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg poppler-utils util-linux fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production DATA_DIR=/data DB_PATH=/data/db/wangke.sqlite FILES_DIR=/data/files HOME=/tmp
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules

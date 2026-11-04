@@ -21,6 +21,7 @@ const run = args => execFileSync('npm', args, { cwd: directory, stdio: 'inherit'
 run(['ci', '--no-audit', '--no-fund']);
 run(['run', 'build', '-w', '@wangke/contracts']);
 run(['run', 'build', '-w', '@wangke/study-core']);
+run(['run', 'build', '-w', '@wangke/remote-host']);
 run(['run', 'typecheck', '-w', '@wangke/api']);
 run(['run', 'build', '-w', '@wangke/api']);
 for (const forbidden of ['src', 'apps/web', 'dist', 'node_modules/react', 'node_modules/react-dom', 'node_modules/vite', 'node_modules/zustand']) {

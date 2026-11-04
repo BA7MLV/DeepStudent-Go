@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { WidgetPayload } from '../harness/widgetRuntime';
 import type { WidgetTheme } from '../harness/widgetTheme';
+import { readWidgetAnswerFeedback, acceptsWidgetFeedback, type WidgetAnswerFeedback } from '../harness/widgetProtocol';
 import WidgetBlock, {
   WIDGET_PREVIEW_MSG,
   type WidgetPreviewMessage,
@@ -38,11 +39,13 @@ export default function WidgetPreview() {
   const [canPrompt, setCanPrompt] = useState(false);
   const [htmlSurface, setHtmlSurface] = useState(false);
   const [error, setError] = useState('');
+  const [feedback, setFeedback] = useState<WidgetAnswerFeedback | null>(null);
 
   useEffect(() => {
     document.title = '交互图形';
     setError('');
     setPayload(null);
+    setFeedback(null);
     if (!token) {
       setError('预览链接无效，请从回答中的图形卡重新打开。');
       return;
@@ -56,6 +59,11 @@ export default function WidgetPreview() {
     channelRef.current = channel;
     channel.onmessage = (event: MessageEvent<WidgetPreviewMessage>) => {
       const message = event.data;
+      if (message?.type === WIDGET_PREVIEW_MSG.feedback) {
+        const next = readWidgetAnswerFeedback(message.feedback);
+        if (next) setFeedback(old => acceptsWidgetFeedback(old, next) ? next : old);
+        return;
+      }
       if (message?.type === WIDGET_PREVIEW_MSG.result) {
         const task = pending.current.get(message.requestId);
         if (!task) return;
@@ -104,7 +112,7 @@ export default function WidgetPreview() {
         <header className="widget-preview-page__header">
           <div>
             <h1>{htmlSurface ? 'HTML 预览' : '交互图形'}</h1>
-            <p>{htmlSurface ? '独立页面 · 安全预览 HTML 内容' : '独立预览 · 仍可使用图形内的交互控件'}</p>
+            <p>{htmlSurface ? '独立页面 · 安全预览 HTML 内容' : '独立预览 · 仍可使用图形内的交互控件'}{feedback ? ' · 题卡反馈只读，作答请回原页面' : ''}</p>
           </div>
         </header>
         {error ? (
@@ -113,7 +121,7 @@ export default function WidgetPreview() {
           </div>
         ) : payload ? (
           <div className="widget-preview-page__widget">
-            <WidgetBlock payload={payload} dark={dark} appearance={appearance} rowId={rowId} disabled={!canPrompt} allowPopout={false} onPrompt={sendPrompt} />
+            <WidgetBlock payload={payload} dark={dark} appearance={appearance} rowId={rowId} disabled={!canPrompt} allowPopout={false} onPrompt={sendPrompt} answerFeedback={feedback} />
           </div>
         ) : (
           <div className="widget-preview-page__message" role="status" data-testid="widget-preview-loading">

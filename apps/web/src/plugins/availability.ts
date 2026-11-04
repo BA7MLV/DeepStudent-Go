@@ -26,10 +26,6 @@ export function saveLocalPluginLayout(content: string, expected: string, revisio
 }
 /** Admission only: do not re-check or abort an already accepted pipeline mid-write. */
 export async function assertPluginAvailable(id: string) {
-  if (cloud.worker) {
-    if (!cloud.acceptedPlugins.includes(id)) throw new Error('plugin_unavailable');
-    return;
-  }
   const packages = cloud.enabled ? (await readRendererPluginCatalog()).plugins : localPluginPackages(JSON.parse(localPluginLayout().content));
   if (!packages.some(p => p.id === id && !p.error && p.manifest?.enabled)) throw new Error('plugin_unavailable');
 }
