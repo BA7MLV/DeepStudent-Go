@@ -18,7 +18,7 @@ export const reviewProvider = {
       const source = notebook ? readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, 'wrongbook.md', service.learningOptions.resources) : undefined;
       const questions = source ? parseWrongbook(source.text).filter(q => q.source.courseId === id) : [];
       const now = Date.now();
-      return { materialId: id, notebookRevision: source?.revision ?? null, cards: { total: cards.length, pending: cards.filter(q => q.status === 0).length, kept: cards.filter(q => q.status === 1).length },
+      return { materialId: id, asOf: now, notebookRevision: source?.revision ?? null, cards: { total: cards.length, pending: cards.filter(q => q.status === 0).length, kept: cards.filter(q => q.status === 1).length },
         questions: questions.map(q => ({ id: q.id, stem: q.question.stem, source: q.source, status: q.status, due: q.card.due, dueNow: q.status !== 'mastered' && Date.parse(q.card.due) <= now, attempts: q.attempts.length, lastAttemptAt: q.attempts.at(-1)?.at ?? null })),
         due: questions.filter(q => q.status !== 'mastered' && Date.parse(q.card.due) <= now).length,
         completed: questions.filter(q => q.status === 'mastered').length, notebookMaterialId: notebook ? 'wrongbook.md' : null };

@@ -5,6 +5,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { fixtureBrowserDomain } from './fixture-domain.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-mcp-files-ui-'));
 const reservation = net.createServer();
@@ -40,7 +41,7 @@ try {
   await post('/auth/password/login', { password: 'mcp-files-ui-password' });
   const config = await (await context.request.get(`${origin}/api/v1/cloud/config`)).json();
   assert.equal((await context.request.put(`${origin}/api/v1/cloud/config`, { headers: { origin }, data: { ...config, providers: [{ id: 'offline', name: 'Offline', baseUrl: 'https://offline.invalid/v1', protocol: 'openai-chat', apiKey: 'test-only', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'offline', model: 'test' } } })).ok(), true);
-  await post('/cloud/records', { mutations: [{ id: 'language', table: 'preferences', key: 'uiLanguage', before: null, after: { id: 'uiLanguage', value: 'zh-CN' } }] });
+   await fixtureBrowserDomain(context.request, origin, 'setPreferences', { operationId: 'fixture-mcp-language-000001', changes: [{ key: 'uiLanguage', expected: null, value: 'zh-CN' }] });
   const server = await (await post('/cloud/mcp', { name: 'MCP fixture', url: 'https://example.invalid/mcp', transport: 'streamable-http', enabled: false, auth: 'bearer', token: 'not-in-json', timeoutMs: 30000, disabledTools: [] })).json();
   const file = async () => (await context.request.get(`${origin}/api/v1/system/file?path=/system/mcp.json`)).json();
   console.log('MCP UI fixture: authenticated and seeded');
@@ -110,7 +111,7 @@ try {
     await dialog.getByRole('alert').waitFor();
     assert.equal(await dialog.getByLabel('名称', { exact: true }).inputValue(), `可视化编辑 ${width}`, 'stale visual forms retain their draft');
     assert.equal(JSON.parse((await file()).content).servers[0].name, concurrentVisualName);
-    await dialog.getByRole('button', { name: '取消', exact: true }).click();
+    await dialog.locator('[data-slot="drawer-footer"]').getByRole('button', { name: '取消', exact: true }).click();
     await visual.getByRole('heading', { name: concurrentVisualName, exact: true }).waitFor();
     await visual.getByRole('button', { name: '编辑服务器', exact: true }).click();
     await dialog.getByLabel('名称', { exact: true }).fill(`可视化编辑 ${width}`);

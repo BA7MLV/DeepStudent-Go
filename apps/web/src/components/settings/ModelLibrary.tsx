@@ -2,7 +2,7 @@ import { useId, useState } from 'react';
 import { Button, Checkbox, Input, ListBox, SearchField, Select } from '@heroui/react';
 import { catalogOf, SLOT_LABEL, type ModelSlot, type SavedModel, type Settings } from '../../store/settings';
 import { editModelPatch, modelKey, savedModelsOf, suggestedModelSlots } from '../../store/modelLibrary';
-import { Field, LoadingButton, SectionCard, Sym, toast } from '../../ui';
+import { Field, Hint, LoadingButton, SectionCard, Sym, toast } from '../../ui';
 import { Collapse } from '../motion';
 import { getModelMeta, MODEL_OVERRIDE_FIELDS } from '../../api/modelMeta';
 import type { DiscoveredModel } from '../../api/modelDiscoveryData';
@@ -239,10 +239,10 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
                   <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control></Checkbox.Content>
                 </Checkbox>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm" title={label}>{label}</div>
-                  <div className="truncate text-xs text-muted" title={m.id}>
+                  <Hint className="block truncate text-sm" content={label}>{label}</Hint>
+                  <Hint className="block truncate text-xs text-muted" content={m.id}>
                     {label !== m.id && `${m.id} · `}{draft ? draft.slots.map((s) => SLOT_LABEL[s]).join(' / ') : '需手动选择用途'}
-                  </div>
+                  </Hint>
                 </div>
                 <Button size="sm" variant="tertiary" aria-label={`${draft ? '添加' : '配置'} ${m.id}`} onPress={() => {
                   if (draft) addDiscovered(draft);

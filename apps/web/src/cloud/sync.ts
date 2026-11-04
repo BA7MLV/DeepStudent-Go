@@ -4,14 +4,23 @@ import { markCloudApply, type OutboxRow } from './cache';
 import { cloud, cloudRequest } from './state';
 import { CLOUD_TABLES, type CloudRecord, type CloudConfig } from '@wangke/contracts/cloud';
 import { useSettings } from '../store/settings';
-import { flushPreferences, loadPreferences, startPreferences } from './preferences';
+import { flushPreferences, loadPreferences, startPreferences, stopPreferences, migratePreferenceOutbox } from './preferences';
 import { apiUrl } from '../api/base';
 import { cloudTransaction, isLostCloudTransaction } from './transactions';
 import { reasoningProviderOf } from '@wangke/study-core/model/reasoning';
+import Dexie from 'dexie';
+import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
+import type { RuntimeRecordsPage } from '@wangke/contracts/client-runtime';
+import { migrateResourceOutbox } from '../client/resources';
+import { flushLearningProducts } from './learning-products';
 
-export const useCloudSync = create<{ pending: number; error: string; syncedAt: number }>()(() => ({ pending: 0, error: '', syncedAt: 0 }));
-let timer: ReturnType<typeof setInterval> | undefined;
-let flight: Promise<void> | undefined;
+export const useCloudSync = create<{ pending: number; error: string; syncedAt: number; recordsRevision: number }>()(() => ({ pending: 0, error: '', syncedAt: 0, recordsRevision: 0 }));
+let stopChanges: (() => void) | undefined;
+let retryRecords: (() => void) | undefined;
+let flight: Promise<boolean> | undefined;
+let syncPhase: { name: string; since: number } = { name: 'idle', since: Date.now() };
+const phase = (name: string) => { syncPhase = { name, since: Date.now() }; };
+export const cloudSyncDiagnostics = () => ({ phase: syncPhase.name, phaseAgeMs: Date.now() - syncPhase.since, flight: !!flight });
 const fileCache = new Map<string, Blob>();
 let configSignature = '';
 let configCheckedAt = 0;
@@ -79,7 +88,7 @@ async function decode(value: any): Promise<any> {
     const response = await fetch(apiUrl(`/api/v1/files/${encodeURIComponent(value.$file)}`), { credentials: 'include' });
     if (!response.ok) throw new Error(`无法同步文件（${response.status}）`);
     const blob = new Blob([await response.blob()], { type: value.type });
-    await db.table('_cloudBlobs').put({ hash: await blobHash(blob), id: value.$file });
+    await db.table('_cloudBlobs').put({ hash: await blobHash(blob), id: value.$file, origin: 'download' });
     // Bounded cache; IndexedDB remains the durable cache after decoding.
     if (fileCache.size >= 50) fileCache.delete(fileCache.keys().next().value!);
     fileCache.set(value.$file, blob);
@@ -90,7 +99,40 @@ async function decode(value: any): Promise<any> {
   return value;
 }
 
-async function syncCycle() {
+async function applyRecordsPage(page: RuntimeRecordsPage, signal?: AbortSignal) {
+  const database = db;
+  const decoded: CloudRecord[] = [];
+  for (const record of page.records) decoded.push({ ...record, value: await decode(record.value) });
+  signal?.throwIfAborted();
+  return cloudTransaction(database, database.tables, async () => {
+    markCloudApply();
+    signal?.throwIfAborted();
+    // Never overwrite an unacknowledged UI transaction, even if it was created
+    // while decoding file references. The durable cursor remains unchanged.
+    if (await database.table('_cloudOutbox').count()) return false;
+    const cursor = (await database.table('_cloudMeta').get('cursor'))?.value ?? 0;
+    if (page.cursor <= cursor) return true;
+    for (const record of decoded) {
+      if (!Object.hasOwn(CLOUD_TABLES, record.table)) throw new Error('服务器返回了未知数据表');
+      if (record.table === 'preferences' && !cloud.worker) continue;
+      const metaId = `revision:${record.table}:${JSON.stringify(record.key)}`;
+      const known = (await database.table('_cloudMeta').get(metaId))?.value ?? 0;
+      // A queued stream page can predate a just-acknowledged local command.
+      // Advance its global cursor, but never roll that key back to its old echo.
+      if (record.revision < known) continue;
+      const table = database.table(record.table);
+      if (record.value === null) await table.delete(record.key);
+      else await table.put(record.value);
+      await database.table('_cloudMeta').put({ id: metaId, value: record.revision });
+    }
+    await database.table('_cloudMeta').put({ id: 'cursor', value: page.cursor });
+    return true;
+  });
+}
+
+async function syncCycle(pull = true) {
+  phase('cycle:begin');
+  if (cloud.worker) await flushLearningProducts();
   const database = db;
   if (!cloud.worker && Date.now() - configCheckedAt > 15000) {
     const config = await cloudRequest<CloudConfig>('/config');
@@ -104,55 +146,59 @@ async function syncCycle() {
     const first = await outbox.orderBy('sequence').first();
     if (!first) break;
     const rows = await outbox.where('transaction').equals(first.transaction).toArray();
+    if (cloud.worker) throw new Error('executor_outbox_requires_reconciliation');
     useCloudSync.setState({ pending: await outbox.count() });
     const mutations = [];
+    phase('cycle:encode-outbox');
     for (const row of rows) mutations.push({ id: row.id, table: row.table, key: row.key, permissionId: row.permissionId,
       baseRevision: (await database.table('_cloudMeta').get(`revision:${row.table}:${JSON.stringify(row.key)}`))?.value,
       before: await encode(row.before), after: await encode(row.after) });
-    const result = await cloudRequest<{ versions: Array<{ table: string; key: string | number; revision: number }> }>('/records', { method: 'POST', body: JSON.stringify({ mutations }) });
+    phase('cycle:commit-records');
+    const result = await (await serverRuntime(cloud.userId)).commitRecords({ operationId: first.transaction, mutations });
+    phase('cycle:commit-cache');
     await cloudTransaction(database, [outbox, database.table('_cloudMeta')], async () => {
       await outbox.bulkDelete(rows.map(r => r.sequence!));
       await database.table('_cloudMeta').bulkPut(result.versions.map(r => ({ id: `revision:${r.table}:${JSON.stringify(r.key)}`, value: r.revision })));
     });
   }
+  if (!pull) { useCloudSync.setState({ pending: await outbox.count(), error: '', syncedAt: Date.now() }); return; }
   let cursor = (await database.table('_cloudMeta').get('cursor'))?.value ?? 0;
   for (;;) {
-    const page = await cloudRequest<{ records: CloudRecord[]; cursor: number; more: boolean }>(`/records?after=${cursor}`);
+    phase('cycle:read-page');
+    const page = cloud.worker
+      ? await cloudRequest<RuntimeRecordsPage>(`/records?after=${cursor}`)
+      : await (await serverRuntime(cloud.userId)).recordsPage(cursor);
     if (page.records.length) changed = true;
-    const decoded: CloudRecord[] = [];
-    for (const record of page.records) decoded.push({ ...record, value: await decode(record.value) });
-    const applied = await cloudTransaction(database, database.tables, async () => {
-      markCloudApply();
-      // A UI write during network I/O must be pushed before applying its remote echo.
-      if (await outbox.count()) return false;
-      for (const record of decoded) {
-        if (!Object.hasOwn(CLOUD_TABLES, record.table)) throw new Error('服务器返回了未知数据表');
-        const table = database.table(record.table);
-        if (record.value === null) await table.delete(record.key);
-        else await table.put(record.value);
-        await database.table('_cloudMeta').put({ id: `revision:${record.table}:${JSON.stringify(record.key)}`, value: record.revision });
-      }
-      await database.table('_cloudMeta').put({ id: 'cursor', value: page.cursor });
-      return true;
-    });
+    phase('cycle:apply-page');
+    const applied = await applyRecordsPage(page);
     if (!applied) return;
     cursor = page.cursor;
     if (!page.more) break;
   }
   useCloudSync.setState({ pending: await outbox.count(), error: '', syncedAt: Date.now() });
-  if (changed) window.dispatchEvent(new Event('cloud-data-changed'));
-  if (changed) await loadPreferences();
+  if (changed) useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1 }));
+  if (changed) { phase('cycle:load-preferences'); await loadPreferences(); }
 }
 
-export function flushCloud(): Promise<void> {
+export function flushCloud(background = false): Promise<void> {
   if (!cloud.enabled) return Promise.resolve();
-  if (flight) return flight.then(async () => {
-    if (await db.table('_cloudOutbox').count()) await flushCloud();
+  if (flight) return flight.then(async completed => {
+    // An explicit caller joining a skipped background attempt must still pull
+    // a baseline, even when there are no local edits to push.
+    if (!background && (!completed || await db.table('_cloudOutbox').count())) await flushCloud();
   });
   if (!flight) flight = (async () => {
-    const drain = async () => { await flushPreferences(); do { await syncCycle(); } while (await db.table('_cloudOutbox').count()); };
-    if (navigator.locks) await navigator.locks.request(`cloud-sync:${cloud.userId}`, drain);
-    else await drain();
+    const drain = async () => { phase('drain:preferences'); await flushPreferences(); do { await syncCycle(!background); } while (await db.table('_cloudOutbox').count()); };
+    phase('lock:waiting');
+    if (navigator.locks) return navigator.locks.request(`cloud-sync:${cloud.userId}`, { ifAvailable: background }, async lock => {
+      // Periodic cache maintenance must not build a queue ahead of a new tab's
+      // initial baseline or an explicit durable-write flush. Never steal a lock.
+      if (!lock) return false;
+      await drain();
+      return true;
+    });
+    await drain();
+    return true;
   })().catch(error => {
     const detail = (error as { detail?: { table?: string; key?: unknown } }).detail;
     useCloudSync.setState({ error: (error as Error).message === 'sync_conflict'
@@ -161,8 +207,8 @@ export function flushCloud(): Promise<void> {
         ? '浏览器本地数据库事务异常，同步尚未完成。请关闭其他同站点标签页后刷新重试，不要清除网站数据。'
         : (error as Error).message });
     throw error;
-  }).finally(() => { flight = undefined; });
-  return flight;
+  }).finally(() => { flight = undefined; phase('idle'); });
+  return flight.then(() => { if (!background) retryRecords?.(); });
 }
 
 export async function resolveCloudConflict() {
@@ -192,12 +238,15 @@ async function resolveConflictLocked() {
     await db.table('_cloudOutbox').bulkDelete(rows.map(r => r.sequence!));
   });
   await syncCycle();
+  retryRecords?.();
 }
 
 export async function startCloud(owner: string, worker = false) {
   cloud.enabled = true; cloud.userId = owner; cloud.worker = worker;
-  useCloudDatabase(owner);
+  useCloudDatabase(owner, worker);
   await db.open();
+  if (!worker) { await migrateResourceOutbox(); await migratePreferenceOutbox(); }
+  if (worker) await (await import('./executor-recovery')).quarantineExecutorOutbox(db);
   useSettings.persist.setOptions({ name: `wangke-cloud-settings-${owner}` });
   // 登录前的语言不随模型配置重置；有账号语言偏好时，后续 loadPreferences 再覆盖。
   const uiLanguage = useSettings.getState().uiLanguage;
@@ -210,12 +259,60 @@ export async function startCloud(owner: string, worker = false) {
     if (worker || !(await db.table('_cloudOutbox').count())) throw error;
   }
   await startPreferences();
-  clearInterval(timer);
-  timer = setInterval(() => void flushCloud().catch(() => {}), worker ? 250 : 1500);
+  stopChanges?.();
+  const database = db;
+  let closed = false;
+  let follow: { dispose(): void; restart(): void } | undefined;
+  // Dexie's committed mutation notification crosses tabs; no polling of either
+  // IndexedDB or HTTP. Reads alone never generate another wakeup.
+  const changed = (parts: Record<string, unknown>) => {
+    if (closed || !Object.keys(parts).some(key => key.startsWith(`idb://${database.name}/`))) return;
+    void database.table('_cloudOutbox').count().then(count => {
+      // An actual committed edit is a durable write, not idle maintenance. It
+      // waits once for the lock (coalesced by flight), otherwise a skipped wake
+      // could strand the only local edit forever after removing the timer.
+      if (!closed && count) void flushCloud().catch(() => {});
+    });
+  };
+  Dexie.on('storagemutated', changed);
+  const online = () => { void flushCloud().then(() => follow?.restart()).catch(() => {}); };
+  window.addEventListener('online', online);
+  stopChanges = () => { closed = true; follow?.dispose(); retryRecords = undefined; Dexie.on('storagemutated').unsubscribe(changed); window.removeEventListener('online', online); };
+  if (!worker) {
+    const runtime = await serverRuntime(owner);
+    if (closed) return;
+    follow = runtime.followRecords({
+      cursor: async () => (await database.table('_cloudMeta').get('cursor'))?.value ?? 0,
+      apply: async (page, signal) => {
+        const apply = async () => {
+          if (closed || !isCurrentServerRuntime(runtime)) return;
+          signal.throwIfAborted();
+          if (!await applyRecordsPage(page, signal)) throw new Error('records_pending_local_transaction');
+          if (page.records.length) {
+            useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1 }));
+            await loadPreferences();
+          }
+        };
+        // Drain local transactions first. Applying under the same lock closes
+        // the multi-tab push/remote-echo race without stealing a writer's lock.
+        if (await database.table('_cloudOutbox').count()) await flushCloud(true);
+        if (navigator.locks) await navigator.locks.request(`cloud-sync:${owner}`, apply);
+        else await apply();
+      },
+      failed: error => { if (!closed) useCloudSync.setState({ error: error instanceof Error ? error.message : String(error) }); },
+    });
+    retryRecords = follow.restart;
+    const { reconcileTaskAdmissions } = await import('./tasks');
+    // Admission uncertainty has its own persisted command UI. Do not overwrite
+    // a records conflict with a transient command warning that survives retry.
+    await reconcileTaskAdmissions();
+  }
 }
 
 export function stopCloud() {
-  clearInterval(timer); fileCache.clear();
+  stopPreferences();
+  void import('../client/bootstrap').then(module => module.disposeServerRuntime());
+  stopChanges?.(); stopChanges = undefined; fileCache.clear();
   // Re-enter through the auth gate on a fresh JS realm: no parked conversations or model
   // settings from a previous identity remain visible after logout/session expiry.
   window.location.reload();
@@ -223,7 +320,9 @@ export function stopCloud() {
 
 /** Discard this browser's cloud cache after a server-side account reset. */
 export async function clearCloudLocalData() {
-  clearInterval(timer);
+  stopPreferences();
+  (await import('../client/bootstrap')).disposeServerRuntime();
+  stopChanges?.(); stopChanges = undefined;
   fileCache.clear();
   flight = undefined;
   configSignature = '';

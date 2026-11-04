@@ -15,12 +15,21 @@ export function owner(file) {
   if (inside(file, 'apps/api')) return 'api';
   if (inside(file, 'packages/contracts')) return 'contracts';
   if (inside(file, 'packages/study-core')) return 'study-core';
+  if (inside(file, 'packages/client-core')) return 'client-core';
+  if (inside(file, 'packages/remote-artifacts')) return 'remote-artifacts';
+  if (inside(file, 'packages/remote-host')) return 'remote-host';
+  if (inside(file, 'packages/dsh-typert-protocol-source')) return 'generator-input';
 }
 
 export function allowed(from, to) {
   if (!from || !to || from === to) return true;
   if (from === 'contracts') return false;
   if (from === 'study-core') return to === 'contracts';
+  if (to === 'generator-input') return false;
+  if (from === 'client-core') return ['contracts', 'remote-artifacts'].includes(to);
+  if (from === 'remote-artifacts') return to === 'contracts';
+  if (from === 'remote-host') return to === 'contracts';
+  if (to === 'remote-host') return from === 'api';
   return to !== 'api' && to !== 'web';
 }
 
@@ -62,6 +71,9 @@ function files(directory) {
 export function inspectSource(filename, text, options = {}, root = repository) {
   const relative = posix(path.relative(root, filename));
   const sourceOwner = owner(relative);
+  const injectedPluginView = /^apps\/web\/src\/plugins\/learning\/(?:Flashcards|Practice|Review|MaterialTools)View\.tsx$/.test(relative);
+  const pluginSource = relative.startsWith('apps/web/src/plugins/');
+  const pluginView = pluginSource && relative.endsWith('.tsx');
   const errors = [];
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true);
   const constants = new Map();
@@ -92,6 +104,20 @@ export function inspectSource(filename, text, options = {}, root = repository) {
   }
   function reference(node, specifier) {
     const clean = specifier.replace(/[?#].*$/, '');
+    const typeOnly = ts.isImportDeclaration(node) && (node.importClause?.isTypeOnly
+      || !node.importClause?.name && node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)
+        && node.importClause.namedBindings.elements.every(element => element.isTypeOnly))
+      || ts.isImportTypeNode(node) || ts.isExportDeclaration(node) && node.isTypeOnly;
+    if (pluginSource && /api\/serverClient/.test(clean)
+      || pluginView && !typeOnly && /(?:api\/serverClient|client\/(?:bootstrap|plugins|plugin-projection)|store\/db|@deepseek-ai\/cordis)/.test(clean)) {
+      fail(node, 'plugin renderers must use injected projections/commands, not transport/database/runtime values');
+    }
+    if (injectedPluginView && !typeOnly && (/^(?:@deepseek-ai\/|@wangke\/(?:client-core|remote-artifacts))/.test(clean)
+      || /(?:^|\/)(?:api|client|cloud)\//.test(clean) || /(?:^|\/)store\/db$/.test(clean)
+      || /^\.\.\/(?:shared|catalog|usePluginRenderer)$/.test(clean))) {
+      fail(node, 'plugin views consume renderer-injected projections/commands, not runtime services');
+    }
+    if (['web', 'client-core'].includes(sourceOwner) && clean === '@wangke/remote-artifacts/host') fail(node, 'Host descriptors are not a Client build input');
     const resolved = ts.resolveModuleName(clean, filename, options, ts.sys).resolvedModule?.resolvedFileName;
     const candidate = resolved ?? (clean.startsWith('.') ? path.resolve(path.dirname(filename), clean)
       : clean.startsWith('/') ? path.join(root, clean) : undefined);
@@ -103,15 +129,28 @@ export function inspectSource(filename, text, options = {}, root = repository) {
         fail(node, `cross-package imports must use workspace exports: ${specifier}`);
       }
     }
-    const packageOwner = clean.startsWith('@wangke/study-core') ? 'study-core'
+    const packageOwner = clean.startsWith('@wangke/client-core') ? 'client-core'
+      : clean.startsWith('@wangke/remote-artifacts') ? 'remote-artifacts'
+      : clean.startsWith('@wangke/remote-host') ? 'remote-host'
+      : clean.startsWith('@wangke/study-core') ? 'study-core'
       : clean.startsWith('@wangke/contracts') ? 'contracts'
         : clean.startsWith('@wangke/api') ? 'api' : clean.startsWith('@wangke/web') ? 'web' : undefined;
     if (packageOwner && !allowed(sourceOwner, packageOwner)) fail(node, `forbidden package edge: ${specifier}`);
-    if ((sourceOwner === 'study-core' || sourceOwner === 'contracts') && /^(?:node:|react(?:\/|$)|zustand(?:\/|$)|dexie$|better-sqlite3$|fastify$)/.test(clean)) {
+    if (['study-core', 'contracts', 'client-core', 'remote-artifacts'].includes(sourceOwner) && /^(?:node:|react(?:\/|$)|zustand(?:\/|$)|dexie$|better-sqlite3$|fastify$)/.test(clean)) {
       fail(node, `environment-specific shared dependency: ${specifier}`);
     }
   }
   function walk(node) {
+    if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && (ts.isIdentifier(node.expression) || ts.isPropertyAccessExpression(node.expression))) {
+      const name = ts.isIdentifier(node.expression) ? node.expression.text : node.expression.name.text;
+      if (pluginSource && name === 'useSyncExternalStore' || pluginView && ['fetch', 'WebSocket', 'EventSource'].includes(name)) {
+        fail(node, 'only the renderer boundary may bridge sources or open business transports');
+      }
+    }
+    if (injectedPluginView && ((ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'fetch')
+      || (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && ['WebSocket', 'EventSource'].includes(node.expression.text)))) {
+      fail(node, 'plugin views must not open a business transport');
+    }
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier) {
       reference(node, node.moduleSpecifier.text);
     } else if (ts.isImportTypeNode(node) && ts.isLiteralTypeNode(node.argument) && ts.isStringLiteral(node.argument.literal)) {
@@ -138,7 +177,7 @@ export function inspectSource(filename, text, options = {}, root = repository) {
       }
     }
     // Shared code may use platform-standard fetch/Blob/URL, never application globals.
-    if ((sourceOwner === 'contracts' || sourceOwner === 'study-core') && ts.isIdentifier(node)
+    if (['contracts', 'study-core', 'client-core', 'remote-artifacts'].includes(sourceOwner) && ts.isIdentifier(node)
       && ['window', 'document', 'localStorage', 'indexedDB', 'navigator', 'process', 'Buffer'].includes(node.text)
       && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)
       && !(ts.isPropertyAssignment(node.parent) && node.parent.name === node)) {
@@ -159,7 +198,7 @@ export function audit(root = repository) {
     const file = path.join(root, filename);
     if (fs.existsSync(file)) errors.push(...inspectDocker(fs.readFileSync(file, 'utf8'), application, filename));
   }
-  for (const directory of ['apps/api', 'apps/web', 'src', 'packages/contracts', 'packages/study-core']) {
+   for (const directory of ['apps/api', 'apps/web', 'src', 'packages/contracts', 'packages/study-core', 'packages/client-core', 'packages/remote-artifacts', 'packages/remote-host']) {
     const configPath = ts.findConfigFile(path.join(root, directory), ts.sys.fileExists);
     let options = { moduleResolution: ts.ModuleResolutionKind.Bundler, target: ts.ScriptTarget.ES2022 };
     if (configPath) {

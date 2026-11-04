@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Input, Modal, Switch, TextArea } from '@heroui/react';
+import { Button, Drawer, Input, Modal, Switch, TextArea } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
-import { SectionCard, MODAL_CONTAINER_CLASS } from '../ui';
+import { SectionCard, MODAL_CONTAINER_CLASS, confirmDialog } from '../ui';
+import { useIsMobile } from '../utils/useMobile';
 import { cloud } from '../cloud/state';
 import { deleteMcpServer, listMcpServers, saveMcpServer, testMcpServer } from './client';
 import type { McpServer, McpServerInput, McpTool } from '@wangke/contracts/mcp';
@@ -10,12 +11,15 @@ import { McpImport, McpConnectionActions } from './McpAdvanced';
 import { SettingSelect } from '../components/settings/controls';
 import { MotionDisclosure } from '../components/motion';
 import { closeSettings } from '../components/settingsDialogStore';
+import { followDocument } from '../client/resources';
+import { MCP_PATH } from '@wangke/contracts/system';
 
 const initial: McpServerInput = { name: '', url: '', transport: 'streamable-http', auth: 'none', enabled: true, timeoutMs: 30000, disabledTools: [] };
 export default function McpSettings() {
   const { t } = useTranslation('settings');
   const [servers, setServers] = useState<McpServer[]>([]);
   const [draft, setDraft] = useState<(McpServerInput & { id?: string; configured?: boolean; revision?: string }) | null>(null);
+  const [draftBaseline, setDraftBaseline] = useState('');
   const [headerText, setHeaderText] = useState('');
   const [argsText, setArgsText] = useState('[]');
   const [envText, setEnvText] = useState('');
@@ -26,6 +30,8 @@ export default function McpSettings() {
   const [timings, setTimings] = useState<Record<string, number>>({});
   const [expanded, setExpanded] = useState<string>();
   const [remove, setRemove] = useState<McpServer | null>(null);
+  const mobile = useIsMobile();
+  const draftDirty = draft !== null && JSON.stringify({ draft, headerText, envText, argsText }) !== draftBaseline;
   const message = (e: unknown) => {
     const code = e instanceof Error ? e.message : '';
     return t(`mcp.errors.${Object.hasOwn(settingsMessages.mcp.errors, code) ? code as keyof typeof settingsMessages.mcp.errors : 'generic'}`);
@@ -38,11 +44,8 @@ export default function McpSettings() {
       const id = ++request;
       void listMcpServers().then(r => { if (!cancelled && id === request) { setServers(r.servers); setLoaded(true); } }).catch(e => { if (!cancelled && id === request) setError(message(e)); });
     };
-    refresh();
-    const timer = setInterval(refresh, 5000);
-    window.addEventListener('focus', refresh);
-    window.addEventListener('system-files-changed', refresh);
-    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
+    const off = followDocument({ kind: 'systemDocument', path: MCP_PATH }, refresh, e => { if (!cancelled) setError(message(e)); });
+    return () => { cancelled = true; off(); };
   }, [t]);
   const action = async (id: string, work: () => Promise<unknown>) => {
     setBusy(id); setError('');
@@ -54,7 +57,23 @@ export default function McpSettings() {
     setTools(current => ({ ...current, [server.id]: result.tools }));
     setTimings(current => ({ ...current, [server.id]: result.durationMs })); setExpanded(server.id);
   });
-  const edit = (server?: McpServer) => { setError(''); setHeaderText(''); setEnvText(''); setArgsText(JSON.stringify(server?.args ?? [])); setDraft(server ? { ...server } : { ...initial }); };
+  const edit = (server?: McpServer) => {
+    setError(''); setHeaderText(''); setEnvText('');
+    const argsText = JSON.stringify(server?.args ?? []);
+    setArgsText(argsText);
+    const next = server ? { ...server } : { ...initial };
+    setDraftBaseline(JSON.stringify({ draft: next, headerText: '', envText: '', argsText }));
+    setDraft(next);
+  };
+  const closeDraft = async () => {
+    if (busy) return;
+    if (draftDirty && !await confirmDialog({
+      headline: '放弃未保存的 MCP 配置？',
+      description: '名称、地址、认证和超时等修改都不会保存。',
+      confirmText: '放弃修改', danger: true,
+    })) return;
+    setDraft(null); setHeaderText(''); setEnvText('');
+  };
   const save = () => action('save', async () => {
     if (!draft) return;
     let headers: Record<string, string> | undefined;
@@ -100,10 +119,12 @@ export default function McpSettings() {
         </div> : null}
       </section>)}
     </div>
-    <Modal.Root isOpen={draft !== null} onOpenChange={open => { if (!open && !busy) { setDraft(null); setHeaderText(''); setEnvText(''); } }}>
-      <Modal.Backdrop><Modal.Container size="lg" className={MODAL_CONTAINER_CLASS}><Modal.Dialog>
-        <Modal.Header><Modal.Heading>{draft?.id ? t('mcp.edit') : t('mcp.add')}</Modal.Heading></Modal.Header>
-        <Modal.Body>{draft && <div className="flex flex-col gap-3 [&_label]:flex [&_label]:flex-col [&_label]:gap-1">
+    <Drawer.Root isOpen={draft !== null} onOpenChange={open => { if (!open) void closeDraft(); }}>
+      <Drawer.Backdrop variant="opaque">
+        <Drawer.Content placement={mobile ? 'bottom' : 'right'} className={mobile ? 'max-h-[90vh]' : 'w-[min(42rem,100vw)]'}>
+          <Drawer.Dialog data-testid="mcp-editor">
+        <Drawer.Header><Drawer.Heading>{draft?.id ? t('mcp.edit') : t('mcp.add')}</Drawer.Heading><Drawer.CloseTrigger aria-label={t('mcp.cancel')} /></Drawer.Header>
+        <Drawer.Body>{draft && <div className="flex flex-col gap-3 [&_label]:flex [&_label]:flex-col [&_label]:gap-1">
           <label>{t('mcp.name')}<Input fullWidth value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
           <SettingSelect label={t('mcp.transport')} value={draft.transport}
             options={[{ id: 'streamable-http', label: 'Streamable HTTP' }, { id: 'sse', label: 'HTTP + SSE' }, { id: 'stdio', label: 'stdio' }]}
@@ -126,10 +147,12 @@ export default function McpSettings() {
           {draft.auth !== 'none' && draft.auth !== 'oauth' ? <div><p className="text-sm text-muted">{t('mcp.secretHint')}</p><Button size="sm" variant="tertiary" onPress={() => { setDraft({ ...draft, token: '', headers: {} }); setHeaderText('{}'); }}>{t('mcp.clearSecret')}</Button></div> : null}
           <label>{t('mcp.timeout')}<Input fullWidth type="number" min={1} max={120} value={String(draft.timeoutMs / 1000)} onChange={e => setDraft({ ...draft, timeoutMs: Number(e.target.value) * 1000 })} /></label>
           {error && <p role="alert" className="text-danger">{error}</p>}
-        </div>}</Modal.Body>
-        <Modal.Footer><Button variant="tertiary" isDisabled={!!busy} onPress={() => { setDraft(null); setHeaderText(''); setEnvText(''); }}>{t('mcp.cancel')}</Button><Button isDisabled={!!busy || !draft?.name.trim() || !(draft.transport === 'stdio' ? draft.command?.trim() : draft.url.trim())} onPress={() => void save()}>{t('mcp.save')}</Button></Modal.Footer>
-      </Modal.Dialog></Modal.Container></Modal.Backdrop>
-    </Modal.Root>
+        </div>}</Drawer.Body>
+        <Drawer.Footer><Button variant="tertiary" isDisabled={!!busy} onPress={() => { setDraft(null); setHeaderText(''); setEnvText(''); }}>{t('mcp.cancel')}</Button><Button isDisabled={!!busy || !draft?.name.trim() || !(draft.transport === 'stdio' ? draft.command?.trim() : draft.url.trim())} onPress={() => void save()}>{t('mcp.save')}</Button></Drawer.Footer>
+          </Drawer.Dialog>
+        </Drawer.Content>
+      </Drawer.Backdrop>
+    </Drawer.Root>
     <Modal.Root isOpen={remove !== null} onOpenChange={open => { if (!open && !busy) setRemove(null); }}><Modal.Backdrop><Modal.Container className={MODAL_CONTAINER_CLASS} size="sm"><Modal.Dialog>
       <Modal.Header><Modal.Heading>{t('mcp.delete')}</Modal.Heading></Modal.Header><Modal.Body>{t('mcp.deleteConfirm', { name: remove?.name })}</Modal.Body>
       <Modal.Footer><Button variant="tertiary" isDisabled={!!busy} onPress={() => setRemove(null)}>{t('mcp.cancel')}</Button><Button variant="danger" isDisabled={!!busy} onPress={() => { if (remove) void action(remove.id, async () => { await deleteMcpServer(remove.id, remove.revision); setRemove(null); }); }}>{t('mcp.delete')}</Button></Modal.Footer>

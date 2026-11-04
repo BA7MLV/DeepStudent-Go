@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { fixturePreference } from './fixture-domain.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-chat-projects-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
@@ -26,7 +27,7 @@ try {
   };
   const config = await call('GET', '/cloud/config');
   await call('PUT', '/cloud/config', { ...config, providers: [{ id: 'offline', name: 'Offline', baseUrl: 'https://offline.invalid/v1', protocol: 'openai-chat', apiKey: 'test-only', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'offline', model: 'test' } });
-  await call('POST', '/cloud/records', { mutations: [{ id: 'language', table: 'preferences', key: 'uiLanguage', before: null, after: { id: 'uiLanguage', value: 'zh-CN' } }] });
+  await fixturePreference(api, cookie, 'uiLanguage', 'zh-CN');
   process.env.WANGKE_API_PROXY = backend;
   vite = await createServer({ root: new URL('../apps/web', import.meta.url).pathname, server: { host: '127.0.0.1', port: 0 }, plugins: [{
     name: 'chat-project-fixture', configureServer(server) {
@@ -70,7 +71,7 @@ try {
     assert.ok(project?.folderId);
     assert.ok(fs.statSync(path.join(directory, 'files', project.scope.workspacePath)).isDirectory());
     await input.fill('在项目里开始复习');
-    const submitted = page.waitForResponse(response => response.url().includes('/api/v1/cloud/tasks') && response.request().method() === 'POST');
+    const submitted = page.waitForResponse(response => response.url().endsWith('/api/clientRuntime/submitTask') && response.request().method() === 'POST');
     await page.getByTestId('chat-send').click();
     await page.getByTestId('chat-import-strip').waitFor({ state: 'hidden' });
     await page.waitForFunction(async () => {
@@ -78,7 +79,8 @@ try {
       return useCourseChat.getState().activeId != null;
     });
     const sessionId = await page.evaluate(async () => (await window.loadTestModule('/src/store/courseChat.ts')).useCourseChat.getState().activeId);
-    await submitted;
+    const admission = await submitted;
+    assert.equal((await admission.json()).result.ok, true, 'typed task admission succeeds');
     const session = (await call('GET', `/cloud/record?table=chatSessions&key=${sessionId}`)).value;
     assert.equal(session.projectFolderId, project.folderId, 'project association persists on first send');
     await page.reload();

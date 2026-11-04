@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Button, EmptyState } from '@heroui/react';
-import { SectionCard, Sym, confirmDialog, toast } from '../../ui';
+import { SectionCard, Sym, popconfirm, toast } from '../../ui';
 import { useCourseChat } from '../../store/courseChat';
 
 /**
@@ -38,12 +38,12 @@ export function ArchivedSessionsList() {
   };
 
   const onDelete = async (id: number, title: string) => {
-    const ok = await confirmDialog({
-      headline: '彻底删除这条会话？',
-      description: `「${title}」会被永久删除，这次没法再找回来了。`,
+    const ok = await popconfirm({
+      headline: `彻底删除会话「${title}」？`,
+      description: '会话里的问答记录会被永久删除，这次没法再找回来了。',
       confirmText: '删除',
-      cancelText: '取消',
       danger: true,
+      testId: 'archived-delete-popconfirm',
     });
     if (ok) {
       await deleteSessionById(id);

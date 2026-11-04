@@ -21,6 +21,7 @@
  *    `data-testid` 后缀，选择器不依赖 HeroUI 的内部类名。
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button, Input, Label, Modal, TextField, Toast, toast as heroToast } from '@heroui/react';
 import { Sym } from './icons';
 import { MODAL_CONTAINER_CLASS } from './modalContainer';
@@ -45,6 +46,18 @@ export interface ConfirmOptions {
    * 语义不能只靠颜色，文案仍须写清动作。
    */
   danger?: boolean;
+}
+
+export interface PopconfirmOptions {
+  /** 标题：一句话说清要做什么 */
+  headline: string;
+  /** 后果说明。不可逆时写清「无法恢复」 */
+  description?: string;
+  /** 确认按钮文案，必须是动作词 */
+  confirmText: string;
+  cancelText?: string;
+  danger?: boolean;
+  testId?: string;
 }
 
 /* ── toast ─────────────────────────────────────────────────────────────── */
@@ -148,6 +161,186 @@ export function promptDialog(options: PromptOptions): Promise<string | null> {
   });
 }
 
+/* ── 锚定确认（Popconfirm） ─────────────────────────────────────────────── */
+
+interface PopconfirmCommand {
+  id: number;
+  options: PopconfirmOptions;
+  /** 打开时锚点的视口矩形。菜单关闭、按钮卸载后仍能定位。 */
+  rect: DOMRect | null;
+  /** 关闭后把焦点还给打开它的元素（若还在 DOM 里）。 */
+  focusTarget: HTMLElement | null;
+  resolve: (confirmed: boolean) => void;
+}
+
+let popconfirmQueue: PopconfirmCommand[] = [];
+let popconfirmId = 0;
+const popconfirmListeners = new Set<() => void>();
+
+/**
+ * 最近一次指针按下的可交互元素。
+ *
+ * Safari 点击按钮不会把焦点移过去，`document.activeElement` 还是 body ——
+ * 只靠它会把确认气泡放到视口左上角。这里在捕获阶段记下真实触发元素，
+ * 键盘触发则退回 activeElement。
+ */
+let lastPress: { target: HTMLElement | null; at: number } = { target: null, at: 0 };
+let pressTracking = false;
+function trackPresses(): void {
+  if (pressTracking) return;
+  pressTracking = true;
+  document.addEventListener('pointerdown', (event) => {
+    const element = event.target instanceof Element
+      ? event.target.closest<HTMLElement>('button, a, [role="menuitem"], [role="option"], [role="button"]')
+      : null;
+    lastPress = { target: element, at: Date.now() };
+  }, true);
+}
+
+function notifyPopconfirm(): void {
+  popconfirmListeners.forEach((listener) => listener());
+}
+
+/**
+ * 单项、不可逆、但影响范围局部的动作：贴着触发元素确认，不打断整页。
+ *
+ * 入队时就把锚点矩形量下来 —— 触发它的菜单/行内按钮往往会在打开后立刻收起。
+ */
+export function popconfirm(options: PopconfirmOptions, anchor?: HTMLElement | null): Promise<boolean> {
+  trackPresses();
+  const recentPress = Date.now() - lastPress.at < 1500 ? lastPress.target : null;
+  const target = anchor
+    ?? recentPress
+    ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+  return new Promise<boolean>((resolve) => {
+    popconfirmQueue = [...popconfirmQueue, {
+      id: ++popconfirmId,
+      options,
+      rect: target?.isConnected ? target.getBoundingClientRect() : null,
+      focusTarget: target?.isConnected ? target : null,
+      resolve,
+    }];
+    notifyPopconfirm();
+  });
+}
+
+function settlePopconfirm(confirmed: boolean): void {
+  const [current, ...rest] = popconfirmQueue;
+  if (!current) return;
+  popconfirmQueue = rest;
+  current.resolve(confirmed);
+  notifyPopconfirm();
+  if (current.focusTarget?.isConnected) current.focusTarget.focus({ preventScroll: true });
+}
+
+function PopconfirmLayer() {
+  const [, forceRender] = useState(0);
+  useEffect(() => {
+    const listener = () => forceRender((n) => n + 1);
+    popconfirmListeners.add(listener);
+    return () => { popconfirmListeners.delete(listener); };
+  }, []);
+  const current = popconfirmQueue[0];
+  return current ? <PopconfirmDialog key={current.id} command={current} /> : null;
+}
+
+function PopconfirmDialog({ command }: { command: PopconfirmCommand }) {
+  const { options } = command;
+  const [style, setStyle] = useState<{ top: number; left: number; width: number; visibility: 'hidden' | 'visible' }>({
+    top: 0, left: 0, width: 0, visibility: 'hidden',
+  });
+  const popupRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+
+  const place = useCallback(() => {
+    const el = popupRef.current;
+    if (!el) return;
+    const width = Math.min(320, window.innerWidth - 16);
+    el.style.width = `${width}px`;
+    const height = el.offsetHeight;
+    const anchor = command.focusTarget?.isConnected
+      ? command.focusTarget.getBoundingClientRect()
+      : command.rect;
+    const gap = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const left = Math.max(8, Math.min(anchor ? anchor.left : (vw - width) / 2, vw - width - 8));
+    let top = anchor ? anchor.bottom + gap : (vh - height) / 2;
+    if (top + height > vh - 8) top = anchor ? anchor.top - height - gap : vh - height - 8;
+    top = Math.max(8, Math.min(top, vh - height - 8));
+    setStyle({ top, left, width, visibility: 'visible' });
+  }, [command]);
+
+  useLayoutEffect(() => {
+    place();
+    cancelRef.current?.focus({ preventScroll: true });
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        settlePopconfirm(false);
+      }
+    };
+    const onPointer = (event: PointerEvent) => {
+      if (popupRef.current?.contains(event.target as Node)) return;
+      settlePopconfirm(false);
+    };
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointer, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointer, true);
+    };
+  }, [place]);
+
+  // `data-react-aria-top-layer`：RAC 把带这个标记的节点视为顶层浮层 ——
+  // 模态的 ariaHideOutside、焦点陷阱和「点外面关闭」都会放行，
+  // 锚定确认才能从抽屉 / 对话框里正常使用。
+  return createPortal(
+    <div
+      ref={popupRef}
+      role="dialog"
+      aria-modal="false"
+      data-react-aria-top-layer
+      aria-labelledby={titleId}
+      aria-describedby={options.description ? descriptionId : undefined}
+      data-testid={options.testId ?? 'popconfirm'}
+      className="ui-smooth fixed rounded-lg border border-border bg-overlay p-4 text-left shadow-overlay"
+      style={{ ...style, zIndex: 100001 }}
+    >
+      <div id={titleId} className="text-sm font-medium text-foreground">{options.headline}</div>
+      {options.description && (
+        <p id={descriptionId} className="mt-1.5 text-[13px] leading-relaxed text-muted">{options.description}</p>
+      )}
+      <div className="mt-3 flex justify-end gap-2">
+        <Button
+          ref={cancelRef}
+          size="sm"
+          variant="tertiary"
+          onPress={() => settlePopconfirm(false)}
+          data-testid="popconfirm-cancel"
+        >
+          {options.cancelText ?? '取消'}
+        </Button>
+        <Button
+          size="sm"
+          variant={options.danger ? 'danger' : 'primary'}
+          onPress={() => settlePopconfirm(true)}
+          data-testid="popconfirm-confirm"
+        >
+          {options.confirmText}
+        </Button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 /**
  * 反馈层宿主：挂在 App 根部一次。
  *
@@ -180,6 +373,7 @@ export function FeedbackHost() {
     <>
       <Toast.Provider placement="top" gap={8} maxVisibleToasts={3} />
       {current && <FeedbackDialog key={queue.length} command={current} onOpenChange={handleOpenChange} />}
+      <PopconfirmLayer />
     </>
   );
 }

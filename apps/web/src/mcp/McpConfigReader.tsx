@@ -5,8 +5,10 @@ import { MCP_PATH, type SystemDocument } from '@wangke/contracts/system';
 import { readSystemDocument, saveSystemMarkdown, systemMaterialId } from '../materials/systemFiles';
 import { ServerApiError } from '../api/serverClient';
 import messages from '../i18n/locales/zh-CN/settings.json';
+import { followDocument } from '../client/resources';
+import { cloud } from '../cloud/state';
 
-/** Raw JSON editing for the resource; visual management lives in Settings. Drafts never follow polls. */
+/** Raw JSON editing for the resource; visual management lives in Settings. Pushes never overwrite drafts. */
 export default function McpConfigReader() {
   const { t } = useTranslation('settings');
   const [document, setDocument] = useState<SystemDocument>();
@@ -21,6 +23,10 @@ export default function McpConfigReader() {
   }, [t]);
 
   useEffect(() => {
+    if (cloud.enabled && !cloud.worker) return followDocument<SystemDocument>({ kind: 'systemDocument', path: MCP_PATH }, next => {
+      setDocument(next);
+      setEditor(current => current ?? { base: next, text: next.content });
+    }, error => setError(message(error)));
     let active = true, request = 0;
     const refresh = () => {
       const id = ++request;
@@ -32,10 +38,9 @@ export default function McpConfigReader() {
       }).catch(error => { if (active && id === request) setError(message(error)); });
     };
     refresh();
-    const timer = setInterval(refresh, 5000);
     window.addEventListener('focus', refresh);
     window.addEventListener('system-files-changed', refresh);
-    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
+    return () => { active = false; window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
   }, [message]);
 
   const save = async () => {

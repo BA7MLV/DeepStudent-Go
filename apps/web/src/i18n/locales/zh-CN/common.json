@@ -240,10 +240,21 @@
     "history": "会话",
     "open": "Bot",
     "activity": {
-      "scanning": "正在翻工具箱…",
-      "connecting": "正在把线索串起来…",
-      "checking": "正在核对关键细节…",
-      "composing": "正在整理成答案…"
+      "waiting": "等待响应…",
+      "queued": "任务已排队…",
+      "running": "任务运行中…",
+      "model": "正在请求模型…",
+      "tools": "正在调用 {{tools}}…",
+      "parallel": "{{count}} 项调用并行中：{{tools}}…",
+      "waiting_user": "等待你的回答或批准",
+      "waiting_event": "正在等待后台任务",
+      "returned": "已返回 {{count}} 次调用",
+      "idle": {
+        "star": "小星星转个圈 ✦",
+        "pillow": "抱着小枕头等一等…",
+        "paws": "小爪爪轻轻晃呀晃…",
+        "cloud": "在云朵上坐一小会儿…"
+      }
     }
   },
   "chat": {

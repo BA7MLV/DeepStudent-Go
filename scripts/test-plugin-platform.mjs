@@ -98,6 +98,13 @@ try {
   const toolLayout = (await api('/plugins/tool', { operation: 'layout' })).json();
   assert.equal((await api('/plugins/tool', { operation: 'configure', content: toolLayout.content, expected: 'stale', revision: toolLayout.revision })).statusCode, 409);
   const toolService = new PluginService(store, undefined, undefined, { filesDir: process.env.FILES_DIR });
+  const originalCatalog = toolService.files.catalog.bind(toolService.files);
+  let listScans = 0;
+  toolService.files.catalog = (...args) => { listScans++; return originalCatalog(...args); };
+  try {
+    assert.ok(toolService.tool(owner, { operation: 'list' }).plugins.length >= 4);
+    assert.equal(listScans, 2, 'one package snapshot plus live legacy layout reconciliation, not recursive rescans per package');
+  } finally { toolService.files.catalog = originalCatalog; }
   try {
     const botTool = pluginTool(toolService);
     assert.deepEqual(botTool.permissions({ operation: 'invoke' }), ['read', 'write']);

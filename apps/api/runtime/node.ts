@@ -34,6 +34,9 @@ import { gatewayTaskTarget, gatewayTaskFetch } from '../src/agent/model-gateway-
 import { modelThinkingLevel } from '../src/agent/model-preferences.js';
 import { cardsRevision, ensureLearningResults, learningCards, recordLearningReceipt } from '../src/plugins/learning-results.js';
 import { validateQuiz, type QuizQuestion } from '@wangke/study-core/quiz';
+import { validateAskUser, askAnswerText, type AskUserData, type AskUserAnswer } from '@wangke/study-core/ask-user';
+import { awaitTaskAnswer } from './task-interactions.js';
+import { editNodeDocument, readNodeDocument, readRawCourse } from './node-documents.js';
 
 /** Text-source handouts for Bot jobs. Existing video/slide Chromium workflow remains unchanged. */
 async function studyHandout(context: TaskContext) {
@@ -116,8 +119,8 @@ const RESOURCE_GREP_TOOL: ToolDef = {
 const RESOURCE_READ_TOOL: ToolDef = {
   type: 'function', function: {
     name: 'read',
-    description: '读取当前课程字幕或材料正文范围。使用 path，并传 start/end；视频单位为秒，材料单位为页或段。也可 read /skills 列出可用技能，按返回的完整路径读取技能正文和参考资料。',
-    parameters: { type: 'object', properties: { path: { type: 'string' }, start: { type: 'number' }, end: { type: 'number' }, offset: { type: 'integer' }, limit: { type: 'integer' } }, required: ['path'] },
+    description: '读取课程字幕或材料正文范围；raw=true 读取 Markdown 原文以便 edit。也可读取 /system/AGENTS.md、具名 /system/memory/*.md、/system/skills 与看板实体文档，返回 revision 和分页。也可 read /skills 获取技能。',
+    parameters: { type: 'object', properties: { path: { type: 'string' }, start: { type: 'number' }, end: { type: 'number' }, offset: { type: 'integer' }, column: { type: 'integer' }, limit: { type: 'integer' }, revision: { type: 'integer' }, raw: { type: 'boolean' } }, required: ['path'] },
   },
 };
 const LIST_COURSES_TOOL: ToolDef = {
@@ -214,11 +217,20 @@ function materialRows(context: TaskContext, videoId: string) {
 function qaTools(kind: 'page' | 'para' | undefined): ToolDef[] {
   // These names match the prompt and the browser-side resource contract. The
   // server executor below resolves them from CloudRecords instead of Dexie.
-  return [RESOURCE_GREP_TOOL, RESOURCE_READ_TOOL];
+  return [RESOURCE_GREP_TOOL, RESOURCE_READ_TOOL, NODE_EDIT_TOOL, NODE_ASK_TOOL];
 }
 
+const NODE_ASK_TOOL: ToolDef = { type: 'function', function: { name: 'ask_user', description: '向用户提出一个需要回答的问题，等待回答后继续。', parameters: { type: 'object', properties: { question: { type: 'string' }, type: { type: 'string', enum: ['single', 'multiple', 'text', 'confirm'] }, options: { type: 'array', items: { type: 'string' } } }, required: ['question'] } } };
+const NODE_EDIT_TOOL: ToolDef = { type: 'function', function: {
+  name: 'edit', description: '按唯一原文修改已有 /courses/<courseId>/material Markdown，课程写入遵守一次审批及原文 CAS，单课程 QA 仅可编辑当前课程（可用 current）。也可编辑 /system/AGENTS.md、具名记忆、已有技能及看板实体文档；系统新建/修改免常规审批，但显式 deny 保留。系统修改先 read 并带 revision；create=true + content 可初始化空文档或新建具名记忆，不能覆盖已有非空内容。禁止 MCP 配置、任意路径、删除或 shell。不支持 regex。',
+  parameters: { type: 'object', additionalProperties: false, properties: {
+    path: { type: 'string' }, revision: { type: 'integer', minimum: 0 }, create: { type: 'boolean' }, content: { type: 'string', maxLength: 100000 },
+    edits: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', additionalProperties: false, properties: { old_string: { type: 'string', minLength: 1, maxLength: 100000 }, new_string: { type: 'string', maxLength: 100000 }, replace_all: { type: 'boolean' } }, required: ['old_string', 'new_string'] } },
+  }, required: ['path'] },
+} };
+
 function libraryTools(hasCourses: boolean): ToolDef[] {
-  return [RESOURCE_READ_TOOL, ...(hasCourses ? [LIST_COURSES_TOOL, SEARCH_LIBRARY_TOOL, COURSE_DETAILS_TOOL] : [])];
+  return [RESOURCE_READ_TOOL, NODE_ASK_TOOL, NODE_EDIT_TOOL, ...(hasCourses ? [LIST_COURSES_TOOL, SEARCH_LIBRARY_TOOL, COURSE_DETAILS_TOOL] : [])];
 }
 
 function parseArgs(value: string) {
@@ -257,6 +269,7 @@ function traceResult(traces: ServerToolTrace[]) {
 }
 
 interface ServerAgentResult {
+  ask?: AskUserData & { answer?: AskUserAnswer; picked?: string };
   content: string;
   reasoning?: string;
   tools: ServerToolTrace[];
@@ -304,6 +317,8 @@ async function runServerAgent(
   const traces: ServerToolTrace[] = [...initialTraces];
   const widgets: WidgetPayload[] = [];
   let widgetPreview: { html: string } | undefined;
+  let ask: ServerAgentResult['ask'];
+  let pendingAsk = false;
   let reasoning = '';
   let answer = '';
   let deliveredContent = '';
@@ -324,11 +339,12 @@ async function runServerAgent(
     if (!force && now - lastReportAt < 100) return;
     lastReportAt = now;
     const transcript = [...out.slice(messages.length), ...(streaming && answer.trim() ? [{ role: 'assistant' as const, content: answer }] : [])];
-    const identities = onSnapshot?.({ content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript, requests, widgets: [...widgets] });
+    const identities = onSnapshot?.({ content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript, requests, widgets: [...widgets], ...(ask ? { ask } : {}) });
     if (identities?.widgets) widgets.splice(0, widgets.length, ...identities.widgets);
     context.report({
       phase, round, content: clip(content(), 20_000), reasoning: clip(reasoning, 8_000), tools: traceResult(traces),
       modelRequests: requests,
+      ...(ask ? { view: { pendingAsk: pendingAsk ? { messageKey: `row:${identities?.rowId}` } : null } } : {}),
       modelTranscript: modelTrace(content(), transcript),
       ...identities,
       widgets, widget: widgets.at(-1), widgetPreview,
@@ -431,7 +447,14 @@ async function runServerAgent(
         report('tool', round + 1, true);
         let result: string;
         try {
-          result = call.function.name === 'show_widget'
+          if (!tools.some(tool => tool.function.name === call.function.name)) throw new Error('tool_not_available');
+          if (call.function.name === 'ask_user') {
+            const validated = validateAskUser(args);
+            if (!validated.ok) throw new Error(validated.error);
+            ask = validated.ask; pendingAsk = true; report('waiting_user', round + 1, true);
+            try { const answered = await awaitTaskAnswer(context, ask); ask = { ...ask, answer: answered.answer, picked: askAnswerText(answered.answer) }; result = answered.result; }
+            finally { pendingAsk = false; }
+          } else result = call.function.name === 'show_widget'
             ? executeServerWidget(args, payload => {
               context.checkActive();
               widgets.push(payload);
@@ -469,7 +492,7 @@ async function runServerAgent(
     if (text.trim()) {
       answer = text;
       report('answer', round + 1, true);
-      return { content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript: out.slice(messages.length), requests, widgets };
+      return { content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript: out.slice(messages.length), requests, widgets, ...(ask ? { ask } : {}) };
     }
     // An empty assistant turn is not a successful answer.  Give the model a
     // bounded, tool-free chance to explain what it found.
@@ -506,7 +529,7 @@ async function runServerAgent(
   answer = textOf(final).trim() || narration || '未获得有效回答。';
   out.push(final);
   report('answer', maxRounds + 1, true);
-  return { content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript: out.slice(messages.length), requests, widgets };
+  return { content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript: out.slice(messages.length), requests, widgets, ...(ask ? { ask } : {}) };
 }
 
 function qaSystemPrompt(video: Record<string, any> | null, kind: 'page' | 'para' | undefined, input: Record<string, any>) {
@@ -520,6 +543,16 @@ function qaSystemPrompt(video: Record<string, any> | null, kind: 'page' | 'para'
 
 function qaExecutor(context: TaskContext, videoId: string, kind: 'page' | 'para' | undefined) {
   return async (name: string, args: Record<string, unknown>) => {
+    if (name === 'edit') return editNodeDocument(context, args);
+    if (name === 'read') {
+      const system = readNodeDocument(context, args);
+      if (system !== null) return system;
+      if (typeof args.path === 'string' && ![`/courses/${encodeURIComponent(videoId)}/material`, `/courses/${encodeURIComponent(videoId)}/transcript`, '/courses/current/material', '/courses/current/transcript'].includes(args.path)) throw new Error('course_outside_task_scope');
+      if (args.raw === true) {
+        if (args.path !== `/courses/${encodeURIComponent(videoId)}/material` && args.path !== '/courses/current/material') throw new Error('course_outside_task_scope');
+        return readRawCourse(context, args, videoId);
+      }
+    }
     if (name === 'grep') {
       const query = String(args.query ?? '').trim();
       if (!query) return '请提供检索关键词。';
@@ -575,7 +608,7 @@ function qaExecutor(context: TaskContext, videoId: string, kind: 'page' | 'para'
       if (!rows.length) return `第 ${from}~${to}${kind === 'page' ? '页' : '段'}没有内容。`;
       return `${rows.map(row => unitText(row, kind)).join('\n')}${rawTo > to ? `\n（一次最多读取 20 个${kind === 'page' ? '页' : '段'}，已截断。）` : ''}`;
     }
-    return '当前任务不支持该工具。';
+    throw new Error('tool_not_available');
   };
 }
 
@@ -591,6 +624,22 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
   return async (name: string, args: Record<string, unknown>) => {
     const courses = rowsFor(context, 'videos');
     const projectScope = folderCourseScope(rowsFor(context, 'folders'), courses as Array<{ id: string; folderId?: number }>, session?.projectFolderId);
+    if (name === 'edit') {
+      return editNodeDocument(context, args);
+    }
+    if (name === 'read') {
+      const system = readNodeDocument(context, args);
+      if (system !== null) return system;
+      const match = typeof args.path === 'string' && /^\/courses\/([^/]+)\/(material|transcript)$/.exec(args.path);
+      if (match) {
+        const id = decodeURIComponent(match[1]);
+        if (projectScope && !projectScope.has(id)) throw new Error('course_outside_project_scope');
+        const course = courses.find(course => course.id === id);
+        if (!course) throw new Error('course_not_found');
+        if (args.raw === true) return readRawCourse(context, args, id);
+        return qaExecutor(context, id, materialKindOf(course))('read', args);
+      }
+    }
     if (name === 'list_courses') {
       const status = String(args.status ?? 'all');
       const kind = String(args.kind ?? 'all');
@@ -633,7 +682,7 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
       const count = (table: string, field: string) => rowsFor(context, table).filter(row => String(row[field]) === id).length;
       return [`课程：${course.name}`, `类型：${course.kind === 'material' ? `阅读材料 ${course.materialFormat ?? ''}` : '视频课程'}`, `进度：${courseProgress(course)}`, `字幕段数：${count('segments', 'videoId')}`, `材料块数：${count('materialBlocks', 'materialId')}`, `卡片数：${count('cards', 'videoId')}`].join('\n');
     }
-    return '当前任务不支持该工具。';
+    throw new Error('tool_not_available');
   };
 }
 
@@ -769,7 +818,7 @@ async function chat(context: TaskContext) {
   let checkpointed = false;
   const persist = (result: ServerAgentResult, interrupted = true) => {
     const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, modelTrace: modelTrace(text, [...skills.messages, current]), modelRequests: result.requests, createdAt: startedAt };
-    const assistantRow = { id: assistantId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
+    const assistantRow = { id: assistantId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.ask ? { ask: result.ask } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
     addConversationMutations(context, sessionId, userRow, assistantRow, { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed);
     checkpointed = true;
     result.widgets = assistantRow.widgets ?? [];

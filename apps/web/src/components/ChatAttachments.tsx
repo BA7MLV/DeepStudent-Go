@@ -3,7 +3,7 @@ import { Button, Spinner } from '@heroui/react';
 import { useChatAttachments } from '../store/chatAttachments';
 import { attachmentSize, type ChatAttachment } from '../chat/attachments';
 import { downloadAttachment, readAttachmentBlob } from '../chat/prepareAttachment';
-import { Sym, toast } from '../ui';
+import { Hint, Sym, toast } from '../ui';
 import { prefersReducedMotion } from '../utils/motion';
 import ImagePreview from './ImagePreview';
 import ImageGallery from './ImageGallery';
@@ -108,7 +108,7 @@ function ChatAttachmentDraftContent() {
     </div> : <div key={item.id} className="chat-attachments__item" data-testid="chat-attachment" data-state={item.error ? 'error' : item.value ? 'ready' : 'loading'}>
       {item.value?.dataUrl ? <img className="chat-attachments__thumb" src={item.value.dataUrl} alt={item.file.name} /> : <Sym name="description" />}
       <div className="chat-attachments__info">
-        <span className="truncate" title={item.file.name}>{item.file.name}</span>
+        <Hint className="truncate" content={item.file.name}>{item.file.name}</Hint>
         <small role="status">{attachmentSize(item.file.size)} · {item.error ? '上传失败' : item.value ? item.value.serverId ? '已保存到服务端' : '已保存到本机' : item.phase}{item.value?.truncated ? ' · 正文已截取' : ''}</small>
         {item.error && <span role="alert" className="chat-attachments__error">{item.error}</span>}
       </div>
@@ -127,7 +127,7 @@ export function ChatMessageAttachments({ files }: { files?: ChatAttachment[] }) 
     {files.filter((file) => !file.dataUrl).map((file) => <button type="button" key={file.id} className="chat-attachments__item" aria-label={`下载附件 ${file.name}`}
       onClick={() => void downloadAttachment(file).catch((error: Error) => toast.error(error.message))}>
       {file.dataUrl ? <img className="chat-attachments__thumb" src={file.dataUrl} alt={file.name} loading="lazy" /> : <Sym name="description" />}
-      <span className="chat-attachments__info"><span className="truncate" title={file.name}>{file.name}</span><small>{attachmentSize(file.size)}{file.truncated ? ' · 正文已截取' : ''}</small></span>
+      <span className="chat-attachments__info"><span className="truncate">{file.name}</span><small>{attachmentSize(file.size)}{file.truncated ? ' · 正文已截取' : ''}</small></span>
       <Sym name="download" />
     </button>)}
   </div>;

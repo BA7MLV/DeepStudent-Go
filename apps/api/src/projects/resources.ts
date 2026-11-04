@@ -7,6 +7,8 @@ import { importBotAttachments } from './attachments.js';
 import type { ProjectRepository } from './repository.js';
 import type { ResourceDirectory, ResourceEntry } from '@wangke/contracts/resources';
 import { RESOURCE_FOLDER_COLORS, type ResourceFolderColor } from '@wangke/contracts/resources';
+import { extractMdUnits } from '@wangke/study-core/materials/markdown';
+import { chunkUnits, countChars, judgeMaterialText } from '@wangke/study-core/materials/chunk';
 
 type Placement = { owner_id: string; course_id: string; project_id: string; path: string; identity: string; revision: string; source_file: string | null };
 type Folder = { folder_id: number; project_id: string; path: string };
@@ -48,6 +50,12 @@ export class ResourceFiles {
   root(owner: string) {
     return this.projects.resourceRoot(owner);
   }
+  listFolder(owner: string, folderId: number) {
+    this.migrate(owner);
+    const folder = this.folder(owner, folderId);
+    if (!folder) throw new ProjectError('project_file_not_found', 404);
+    return this.list(owner, folder.project_id, folder.path);
+  }
   private folder(owner: string, id: number): Folder | undefined {
     return this.db.prepare('SELECT folder_id,project_id,path FROM resource_folders WHERE owner_id=? AND folder_id=?').get(owner, id) as Folder | undefined;
   }
@@ -71,7 +79,7 @@ export class ResourceFiles {
   placement(owner: string, id: string): Placement | undefined {
     return this.db.prepare('SELECT * FROM resource_files WHERE owner_id=? AND course_id=?').get(owner, id) as Placement | undefined;
   }
-  private remember(owner: string, id: string, projectId: string, filename: string, source: string | null) {
+  private remember(owner: string, id: string, projectId: string, filename: string, source: string | null, preserveMetadata = false) {
     const opened = this.projects.files.open(projectId, filename);
     let identity: string;
     try { const stat = fs.fstatSync(opened.fd); identity = `${stat.dev}:${stat.ino}`; }
@@ -81,7 +89,7 @@ export class ResourceFiles {
       .run(owner, id, projectId, filename, identity, opened.revision, source);
     const previous = this.records.get(owner, 'courseFiles', id);
     const course = this.records.get(owner, 'videos', id);
-    if (course) this.put(owner, 'videos', id, { ...course, name: path.posix.basename(filename).replace(/\.[^.]+$/, ''),
+    if (course && !preserveMetadata) this.put(owner, 'videos', id, { ...course, name: path.posix.basename(filename).replace(/\.[^.]+$/, ''),
       folderId: this.folderId(owner, projectId, path.posix.dirname(filename) === '.' ? '' : path.posix.dirname(filename)), size: opened.size });
     this.put(owner, 'courseFiles', id, { ...previous, id, resourceProjectId: projectId, resourcePath: filename, resourceRevision: opened.revision,
       mimeType: course?.mimeType ?? previous?.mimeType ?? 'application/octet-stream', size: opened.size });
@@ -90,6 +98,12 @@ export class ResourceFiles {
   /** Lazy, resumable migration: no startup move, no deletion of original data. */
   migrate(owner: string) {
     const root = this.root(owner);
+    // A legacy title/size is not a filesystem name/stat. Preserve those source
+    // fields while materializing the explicit mapping; actual bytes and paths
+    // live in courseFiles. In particular sanitizing or disambiguating a filename
+    // must not rename the imported logical course on the next lazy migration.
+    const imported = this.db.prepare("SELECT json_extract(result,'$.sourceMetadata') AS metadata FROM client_commands WHERE owner_id=? AND json_extract(result,'$.librarySource') IS NOT NULL LIMIT 1").get(owner) as { metadata: string | null } | undefined;
+    const sourceMetadata = new Map<string, { id: string; name: string; folderId?: number }>((JSON.parse(imported?.metadata ?? '[]') as { id: string; name: string; folderId?: number }[]).map(row => [row.id, row]));
     const trashed = new Set((this.db.prepare('SELECT project_id FROM resource_trash WHERE owner_id=?').all(owner) as { project_id: string }[]).map(row => row.project_id));
     // Old clients remove courseFiles before marking the learning row deleted.
     // Consume that request once, using the last observed disk revision so a
@@ -148,9 +162,11 @@ export class ResourceFiles {
     }
     for (const course of this.rows(owner, 'videos')) {
       if (course.fileDeleted) continue;
+      const original = sourceMetadata.get(course.id);
+      const preserveMetadata = Boolean(original && original.name === course.name && original.folderId === course.folderId);
       let mapped = this.placement(owner, course.id);
       if (mapped && trashed.has(mapped.project_id)) continue;
-      if (mapped) {
+      if (mapped && !preserveMetadata) {
         const parent = course.folderId != null ? this.folder(owner, course.folderId) : undefined;
         const targetId = parent?.project_id ?? root;
         const basename = path.posix.basename(mapped.path), title = basename.replace(/\.[^.]+$/, '');
@@ -183,7 +199,7 @@ export class ResourceFiles {
       const title = cleanName(String(course.name));
       const filename = mapped?.path ?? this.unique(projectId, location?.path ?? '', title.toLowerCase().endsWith(extension) ? title : title + extension);
       this.projects.files.copy(projectId, filename, sourcePath, mapped?.revision ?? null);
-      this.remember(owner, course.id, projectId, filename, sourceId);
+      this.remember(owner, course.id, projectId, filename, sourceId, preserveMetadata);
       if (edited) this.put(owner, 'files', course.id, null);
     }
     importBotAttachments(this.projects, this.filesDir, owner);
@@ -359,6 +375,127 @@ export class ResourceFiles {
     this.invalidate(owner, id);
     return { revision: this.remember(owner, id, mapped.project_id, mapped.path, mapped.source_file) };
   }
+  /** Application Markdown is a real resource, including the wrongbook. The
+   * caller supplies original text, never rows or a replacement course object. */
+  saveMarkdown(owner: string, input: { courseId: string; text: string; expected: string; name?: string; folderId?: number; createOnly?: boolean }) {
+    const { courseId: id, text, expected } = input;
+    if (!id || id.length > 200 || typeof text !== 'string' || text.length > 2000000 || typeof expected !== 'string') throw new ProjectError('invalid_markdown');
+    this.migrate(owner);
+    const course = this.records.get(owner, 'videos', id);
+    if (course && (course.kind !== 'material' || course.materialFormat !== 'md' || course.fileDeleted)) throw new ProjectError('invalid_markdown_course');
+    let mapped = this.placement(owner, id);
+    if (input.createOnly && course) throw new ProjectError('project_file_conflict', 409);
+    if (mapped) this.saveText(owner, id, text, expected);
+    else {
+      // Existing unmapped bytes cannot be replaced under a guessed empty CAS.
+      if (course || expected !== '') throw new ProjectError('project_file_conflict', 409);
+      const folder = input.folderId === undefined ? undefined : this.folder(owner, input.folderId);
+      if (input.folderId !== undefined && !folder) throw new ProjectError('project_file_not_found', 404);
+      const projectId = folder?.project_id ?? this.root(owner);
+      this.projects.writable(owner, projectId); this.projects.assertIdle(projectId);
+      const filename = this.unique(projectId, folder?.path ?? '', `${cleanName(input.name ?? id).replace(/\.md$/i, '')}.md`);
+      this.projects.files.write(projectId, filename, text, null);
+      this.put(owner, 'videos', id, { id, name: input.name ?? id, kind: 'material', materialFormat: 'md', mimeType: 'text/markdown', duration: 0, size: Buffer.byteLength(text), createdAt: Date.now(), status: 'transcribed', coverState: 'pending' });
+      this.remember(owner, id, projectId, filename, null);
+      mapped = this.placement(owner, id)!;
+    }
+    const blocks = chunkUnits(extractMdUnits(text), 'para');
+    const totalChars = countChars(blocks), unitCount = new Set(blocks.map(block => block.unit)).size;
+    const { scanned, empty } = judgeMaterialText('md', totalChars, unitCount);
+    this.projects.store.transaction(() => {
+      for (const block of this.rows(owner, 'materialBlocks').filter(row => row.materialId === id)) this.put(owner, 'materialBlocks', block.id, null);
+      let next = this.next(owner, 'materialBlocks');
+      for (const block of blocks) { const key = next++; this.put(owner, 'materialBlocks', key, { ...block, id: key, materialId: id }); }
+      const current = this.records.get(owner, 'videos', id)!;
+      const after: Record<string, any> = { ...current, unitCount, status: 'transcribed' };
+      delete after.scanned; delete after.empty;
+      if (scanned) after.scanned = 1;
+      if (empty) after.empty = 1;
+      this.put(owner, 'videos', id, after);
+    });
+    return { unitCount, blockCount: blocks.length, totalChars, scanned, empty };
+  }
+  /** Preflight the whole selection, then one index transaction. Roll back file
+   * renames on a synchronous failure. Process death/external rollback conflicts
+   * remain an admitted uncertain batch: never split or auto-replay it. */
+  moveSelection(owner: string, placements: { key: string; parent: number | null; target: number | null }[]) {
+    if (!placements.length || placements.length > 10000 || new Set(placements.map(item => item.key)).size !== placements.length) throw new ProjectError('invalid_resource_selection');
+    this.migrate(owner);
+    const root = this.root(owner);
+    const moves = placements.map(item => {
+      const folder = item.key.startsWith('folder:') ? this.folder(owner, Number(item.key.slice(7))) : undefined;
+      const file = item.key.startsWith('file:') ? this.placement(owner, item.key.slice(5)) : undefined;
+      const source = folder ?? file;
+      if (!source || !source.path) throw new ProjectError('protected_resource_folder', 409);
+      const record = folder ? this.records.get(owner, 'folders', folder.folder_id) : this.records.get(owner, 'videos', item.key.slice(5));
+      const parent = folder ? record?.parentId : record?.folderId;
+      if ((parent ?? null) !== item.parent) throw new ProjectError('project_file_conflict', 409);
+      const target = item.target == null ? undefined : this.folder(owner, item.target);
+      if (item.target != null && !target) throw new ProjectError('project_file_not_found', 404);
+      const targetId = target?.project_id ?? root, destination = join(target?.path ?? '', path.posix.basename(source.path));
+      this.projects.writable(owner, source.project_id); this.projects.writable(owner, targetId);
+      this.projects.assertIdle(source.project_id); this.projects.assertIdle(targetId);
+      if (source.project_id === targetId && (destination === source.path || destination.startsWith(`${source.path}/`))) throw new ProjectError('invalid_resource_move');
+      const entry = this.entry(source.project_id, source.path);
+      if (this.projects.files.list(targetId, target?.path ?? '').some(entry => entry.path === destination)) throw new ProjectError('project_file_exists', 409);
+      return { sourceId: source.project_id, source: source.path, targetId, destination, revision: entry.revision, placement: item };
+    }).filter((move, _index, all) => !all.some(parent => parent !== move && parent.sourceId === move.sourceId && move.source.startsWith(`${parent.source}/`)));
+    const destinations = moves.map(move => `${move.targetId}:${move.destination}`);
+    if (new Set(destinations).size !== destinations.length) throw new ProjectError('project_file_exists', 409);
+    const completed: typeof moves = [];
+    try {
+      this.projects.store.transaction(() => {
+        for (const move of moves) this.move(owner, move.sourceId, move.source, move.targetId, move.destination, move.revision, () => completed.push(move));
+      });
+    } catch (error) {
+      for (const move of completed.reverse()) {
+        const current = this.entry(move.targetId, move.destination);
+        this.projects.files.move(move.targetId, move.destination, move.sourceId, move.source, current.revision);
+      }
+      throw error;
+    }
+    return moves.map(move => move.placement);
+  }
+  organizeCourses(owner: string, folders: { name: string; courseIds: string[] }[]) {
+    if (folders.length > 1000 || folders.some(folder => !folder.name.trim() || cleanName(folder.name) !== folder.name || folder.courseIds.length > 10000)) throw new ProjectError('invalid_folder_plan');
+    this.migrate(owner);
+    const root = this.root(owner), result = { createdFolders: [] as string[], moved: 0, missing: [] as string[], perFolder: [] as { name: string; count: number }[] };
+    const moves = new Map<string, { key: string; parent: number | null; target: number | null }>();
+    const missing = new Set<string>();
+    const created: string[] = [];
+    this.projects.writable(owner, root); this.projects.assertIdle(root);
+    try {
+      return this.projects.store.transaction(() => {
+      for (const folder of folders) {
+        if (!folder.courseIds.length) continue;
+        let entry = this.list(owner).entries.find(entry => entry.kind === 'directory' && entry.name === folder.name);
+        if (!entry) {
+          this.projects.files.mkdir(root, folder.name); created.push(folder.name);
+          entry = this.list(owner).entries.find(entry => entry.kind === 'directory' && entry.name === folder.name)!;
+          result.createdFolders.push(folder.name);
+        }
+        let count = 0;
+        for (const id of folder.courseIds) {
+          const row = this.records.get(owner, 'videos', id);
+          if (!row || row.fileDeleted || !this.placement(owner, id)) { missing.add(id); continue; }
+          count++;
+          moves.set(id, { key: `file:${id}`, parent: row.folderId ?? null, target: entry.folderId ?? null });
+        }
+        result.perFolder.push({ name: folder.name, count });
+      }
+      const changed = [...moves.values()].filter(move => move.parent !== move.target);
+      if (changed.length) this.moveSelection(owner, changed);
+      result.moved = moves.size; result.missing = [...missing];
+      return result;
+      });
+    } catch (error) {
+      for (const directory of created.reverse()) {
+        if (this.projects.files.list(root, directory).length) continue;
+        this.projects.files.remove(root, directory, this.entry(root, directory).revision);
+      }
+      throw error;
+    }
+  }
   /** Delete a resource and its learning records as one Resource Library action. */
   remove(owner: string, projectId: string, filename: string, expected: string) {
     this.migrate(owner);
@@ -384,7 +521,7 @@ export class ResourceFiles {
     if (mutations.length) this.records.apply(owner, mutations);
     if (courseId) this.db.prepare('DELETE FROM resource_files WHERE owner_id=? AND course_id=?').run(owner, courseId);
   }
-  move(owner: string, id: string, filename: string, targetId: string, target: string, revision: string) {
+  move(owner: string, id: string, filename: string, targetId: string, target: string, revision: string, moved: () => void = () => {}) {
     this.projects.writable(owner, id); this.projects.writable(owner, targetId);
     this.projects.assertIdle(id); this.projects.assertIdle(targetId);
     const placements = this.db.prepare('SELECT * FROM resource_files WHERE owner_id=? AND project_id=?').all(owner, id) as Placement[];
@@ -400,6 +537,7 @@ export class ResourceFiles {
       if (existing && existing.folder_id !== folder.folder_id) throw new ProjectError('project_file_exists', 409);
     }
     this.projects.files.move(id, filename, targetId, target, revision);
+    moved();
     this.projects.store.transaction(() => {
       for (const folder of folders) {
         if (folder.path === filename || folder.path.startsWith(`${filename}/`)) this.db.prepare('UPDATE resource_folders SET project_id=?,path=? WHERE owner_id=? AND folder_id=?').run(targetId, target + folder.path.slice(filename.length), owner, folder.folder_id);

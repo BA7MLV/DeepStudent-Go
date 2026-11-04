@@ -89,7 +89,7 @@ export function registerPracticeActions(service: PluginService, resolveMaterial:
       return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(taskId));
     });
   } });
-  service.register({ id: 'practice.submit', capability: 'learning', access: 'write', trustedOnly: true, schema: object({ rowId: integer, questionIndex: integer, pick: { anyOf: [{ type: 'integer', minimum: 0 }, object({ answer: {}, selfGrade: { type: 'boolean' } }, ['answer'])] }, durationSeconds: { type: 'number', minimum: 0, maximum: 86400 } }), run: (a, c) => store.transaction(() => {
+  service.register({ id: 'practice.submit', capability: 'learning', access: 'write', atomic: 'sqlite', trustedOnly: true, schema: object({ rowId: integer, questionIndex: integer, pick: { anyOf: [{ type: 'integer', minimum: 0 }, object({ answer: {}, selfGrade: { type: 'boolean' } }, ['answer'])] }, durationSeconds: { type: 'number', minimum: 0, maximum: 86400 } }), run: (a, c) => store.transaction(() => {
     const row = resolveRow(c, a.rowId), question = row.quiz.data.questions[a.questionIndex];
     if (!question) throw new Error('invalid_plugin_question');
     const old = row.quiz.picks[a.questionIndex];

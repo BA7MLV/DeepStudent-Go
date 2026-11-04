@@ -148,6 +148,10 @@ async function runOne(videoId: string): Promise<void> {
 
 /** 部分字幕仍可阅读，但不是完成态；显式重试才能继续，避免刷新后偷跑。 */
 async function settleCanceled(videoId: string): Promise<void> {
+  if (remoteTasks()) {
+    await (await import('../client/resources')).resourceCommand({ kind: 'pauseTranscription', courseId: videoId });
+    return;
+  }
   await db.videos.update(videoId, { status: 'new', transcriptionPaused: true });
 }
 

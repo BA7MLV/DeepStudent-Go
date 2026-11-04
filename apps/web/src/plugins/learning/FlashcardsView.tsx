@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { pluginRpc, subscribePluginRead } from '../shared';
 import type { BuiltinViewProps } from '../builtins';
 import type { CardRow } from '../../store/db';
 import { confirmDialog } from '../../ui';
@@ -9,41 +8,30 @@ import './learning.css';
 interface ResultTask { id: string; status: string; error: string | null; progress?: { message?: string }; artifacts?: { count: number; cardIds: number[] }; deliveryError?: string }
 interface Snapshot { cards: CardRow[]; revision: string; tasks: ResultTask[] }
 export default function FlashcardsView(props: BuiltinViewProps) {
-  const { plugin, instance, context } = props;
-  const endpoint = `/plugins/${encodeURIComponent(plugin.id)}/instances/${encodeURIComponent(instance.id)}/rpc`;
-  const call = useCallback((method: string, args: Record<string, unknown> = {}) => pluginRpc(endpoint, plugin.revision, method, args), [endpoint, plugin.revision]);
-  const [materials, setMaterials] = useState<{ id: string; name: string }[]>([]);
+  const { plugin, instance, context, call, useProjection } = props;
   const [chosen, setChosen] = useState('');
   const materialId = instance.scope.kind === 'material' ? instance.scope.id : context.materialId ?? chosen;
-  const [error, setError] = useState('');
-  useEffect(() => {
-    let ignore = false;
-    void call('learning.materials').then(value => { if (!ignore) setMaterials((value as { materials: typeof materials }).materials); }).catch(e => { if (!ignore) setError(String(e.message ?? e)); });
-    return () => { ignore = true; };
-  }, [call]);
+  const projectionKey = JSON.stringify([plugin.id, instance.id, plugin.revision, materialId]);
+  const projection = useProjection([
+      { key: 'materials', method: 'learning.materials', args: {} },
+      ...(materialId ? [
+        { key: 'cards', method: 'cards.list', args: { materialId } },
+        { key: 'results', method: 'learning.results', args: { materialId } },
+      ] : []),
+    ]);
+  const next = projection.data as unknown as { materials: { materials: { id: string; name: string }[] }; cards?: Pick<Snapshot, 'cards' | 'revision'>; results?: Pick<Snapshot, 'tasks'> } | undefined;
+  const materials = next?.materials.materials ?? [];
   return <div className="learning-plugin" data-testid="plugin-flashcards">
     {instance.scope.kind === 'account' && !context.materialId ? <label>选择资料<select aria-label="卡片资料" value={chosen} onChange={e => setChosen(e.target.value)}><option value="">请选择资料</option>{materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label> : <p>{materials.find(m => m.id === materialId)?.name ?? materialId}</p>}
-    {error ? <p role="alert">{error}</p> : null}
-    {materialId ? <MaterialCards key={materialId} materialId={materialId} call={call} endpoint={endpoint} revision={plugin.revision} /> : <p>选择一份资料，或在阅读侧栏挂载此实例。</p>}
+    {projection.error ? <p role="alert">{projection.error}</p> : null}
+    {projection.status === 'reconnecting' ? <p role="status">连接中断，正在恢复学习记录…</p> : null}
+    {materialId ? <MaterialCards key={projectionKey} materialId={materialId} call={call} snapshot={next?.cards && next.results ? { ...next.cards, ...next.results } : null} /> : <p>选择一份资料，或在阅读侧栏挂载此实例。</p>}
   </div>;
 }
 
-function MaterialCards({ materialId, call, endpoint, revision }: { materialId: string; call: (method: string, args?: Record<string, unknown>) => Promise<unknown>; endpoint: string; revision?: number }) {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+function MaterialCards({ materialId, call, snapshot }: { materialId: string; call: (method: string, args?: Record<string, unknown>) => Promise<unknown>; snapshot: Snapshot | null }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const read = useCallback(async (): Promise<Snapshot> => {
-    const [cards, results] = await Promise.all([call('cards.list', { materialId }), call('learning.results', { materialId })]);
-    return { ...(cards as { cards: CardRow[]; revision: string }), ...(results as { tasks: ResultTask[] }) };
-  }, [call, materialId]);
-  useEffect(() => {
-    setSnapshot(null); setError(''); setBusy(false);
-    if (!materialId) return;
-    let ignore = false;
-    void read().then(value => { if (!ignore) setSnapshot(value); }).catch(e => { if (!ignore) setError(String(e.message ?? e)); });
-    const off = subscribePluginRead(`learning:cards:${endpoint}:${revision}:${materialId}`, read, value => { if (!ignore) setSnapshot(value as Snapshot); });
-    return () => { ignore = true; off(); };
-  }, [read, endpoint, revision, materialId]);
   // A keyed host prevents in-flight actions for A from updating B's local view.
   const generate = async () => {
     if (!snapshot || busy) return;
@@ -51,12 +39,11 @@ function MaterialCards({ materialId, call, endpoint, revision }: { materialId: s
     setBusy(true); setError('');
     try {
       await call('cards.generate', { materialId, clientNonce: crypto.randomUUID(), ...(snapshot.cards.length ? { replaceRevision: snapshot.revision } : {}) });
-      setSnapshot(await read());
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };
   const update = async (id: number, status: number) => {
-    try { await call('cards.update', { materialId, id, status }); setSnapshot(await read()); }
+    try { await call('cards.update', { materialId, id, status }); setError(''); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const running = snapshot?.tasks.some(t => ['queued', 'running', 'waiting_user'].includes(t.status));

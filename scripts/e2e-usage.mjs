@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { fixturePreference } from './fixture-domain.mjs';
 
 const temporary = path.join(os.tmpdir(), 'opencode');
 fs.mkdirSync(temporary, { recursive: true });
@@ -21,7 +22,7 @@ try {
   const login = await api.inject({ method: 'POST', url: '/api/v1/auth/password/login', payload: { password: 'usage-preview-password' } });
   const cookie = login.headers['set-cookie'].split(';')[0];
   const owner = login.json().user.id;
-  await api.inject({ method: 'POST', url: '/api/v1/cloud/records', headers: { cookie }, payload: { mutations: [{ id: 'language', table: 'preferences', key: 'uiLanguage', before: null, after: { id: 'uiLanguage', value: 'zh-CN' } }] } });
+  await fixturePreference(api, cookie, 'uiLanguage', 'zh-CN');
   assert.equal((await api.inject('/api/v1/cloud/model-usage')).statusCode, 401, 'real auth protects usage');
   store = new DatabaseStore(dbPath);
   const today = new Date().toISOString().slice(0, 10), yesterday = new Date(Date.parse(today) - 86400000).toISOString().slice(0, 10);
@@ -50,12 +51,15 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto(`${origin}/__usage_fixture`);
   const module = page.getByTestId('settings-module-usage'), total = page.getByTestId('usage-total');
-  const waitTotal = value => page.waitForFunction(value => document.querySelector('[data-testid="usage-total"]')?.textContent.includes(value), value);
-  await waitTotal('3,300');
+  // The current UI uses compact token units; keep the exact fixture totals.
+  const compact = value => ({ '3,300': '3.3K', '2,200': '2.2K', '1,100': '1.1K' })[value] ?? value;
+  const waitTotal = value => page.waitForFunction(value => document.querySelector('[data-testid="usage-total"]')?.textContent.includes(value), compact(value));
+  try { await waitTotal('3,300'); }
+  catch (error) { console.error('Usage page:', await page.locator('body').innerText(), errors); throw error; }
   assert.equal(await page.getByTestId('settings-nav-usage').locator('svg').count(), 1, 'usage navigation has a mapped icon');
   assert.match(await total.innerText(), /3 \/ 5/);
-  assert.match(await page.getByTestId('usage-source-chat').innerText(), /1,100/);
-  assert.match(await page.getByTestId('usage-source-bot').innerText(), /2,200/);
+  assert.match(await page.getByTestId('usage-source-chat').innerText(), /1\.1K/);
+  assert.match(await page.getByTestId('usage-source-bot').innerText(), /2\.2K/);
   assert.match(await total.innerText(), /60%/);
   const unknown = module.getByRole('row').filter({ hasText: 'unknown-model' });
   assert.match(await unknown.innerText(), /未知/);
@@ -78,7 +82,7 @@ try {
   await page.route(pattern, route => route.fulfill({ status: 503, json: { error: 'unavailable' } }));
   await refresh.click(); await module.getByRole('alert').waitFor();
   assert.match(await module.getByRole('alert').innerText(), /上次统计/);
-  assert.match(await total.innerText(), /3,300/, 'failed refresh preserves same-query snapshot');
+  assert.match(await total.innerText(), /3\.3K/, 'failed refresh preserves same-query snapshot');
   await page.reload(); await module.getByRole('alert').waitFor();
   assert.equal(await total.count(), 0, 'initial failure never advertises false zero');
   await page.unroute(pattern); await refresh.click(); await waitTotal('3,300');
@@ -95,7 +99,7 @@ try {
   await refresh.click(); await intercepted;
   await source.selectOption('chat'); await waitTotal('1,100'); release();
   await page.unrouteAll({ behavior: 'wait' });
-  assert.match(await total.innerText(), /1,100/, 'late response cannot replace a newer source');
+  assert.match(await total.innerText(), /1\.1K/, 'late response cannot replace a newer source');
 
   const end = page.getByLabel('结束日期（UTC，含当日）', { exact: true });
   const start = page.getByLabel('开始日期（UTC）', { exact: true });

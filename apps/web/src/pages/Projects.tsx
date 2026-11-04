@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { resourceCommand } from '../client/resources';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
@@ -45,7 +46,7 @@ export default function Projects() {
   };
   const remove = async (project: ProjectDto) => {
     setBusy(true);
-    try { await request(`/resources/folders/${encodeURIComponent(project.id)}/trash`, { method: 'POST' }); setProjects(old => old.filter(p => p.id !== project.id)); toast.success(t('movedToTrash')); }
+    try { await resourceCommand({ kind: 'trash', projectId: project.id }); setProjects(old => old.filter(p => p.id !== project.id)); toast.success(t('movedToTrash')); }
     catch (error) { toast.error(projectError(error)); }
     finally { setBusy(false); }
   };

@@ -11,17 +11,23 @@ public final class AppModel {
     public private(set) var threads: [ThreadSummary] = []
     public private(set) var details: [String: ThreadDetail] = [:]
     public var errorMessage: String?
+    public private(set) var hasOlder: [String: Bool] = [:]
 
     private var client: APIClient?
     private let store: TokenStore
     private var streams: [String: Task<Void, Never>] = [:]
-    private var cursors: [String: Int] = [:]
+    private var generation = UUID()
+    private var loginGeneration = UUID()
+    private var streamGenerations: [String: UUID] = [:]
+    private var olderMessages: [String: [Message]] = [:]
+    private var baselines: [String: UUID] = [:]
+    private var olderLoading: Set<String> = []
 
     public init(store: TokenStore) {
         self.store = store
         if let saved = store.load() {
             credential = saved
-            client = APIClient(baseURL: saved.serverURL, token: saved.token)
+            client = APIClient(baseURL: saved.serverURL, token: saved.sessionCookie == nil ? saved.token : nil, sessionCookie: saved.sessionCookie)
         }
     }
 
@@ -30,28 +36,41 @@ public final class AppModel {
     // MARK: - 登录
 
     public func signIn(server: String, password: String, deviceName: String) async throws {
+        let attempt = UUID()
+        loginGeneration = attempt
         guard let url = Self.normalizedServerURL(server) else {
             throw APIError(status: 0, code: "服务器地址不对")
         }
         let client = APIClient(baseURL: url)
-        let grant = try await client.login(password: password, deviceName: deviceName)
-        let credential = StoredCredential(serverURL: url, token: grant.token, user: grant.user)
+        let user = try await client.loginSession(password: password)
+        guard loginGeneration == attempt else { await client.logout(); throw CancellationError() }
+        let credential = StoredCredential(serverURL: url, token: "", user: user, sessionCookie: client.sessionCookie)
+        let previous = self.client
+        generation = UUID()
+        streams.values.forEach { $0.cancel() }
+        streams = [:]; streamGenerations = [:]; details = [:]; threads = []
+        olderMessages = [:]; baselines = [:]; hasOlder = [:]; olderLoading = []
         store.save(credential)
         self.client = client
         self.credential = credential
+        await previous?.disconnectRemote()
         await refreshThreads()
     }
 
     public func signOut() async {
+        let previous = client
+        loginGeneration = UUID()
+        generation = UUID()
         streams.values.forEach { $0.cancel() }
         streams = [:]
-        await client?.logout()
+        streamGenerations = [:]
         store.clear()
         client = nil
         credential = nil
         threads = []
         details = [:]
-        cursors = [:]
+        olderMessages = [:]; baselines = [:]; hasOlder = [:]; olderLoading = []
+        await previous?.logout()
     }
 
     /// 补全协议、去掉末尾斜杠。没写协议时默认 https。
@@ -68,66 +87,106 @@ public final class AppModel {
 
     public func refreshThreads() async {
         guard let client else { return }
+        let current = generation
         do {
-            threads = try await client.threads()
+            let result = try await client.threads()
+            guard generation == current else { return }
+            threads = result
         } catch let error as APIError where error.status == 401 {
-            await expire()
+            if generation == current { await expire() }
         } catch {
-            errorMessage = error.localizedDescription
+            if generation == current { errorMessage = error.localizedDescription }
         }
     }
 
     public func newThread() async -> ThreadSummary? {
         guard let client else { return nil }
+        let current = generation
         do {
             let thread = try await client.createThread(title: "新的 Bot 任务")
+            guard generation == current else { return nil }
             threads.insert(thread, at: 0)
             details[thread.id] = ThreadDetail(id: thread.id, mode: thread.mode, title: thread.title, createdAt: thread.createdAt, updatedAt: thread.updatedAt, messages: [], approvals: [])
             return thread
         } catch {
-            errorMessage = error.localizedDescription
+            await commandError(error, account: current)
             return nil
         }
     }
 
-    /// 打开线程：拉详情，然后开事件流（服务端每次回放完就断开，这里循环重连）。
+    /// Snapshot and durable journal share an applied watermark. Every open uses
+    /// the account's one mux; closing only releases this thread's observer.
     public func open(_ threadId: String) async {
         guard let client else { return }
-        if details[threadId] == nil {
-            do {
-                details[threadId] = try await client.thread(threadId)
-            } catch {
-                errorMessage = error.localizedDescription
-                return
-            }
-        }
         guard streams[threadId] == nil else { return }
+        let account = generation
+        let incarnation = UUID()
+        streamGenerations[threadId] = incarnation
         streams[threadId] = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                await self.pullEvents(threadId, client: client)
-                try? await Task.sleep(nanoseconds: 800_000_000)
+            do {
+                try await BotFollower.run(client: client, threadId: threadId) { [weak self] projection in
+                    await self?.receive(projection, threadId: threadId, account: account, incarnation: incarnation)
+                }
+            } catch is CancellationError {
+                // Disappear/account changes release observation, never stop a run.
+            } catch {
+                guard let self, self.generation == account, self.streamGenerations[threadId] == incarnation else { return }
+                if let api = error as? APIError, api.status == 401 { await self.expire() }
+                else { self.errorMessage = error.localizedDescription }
             }
+            guard let self, self.generation == account, self.streamGenerations[threadId] == incarnation else { return }
+            self.streams[threadId] = nil
+            self.streamGenerations[threadId] = nil
         }
     }
 
     public func close(_ threadId: String) {
         streams[threadId]?.cancel()
         streams[threadId] = nil
+        streamGenerations[threadId] = nil
     }
 
-    private func pullEvents(_ threadId: String, client: APIClient) async {
-        do {
-            let events = try await client.events(threadId: threadId, after: cursors[threadId] ?? 0)
-            for event in events {
-                cursors[threadId] = max(cursors[threadId] ?? 0, event.id)
-                if let message = event.message { apply(message, to: threadId) }
-            }
-        } catch let error as APIError where error.status == 401 {
-            await expire()
-        } catch {
-            // 网络抖动：下一轮重连。
+    private func receive(_ projection: BotProjection, threadId: String, account: UUID, incarnation: UUID) {
+        guard generation == account, streamGenerations[threadId] == incarnation else { return }
+        var detail = projection.detail
+        if baselines[threadId] != projection.baselineID {
+            olderMessages[threadId] = nil
+            baselines[threadId] = projection.baselineID
+            hasOlder[threadId] = projection.hasOlder
         }
+        var messages = olderMessages[threadId] ?? []
+        for message in detail.messages { messages = MessageGrouping.merge(message, into: messages) }
+        detail.messages = messages
+        for pending in details[threadId]?.messages.filter({ $0.id.hasPrefix("pending-") }) ?? [] {
+            if !detail.messages.contains(where: { $0.clientNonce == pending.clientNonce }) {
+                detail.messages = MessageGrouping.merge(pending, into: detail.messages)
+            }
+        }
+        details[threadId] = detail
+    }
+
+    public func loadOlder(_ threadId: String) async {
+        guard let client, hasOlder[threadId] == true, !olderLoading.contains(threadId),
+              let first = details[threadId]?.messages.first?.seq else { return }
+        let account = generation
+        let baseline = baselines[threadId]
+        olderLoading.insert(threadId)
+        defer { if generation == account { olderLoading.remove(threadId) } }
+        do {
+            let page = try await client.botMessages(threadId: threadId, beforeSeq: first)
+            guard generation == account, baselines[threadId] == baseline else { return }
+            var messages = olderMessages[threadId] ?? []
+            for message in page.messages { messages = MessageGrouping.merge(message, into: messages) }
+            olderMessages[threadId] = messages
+            if var detail = details[threadId] {
+                for message in detail.messages { messages = MessageGrouping.merge(message, into: messages) }
+                detail.messages = messages
+                let existing = Set((detail.approvals ?? []).map(\.id))
+                detail.approvals = (detail.approvals ?? []) + page.approvals.filter { !existing.contains($0.id) }
+                details[threadId] = detail
+            }
+            hasOlder[threadId] = page.hasOlder
+        } catch { await commandError(error, account: account) }
     }
 
     private func apply(_ message: Message, to threadId: String) {
@@ -138,6 +197,7 @@ public final class AppModel {
 
     public func send(_ text: String, to threadId: String) async -> Bool {
         guard let client else { return false }
+        let account = generation
         let content = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return false }
         let nonce = UUID().uuidString
@@ -145,43 +205,67 @@ public final class AppModel {
         let pending = Message(id: "pending-\(nonce)", threadId: threadId, clientNonce: nonce, seq: Int.max, role: .user, kind: .text, content: content, createdAt: ISO8601DateFormatter().string(from: Date()), replyTo: nil)
         apply(pending, to: threadId)
         do {
-            apply(try await client.sendText(content, to: threadId, nonce: nonce), to: threadId)
+            let sent = try await client.sendText(content, to: threadId, nonce: nonce)
+            guard generation == account else { return false }
+            apply(sent, to: threadId)
             return true
         } catch {
+            guard generation == account else { return false }
             details[threadId]?.messages.removeAll { $0.id == pending.id }
-            errorMessage = "没发出去"
+            await commandError(error, account: account)
             return false
         }
     }
 
     public func resolve(_ approval: Approval, approved: Bool) async {
         guard let client else { return }
+        let account = generation
         do {
             let resolved = try await client.resolveApproval(approval.id, approved: approved)
+            guard generation == account else { return }
             if var detail = details[approval.threadId] {
                 detail.approvals = detail.approvals?.map { $0.id == resolved.id ? resolved : $0 }
                 details[approval.threadId] = detail
             }
         } catch {
-            errorMessage = error.localizedDescription
+            await commandError(error, account: account)
         }
     }
 
     public func react(to message: Message) async {
-        try? await client?.react(messageId: message.id)
+        guard let client else { return }
+        let account = generation
+        do { try await client.react(messageId: message.id) }
+        catch { await commandError(error, account: account) }
     }
 
     public func stop(_ threadId: String) async {
-        try? await client?.stop(threadId: threadId)
+        guard let client else { return }
+        let account = generation
+        do { try await client.stop(threadId: threadId) }
+        catch { await commandError(error, account: account) }
+    }
+
+    private func commandError(_ error: Error, account: UUID) async {
+        guard generation == account else { return }
+        if let api = error as? APIError, api.status == 401 { await expire() }
+        else { errorMessage = error.localizedDescription }
     }
 
     private func expire() async {
+        let previous = client
+        generation = UUID()
+        loginGeneration = UUID()
         errorMessage = APIError(status: 401, code: "unauthorized").localizedDescription
         store.clear()
         streams.values.forEach { $0.cancel() }
         streams = [:]
+        streamGenerations = [:]
+        threads = []; details = [:]
+        olderMessages = [:]; baselines = [:]; hasOlder = [:]; olderLoading = []
         client = nil
         credential = nil
+        await previous?.disconnectRemote()
     }
 }
 #endif

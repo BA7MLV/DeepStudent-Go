@@ -6,6 +6,9 @@ import { SystemMcp } from './system-mcp.js';
 import { SystemSkills } from './system-skills.js';
 import { SystemSkillRecords } from './system-skill-records.js';
 import { migrateMessageSync } from './message-sync-migration.js';
+import { migrateClientRuntime } from '../realtime/migration.js';
+import { ensureLearningResults } from '../plugins/learning-results.js';
+import { migrateFileIntents } from './file-intents.js';
 
 const MIGRATIONS: Array<[number, string]> = [
   [1, `
@@ -556,7 +559,8 @@ export class DatabaseStore {
         expected.exec(PROJECT_MIGRATION);
         expected.exec(LEASE_MIGRATION);
         expected.exec(MCP_FILE_MIGRATION);
-        expected.exec(SKILL_RECORDS_MIGRATION);
+         expected.exec(SKILL_RECORDS_MIGRATION);
+         migrateFileIntents(expected);
         const groups = [
           { version: 13, tables: ['gateway_accounts', 'gateway_pairings', 'gateway_bindings', 'gateway_inbox', 'gateway_outbox', 'bot_reminders'], extra: [['cloud_tasks', 'parent_run_id'], ['cloud_tasks', 'parent_step_id'], ['approvals', 'cloud_permission_id']], sql: MIGRATIONS.find(([v]) => v === 13)![1] },
           { version: 14, tables: ['gateway_projection_failures'], extra: [], sql: MIGRATIONS.find(([v]) => v === 14)![1] },
@@ -582,7 +586,7 @@ export class DatabaseStore {
           if (markers.some(Boolean) && !markers.every(Boolean)) throw new Error(`schema_layout_partial_v${group.version}: restore a consistent backup before upgrading`);
           if (markers.every(Boolean)) {
             for (const table of group.tables) {
-              const evolved = (name: string) => table === 'gateway_inbox' && name === 'received_at' || table === 'bot_requests' && ['cache_creation_tokens', 'reasoning_tokens'].includes(name);
+              const evolved = (name: string) => table === 'gateway_inbox' && name === 'received_at' || table === 'bot_requests' && ['cache_creation_tokens', 'reasoning_tokens'].includes(name) || table === 'system_file_entries' && name === 'intent_id';
               const actual = columns(this.db, table).filter(c => !evolved(c.name));
               const trusted = columns(expected, table).filter(c => !evolved(c.name));
               if (JSON.stringify(actual) !== JSON.stringify(trusted)) throw new Error(`schema_layout_untrusted_${table}`);
@@ -634,6 +638,11 @@ export class DatabaseStore {
            this.db.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(33,?)').run(new Date().toISOString());
          }
         migrateMessageSync(this.db);
+         migrateClientRuntime(this.db);
+         // Schema identity must include the learning result journal before a
+         // server/plugin starts; runtime activation must not mutate the schema.
+         ensureLearningResults(this);
+         migrateFileIntents(this.db);
       } finally { expected.close(); }
     })();
   }

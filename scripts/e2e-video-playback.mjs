@@ -7,6 +7,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
+import { fixturePreference, seedFixtureRecords } from './fixture-domain.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-video-browser-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
@@ -32,7 +33,7 @@ try {
   cookie = login.headers['set-cookie'].split(';')[0];
   const config = await call('GET', '/cloud/config');
   await call('PUT', '/cloud/config', { ...config, providers: [{ id: 'offline', name: 'Offline', baseUrl: 'https://offline.invalid/v1', protocol: 'openai-chat', apiKey: 'test-only', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'offline', model: 'test' }, visionModel: { providerId: '', model: '' }, asrModel: { providerId: '', model: '' }, decisionModel: { providerId: '', model: '' } });
-  await call('POST', '/cloud/records', { mutations: [{ id: crypto.randomUUID(), table: 'preferences', key: 'uiLanguage', before: null, after: { id: 'uiLanguage', value: 'zh-CN' } }] });
+  await fixturePreference(app, cookie, 'uiLanguage', 'zh-CN');
   const root = await call('GET', '/resources');
   const fixture = path.join(directory, 'files/projects', root.rootId, 'progressive.mp4');
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=15', '-t', '60', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '24', '-pix_fmt', 'yuv420p', '-g', '15', '-movflags', '+faststart', fixture]);
@@ -44,7 +45,7 @@ try {
   fs.appendFileSync(fixture, freeBox); fs.truncateSync(fixture, contentBytes + paddingBytes);
   const entry = (await call('GET', '/resources')).entries.find(entry => entry.name === 'progressive.mp4');
   const record = (await call('GET', `/cloud/record?table=videos&key=${encodeURIComponent(JSON.stringify(entry.courseId))}`)).value;
-  await call('POST', '/cloud/records', { mutations: [{ id: crypto.randomUUID(), table: 'videos', key: record.id, before: record, after: { ...record, duration: 60, coverState: 'ready' } }] });
+  await seedFixtureRecords(directory, login.json().user.id, [{ id: crypto.randomUUID(), table: 'videos', key: record.id, before: record, after: { ...record, duration: 60, coverState: 'ready' } }]);
   process.env.WANGKE_API_PROXY = backend;
   vite = await createServer({ root: new URL('../apps/web', import.meta.url).pathname, server: { host: '127.0.0.1', port: 0, hmr: false, watch: null }, plugins: [{
     name: 'video-preview-login', configureServer(server) {
@@ -80,7 +81,8 @@ try {
     session.on('Network.dataReceived', event => { if (mediaIds.has(event.requestId)) received += event.dataLength; });
     await page.goto(`${origin}/__fixture_login`);
     // Throttle once the application bundle is loaded, not its JS dependencies.
-    await page.locator('[data-media-player]').waitFor({ timeout: 60000 });
+    try { await page.locator('[data-media-player]').waitFor({ timeout: 60000 }); }
+    catch (error) { console.error('Playback page:', await page.locator('body').innerText(), 'Page errors:', errors); throw error; }
     await session.send('Network.emulateNetworkConditions', { offline: false, latency: 50, downloadThroughput: 256 * 1024, uploadThroughput: -1 });
     const video = page.locator('[data-media-provider] video');
     await page.waitForFunction(() => document.querySelector('[data-media-provider] video')?.readyState >= 2, null, { timeout: 30000 });
@@ -123,7 +125,17 @@ try {
     console.log('PASS media failure is visible and retry restores playback');
 
     // Local OPFS / IndexedDB still uses a releasable Blob URL.
-    const local = await page.evaluate(async () => {
+    // A server cache is intentionally read-only even if cloud.enabled is toggled.
+    // Exercise static mode in its own document and real local database instead.
+    const openLocalPage = async context => {
+      const localPage = await context.newPage();
+      await localPage.route('**/api/v1/cloud/status', route => route.fulfill({ json: { cloud: false } }));
+      await localPage.goto(`${origin}/#/library`);
+      await localPage.getByTestId('import-input').waitFor({ timeout: 60000 });
+      return localPage;
+    };
+    const localPage = await openLocalPage(context);
+    const local = await localPage.evaluate(async () => {
       const { cloud } = await import('/src/cloud/state.ts');
       const { saveVideoFile } = await import('/src/store/fileStore.ts');
       const { getVideoPlaybackSource } = await import('/src/store/videoPlayback.ts');
@@ -139,7 +151,7 @@ try {
         let abortRejected = false;
         try { await getVideoPlaybackSource('local-playback-fixture', cancelled.signal); } catch { abortRejected = true; }
         return { text, released, abortRejected, blob: source.src.startsWith('blob:') };
-      } finally { cloud.enabled = true; }
+      } finally { cloud.enabled = false; }
     });
     assert.deepEqual(local, { text: 'local-video', released: true, abortRejected: true, blob: true });
     console.log('PASS local files, Blob URL cleanup and cancelled source loading');
@@ -220,10 +232,11 @@ try {
       } finally {
         video.removeAttribute('src'); video.load(); source?.release();
         await deleteVideoFile('local-decode-fixture');
-        cloud.enabled = true;
+        cloud.enabled = false;
       }
     }, { courseId: entry.courseId, contentBytes });
-    assert.equal(await localDecode(page), true);
+    assert.equal(await localDecode(localPage), true);
+    await localPage.close();
     console.log('PASS Chromium offline file decodes through the local Blob source');
 
     const safari = await webkit.launchPersistentContext(path.join(directory, 'webkit-profile'), { headless: true, viewport: { width: 1280, height: 900 }, locale: 'zh-CN', serviceWorkers: 'block' });
@@ -242,7 +255,9 @@ try {
         return video && !video.seeking && Math.abs(video.currentTime - 25) < 1 && video.readyState >= 2;
       });
       assert.deepEqual(safariErrors, []);
-      assert.equal(await localDecode(safariPage), true);
+      const safariLocal = await openLocalPage(safari);
+      assert.equal(await localDecode(safariLocal), true);
+      await safariLocal.close();
       console.log('PASS WebKit authenticated progressive playback and seeking');
       console.log('PASS WebKit offline file decodes through the local Blob source');
     } finally { await safari.close(); }

@@ -1,4 +1,6 @@
 import type { ProjectDto, ProjectFileDto } from './projects.js';
+export type { LibraryImport } from './library-import.js';
+export { LIBRARY_IMPORT_FIELDS } from './library-import.js';
 
 export const RESOURCE_FOLDER_COLORS = ['blue', 'green', 'yellow', 'orange', 'red', 'purple', 'gray'] as const;
 export type ResourceFolderColor = (typeof RESOURCE_FOLDER_COLORS)[number];
@@ -19,3 +21,31 @@ export interface ResourceDirectory {
   folderId?: number;
   entries: ResourceEntry[];
 }
+
+/** Explicit filesystem operations, not table mutations. */
+export type ResourceOperation =
+  | { kind: 'importLibraryBlob'; sourceId: string; size: number; sha256: string; contentType: string }
+  | { kind: 'importLibrary'; library: import('./library-import.js').LibraryImport }
+  | { kind: 'createFolder'; name: string }
+  | { kind: 'createDirectory'; projectId: string; path: string }
+  | { kind: 'upload'; projectId: string; path: string; size: number; sha256: string; contentType: string }
+  | { kind: 'recordMediaDuration'; courseId: string; duration: number }
+  | { kind: 'recordPlayback'; courseId: string; position: number; finished?: boolean }
+  | { kind: 'recordReadingPosition'; courseId: string; unit: number }
+  | { kind: 'setReadingView'; courseId: string; view: 'raw' | 'blocks' }
+  | { kind: 'setCourseSkills'; courseId: string; pin: number[]; drop: number[] }
+  | { kind: 'setCoursePinned'; courseId: string; pinned: boolean }
+  | { kind: 'pauseTranscription'; courseId: string }
+  | { kind: 'setVideoSource'; courseId: string; source: { bvid: string; aid: number; cid: number; page: number } }
+  | { kind: 'importSubtitles'; courseId: string; primary: boolean; segments: { idx: number; start: number; end: number; text: string; status: 0 | 1; cues?: { start: number; end: number; text: string }[] }[]; tracks: { lang: string; lanDoc: string; primary?: 0 | 1; cues: { start: number; end: number; text: string }[] }[] }
+  | { kind: 'renameFolder'; projectId: string; name: string }
+  | { kind: 'folderColor'; projectId: string; path: string; color: ResourceFolderColor }
+  | { kind: 'move'; projectId: string; path: string; targetProjectId: string; target: string; revision: string }
+  | { kind: 'remove'; projectId: string; path: string; revision: string }
+  | { kind: 'trash' | 'restore' | 'deleteTrash'; projectId: string }
+  | { kind: 'saveCourseText'; courseId: string; text: string; expected: string }
+  | { kind: 'saveMarkdown'; courseId: string; text: string; expected: string; name?: string; folderId?: number; createOnly?: boolean }
+  | { kind: 'organizeCourses'; folders: { name: string; courseIds: string[] }[] }
+  | { kind: 'moveLibrarySelection'; placements: { key: string; parent: number | null; target: number | null }[] }
+  | { kind: 'saveProjectText'; projectId: string; path: string; text: string; expectedRevision: string | null };
+export interface ResourceCommand { operationId: string; operation: ResourceOperation }

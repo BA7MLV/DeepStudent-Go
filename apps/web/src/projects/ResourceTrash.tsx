@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button, Modal } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
 import type { ProjectDto } from '@wangke/contracts';
-import { request } from '../api/serverClient';
+import { followResourceTrash, resourceCommand } from '../client/resources';
 import { confirmDialog, MODAL_CONTAINER_CLASS, Sym } from '../ui';
 import { projectError } from './errors';
 
@@ -14,17 +14,14 @@ export default function ResourceTrash({ onClose, onChange }: { onClose: () => vo
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   useEffect(() => {
-    let ignore = false;
-    request<{ projects: typeof items }>('/resources/trash').then(result => { if (!ignore) { setItems(result.projects); setError(''); } })
-      .catch(error => { if (!ignore) setError(projectError(error)); }).finally(() => { if (!ignore) setLoading(false); });
-    return () => { ignore = true; };
+    return followResourceTrash(result => { setItems(result.projects); setError(''); setLoading(false); }, error => { setError(projectError(error)); setLoading(false); });
   }, [revision]);
   const act = async (item: ProjectDto, action: 'restore' | 'delete') => {
     if (busy) return;
     if (action === 'delete' && !await confirmDialog({ headline: t('permanentDeleteConfirm', { name: item.name }), description: t('permanentDeleteHint'), confirmText: t('permanentDelete'), cancelText: t('cancel'), danger: true })) return;
     setBusy(true);
     try {
-      await request(`/resources/folders/${encodeURIComponent(item.id)}/${action}`, { method: 'POST' });
+      await resourceCommand({ kind: action === 'delete' ? 'deleteTrash' : 'restore', projectId: item.id });
       setItems(old => old.filter(row => row.id !== item.id)); setError(''); onChange();
     } catch (error) { setError(projectError(error)); }
     finally { setBusy(false); }

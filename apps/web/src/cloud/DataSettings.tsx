@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { Button } from '@heroui/react';
 import { startRegistration, browserSupportsWebAuthn } from '@simplewebauthn/browser';
 import { cloud, cloudRequest } from './state';
@@ -9,6 +9,7 @@ import { SettingRow } from '../components/settings/controls';
 import ArchivedSessionsCard from '../components/settings/ArchivedSessionsCard';
 import { logoutCloud } from './logout';
 import ServerStorageCard from './ServerStorageCard';
+const LibraryImportFiles = lazy(() => import('./LibraryImportFiles'));
 
 /**
  * 设置 → 数据（云端）。
@@ -103,9 +104,12 @@ export default function DataSettings() {
         {!cloud.worker && (
           <SettingRow label="旧版浏览器数据">
             <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void importLegacy()}>导入</Button>
+            <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('export-import', async () => (await import('./migrate')).exportLibraryImport())}>导出导入快照</Button>
           </SettingRow>
         )}
       </SectionCard>
+
+      {!cloud.worker && <Suspense fallback={null}><LibraryImportFiles /></Suspense>}
 
       <ArchivedSessionsCard />
 

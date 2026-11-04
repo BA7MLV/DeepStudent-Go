@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import { fixtureBrowserDomain } from './fixture-domain.mjs';
 import { addPlugin, assertCreationHint } from './plugin-tools.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,6 +9,14 @@ import net from 'node:net';
 import { Readable } from 'node:stream';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+
+// Opt-in local CPU diagnosis, bound to loopback on a free port. Never expose
+// the test fixture inspector on a shared/default debugger port.
+if (process.env.PLUGIN_CPU_DIAGNOSTIC === '1') {
+  const inspector = await import('node:inspector');
+  inspector.open(0, '127.0.0.1');
+  console.error(`Plugin diagnostic inspector: ${inspector.url()}`);
+}
 
 const root = path.join(os.tmpdir(), 'opencode'); fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'plugin-platform-ui-'));
@@ -36,6 +46,7 @@ const botFixtureFetch = async (_url, init) => {
 };
 let app = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: botFixtureFetch });
 let browser, web, store, learningRunner;
+let failed = false;
 const errors = [];
 const diagnostics = [];
 const tracePage = page => {
@@ -53,6 +64,12 @@ const observePage = () => {
   const log = (event, detail) => window.pluginDiagnostics.push({ at: performance.now(), event, detail });
   for (const name of ['DOMContentLoaded', 'load', 'visibilitychange', 'wangke:bot-session-ended']) window.addEventListener(name, () => log(name, document.visibilityState));
   window.addEventListener('unhandledrejection', event => log('unhandledrejection', String(event.reason?.stack ?? event.reason)));
+  window.addEventListener('message', event => {
+    const data = event.data;
+    if (data?.channel && (data.lifecycle || data.context || data.ready)) log('plugin-lifecycle', { channel: data.channel, lifecycle: data.lifecycle, context: data.context, ready: data.ready });
+    if (data?.channel && data.method) log('plugin-request', { channel: data.channel, id: data.id, method: data.method });
+    if (data?.channel && Number.isSafeInteger(data.id) && ('result' in data || data.error)) log('plugin-response', { channel: data.channel, id: data.id, error: data.error });
+  });
   if (navigator.locks) {
     const request = navigator.locks.request.bind(navigator.locks);
     navigator.locks.request = (name, ...args) => {
@@ -63,6 +80,7 @@ const observePage = () => {
   }
   document.addEventListener('click', event => { const button = event.target.closest?.('[data-plugin-actions] button'); if (button) log('contribution-click', { text: button.textContent, surface: button.closest('[data-plugin-actions]').dataset.pluginActions }); }, true);
   for (const name of ['pointerdown', 'pointerup', 'click']) document.addEventListener(name, event => {
+    if (location.href === 'about:srcdoc') log(`sandbox-${name}`, { tag: event.target.tagName, id: event.target.id, x: event.clientX, y: event.clientY, status: document.getElementById('status')?.textContent });
     const trigger = event.target.closest?.('[data-testid="study-assistant-toggle"]');
     if (trigger) log(`assistant-${name}`, { expanded: trigger.getAttribute('aria-expanded'), x: event.clientX, y: event.clientY });
   }, true);
@@ -74,12 +92,13 @@ const observePage = () => {
 const output = process.env.SCREENSHOT_DIR ?? path.join(root, 'plugin-platform-screenshots'); fs.mkdirSync(output, { recursive: true });
 const pageDiagnostics = async () => {
   const { cloud } = await import('/src/cloud/state.ts');
-  return { readyState: document.readyState, visibility: document.visibilityState, root: document.getElementById('root')?.innerHTML, account: { enabled: cloud.enabled, userId: cloud.userId, worker: cloud.worker }, locks: await navigator.locks?.query(), events: window.pluginDiagnostics, resources: performance.getEntriesByType('resource').slice(-30).map(r => ({ name: r.name, duration: r.duration })) };
+  const { cloudSyncDiagnostics } = await import('/src/cloud/sync.ts');
+  return { readyState: document.readyState, visibility: document.visibilityState, root: document.getElementById('root')?.innerHTML, sync: cloudSyncDiagnostics(), account: { enabled: cloud.enabled, userId: cloud.userId, worker: cloud.worker }, locks: await navigator.locks?.query(), events: window.pluginDiagnostics, resources: performance.getEntriesByType('resource').slice(-30).map(r => ({ name: r.name, duration: r.duration })) };
 };
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
   const apiPort = app.server.address().port;
-  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: false } } } });
+   web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port, strictPort: true, proxy: { '/api': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: false, ws: true } } } });
   await web.listen(); browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ locale: 'zh-CN', viewport: { width: 1440, height: 1000 } });
   await context.addInitScript(observePage);
@@ -90,7 +109,7 @@ try {
   store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
   const files = new PluginFiles(store); files.layout(owner);
   const material = { id: 'plugin-source', name: '插件上下文验收资料', kind: 'material', materialFormat: 'md', mimeType: 'text/markdown', duration: 0, createdAt: Date.now(), status: 'transcribed' };
-  new CloudRecords(store).apply(owner, [{ id: 'plugin-source', table: 'videos', key: material.id, before: null, after: material }]);
+   await fixtureBrowserDomain(context.request, origin, 'resourceCommand', { operationId: crypto.randomUUID(), operation: { kind: 'saveMarkdown', courseId: material.id, name: material.name, expected: '', text: '# 资料\n\n用于验证阅读侧栏的资料上下文。', createOnly: true } });
   new CloudRecords(store).apply(owner, [{ id: 'plugin-source-block', table: 'materialBlocks', key: 700, before: null, after: { id: 700, materialId: material.id, idx: 0, unit: 1, unitLabel: '第 1 段', kind: 'body', text: '这份已解析的真实资料用于验证卡片生成、复习审核与持久收据。' } }]);
   const bankId = `__course_questions__${encodeURIComponent(material.id)}`;
   const bankQuestion = { stem: '原题闭环验收：哪项是权威记录？', options: ['原错题本 Markdown', '组件临时状态', '随机示例', '页面回调'], answer: 0, explanation: '原错题本是唯一学习记录。', answerSource: 'original', source: { courseId: material.id, name: material.name, page: 1 } };
@@ -136,7 +155,7 @@ try {
     await debuggerSession.send('Debugger.setPauseOnExceptions', { state: 'all' });
   }
   await reader.goto(`${origin}/#/board`); await reader.getByTestId('board-plugin-todo').first().waitFor();
-  await reader.evaluate(async material => { const { db } = await import('/src/store/db.ts'); await db.videos.put(material); await db.files.put({ id: material.id, blob: new Blob(['# 资料\n\n用于验证阅读侧栏的资料上下文。'], { type: 'text/markdown' }) }); }, material);
+   await reader.evaluate(async () => (await import('/src/cloud/sync.ts')).flushCloud());
   await reader.goto(`${origin}/#/player/${material.id}`); await reader.getByTestId('panel-tab-plugins').waitFor({ state: 'attached' });
   const toggle = reader.getByTestId('study-assistant-toggle'); if (await toggle.isVisible()) await toggle.click();
   await reader.getByTestId('panel-tab-plugins').click();
@@ -377,8 +396,8 @@ try {
     await noteFrame.getByRole('button', { name: '保存到共享实例', exact: true }).click();
     await noteFrame.getByText('已保存', { exact: true }).waitFor();
     const materialB = { ...material, id: 'plugin-source-b', name: '插件上下文资料 B' };
-    new CloudRecords(store).apply(owner, [{ id: 'plugin-source-b', table: 'videos', key: materialB.id, before: null, after: materialB }]);
-    await reader.evaluate(async next => { const { db } = await import('/src/store/db.ts'); await db.videos.put(next); await db.files.put({ id: next.id, blob: new Blob(['# 资料 B'], { type: 'text/markdown' }) }); }, materialB);
+     await fixtureBrowserDomain(context.request, origin, 'resourceCommand', { operationId: crypto.randomUUID(), operation: { kind: 'saveMarkdown', courseId: materialB.id, name: materialB.name, expected: '', text: '# 资料 B', createOnly: true } });
+     await reader.evaluate(async () => (await import('/src/cloud/sync.ts')).flushCloud());
     await reader.goto(`${origin}/#/player/${materialB.id}`); await openReaderPlugins();
     await noteFrame.locator('#note:not([disabled])').waitFor();
     assert.equal(await noteFrame.getByLabel('本资料笔记').inputValue(), '', 'A draft is never relabelled as B');
@@ -416,9 +435,8 @@ try {
      const extraction = store.db.prepare("SELECT t.*,l.result AS artifacts FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE l.owner_id=? AND l.action_id='practice.extract'").get(owner);
      assert.equal(extraction.executor, 'browser'); assert.equal(extraction.status, 'completed');
      assert.equal(JSON.parse(extraction.artifacts).kind, 'question-bank');
-     const savedBank = new CloudRecords(store).get(owner, 'files', bankId);
-     const savedBlob = store.db.prepare('SELECT storage_name FROM files WHERE id=? AND owner_id=?').get(savedBank.blob.$file, owner);
-     const savedText = fs.readFileSync(path.join(directory, 'files', savedBlob.storage_name), 'utf8');
+      const savedBank = await fixtureBrowserDomain(context.request, origin, 'read', { kind: 'courseDocument', courseId: bankId });
+      const savedText = savedBank.value.text;
      assert.ok(savedText.includes('浏览器提取已保存部分')); assert.ok(savedText.includes(bankQuestion.stem), 'original QA edit preserves the original bank');
      // Keyboard stays in the modal, Escape returns to the intact reader draft.
      await oldPracticeDialog.getByRole('button', { name: '关闭', exact: true }).focus();
@@ -504,10 +522,20 @@ try {
   assert.deepEqual(errors, []);
    console.log(`Plugin platform UI passed: configuration via real tools, shared todo/cards across board/Chat/reader/page, native AI practice and original Markdown snapshots, answer-source labels, immutable submission sync, wrongbook review re-answer and original attempt counts, artifact receipts, independent instance, refresh and service restart, 360/390/1440 light/dark/system (including 27 learning-page screenshots). Screenshots: ${output}`);
 } catch (error) {
+  failed = true;
+  console.error(`Plugin failure fixture retained at ${directory}; diagnostics at ${output}`);
   console.error(`Captured browser errors: ${JSON.stringify(errors)}`);
   fs.writeFileSync(path.join(output, 'network-failure.json'), JSON.stringify(diagnostics.map(record => ({ ...record, pending: [...record.pending].map(request => request.url()) })), null, 2));
   if (browser) for (const [index, diagnosticPage] of browser.contexts().flatMap(c => c.pages()).entries()) {
-    try { await diagnosticPage.screenshot({ path: path.join(output, `failure-page-${index}.png`) }); console.error(`Page ${index}: ${diagnosticPage.url()}\n${(await diagnosticPage.locator('body').innerText()).slice(0, 2500)}`); fs.writeFileSync(path.join(output, `page-failure-${index}.json`), JSON.stringify(await diagnosticPage.evaluate(pageDiagnostics), null, 2)); } catch { /* A closing tab has no useful diagnostics. */ }
+    try {
+      await diagnosticPage.screenshot({ path: path.join(output, `failure-page-${index}.png`) });
+      console.error(`Page ${index}: ${diagnosticPage.url()}\n${(await diagnosticPage.locator('body').innerText()).slice(0, 2500)}`);
+      const frames = [];
+      for (const frame of diagnosticPage.frames().slice(1)) {
+        try { frames.push(await frame.evaluate(() => ({ url: location.href, text: document.body.innerText.slice(0, 3000), note: document.getElementById('note')?.value, events: window.pluginDiagnostics }))); } catch { /* A detached sandbox is recorded by the host lifecycle log. */ }
+      }
+      fs.writeFileSync(path.join(output, `page-failure-${index}.json`), JSON.stringify({ ...await diagnosticPage.evaluate(pageDiagnostics), frames }, null, 2));
+    } catch { /* A closing tab has no useful diagnostics. */ }
   }
   throw error;
-} finally { await learningRunner?.close(); await browser?.close(); await web?.close(); await app.close(); store?.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+} finally { await learningRunner?.close(); await browser?.close(); await web?.close(); await app.close(); store?.close(); if (!failed) fs.rmSync(directory, { recursive: true, force: true }); }

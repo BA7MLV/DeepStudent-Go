@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { PLUGIN_LAYOUT_PATH } from '@wangke/contracts/plugins';
 import type { DatabaseStore } from '../storage/database.js';
 import type { BotApplicationService } from '../agent/service.js';
 import type { CloudTaskRunner } from '../cloud/tasks.js';
@@ -24,10 +23,6 @@ export function registerPluginRoutes(app: FastifyInstance, store: DatabaseStore,
   app.post<{ Body: Record<string, unknown> }>('/api/v1/plugins/tool', async (r, p) => {
     if (!origin(r, p)) return; const u = auth(r, p); if (!u) return;
     return safe(p, () => service.tool(u.id, r.body));
-  });
-  app.post<{ Body: { content: string; expected: string; revision: number } }>('/api/v1/plugins/layout', async (r, p) => {
-    if (!origin(r, p)) return; const u = auth(r, p); if (!u) return;
-    return safe(p, () => files.save(u.id, PLUGIN_LAYOUT_PATH, r.body.content, r.body.expected, r.body.revision));
   });
   app.get<{ Params: { id: string; view: string } }>('/api/v1/plugins/:id/views/:view', async (r, p) => {
     const u = auth(r, p); if (!u) return;

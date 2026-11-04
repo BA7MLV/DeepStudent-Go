@@ -20,7 +20,7 @@ const until = async fn => { for (let i = 0; i < 200; i++) { if (await fn()) retu
 let browser, store, web, lastReplyRun;
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
-  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
+  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { host: 'localhost', port, strictPort: true, proxy: { '/api': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false, ws: true } } } });
   await web.listen();
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ serviceWorkers: 'block' });

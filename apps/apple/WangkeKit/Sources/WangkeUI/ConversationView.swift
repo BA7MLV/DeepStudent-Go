@@ -19,6 +19,10 @@ public struct ConversationView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    if model.hasOlder[thread.id] == true {
+                        Button("更早的消息") { Task { await model.loadOlder(thread.id) } }
+                            .padding(.vertical, 8)
+                    }
                     ForEach(rows) { row in
                         MessageBubble(
                             row: row,

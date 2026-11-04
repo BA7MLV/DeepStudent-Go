@@ -46,7 +46,7 @@ import {
   PanelPlaceholder,
   Sym,
   toast,
-  confirmDialog,
+  popconfirm,
 } from '../ui';
 import { StreamParagraph, useMessageEnter } from './motion';
 import ResponseProcess from './ResponseProcess';
@@ -75,6 +75,7 @@ import { persistAssistantSnapshot } from '../store/assistantSnapshot';
 import { widgetReference } from '../harness/widgetLayout';
 import { nextVisualRound, readPartialWidgetArguments } from '../utils/streamingHtml';
 import { cloud } from '../cloud/state';
+import { useCloudActivity } from '../cloud/activityStore';
 import { useMaterialPluginView } from '../plugins/useMaterialPluginView';
 import { usePluginAvailable } from '../plugins/catalog';
 import { isPluginAvailable, assertPluginAvailable } from '../plugins/availability';
@@ -866,9 +867,13 @@ export default function ChatPanel({
   useEffect(() => {
     let cancelled = false;
     let previous = '';
-    const refresh = async (event: Event) => {
+    let lastDataRevision = -1;
+    const refresh = async () => {
       if (localRequest.current) return;
-      const { tasks, dataChanged } = (event as CustomEvent<{ tasks: import('@wangke/contracts/cloud').CloudTask[]; dataChanged: boolean }>).detail;
+      const { tasks, dataRevision } = useCloudActivity.getState();
+      if (!tasks) return;
+      const dataChanged = dataRevision !== lastDataRevision;
+      lastDataRevision = dataRevision;
       const list = await db.chatSessions.where('videoId').equals(videoId).sortBy('createdAt');
       if (cancelled || localRequest.current) return;
       setSessions(list);
@@ -899,9 +904,10 @@ export default function ChatPanel({
       }));
       setHasOlder(page.hasOlder); setLoading(Boolean(running)); setLoadedSessionId(activeId);
     };
-    const listener = (event: Event) => { void refresh(event).catch(() => setHistoryError(true)); };
-    window.addEventListener('cloud-tasks-changed', listener);
-    return () => { cancelled = true; window.removeEventListener('cloud-tasks-changed', listener); };
+    const listener = () => { void refresh().catch(() => { if (!cancelled) setHistoryError(true); }); };
+    const unsubscribe = useCloudActivity.subscribe(listener);
+    listener();
+    return () => { cancelled = true; unsubscribe(); };
   }, [activeId, videoId]);
 
   const loadOlder = useCallback(async () => {
@@ -1774,12 +1780,12 @@ export default function ChatPanel({
 
   /** 删除当前会话前确认（危险操作：确认按钮上错误色，文案写清动作） */
   const confirmDeleteSession = async () => {
-    const ok = await confirmDialog({
+    const ok = await popconfirm({
       headline: '删除当前会话？',
       description: '会话里的全部问答记录都会被删除，无法恢复。',
       confirmText: '删除',
-      cancelText: '取消',
       danger: true,
+      testId: 'session-delete-popconfirm',
     });
     if (ok) void deleteSession();
   };

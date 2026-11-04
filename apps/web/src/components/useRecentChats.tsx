@@ -3,7 +3,7 @@ import Dexie, { liveQuery } from 'dexie';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../store/db';
 import { useCourseChat } from '../store/courseChat';
-import { confirmDialog, promptDialog, Sym, toast } from '../ui';
+import { popconfirm, promptDialog, Sym, toast } from '../ui';
 import type { RecentItem } from '../ui/layout';
 
 /** 由共享布局持有查询和操作，切页不重挂；只有对话页显示当前会话高亮。 */
@@ -53,10 +53,10 @@ export function useRecentChats(showActive = false) {
   }, [sessions, activity]);
 
   const remove = async (id: number, title: string) => {
-    const ok = await confirmDialog({
-      headline: '删除这条会话？',
-      description: `「${title}」会被永久删除，课程和学习数据不会受影响。`,
-      confirmText: '删除', cancelText: '取消', danger: true,
+    const ok = await popconfirm({
+      headline: `删除会话「${title}」？`,
+      description: '会话里的问答记录会被永久删除，课程和学习数据不受影响。',
+      confirmText: '删除', danger: true, testId: 'recent-delete-popconfirm',
     });
     if (ok) await useCourseChat.getState().deleteSessionById(id);
   };
@@ -70,12 +70,8 @@ export function useRecentChats(showActive = false) {
     if (next) await useCourseChat.getState().renameSession(id, next);
   };
   const archive = async (id: number, title: string) => {
-    const ok = await confirmDialog({
-      headline: '归档这条会话？',
-      description: `「${title}」会从 Recent 里收起来，之后可以在「设置 → 数据 → 已归档会话」里找回来。`,
-      confirmText: '归档', cancelText: '取消',
-    });
-    if (ok) await useCourseChat.getState().setArchived(id, true);
+    await useCourseChat.getState().setArchived(id, true);
+    toast.info(`「${title}」已归档，可在「设置 → 数据 → 已归档会话」恢复`);
   };
   const fork = async (id: number) => {
     const newId = await useCourseChat.getState().forkSession(id);

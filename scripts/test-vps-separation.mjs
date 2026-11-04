@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { atomicJSON, readJSON } from './lib/release-storage.mjs';
 import { manifestIdentity } from './release-plan.mjs';
+import { createExecutorRuntime } from '@wangke/client-core';
 
 const [root, apiTag, webTag, apiNextTag, webNextTag, apiBadTag] = process.argv.slice(2);
 if (!root || !/^wangke-separation-check\.[A-Za-z0-9]+$/.test(path.basename(root)) || ![apiTag, webTag, apiNextTag, webNextTag, apiBadTag].every(tag => /^wk-check-/.test(tag ?? ''))) throw new Error('isolated_acceptance_arguments_required');
@@ -120,8 +121,8 @@ try {
   execAPI(`import {DatabaseStore} from './apps/api/dist/apps/api/src/storage/database.js'; const s=new DatabaseStore('/data/db/wangke.sqlite');const owner=s.db.prepare('SELECT id FROM users').get().id;const at=new Date().toISOString();s.db.prepare('INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at,executor) VALUES(?,?,?,?,?,?,?,?,?,?)').run(${JSON.stringify(browserTask)},owner,${JSON.stringify(browserTask)},'transcribe',${JSON.stringify(browserTask)},'{}','queued',at,at,'browser');s.close();`);
   const claim = await request('/api/v1/cloud/worker/claim', { method: 'POST', headers, body: JSON.stringify({ kinds: ['transcribe'] }) });
   assert.equal(claim.status, 200); const leased = await claim.json();
-  const workerHeaders = { authorization: `Bearer ${leased.token}`, 'content-type': 'application/json' };
-  heartbeat = setInterval(() => { request(`/api/v1/cloud/tasks/${browserTask}/report`, { method: 'POST', headers: workerHeaders, body: '{"progress":{"content":"acceptance heartbeat"}}' }).then(r => r.body?.cancel()).catch(() => {}); }, 5000);
+   const executor = await createExecutorRuntime(browserTask,{interactions:'answer',transport:{fetch:(url,init)=>request(String(url),{...init,headers:{...init?.headers,authorization:`Bearer ${leased.token}`}})}});
+   heartbeat = setInterval(() => { void executor.report({content:'acceptance heartbeat'}).catch(() => {}); }, 5000);
   const webTarget = candidate(initial, 'web', images.webNext.image, 'b');
   const webCandidate = path.join(root, 'web-manifest.json'); atomicJSON(webCandidate, webTarget);
   atomicJSON(path.join(root, 'logs/browser-before-web.json'), { origin, project });
@@ -135,7 +136,7 @@ try {
   await send('after-web-replace'); await receive(Date.now());
   assert.equal((await request('/assets/wk-old-proof.js')).status, 200);
   assert.equal((await request('/assets/wk-new-proof.js')).status, 200);
-  assert.equal((await request(`/api/v1/cloud/tasks/${browserTask}/report`, { method: 'POST', headers: workerHeaders, body: '{"progress":{"content":"survived web update"}}' })).status, 200);
+   assert.ok(Date.parse((await executor.report({content:'survived web update'})).leaseExpiresAt)>Date.now());
   mark('real Web-only recreate: identical API/edge IDs, same live SSE reader, old+new chunks and active browser lease');
   if (process.env.WANGKE_BROWSER_COORDINATION === '1') {
     for (let i = 0; i < 120 && !fs.existsSync(path.join(root, 'browser-done')); i++) await new Promise(resolve => setTimeout(resolve, 500));
@@ -159,7 +160,8 @@ try {
   assert.equal(JSON.parse(docker(['inspect', writerName]))[0].State.Running, false, 'real writable sandbox container must stop before snapshot');
   docker(['rm', writerName]);
   const unavailable = samples.filter(s => s.status !== 200); receipt.readinessSamples = samples; receipt.timings.apiUnavailableSampleSpanMs = unavailable.length ? unavailable.at(-1).at - unavailable[0].at + 100 : 0;
-  assert.equal((await request(`/api/v1/cloud/tasks/${browserTask}/report`, { method: 'POST', headers: workerHeaders, body: '{"progress":{"content":"stale"}}' })).status, 403);
+   assert.equal((await request('/api/executorRuntime/report',{method:'POST',headers:{authorization:`Bearer ${leased.token}`,'content-type':'application/json'},body:'{}'})).status,401,'restarted API rejects the old capability before codec dispatch');
+   await executor.dispose();
   const fenced = await (await request(`/api/v1/cloud/tasks/${browserTask}`, { headers: { cookie } })).json();
   assert.equal(fenced.status, 'queued');
   assert.equal(readJSON(path.join(installation, 'releases/last-success.json')).sourceCommit, apiTarget.sourceCommit);

@@ -9,6 +9,7 @@ import {
   Dropdown,
   EmptyState as HeroEmptyState,
   ListBox,
+  Popover,
   ScrollShadow,
   Separator,
   Typography,
@@ -1040,37 +1041,29 @@ export interface HelpTipProps {
  * 手机上把补充说明整段铺开会把版面吃掉好几行，所以约定：**当场要决策的留正文，
  * 解释性的收进这里**。
  *
- * **为什么不用 HeroUI 的 `Popover`**：`Popover.Trigger` 渲染成
- * `<Pressable><div role="button" /></Pressable>`，`Pressable` 自己 `usePress`
- * 把 press 事件合到 children 上，与 DialogTrigger 注入的 `onPress` 互相覆盖 ——
- * 结果是点击没反应且不报错（本仓库在 `ModelsModule` 里已经踩过并绕开）。
- * 绕开要自己画原生 `<button>` + 受控 `isOpen` + `triggerRef`，为一个问号气泡
- * 引入这套机制不划算。`<details>` 无 JS 依赖、键盘可达、点外面也能收。
- *
- * 气泡宽度必须**写死**：定位前会先量 popup 的 offsetWidth，而那一刻 popup 还停在
- * 触发元素的静态位置上，可用宽度只剩「视口 − 触发元素左边距」—— 问号通常落在整行
- * 偏右，手机上会被压成一条竖条（实测宽 116 / 高 556）。
+ * 用 HeroUI 的 `Popover`：点外面 / Escape / 关闭后焦点归还都由 RAC 处理，
+ * 定位也会自动翻转避边。触发按钮保留真正的 `<button>` 语义；宽度写死，
+ * 避免量宽那一刻被触发元素右侧的剩余空间压成竖条。
  */
 export function HelpTip({ headline, children, label = '说明', testId }: HelpTipProps) {
   return (
-    <details className="relative inline-block">
-      <summary
-        className="inline-grid cursor-pointer list-none place-items-center text-muted [&>svg]:shrink-0 [&::-webkit-details-marker]:hidden"
+    <Popover>
+      <Popover.Trigger
+        className="inline-grid cursor-pointer place-items-center rounded-sm text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus"
         aria-label={label}
         data-testid={testId}
       >
         <Sym name="help" />
-      </summary>
-      <div
-        role="note"
-        className="absolute top-[calc(100%+6px)] right-0 z-20 w-[min(17rem,calc(100vw-6rem))] rounded-lg border border-border bg-overlay p-4 text-left shadow-overlay"
-      >
-        <div className="text-sm font-medium text-foreground">{headline}</div>
-        <div className="mt-1.5 text-[13px] leading-relaxed text-muted [&_p:last-child]:mb-0 [&_p]:m-0 [&_p]:mb-2">
-          {children}
-        </div>
-      </div>
-    </details>
+      </Popover.Trigger>
+      <Popover.Content placement="bottom end" className="w-[min(17rem,calc(100vw-2rem))] p-4">
+        <Popover.Dialog>
+          <Popover.Heading className="text-sm font-medium text-foreground">{headline}</Popover.Heading>
+          <div className="mt-1.5 text-[13px] leading-relaxed text-muted [&_p:last-child]:mb-0 [&_p]:m-0 [&_p]:mb-2">
+            {children}
+          </div>
+        </Popover.Dialog>
+      </Popover.Content>
+    </Popover>
   );
 }
 

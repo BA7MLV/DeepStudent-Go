@@ -17,6 +17,8 @@ export interface PluginActionContext { owner: string; plugin: PluginPackage; ins
 export interface PluginActionHandler {
   id: string; capability: PluginCapability; schema: Record<string, unknown>;
   trustedOnly?: boolean;
+  /** Audited synchronous SQL/intent-only handler; never network/process effects. */
+  atomic?: 'sqlite';
   provider?: string;
   access: 'read' | 'write'; run(args: Record<string, any>, context: PluginActionContext): unknown;
 }
@@ -29,7 +31,7 @@ export class PluginService {
   readonly files: PluginFiles;
   readonly registry = new PluginRegistry();
   private readonly schemas = new Ajv({ strict: true, ownProperties: true, allErrors: false, addUsedSchema: false });
-  private readonly actions = new Map<string, { handler: PluginActionHandler; validate: ValidateFunction }>();
+  private readonly actions = new Map<string, { handler: PluginActionHandler; validate: ValidateFunction; incarnation: symbol }>();
   private readonly effects: PluginDispose[] = [];
   private readonly validateTool = this.schemas.compile<Record<string, any>>(PLUGINS_TOOL.function.parameters);
   private readonly learningCleanup: () => Promise<void>;
@@ -57,7 +59,7 @@ export class PluginService {
     this.effects.push(this.registry.register({ id: 'storage', setup: ctx => ctx.provide('storage', { version: 1, value: this.files }) }));
     for (const kind of ['state', 'schedules'] as const) {
       this.register({ id: `${kind}.read`, capability: kind, access: 'read', schema: object({}), run: (_, c) => this.files.readState(c.owner, c.plugin.id, c.instance.id, kind) });
-      this.register({ id: `${kind}.write`, capability: kind, access: 'write', schema: snapshotWrite, run: (a, c) => this.files.writeState(c.owner, c.plugin.id, c.instance.id, kind, a.data, a.expected, a.revision) });
+      this.register({ id: `${kind}.write`, capability: kind, access: 'write', atomic: 'sqlite', schema: snapshotWrite, run: (a, c) => this.files.writeState(c.owner, c.plugin.id, c.instance.id, kind, a.data, a.expected, a.revision) });
     }
     this.register({ id: 'schedules.threads', capability: 'schedules', access: 'read', schema: object({}), run: (_, c) => ({ threads: store.db.prepare("SELECT id,title,project_id FROM threads WHERE owner_id=? AND mode='bot' AND archived=0 ORDER BY updated_at DESC LIMIT 200").all(c.owner).filter((t: any) => c.instance.scope.kind === 'account' || c.instance.scope.kind === 'project' && t.project_id === c.instance.scope.id) }) });
     this.register({ id: 'tasks.list', capability: 'tasks', access: 'read', schema: object({}), run: (_, c) => ({ tasks: tasks.list(c.owner).filter(task => taskAllowed(task, c)) }) });
@@ -85,7 +87,7 @@ export class PluginService {
     const validate = this.schemas.compile(handler.schema);
     const off = this.registry.register({ id: `action-${handler.id}`, requires: { storage: 1 }, setup: ctx => {
       ctx.provide(`action.${handler.id}`, { version: 1, value: handler });
-      this.actions.set(handler.id, { handler, validate });
+      this.actions.set(handler.id, { handler, validate, incarnation: Symbol(handler.id) });
       ctx.effect(() => this.actions.delete(handler.id));
     } });
     this.effects.push(off); return off;
@@ -101,8 +103,8 @@ export class PluginService {
     this.effects.push(off); return off;
   }
   private releaseAccounts() { for (const account of this.accounts.values()) for (const off of account.dispose.reverse()) off(); this.accounts.clear(); }
-  private account(owner: string) {
-    const packages = this.files.catalog(owner), signature = JSON.stringify(packages.map(p => [p.id, p.source, p.revision, p.manifest?.enabled, p.error]));
+  private account(owner: string, packages = this.files.catalog(owner)) {
+    const signature = JSON.stringify(packages.map(p => [p.id, p.source, p.revision, p.manifest?.enabled, p.error]));
     const previous = this.accounts.get(owner);
     if (previous?.signature === signature) return previous.registry;
     if (previous) for (const off of previous.dispose.reverse()) off();
@@ -134,6 +136,9 @@ export class PluginService {
   definitions(owner?: string, plugin?: PluginPackage & { manifest: NonNullable<PluginPackage['manifest']> }) {
     const registry = owner ? this.account(owner) : undefined;
     const packages = owner ? plugin ? [plugin] : this.files.catalog(owner) : [];
+    return this.availableDefinitions(owner, packages, registry);
+  }
+  private availableDefinitions(owner: string | undefined, packages: PluginPackage[], registry: PluginRegistry | undefined) {
     return [...this.actions.values()].filter(({ handler }) => {
       if (!owner) return true;
       return packages.some(p => { if (p.error || !p.manifest?.enabled) return false; try { this.allowed(owner, p as PluginPackage & { manifest: NonNullable<PluginPackage['manifest']> }, handler, registry); return true; } catch { return false; } });
@@ -147,32 +152,46 @@ export class PluginService {
     return { ...entry, plugin, instance };
   }
   invoke(owner: string, pluginId: string, instanceId: string, revision: number, method: string, args: Record<string, unknown>, checkActive = () => {}) {
+    return this.prepareInvocation(owner, pluginId, instanceId, revision, method, args, checkActive)();
+  }
+  prepareInvocation(owner: string, pluginId: string, instanceId: string, revision: number, method: string, args: Record<string, unknown>, checkActive = () => {}) {
     checkActive();
     const { handler, validate, plugin, instance } = this.resolve(owner, pluginId, instanceId, method);
     if (plugin.revision !== revision) throw new Error('plugin_changed');
     if (JSON.stringify(args).length > 128000 || !validate(args)) throw new Error('invalid_plugin_arguments');
     const projectId = instance.scope.kind === 'project' ? instance.scope.id : instance.scope.kind === 'material' ? this.files.materialProject(owner, instance.scope.id) : undefined;
-    return handler.run(args, { owner, plugin, instance, projectId, checkActive });
+    return Object.assign(() => {
+      checkActive();
+      return handler.run(args, { owner, plugin, instance, projectId, checkActive });
+    }, { atomic: handler.atomic });
   }
   invokeNamed(owner: string, pluginId: string, instanceId: string, revision: number, actionId: string, args: Record<string, unknown>, checkActive = () => {}) {
+    return this.prepareNamedInvocation(owner, pluginId, instanceId, revision, actionId, args, checkActive)();
+  }
+  prepareNamedInvocation(owner: string, pluginId: string, instanceId: string, revision: number, actionId: string, args: Record<string, unknown>, checkActive = () => {}) {
     const { plugin } = this.files.instance(owner, pluginId, instanceId);
     const action = plugin.manifest.actions?.[actionId];
     if (!action) throw new Error('plugin_action_not_found');
     // The compiled host handler's schema remains authoritative, never a package's claimed schema.
-    return this.invoke(owner, pluginId, instanceId, revision, action.service, args, checkActive);
+    return this.prepareInvocation(owner, pluginId, instanceId, revision, action.service, args, checkActive);
   }
   tool(owner: string, args: Record<string, any>, checkActive = () => {}) {
     checkActive();
     if (!this.validateTool(args)) throw new Error('invalid_plugin_arguments');
-    if (args.operation === 'list') return {
-      plugins: this.files.catalog(owner).map(p => {
+    if (args.operation === 'list') {
+      // One synchronous disk snapshot per list operation, not a full recursive
+      // catalog scan per package. Never retain this across an await or request.
+      const packages = this.files.catalog(owner), registry = this.account(owner, packages);
+      return {
+      plugins: packages.map(p => {
         const active = p.manifest?.enabled && !p.error;
-        const methods = new Set(active ? this.definitions(owner, p as PluginPackage & { manifest: NonNullable<PluginPackage['manifest']> }).map(d => d.id) : []);
+        const methods = new Set(active ? this.availableDefinitions(owner, [p], registry).map(d => d.id) : []);
         return { id: p.id, source: p.source, revision: p.revision, error: p.error, installation: p.installation, provider: p.provider, name: p.manifest?.name, enabled: p.manifest?.enabled, views: active ? p.manifest!.views : {}, contributions: active ? p.manifest!.contributions : {}, dependencies: p.dependencies, actions: Object.entries(p.manifest?.actions ?? {}).filter(([, a]) => methods.has(a.service)).map(([id, a]) => ({ id, title: a.title })) };
       }),
       layout: JSON.parse(this.files.layout(owner).content), surfaces: PLUGIN_SURFACES,
       scopes: this.files.scopeCatalog(owner),
     };
+    }
     if (args.operation === 'describe') {
       const plugin = this.files.plugin(owner, args.pluginId);
       const definitions = this.definitions(owner, plugin);

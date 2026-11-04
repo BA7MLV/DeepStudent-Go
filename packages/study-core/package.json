@@ -22,6 +22,7 @@
     "./comments": { "types": "./src/harness/comments.ts", "default": "./dist/harness/comments.js" },
     "./cards": { "types": "./src/harness/ankiCard.ts", "default": "./dist/harness/ankiCard.js" },
     "./quiz": { "types": "./src/harness/quiz.ts", "default": "./dist/harness/quiz.js" },
+    "./ask-user": { "types": "./src/harness/askUser.ts", "default": "./dist/harness/askUser.js" },
     "./wrongbook": { "types": "./src/study/wrongbook.ts", "default": "./dist/study/wrongbook.js" },
     "./instructions": { "types": "./src/harness/agentInstructions.ts", "default": "./dist/harness/agentInstructions.js" },
     "./search": { "types": "./src/harness/lexical.ts", "default": "./dist/harness/lexical.js" },

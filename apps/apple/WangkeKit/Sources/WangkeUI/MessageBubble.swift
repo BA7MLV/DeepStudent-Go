@@ -96,7 +96,7 @@ struct MessageBubble: View {
                 Text(String(message.content.prefix(1000))).font(.system(.footnote, design: .monospaced))
             }
             .frame(maxHeight: 200)
-        case .text:
+        case .text, .webSources:
             Text(message.content).textSelection(.enabled)
         }
     }

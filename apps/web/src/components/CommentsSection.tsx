@@ -16,7 +16,7 @@ import {
 } from '../harness/comments';
 import { fmtTime } from '../utils/vtt';
 import { formatCaughtError } from '../utils/errorText';
-import { LoadingButton, PanelProgress, CueSkeleton, SkeletonReveal, useSkeletonGate, Sym, alertDialog, toast } from '../ui';
+import { LoadingButton, PanelProgress, CueSkeleton, SkeletonReveal, useSkeletonGate, Sym, toast } from '../ui';
 import { Collapse, TextSwap } from './motion';
 import ModelPicker from './ModelPicker';
 import PersistentError from './PersistentError';
@@ -107,9 +107,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
         n > 0 ? `讨论生成完成：${n} 串、${posts} 条发言` : '生成完成：这段课程没有挖出值得讨论的点',
       );
     } catch (e) {
-      const errText = formatCaughtError(e);
-      setErrorText(errText);
-      void alertDialog({ headline: '讨论生成失败', description: errText, copyText: errText });
+      setErrorText(formatCaughtError(e));
     } finally {
       setProgress(null);
       await reload();

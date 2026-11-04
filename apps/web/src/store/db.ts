@@ -518,7 +518,7 @@ export interface SkillRefRow {
   body: string;
 }
 
-class WangkeDB extends Dexie {
+export class WangkeDB extends Dexie {
   videos!: Table<VideoRow, string>;
   files!: Table<FileRow, string>;
   segments!: Table<SegmentRow, number>;
@@ -642,7 +642,13 @@ class WangkeDB extends Dexie {
 }
 
 export let db = new WangkeDB();
-export function useCloudDatabase(owner: string) {
+/** UI edits and executor writes must never share an upload queue. A Worker token
+ * authorizes its leased task, not arbitrary edits made by another browser realm.
+ * The old interactive database/outbox is intentionally retained unchanged. */
+export function cloudDatabaseName(owner: string, executor = false) {
+  return `${executor ? 'wangke-cloud-executor-' : 'wangke-cloud-'}${owner}`;
+}
+export function useCloudDatabase(owner: string, executor = false) {
   db.close();
-  db = new WangkeDB(`wangke-cloud-${owner}`, true);
+  db = new WangkeDB(cloudDatabaseName(owner, executor), true);
 }

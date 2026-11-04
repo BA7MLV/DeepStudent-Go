@@ -1,0 +1,11 @@
+{
+  "name": "@wangke/remote-host", "version": "0.1.0", "private": true, "type": "module",
+  "exports": {
+    ".": { "types": "./src/index.ts", "default": "./dist/index.js" },
+    "./typert": { "types": "./lib/typert.host.d.ts", "default": "./lib/typert.host.js" },
+    "./remote": { "types": "./lib/typert.remote-client.d.ts", "default": "./lib/typert.remote-client.js" }
+  },
+  "files": ["dist", "src", "lib/typert.host.js", "lib/typert.host.d.ts", "lib/typert.remote-client.js", "lib/typert.remote-client.d.ts"],
+  "scripts": { "build": "tsc --noEmit -p tsconfig.json && esbuild src/index.ts --format=esm --platform=node --target=es2022 --packages=external --outfile=dist/index.js" },
+  "dependencies": { "@deepseek-ai/cordis": "4.0.6-alpha.1", "@deepseek-ai/dsh-typert-protocol": "0.2.2-alpha.2", "@wangke/contracts": "0.1.0" }
+}

@@ -54,26 +54,13 @@ final class DecodingTests: XCTestCase {
     }
 }
 
-final class SSEParserTests: XCTestCase {
-    func testParsesMessageEventsAndSkipsBrokenData() {
-        let stream = """
-        id: 3
-        event: message.accepted
-        data: {"message":{"id":"m","threadId":"t","clientNonce":null,"seq":1,"role":"assistant","kind":"text","content":"你好","replyTo":null,"createdAt":"2026-10-24T10:00:00.000Z"}}
-
-        id: 4
-        event: message.reaction
-        data: {"messageId":"m","reaction":"👍","active":true}
-
-        id: 5
-        event: message.accepted
-        data: {not json
-
-        """
-        let events = SSEParser.parse(stream)
-        XCTAssertEqual(events.map(\.id), [3, 4])
-        XCTAssertEqual(events.first?.message?.content, "你好")
-        XCTAssertNil(events.last?.message)
+final class JournalCodecTests: XCTestCase {
+    func testDecodesFormalReadyAndRejectsMalformedItems() throws {
+        let ready = try JSONDecoder().decode(BotJournalFrame.self, from: Data(#"{"type":"ready","cursor":7}"#.utf8))
+        XCTAssertEqual(ready.cursor, 7)
+        for invalid in [#"{"type":"ready","cursor":-1}"#, #"{"type":"event","cursor":8}"#, #"{"type":"event","cursor":8,"event":{"type":"unknown"}}"#] {
+            XCTAssertThrowsError(try JSONDecoder().decode(BotJournalFrame.self, from: Data(invalid.utf8)))
+        }
     }
 }
 

@@ -150,6 +150,12 @@ async function rebuildHandoutDocx(handoutId: number, sections: HandoutSection[],
   });
 
   const outline = JSON.parse(row.outlineJson) as Record<string, unknown>;
+  if ((await import('../cloud/state')).cloud.worker) {
+    await (await import('../cloud/learning-products')).publishLearningProducts([{ kind: 'handoutDocument', expected: { ...row, id: handoutId }, value: {
+      ...row, id: handoutId, blob, sectionsJson: JSON.stringify(sections), outlineJson: JSON.stringify({ ...outline, summary }),
+    } }]);
+    return;
+  }
   await db.handouts.update(handoutId, {
     blob,
     sectionsJson: JSON.stringify(sections),

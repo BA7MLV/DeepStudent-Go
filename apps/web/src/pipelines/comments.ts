@@ -3,6 +3,7 @@ import { assertPluginAvailable } from '../plugins/availability';
 import { runMaterialPluginTask } from '../plugins/legacy-actions';
 import { getSettings, targetOfSlot } from '../store/settings';
 import { db } from '../store/db';
+import { publishLearningProducts, learningId, type BrowserLearningProduct } from '../cloud/learning-products';
 import { acquireWakeLock, releaseWakeLock } from '../utils/wakeLock';
 import type { CommentThreadDraft } from '../harness/comments';
 import { generateText } from './textGeneration';
@@ -58,21 +59,24 @@ async function saveComments(
 ): Promise<{ threads: number; posts: number }> {
   const now = Date.now();
   let posts = 0;
-  await db.transaction('rw', db.comments, async () => {
-    await db.comments.where('videoId').equals(videoId).delete();
+  const old = await db.comments.where('videoId').equals(videoId).toArray();
+  const products: BrowserLearningProduct[] = old.map(row => ({ kind: 'courseComment', expected: { ...row, id: row.id! }, value: null }));
     let seq = 0;
     for (const t of threads) {
-      const parentId = await db.comments.add({
+      const parentId = learningId();
+      products.push({ kind: 'courseComment', expected: null, value: {
+        id: parentId,
         videoId,
         time: t.time,
         author: t.author,
         role: t.role,
         text: t.text,
         createdAt: now + seq++,
-      });
+      } });
       posts++;
       for (const r of t.replies) {
-        await db.comments.add({
+        products.push({ kind: 'courseComment', expected: null, value: {
+          id: learningId(),
           videoId,
           time: t.time,
           author: r.author,
@@ -80,10 +84,10 @@ async function saveComments(
           text: r.text,
           parentId,
           createdAt: now + seq++,
-        });
+        } });
         posts++;
       }
     }
-  });
+  await publishLearningProducts(products);
   return { threads: threads.length, posts };
 }

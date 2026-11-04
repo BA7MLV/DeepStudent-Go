@@ -15,7 +15,7 @@ let browser, web, store;
 const app = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: async () => Response.json({ choices: [{ message: { role: 'assistant', content: '模板 Bot 任务已真实完成。' }, finish_reason: 'stop' }] }) });
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
-  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite'), server: { watch: null, hmr: false, host: 'localhost', port: 0, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
+  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite'), server: { watch: null, hmr: false, host: 'localhost', port: 0, proxy: { '/api': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false, ws: true } } } });
   await web.listen(); const origin = web.resolvedUrls.local[0].replace(/\/$/, ''); process.env.PUBLIC_ORIGIN = origin;
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ locale: 'zh-CN' });

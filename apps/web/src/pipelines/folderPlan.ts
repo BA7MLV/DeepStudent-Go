@@ -49,6 +49,16 @@ export async function applyFolderPlan(plan: FolderPlan): Promise<AppliedPlanResu
 }
 
 async function applyApprovedFolderPlan(plan: FolderPlan): Promise<AppliedPlanResult> {
+  const { cloud } = await import('../cloud/state');
+  if (cloud.enabled) {
+    const operation = { kind: 'organizeCourses' as const, folders: plan.folders };
+    const result = cloud.worker
+      ? await (await import('../cloud/executor-runtime')).executeTaskResource(operation)
+      : await (await import('../client/resources')).resourceCommand(operation);
+    await (await import('../cloud/sync')).flushCloud();
+    useLibraryRevision.getState().bump();
+    return result as unknown as AppliedPlanResult;
+  }
   const result: AppliedPlanResult = { createdFolders: [], moved: 0, missing: [], perFolder: [] };
 
   await db.transaction('rw', [db.folders, db.videos], async () => {

@@ -2,7 +2,7 @@ import { INSTALLED_LEARNING_PLUGINS } from '@wangke/contracts/learning-plugins';
 import { parsePluginLayout, resolvePluginDependencies, type PluginPackage, type PluginLayout } from '@wangke/contracts/plugins';
 import type { SystemDocument } from '@wangke/contracts/system';
 import { cloud } from '../cloud/state';
-import { request } from '../api/serverClient';
+import { readRendererPluginCatalog } from '../client/plugin-renderer-commands';
 
 const LOCAL = 'wangke:local-plugin-layout:v2';
 export function localPluginLayout(): SystemDocument {
@@ -30,7 +30,7 @@ export async function assertPluginAvailable(id: string) {
     if (!cloud.acceptedPlugins.includes(id)) throw new Error('plugin_unavailable');
     return;
   }
-  const packages = cloud.enabled ? (await request<{ plugins: PluginPackage[] }>('/plugins')).plugins : localPluginPackages(JSON.parse(localPluginLayout().content));
+  const packages = cloud.enabled ? (await readRendererPluginCatalog()).plugins : localPluginPackages(JSON.parse(localPluginLayout().content));
   if (!packages.some(p => p.id === id && !p.error && p.manifest?.enabled)) throw new Error('plugin_unavailable');
 }
 export async function isPluginAvailable(id: string) { try { await assertPluginAvailable(id); return true; } catch { return false; } }

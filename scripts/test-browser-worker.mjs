@@ -7,6 +7,7 @@ import { buildServer } from '../apps/api/src/server.ts';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { workerTokens, workerIdentity } from '../apps/api/src/cloud/workerAuth.js';
 import { CloudTaskRunner } from '../apps/api/src/cloud/tasks.ts';
+import { createExecutorRuntime } from '@wangke/client-core';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-browser-worker-'));
 const dbPath = path.join(dir, 'db.sqlite');
@@ -25,7 +26,7 @@ try {
   const taskId = crypto.randomUUID();
   store.db.prepare('INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,executor,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
     .run(taskId, owner, taskId, 'transcribe', 'course:one', JSON.stringify({ videoId: 'one' }), 'queued', 'browser', now, now);
-  await app.ready();
+   const origin = await app.listen({host:'127.0.0.1',port:0});
   runner.start('http://127.0.0.1:1');
   const auth = { cookie: `wangke_session=${encodeURIComponent(token)}` };
   const claim = await app.inject({ method: 'POST', url: '/api/v1/cloud/worker/claim', headers: auth });
@@ -36,6 +37,23 @@ try {
   assert.ok(workerTokens.has(claimed.token));
   assert.ok(workerIdentity({ headers: { authorization: `Bearer ${claimed.token}` } }));
   assert.equal(workerIdentity({ headers: { authorization: 'Bearer wrong' } }), undefined);
+  const unrelatedWrite = await app.inject({ method: 'POST', url: '/api/v1/cloud/records',
+    headers: { authorization: `Bearer ${claimed.token}` }, payload: { mutations: [{ id: crypto.randomUUID(),
+      table: 'studyDays', key: '2026-11-03', before: null, after: { date: '2026-11-03', seconds: 60, updatedAt: Date.now() } }] } });
+  assert.equal(unrelatedWrite.statusCode, 403, 'isolating browser queues must not widen executor authority');
+  assert.equal(unrelatedWrite.json().error, 'worker_mutation_denied:studyDays:missing_permit');
+  const executorAuth = { authorization: `Bearer ${claimed.token}` };
+  const scopedPayload = { mutations: [{ id: crypto.randomUUID(), table: 'studyDays', key: '2026-11-03', before: null, after: { date: '2026-11-03', seconds: 60 } }] };
+  const scopedUnrelatedWrite = await app.inject({ method: 'POST', url: `/api/v1/cloud/tasks/${taskId}/records`, headers: executorAuth, payload: scopedPayload });
+  assert.equal(scopedUnrelatedWrite.statusCode, 403);
+  assert.equal(scopedUnrelatedWrite.json().error, 'worker_mutation_denied:studyDays:missing_permit');
+  const wrongTaskWrite = await app.inject({ method: 'POST', url: '/api/v1/cloud/tasks/another-task/records', headers: executorAuth, payload: scopedPayload });
+  assert.equal(wrongTaskWrite.statusCode, 403);
+  assert.equal(wrongTaskWrite.json().error, 'worker_scope_denied');
+  const permittedRow = { id: 'segment-one', videoId: 'one', text: 'task scoped output' };
+  const taskWrite = await app.inject({ method: 'POST', url: `/api/v1/cloud/tasks/${taskId}/records`, headers: executorAuth,
+    payload: { mutations: [{ id: crypto.randomUUID(), table: 'segments', key: permittedRow.id, before: null, after: permittedRow }] } });
+  assert.equal(taskWrite.statusCode, 200);
   const enqueue = (id, account, resource) => store.db.prepare('INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,executor,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
     .run(id, account, id, 'cover', resource, JSON.stringify({ videoId: resource.slice(7) }), 'queued', 'browser', now, now);
   enqueue('same-course', owner, 'course:one');
@@ -54,8 +72,9 @@ try {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.equal(store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(taskId).status, 'queued', 'expired lease is recovered without a server restart');
-  const stale = await app.inject({ method: 'POST', url: `/api/v1/cloud/tasks/${taskId}/report`, headers: { authorization: `Bearer ${claimed.token}` }, payload: { progress: {} } });
-  assert.ok([403, 409].includes(stale.statusCode), 'old host cannot renew a recovered lease');
+   const stale = await createExecutorRuntime(taskId,{interactions:'answer',transport:{fetch:(url,init)=>fetch(new URL(url,origin),{...init,headers:{...init?.headers,authorization:`Bearer ${claimed.token}`}})}});
+   try { await assert.rejects(stale.report({}),error=>error.detail?.code==='worker_lease_expired','old host cannot renew a recovered lease'); }
+   finally { await stale.dispose(); }
   const reclaimed = await app.inject({ method: 'POST', url: '/api/v1/cloud/worker/claim', headers: auth });
   assert.equal(reclaimed.statusCode, 200);
   assert.equal(reclaimed.json().task.id, taskId);

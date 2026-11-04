@@ -7,7 +7,7 @@
 ```
 apps/
 ├── apple/WangkeKit/          # iOS 与 macOS 共用的 Swift 包
-│   ├── Sources/WangkeKit/    # 纯 Foundation：API 客户端、数据模型、事件流解析、消息分组、钥匙串
+│   ├── Sources/WangkeKit/    # Foundation：共享 Remote mux、Bot journal/model、账户 API、消息分组、钥匙串
 │   ├── Sources/WangkeUI/     # SwiftUI：登录页、线程列表、iMessage 式对话、输入栏
 │   └── Tests/                # 单元测试 + 对真实后端的联调测试
 └── ios/
@@ -33,13 +33,18 @@ open WangkeAgent.xcodeproj
 - 服务器地址：比如 `https://agent.example.com`，或者局域网里的 `http://192.168.1.10:3000`（只放行了局域网 http，公网必须 https）；
 - 访问密码：网页端初始化时设置的密码，无需填写账号。忘记密码可在网页登录页查看 Passkey 登录或服务器终端重设说明。
 
-后端需要包含「前后端分离」那个 PR 里的 `POST /api/v1/auth/token`。连到旧版本服务端时，登录页会提示先升级服务端。
+后端需要现有账户 password/session API、Bot snapshot/sync-state 和 `/api/remote.mux` 的正式 DSH `watchBot`。不兼容旧的仅 SSE 服务端，也没有静默降级。
 
 ## 鉴权
 
-- 登录调 `POST /api/v1/auth/token`，拿到的 Bearer token 连同服务器地址一起存进钥匙串（`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`，不随 iCloud 同步）。
-- 之后每个请求带 `Authorization: Bearer`，不用 Cookie，也不需要后端开 CORS。
-- 退出登录会调 `POST /api/v1/auth/logout` 吊销 token；任何请求返回 401 时 App 清掉本地凭据回到登录页。
+- 新登录调 `POST /api/v1/auth/password/login`，将真实 `wangke_session` HttpOnly Cookie 值连同服务器地址保存到原钥匙串（`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`，不随 iCloud 同步）。原生可读取 Set-Cookie；不会将凭据放入 URL、日志或 UserDefaults。
+- HTTP 与 WebSocket upgrade 使用同一个账户 session；每个 APIClient 的 URLSession 隔离，不借用全局浏览器 Cookie。重启从钥匙串恢复显式 Cookie，不依赖进程 Cookie jar。
+- 退出通过原 `POST /api/v1/auth/logout` 撤销 session；Host 自动关闭过期流后，客户端通过实际 `/auth/session` 判断失效并终止重连。关闭页面只取消逻辑观察，不调用 Bot stop。
+- 旧钥匙串的 Bearer 格式仍可解码。当前 Host 若仍把所有 Bearer 当 Worker，旧凭据会被明确拒绝并要求重新登录（生成账户 Cookie），不会 fallback SSE 或伪造 executor token。最小 Host 兼容请求见 `docs/client-runtime/native-migration.md`。
+
+## Bot 连接
+
+同一账户/APIClient 的多个逻辑 `watchBot` 共享一个 DSH WebSocket。先读取事务 snapshot 的消息与 eventCursor，再从该 cursor 打开 journal，重放 snapshot/open 竞态中的提交。仅在应用事件后推进 cursor；保留缺口通过 Host 的 `resync.required` 显式重建，不假设跨线程全局 event_id 连续。断线退避重连，无健康连接业务轮询、SSE 或轮询 fallback。初始 50 条，显式“更早的消息”分页，不再调用无界线程详情作为订阅基线。
 
 ## 界面
 
@@ -58,14 +63,23 @@ open WangkeAgent.xcodeproj
 
 ```bash
 cd apps/apple/WangkeKit
-swift test                                   # 单元测试（分组、解码、SSE 解析、请求构造）
+swift build                                  # 包含 macOS WangkeUI 的真实编译
+swift test                                   # 有 XCTest SDK 时跑分组/解码/journal/请求测试
 
-# 对真实后端联调：登录 → 建线程 → 发消息 → 事件流收到 → 退出后 token 失效
+# 可选账户 smoke：不发消息、不触发模型/IM；只对明确授权的服务运行
 WANGKE_E2E_URL=http://127.0.0.1:3000 WANGKE_E2E_PASSWORD='管理员密码' swift test --filter LiveServerTests
 ```
 
+没有 XCTest/模拟器时，仍可执行原生专项（从仓库根目录）：
+
+```bash
+node --import tsx apps/apple/WangkeKit/Integration/native-server.mjs
+```
+
+它启动独立临时 SQLite/Fastify/DSH Host（loopback 随机端口），消费正式生成 codec 夹具，并编译运行 Swift executable。真实验证 Cookie、Remote unary、共享 WS、回放、snapshot/open 竞态、缺口重建、慢消费者、取消、重连、自动过期与实际 AppModel 的晚响应代际隔离。事件由不含 runner 的 BotApplicationService 写入，不调用真实模型/IM。证据与当前边界见 `docs/client-runtime/native-migration.md`。
+
 ## 现状说明
 
-- `WangkeKit`（网络、模型、鉴权、分组）在 Linux 上用 Swift 6.0.3 编译通过，8 个单元测试和对本地后端的联调测试都通过。
-- `WangkeUI` 和 App 入口依赖 SwiftUI，只能在 Apple 平台编译，**还没有在 Xcode 里编译和运行过**。首次打开可能需要修一些小的编译问题。
+- 本轮 macOS Swift 6.1.2 已实际编译 WangkeKit/WangkeUI 与 executable harness，修复跨模块初始化器可见性；旧 Linux 测试记录不当作新协议的通过证据。
+- 当前命令行工具链没有 XCTest 模块；`swift test` 的实际失败已记录，替代 executable harness 并非宣称 XCTest 通过。未运行 iOS 模拟器、签名安装或真机网络/后台恢复。
 - 附件上传、Passkey 登录、扫码配对还没做，按需求只实现了登录和渲染。

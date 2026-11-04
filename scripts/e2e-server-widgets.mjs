@@ -7,6 +7,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from 'playwright';
+import { seedFixtureRecords } from './fixture-domain.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-server-widget-e2e-'));
 const shots = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'opencode', 'server-widgets', process.env.BROWSER || 'chrome');
@@ -82,21 +83,21 @@ try {
   const { preview } = await import('vite');
   const root = fileURLToPath(new URL('../apps/web/', import.meta.url));
   vite = await preview({ root, configFile: path.join(root, 'vite.config.ts'),
-    preview: { host: '127.0.0.1', port, strictPort: true, proxy: { '/api/v1': { target: process.env.WANGKE_API_PROXY, changeOrigin: false } } }, logLevel: 'warn' });
+    preview: { host: '127.0.0.1', port, strictPort: true, proxy: { '/api': { target: process.env.WANGKE_API_PROXY, changeOrigin: false, ws: true } } }, logLevel: 'warn' });
   browser = await (process.env.BROWSER === 'webkit' ? webkit : chromium).launch(process.env.BROWSER === 'webkit' ? {} : { channel: 'chrome' });
   // Playwright's serviceWorkers:'block' injects a navigator.serviceWorker probe
   // into sandboxed srcdoc frames and itself raises a SecurityError there.
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'zh-CN' });
   const login = await context.request.post(`${origin}/api/v1/auth/password/login`, { data: { password } });
   assert.equal(login.status(), 200);
+  const fixtureOwner = (await login.json()).user.id;
   const config = await (await context.request.get(`${origin}/api/v1/cloud/config`)).json();
   const configured = await context.request.put(`${origin}/api/v1/cloud/config`, { data: { ...config, providers: [
     { id: 'test', name: 'Test', protocol: 'openai-chat', apiKey: 'test-only', baseUrl: 'https://test.example/v1', serves: ['chat'] },
   ], llmModel: { providerId: 'test', model: 'test-model' } } });
   assert.equal(configured.status(), 200);
   const mutate = async (table, key, after) => {
-    const result = await context.request.post(`${origin}/api/v1/cloud/records`, { data: { mutations: [{ id: crypto.randomUUID(), table, key, before: null, after }] } });
-    assert.equal(result.status(), 200);
+    await seedFixtureRecords(directory, fixtureOwner, [{ id: crypto.randomUUID(), table, key, before: null, after }]);
   };
   const page = await context.newPage();
   await page.addInitScript(() => {

@@ -10,6 +10,7 @@ import { BotApplicationService } from '../apps/api/src/agent/service.ts';
 import { BotRunner } from '../apps/api/src/agent/runner.ts';
 import { StudyTools } from '../apps/api/src/agent/study.ts';
 import { BudgetBlocked, DEFAULT_BOT_BUDGET } from '../apps/api/src/agent/budget.ts';
+import { BotMessageHistory } from '../apps/api/src/agent/message-history.ts';
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 async function until(fn) { for (let i = 0; i < 500; i++) { if (fn()) return; await new Promise(r => setTimeout(r, 5)); } throw new Error('Bot parallel timeout'); }
@@ -57,8 +58,13 @@ test('Bot overlaps four reads, commits reverse completions by ID, isolates read 
     return done();
   });
   await until(() => started.length === 4);
+  const history = new BotMessageHistory(store);
+  assert.equal(history.snapshot(state().thread_id).activity.activeTools, 4);
+  assert.deepEqual(history.snapshot(state().thread_id).activity.tools.map(tool => tool.name), Array(4).fill('probe_read'));
   gates[3].resolve(); await until(() => ended.includes(3));
   await until(() => JSON.parse(state().context_json).some(m => m.role === 'tool'));
+  assert.equal(history.state(state().thread_id).activity.activeTools, 3);
+  assert.equal(history.state(state().thread_id).activity.completedTools, 1);
   assert.equal(started.length, 4);
   for (let i = 0; i < 3; i++) gates[i].resolve();
   await until(() => started.length === 6);
@@ -66,6 +72,7 @@ test('Bot overlaps four reads, commits reverse completions by ID, isolates read 
   gates[4].resolve(); gates[5].resolve();
   await until(() => started.includes(6)); gates[6].resolve();
   await until(() => state().status === 'completed'); await close();
+  assert.equal(history.snapshot(state().thread_id).activity, null);
   assert.equal(peak, 4); assert.equal(state().step_count, calls.length); assert.equal(requests, 2);
   assert.deepEqual(modelResults.map(r => r.tool_call_id), calls.map((_, i) => `provider-${i}`));
   assert.equal(JSON.parse(modelResults[1].content).error.code, 'tool_failed');

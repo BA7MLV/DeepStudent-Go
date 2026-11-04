@@ -9,7 +9,7 @@ import { TextSwap } from './motion';
 import ModelPicker from './ModelPicker';
 import PersistentError from './PersistentError';
 import { formatCaughtError } from '../utils/errorText';
-import { LoadingButton, Panel, PanelBar, PanelBody, PanelProgress, PanelPlaceholder, CueRow, CueSkeleton, SkeletonReveal, useSkeletonGate, Sym, toast, alertDialog } from '../ui';
+import { LoadingButton, Panel, PanelBar, PanelBody, PanelProgress, PanelPlaceholder, CueRow, CueSkeleton, SkeletonReveal, useSkeletonGate, Sym, toast } from '../ui';
 import './subtitle-danmaku.css';
 
 interface Props {
@@ -58,9 +58,7 @@ export default function DanmakuPanel({ videoId, playerRef, hasSubtitles }: Props
       const count = await runDanmaku(videoId, setProgress);
       toast.success(count > 0 ? `弹幕生成完成，共 ${count} 条思考题` : '生成完成：这段课程没有挖出合适的思考题');
     } catch (e) {
-      const errText = formatCaughtError(e);
-      setErrorText(errText);
-      void alertDialog({ headline: '弹幕生成失败', description: errText, copyText: errText });
+      setErrorText(formatCaughtError(e));
     } finally {
       setProgress(null);
       await reload();

@@ -76,14 +76,13 @@ try {
   const duplicate = await app.inject({ method: 'POST', url: `/api/v1/threads/${thread.id}/messages`, headers: { cookie }, payload: messagePayload });
   assert.equal(duplicate.statusCode, 200);
   assert.equal(duplicate.json().deduplicated, true);
-  const events = await app.inject({ method: 'GET', url: `/api/v1/threads/${thread.id}/events?after=0`, headers: { cookie } });
-  assert.equal(events.statusCode, 200);
-  assert.match(events.body, /message\.accepted/);
-  assert.match(events.body, /"message":\{"id":/);
-  const eventsFromHeader = await app.inject({ method: 'GET', url: `/api/v1/threads/${thread.id}/events`, headers: { cookie, 'last-event-id': '0' } });
-  assert.match(eventsFromHeader.body, /id: 1\n/);
-  const invalidCursor = await app.inject({ method: 'GET', url: `/api/v1/threads/${thread.id}/events`, headers: { cookie, 'last-event-id': 'nope' } });
-  assert.equal(invalidCursor.statusCode, 400);
+  const snapshot = await app.inject({ method: 'GET', url: `/api/v1/threads/${thread.id}/snapshot`, headers: { cookie } });
+  assert.equal(snapshot.statusCode, 200);
+  assert.equal(snapshot.json().messages[0].id, message.json().id);
+  assert.equal(snapshot.json().eventCursor, 1);
+  // Durable replay/cursor validation is exercised over generated watchBot in
+  // test-bot-sync; removed transports must actually be absent, not deprecated.
+  for (const suffix of ['events', 'stream']) assert.equal((await app.inject({ method: 'GET', url: `/api/v1/threads/${thread.id}/${suffix}`, headers: { cookie } })).statusCode, 404);
   const missingThread = await app.inject({ method: 'GET', url: `/api/v1/threads/${crypto.randomUUID()}`, headers: { cookie } });
   assert.equal(missingThread.statusCode, 404);
   const run = await app.inject({ method: 'POST', url: '/api/v1/runs', headers: { cookie }, payload: { threadId: thread.id } });

@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createExecutorRuntime } from '@wangke/client-core';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/server-drain-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
@@ -10,7 +11,7 @@ const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');
 const { workerTokens, workerTokenHash } = await import('../apps/api/src/cloud/workerAuth.ts');
 const app = buildServer();
-let store;
+let store, executor;
 try {
   const origin = await app.listen({ host: '127.0.0.1', port: 0 });
   const secret = fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim();
@@ -21,8 +22,9 @@ try {
   const owner = store.db.prepare('SELECT id FROM users').get().id;
   const task = crypto.randomUUID(), token = crypto.randomUUID(), at = new Date().toISOString();
   workerTokens.set(token, { id: owner, taskId: task, expiresAt: Date.now() + 60000 });
-  store.db.prepare('INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at,worker_id) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .run(task, owner, task, 'modelOnce', task, '{}', 'running', at, at, workerTokenHash(token));
+   store.db.prepare('INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at,worker_id,lease_expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+     .run(task, owner, task, 'modelOnce', task, '{}', 'running', at, at, workerTokenHash(token), new Date(Date.now()+60000).toISOString());
+   executor = await createExecutorRuntime(task, { interactions:'answer', transport: { fetch:(url,init)=>fetch(new URL(url,origin), {...init,headers:{...init?.headers,authorization:`Bearer ${token}`}}) } });
   assert.equal((await fetch(`${origin}/api/v1/ready`)).status, 200);
   await assert.rejects(() => app.drainForRelease(-1), /invalid_drain_deadline/);
   const drain = app.drainForRelease(1000);
@@ -35,8 +37,9 @@ try {
     assert.equal((await result.json()).error, 'api_draining');
   }
   // A live, task-scoped worker keeps the existing authorization/lease checks.
-  const report = await fetch(`${origin}/api/v1/cloud/tasks/${task}/report`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ progress: { content: 'finishing' } }) });
-  assert.equal(report.status, 200, await report.text());
+   const report = await executor.report({ content: 'finishing' });
+   assert.ok(Date.parse(report.leaseExpiresAt)>Date.now());
+   assert.equal(JSON.parse(store.db.prepare('SELECT progress FROM cloud_tasks WHERE id=?').get(task).progress).content,'finishing');
   const denied = await fetch(`${origin}/api/v1/threads`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}' });
   assert.equal(denied.status, 403, 'drain exemption does not expand worker scope');
   assert.equal(await drain, true);
@@ -44,5 +47,5 @@ try {
   workerTokens.delete(token);
   console.log('Server drain: readiness, external write/claim rejection, scoped loopback reports and idempotent close passed (not a consistent snapshot)');
 } finally {
-  await app.close(); store?.close(); fs.rmSync(directory, { recursive: true, force: true });
+   await executor?.dispose(); await app.close(); store?.close(); fs.rmSync(directory, { recursive: true, force: true });
 }

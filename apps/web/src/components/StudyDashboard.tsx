@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { Button, ToggleButton, ToggleButtonGroup } from '@heroui/react';
-import { Banner, SectionCard, Sym, useSkeletonGate } from '../ui';
+import { Banner, Hint, SectionCard, Sym, useSkeletonGate } from '../ui';
 import { loadStudyDays, useStudyTime } from '../store/studyTime';
 import { useSettings } from '../store/settings';
 import { NumberPop, useSlidingTabs } from './motion';
@@ -52,6 +52,11 @@ export function StudyDashboard() {
   const [tip, setTip] = useState<{ cell: HeatCell; x: number; y: number } | null>(null);
   /** 提示气泡是否已进入。挂载帧 false、下一帧 true，给 .t-tt 一个可插值的起点。 */
   const [tipShown, setTipShown] = useState(false);
+  /**
+   * 热力图的「漫游焦点」日期。371 个格子全部进 Tab 顺序会让键盘用户按到崩溃，
+   * 所以整张图只留一个 tabIndex=0，方向键在格子之间移动。
+   */
+  const [activeDate, setActiveDate] = useState(() => dateKey(Date.now()));
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const pending = useStudyTime((s) => s.pending);
@@ -147,6 +152,11 @@ export function StudyDashboard() {
     const cellRect = cellEl.getBoundingClientRect();
     const wrapRect = wrap.getBoundingClientRect();
     const center = cellRect.left - wrapRect.left + wrap.scrollLeft + cellRect.width / 2;
+    // 提示条按格子锚定，但夹在「当前可见的那一段」里：横向滚动后，
+    // 贴着视口左右边缘的格子也不会把提示条顶出屏幕（最多只留得下半个气泡）。
+    const half = 84;
+    const viewLeft = wrap.scrollLeft + half;
+    const viewRight = wrap.scrollLeft + wrap.clientWidth - half;
     setTip({
       cell: {
         date,
@@ -154,9 +164,50 @@ export function StudyDashboard() {
         level: Number(cellEl.dataset.level ?? 0) as HeatCell['level'],
         future: false,
       },
-      x: Math.min(Math.max(center, 72), Math.max(72, wrap.scrollWidth - 72)),
+      x: Math.min(Math.max(center, viewLeft), Math.max(viewLeft, viewRight)),
       y: cellRect.top - wrapRect.top + wrap.scrollTop - 6,
     });
+  };
+
+  /** 键盘：方向键在日期网格里移动一天 / 一周，Escape 收起提示。 */
+  const onHeatKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const wrap = scrollRef.current;
+    const cellEl = (e.target as HTMLElement | null)?.closest?.('[data-date]') as HTMLElement | null;
+    if (!wrap || !cellEl) return;
+    if (e.key === 'Escape') {
+      setTip(null);
+      return;
+    }
+    const delta =
+      e.key === 'ArrowLeft' ? -7
+      : e.key === 'ArrowRight' ? 7
+      : e.key === 'ArrowUp' ? -1
+      : e.key === 'ArrowDown' ? 1
+      : 0;
+    if (!delta) return;
+    e.preventDefault();
+    const date = shiftDays(cellEl.dataset.date ?? '', delta);
+    const next = wrap.querySelector<HTMLElement>(`[data-date="${date}"]`);
+    if (!next || next.dataset.future === '1') return;
+    next.focus();
+  };
+
+  /** 焦点落在格子上（Tab / 方向键）时显示同一份读数。 */
+  const onHeatFocus = (e: ReactFocusEvent<HTMLDivElement>) => {
+    const cellEl = (e.target as HTMLElement | null)?.closest?.('[data-date]') as HTMLElement | null;
+    if (!cellEl) return;
+    setActiveDate(cellEl.dataset.date ?? '');
+    showTip(cellEl);
+  };
+
+  const onHeatBlur = (e: ReactFocusEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setTip(null);
+  };
+
+  const onHeatLeave = () => {
+    // 键盘焦点还在格子上时不要因为鼠标移开就把读数收掉。
+    const focused = document.activeElement?.closest?.('[data-date]');
+    if (!focused) setTip(null);
   };
 
   /** 数据到齐了才允许把数字写进界面 —— 没到齐时显示的每一个数字都可能是错的 */
@@ -303,8 +354,11 @@ export function StudyDashboard() {
           aria-label="学习热力图，可横向滚动查看较早的记录"
           tabIndex={0}
           onMouseOver={(e) => showTip(e.target)}
-          onMouseLeave={() => setTip(null)}
+          onMouseLeave={onHeatLeave}
           onClick={(e) => showTip(e.target)}
+          onKeyDown={onHeatKeyDown}
+          onFocus={onHeatFocus}
+          onBlur={onHeatBlur}
         >
           <div className="heat-inner">
             <div className="heat-months">
@@ -345,6 +399,7 @@ export function StudyDashboard() {
                         role={cell.future ? undefined : 'img'}
                         aria-hidden={cell.future ? true : undefined}
                         aria-label={`${cell.date} ${cell.seconds > 0 ? formatStudyDuration(cell.seconds) : '无记录'}`}
+                        tabIndex={cell.future ? undefined : cell.date === activeDate ? 0 : -1}
                       />
                     ))}
                   </div>
@@ -400,10 +455,10 @@ export function StudyDashboard() {
         <div className="study-recent" data-testid="study-recent">
           {recentRows(live, today).map((r) => (
             <div className="study-recent__row" key={r.date} data-testid="study-recent-row">
-              {/* 明细列窄，用不带年份的短标签；完整日期挂 title，鼠标停一下就能看全 */}
-              <span className="study-recent__date" title={formatDayLabel(r.date)}>
+              {/* 明细列窄，用不带年份的短标签；完整日期放进提示，聚焦或点一下都能看全 */}
+              <Hint className="study-recent__date" content={formatDayLabel(r.date)}>
                 {relativeDayLabel(r.date, today)}
-              </span>
+              </Hint>
               <span className="study-recent__bar">
                 <span
                   className="study-recent__fill"

@@ -5,6 +5,7 @@ import { liveQuery } from 'dexie';
 import { Button } from '@heroui/react';
 import { db, type VideoRow } from '../store/db';
 import { cloud } from '../cloud/state';
+import { followDocument } from '../client/resources';
 import { getMaterialFile } from '../store/fileStore';
 import { useSettings } from '../store/settings';
 import { AGENT_INSTRUCTIONS_FILE_ID, getSystemMaterialFile, systemMaterialPath, loadSystemMaterialFile, useSystemDocuments } from '../materials/systemFiles';
@@ -106,6 +107,13 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
   // original snapshot before saving, rather than overwriting concurrent answers.
   useEffect(() => {
     if (format !== 'md') return;
+    if (cloud.enabled && !cloud.worker) {
+      const path = systemMaterialPath(materialId);
+      return followDocument(path ? { kind: 'systemDocument', path } : { kind: 'courseDocument', courseId: materialId }, document => {
+        const content = document.content ?? document.text;
+        if (content !== undefined) setBlob(new Blob([content], { type: 'text/markdown' }));
+      }, error => toast.error(`资料更新失败：${formatCaughtError(error)}`));
+    }
     if (materialId === AGENT_INSTRUCTIONS_FILE_ID) {
       const refresh = () => setBlob(getSystemMaterialFile(materialId)!);
       refresh();
@@ -122,34 +130,21 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
       });
       window.addEventListener('focus', refresh);
       window.addEventListener('system-files-changed', refresh);
-      const timer = setInterval(refresh, 5000);
-      return () => { active = false; clearInterval(timer); unsubscribe(); window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
+      return () => { active = false; unsubscribe(); window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
     }
     const subscription = liveQuery(() => db.files.get(materialId)).subscribe({
       next: (row) => { if (row) setBlob(row.blob); },
       error: (error) => toast.error(`资料更新失败：${formatCaughtError(error)}`),
     });
-    let active = true, snapshot: string | undefined;
-    const refresh = async () => {
-      if (!cloud.enabled || document.hidden) return;
-      const reference = await db.table('courseFiles').get(materialId);
-      if (!reference?.resourceProjectId) return;
-      const file = await getMaterialFile(materialId);
-      if (!file) return;
-      const text = await file.text();
-      if (active && text !== snapshot) { snapshot = text; setBlob(file); }
-    };
-    const update = () => { void refresh().catch(error => { if (active) toast.error(`资料更新失败：${formatCaughtError(error)}`); }); };
-    const timer = setInterval(update, 5000);
-    window.addEventListener('focus', update);
-    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', update); subscription.unsubscribe(); };
+    return () => subscription.unsubscribe();
   }, [materialId, format]);
 
   /** 断点续读：阅读位置写回 videos.lastUnit（与视频的 lastPosition 对称） */
   const onUnitChange = useCallback(
     (unit: number) => {
       if (systemMaterialPath(materialId)) return;
-      void db.videos.update(materialId, { lastUnit: unit });
+      void import('../client/resources').then(({ recordReadingPosition }) => recordReadingPosition(materialId, unit))
+        .catch(error => toast.error(`阅读位置保存失败：${formatCaughtError(error)}`));
     },
     [materialId],
   );
@@ -157,7 +152,9 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
   /** HTML 的阅读视图（原样 / 分段）写回 videos.htmlView —— 非索引字段，与 lastUnit 同一惯例 */
   const onHtmlViewChange = useCallback(
     (htmlView: HtmlView) => {
-      void db.videos.update(materialId, { htmlView });
+      if (systemMaterialPath(materialId)) return;
+      void import('../client/resources').then(({ setReadingView }) => setReadingView(materialId, htmlView))
+        .catch(error => toast.error(`阅读视图保存失败：${formatCaughtError(error)}`));
     },
     [materialId],
   );

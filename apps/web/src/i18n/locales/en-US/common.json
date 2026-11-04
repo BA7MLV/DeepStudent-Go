@@ -240,10 +240,21 @@
     "history": "Conversations",
     "open": "Bot",
     "activity": {
-      "scanning": "Rummaging through the toolbox…",
-      "connecting": "Connecting the clues…",
-      "checking": "Checking the important details…",
-      "composing": "Shaping it into an answer…"
+      "waiting": "Waiting for a response…",
+      "queued": "Task queued…",
+      "running": "Task running…",
+      "model": "Requesting the model…",
+      "tools": "Calling {{tools}}…",
+      "parallel": "{{count}} calls in parallel: {{tools}}…",
+      "waiting_user": "Waiting for your answer or approval",
+      "waiting_event": "Waiting for background tasks",
+      "returned": "Returned: {{count}}",
+      "idle": {
+        "star": "A little star takes a twirl ✦",
+        "pillow": "Hugging a tiny pillow while we wait…",
+        "paws": "Wiggling little paws…",
+        "cloud": "Sitting on a fluffy cloud for a moment…"
+      }
     }
   },
   "chat": {

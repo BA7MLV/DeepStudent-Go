@@ -6,17 +6,30 @@
     "apps/api",
     "apps/web",
     "packages/contracts",
-    "packages/study-core"
+    "packages/study-core",
+    "packages/remote-artifacts",
+    "packages/client-core",
+    "packages/remote-host"
   ],
   "license": "GPL-2.0-only",
   "type": "module",
   "packageManager": "npm@11.16.0",
   "scripts": {
+    "generate:remote": "node scripts/generate-remote.mjs",
+    "check:remote": "node scripts/generate-remote.mjs --check",
+    "test:client-runtime": "npm run build -w @wangke/contracts && npm run build -w @wangke/remote-host && tsx --test scripts/test-runtime-projection.mjs && tsx scripts/test-client-runtime.mjs",
+    "test:client-runtime:products": "tsx scripts/test-learning-products.mjs && tsx scripts/test-executor-runtime.mjs && tsx scripts/test-executor-interactions.mjs",
+    "test:client-runtime:executor-chat:e2e": "tsx scripts/e2e-executor-chat.mjs",
+    "test:client-runtime:resource-faults:e2e": "tsx scripts/e2e-wrongbook-domain.mjs",
+    "test:client-runtime:e2e": "npm run build -w @wangke/contracts && npm run build -w @wangke/remote-host && tsx scripts/e2e-client-runtime.mjs",
+    "test:client-runtime:tasks:e2e": "npm run build -w @wangke/contracts && npm run build -w @wangke/remote-host && tsx scripts/e2e-cloud-task-observer.mjs",
+    "test:client-runtime:activity:e2e": "npm run build -w @wangke/contracts && npm run build -w @wangke/remote-host && tsx scripts/e2e-cloud-activity.mjs",
+    "test:client-runtime:sync-locks:e2e": "npm run build -w @wangke/contracts && npm run build -w @wangke/remote-host && tsx scripts/e2e-cloud-sync-locks.mjs",
     "predev": "turbo run build --filter=@wangke/contracts --filter=@wangke/study-core",
     "dev": "npm run dev -w @wangke/web",
-    "build": "npm run check:boundaries && turbo run build",
-    "build:web": "npm run check:boundaries && turbo run build --filter=@wangke/web",
-    "build:api": "npm run check:boundaries && turbo run build --filter=@wangke/api",
+    "build": "npm run check:boundaries && turbo run build && node scripts/build-client-runtime-licenses.mjs apps/web/dist apps/api/dist",
+    "build:web": "npm run check:boundaries && turbo run build --filter=@wangke/web && node scripts/build-client-runtime-licenses.mjs apps/web/dist",
+    "build:api": "npm run check:boundaries && turbo run build --filter=@wangke/api && node scripts/build-client-runtime-licenses.mjs apps/api/dist",
     "generate:models": "node scripts/generate-models.mjs",
     "predev:api": "npm run build:api",
     "dev:api": "npm run dev -w @wangke/api",
@@ -74,6 +87,10 @@
     "test:plugins:learning": "npm run build:api && tsx scripts/test-plugin-learning.mjs",
     "test:plugins:materials": "npm run build:api && tsx scripts/test-plugin-material-actions.mjs",
     "test:plugins:e2e": "tsx scripts/e2e-plugin-platform.mjs",
+    "test:plugins:frame:e2e": "node scripts/e2e-plugin-frame-lifecycle.mjs",
+    "test:plugins:renderer:e2e": "node scripts/e2e-plugin-renderer.mjs",
+    "test:plugins:review-clock:e2e": "node scripts/e2e-plugin-review-clock.mjs",
+    "test:plugins:models:e2e": "npm run build -w @wangke/contracts && npm run build -w @wangke/remote-host && tsx scripts/e2e-plugin-catalog-model.mjs",
     "test:plugins:projects": "tsx scripts/test-plugin-projects.mjs",
     "test:plugins:projects:e2e": "tsx scripts/e2e-plugin-projects.mjs",
     "test:plugins:extraction:e2e": "tsx scripts/e2e-plugin-extraction.mjs",
@@ -96,7 +113,7 @@
     "test:player": "tsx scripts/test-player-shortcuts.mjs && tsx --test scripts/test-preview-seeker.mjs",
     "test:player:e2e": "node scripts/e2e-player-enhance.mjs && node scripts/e2e-player-performance.mjs",
     "test:bot-ui": "tsx --test scripts/test-bot-messages.mjs scripts/test-bot-attachments.mjs",
-    "test:bot-sync": "tsx --test scripts/test-bot-sync.mjs",
+    "test:bot-sync": "tsx --test scripts/test-bot-history-model.mjs scripts/test-bot-sync.mjs",
     "test:bot-sync:e2e": "tsx scripts/e2e-bot-sync.mjs",
     "test:bot-composer:e2e": "tsx scripts/e2e-bot-composer.mjs",
     "test:bot:r3:e2e": "tsx scripts/e2e-bot-r3.mjs",
@@ -116,6 +133,7 @@
     "preview": "npm run preview -w @wangke/web"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-typert-generator": "0.2.2-alpha.2",
     "@types/node": "^20.19.43",
     "@typescript/typescript6": "^6.0.2",
     "esbuild": "^0.21.5",
@@ -125,6 +143,10 @@
     "turbo": "2.11.10",
     "typescript": "^7.0.2",
     "ws": "^8.22.0"
+  },
+  "overrides": {
+    "@deepseek-ai/dsh-client-connection": { "zod": "4.6.7" },
+    "@deepseek-ai/dsh-typert-registry": { "zod": "4.6.7" }
   },
   "allowScripts": {
     "esbuild@0.21.5": true,

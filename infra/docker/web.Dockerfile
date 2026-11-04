@@ -13,6 +13,8 @@ WORKDIR /app
 COPY --from=prune /repo/out/json/ ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY --from=prune /repo/out/full/ ./
+COPY scripts/build-client-runtime-licenses.mjs ./scripts/build-client-runtime-licenses.mjs
+COPY licenses/client-runtime ./licenses/client-runtime
 ARG VITE_API_BASE_URL=""
 ARG SOURCE_COMMIT=""
 ARG SOURCE_DATE_EPOCH=""

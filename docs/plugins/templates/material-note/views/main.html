@@ -14,7 +14,7 @@
 (() => {
   const note = document.getElementById('note'), save = document.getElementById('save'), status = document.getElementById('status');
   let context, sequence = 0, disposed = false, busy = false, dirty = false;
-  const same = (id, revision) => !disposed && context?.materialId === id && context?.revision === revision;
+  const same = (id, ticket) => !disposed && context?.materialId === id && sequence === ticket;
   async function load(next, refresh = false) {
     // Size/theme notifications are not resource switches and must not erase a draft.
     if (!refresh && context && context.materialId === next.materialId) { context = next; return; }
@@ -31,14 +31,14 @@
   note.oninput = () => { dirty = true; status.textContent = ''; };
   save.onclick = async () => {
     if (busy || !context?.materialId) return;
-    const id = context.materialId, revision = context.revision, text = note.value;
+    const id = context.materialId, ticket = sequence, text = note.value;
     busy = true; save.disabled = true; status.textContent = '正在保存…';
     try {
       const before = await plugin.state.read();
       // Always commit to captured A, never relabel A's text as B after a switch.
       await plugin.state.write({ ...before.data, notes: { ...before.data.notes, [id]: text } }, before);
-      if (same(id, revision)) { dirty = note.value !== text; status.textContent = '已保存'; }
-    } catch (e) { if (same(id, revision)) fail(e); }
+      if (same(id, ticket)) { dirty = note.value !== text; status.textContent = '已保存'; }
+    } catch (e) { if (same(id, ticket)) fail(e); }
     finally { busy = false; if (!disposed) save.disabled = !context?.materialId; }
   };
   const offContext = plugin.events.subscribe('contextChanged', next => { void load(next).catch(fail); });

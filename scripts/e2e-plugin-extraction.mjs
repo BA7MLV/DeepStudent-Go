@@ -28,10 +28,21 @@ const app = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: fixt
 let browser, web, store;
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
-   web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
+   web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port, strictPort: true, proxy: { '/api': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false, ws: true } } } });
   await web.listen(); browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ locale: 'zh-CN' });
   await context.route('https://models.dev/**', route => route.fulfill({ json: {} }));
+  let holdInteractive = false;
+  const workerMutations = [];
+  await context.route(/\/api\/(?:v1\/cloud\/records|clientRuntime\/(?:commitRecords|editLearning)|executorRuntime\/(?:commitArtifacts|resourceCommand))(?:\?|$)/, async route => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      const worker = request.headers().authorization?.startsWith('Bearer ');
+      if (worker) { const body = request.postDataJSON().payload.args.request; workerMutations.push(...(body.products ?? [body.operation])); }
+      else if (holdInteractive) return route.fulfill({ status: 503, json: { error: 'fixture_hold_interactive_outbox' } });
+    }
+    await route.continue();
+  });
   const post = (url, data, headers = {}) => context.request.post(`${origin}/api/v1${url}`, { headers: { origin, ...headers }, data });
   assert.equal((await post('/bootstrap/initialize', { adminPassword: 'plugins-ui-password-123' }, { 'x-bootstrap-secret': fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim() })).status(), 201);
   const owner = (await (await post('/auth/password/login', { password: 'plugins-ui-password-123' })).json()).user.id;
@@ -45,10 +56,19 @@ try {
   const configuration = new CloudConfiguration(store, path.join(directory, 'config'));
   configuration.save(owner, { ...configuration.get(owner), policy: { ...configuration.get(owner).policy, read: 'allow', write: 'allow' }, providers: [{ id: 'fixture', name: 'Fixture', protocol: 'openai-chat', apiKey: 'fixture', baseUrl: 'https://fixture.example/v1', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture-model' } });
   const page = await context.newPage(), requests = [];
-  page.on('request', request => { if (/\/cloud\/(records|tasks\/.*authorize)/.test(request.url()) && request.method() === 'POST') requests.push({ url: request.url(), body: request.postDataJSON(), permissions: store.db.prepare('SELECT id,capability,status FROM cloud_permissions').all() }); });
+  const workerPage = await context.newPage();
+  await workerPage.goto(`${origin}/?cloud-worker`);
+   page.on('request', request => { if (/\/cloud\/(records|tasks\/.*authorize)|\/(clientRuntime\/(commitRecords|editLearning)|executorRuntime\/(commitArtifacts|resourceCommand))/.test(request.url()) && request.method() === 'POST') requests.push({ url: request.url(), body: request.postDataJSON(), permissions: store.db.prepare('SELECT id,capability,status FROM cloud_permissions').all() }); });
   await page.goto(`${origin}/#/board`); await page.getByTestId('board-plugin-todo').waitFor({ timeout: 30000 });
   const instance = await page.evaluate(async id => (await (await import('/src/plugins/legacy-actions.ts')).materialPluginInstance('practice', id)).instance.id, id);
   await page.goto(`${origin}/#/plugins/${instance}`);
+  await page.getByRole('button', { name: '提取原题为题库', exact: true }).waitFor();
+  holdInteractive = true;
+  const pendingId = await page.evaluate(async () => {
+    const { db } = await import('/src/store/db.ts');
+    await db.studyDays.put({ date: '2026-01-01', seconds: 60, updatedAt: Date.now() });
+    return (await db.table('_cloudOutbox').toArray()).find(row => row.table === 'studyDays' && row.key === '2026-01-01').id;
+  });
   await page.getByRole('button', { name: '提取原题为题库', exact: true }).click();
   try { await page.getByText('题库现有 1 道原题', { exact: false }).waitFor({ timeout: 30000 }); }
   catch (error) {
@@ -59,13 +79,19 @@ try {
   const task = store.db.prepare("SELECT * FROM cloud_tasks WHERE kind='qa'").get();
   assert.equal(task.status, 'completed'); assert.equal(task.executor, 'browser');
   assert.ok(JSON.parse(task.progress).questionBankSaved);
-  const saved = records.get(owner, 'files', bankId), storage = store.db.prepare('SELECT storage_name FROM files WHERE id=?').get(saved.blob.$file);
-  const text = fs.readFileSync(path.join(directory, 'files', storage.storage_name), 'utf8');
+  const saved = store.db.prepare('SELECT project_id,path FROM resource_files WHERE owner_id=? AND course_id=?').get(owner, bankId);
+  const text = fs.readFileSync(path.join(directory, 'files/projects', saved.project_id, saved.path), 'utf8');
   assert.ok(text.includes('真实工具保存的部分提取。')); assert.ok(text.includes(question.stem));
+  assert.ok(workerMutations.length, 'real worker submitted its permitted task changes');
+  assert.ok(workerMutations.every(row => row.kind !== 'studyTime'), 'executor cannot drain the UI queue even during tool flush');
+  assert.ok(await page.evaluate(async pendingId => (await (await import('/src/store/db.ts')).db.table('_cloudOutbox').toArray()).some(row => row.id === pendingId), pendingId), 'UI edit stays pending until its own upload is allowed');
+  holdInteractive = false;
+  await page.evaluate(async () => (await import('/src/cloud/sync.ts')).flushCloud());
+  assert.equal(records.get(owner, 'studyDays', '2026-01-01').seconds, 60, 'retained edit eventually commits through the account client');
   const screenshots = process.env.SCREENSHOT_DIR ?? path.join(os.tmpdir(), 'opencode/plugin-platform-screenshots');
   fs.mkdirSync(screenshots, { recursive: true });
   await page.screenshot({ path: path.join(screenshots, 'learning-extraction-success.png') });
-  console.log('Real browser extraction passed: original QA read/edit, scoped write permission, Markdown preservation and durable artifact receipt.');
+  console.log('Real browser extraction passed: original QA read/edit, scoped write permission, Markdown preservation, durable artifact receipt and deterministic UI/executor outbox isolation.');
 } finally {
   await browser?.close(); await web?.close(); store?.close(); await app.close(); fs.rmSync(directory, { recursive: true, force: true });
 }

@@ -6,6 +6,7 @@ import FoundationNetworking
 public struct APIError: Error, LocalizedError, Equatable, Sendable {
     public let status: Int
     public let code: String
+    public init(status: Int, code: String) { self.status = status; self.code = code }
 
     public var errorDescription: String? {
         switch code {
@@ -18,22 +19,34 @@ public struct APIError: Error, LocalizedError, Equatable, Sendable {
     }
 }
 
-/// 所有数据都从后端拿。鉴权一律用 `Authorization: Bearer`，不碰 Cookie。
+/// All data comes from Host. Native UI uses the existing account Cookie session;
+/// legacy bearer clients remain explicit and are never converted to Worker auth.
 public final class APIClient: @unchecked Sendable {
     public let baseURL: URL
     private let session: URLSession
     private let lock = NSLock()
     private var _token: String?
+    private var _remote: RemoteConnection?
+    private var _sessionCookie: String?
+    public var sessionCookie: String? { lock.lock(); defer { lock.unlock() }; return _sessionCookie }
 
     public var token: String? {
         get { lock.lock(); defer { lock.unlock() }; return _token }
-        set { lock.lock(); _token = newValue; lock.unlock() }
+        set {
+            lock.lock()
+            let previous = _remote
+            _remote = nil
+            _token = newValue
+            lock.unlock()
+            if let previous { Task { await previous.close() } }
+        }
     }
 
-    public init(baseURL: URL, token: String? = nil, session: URLSession = .shared) {
+    public init(baseURL: URL, token: String? = nil, session: URLSession? = nil, sessionCookie: String? = nil) {
         self.baseURL = baseURL
         self._token = token
-        self.session = session
+        self.session = session ?? URLSession(configuration: .ephemeral)
+        self._sessionCookie = sessionCookie
     }
 
     // MARK: - 请求
@@ -46,6 +59,7 @@ public final class APIClient: @unchecked Sendable {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let sessionCookie { request.setValue("wangke_session=\(sessionCookie)", forHTTPHeaderField: "Cookie") }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(AnyEncodable(body))
@@ -88,9 +102,26 @@ public final class APIClient: @unchecked Sendable {
         return grant
     }
 
+    /// Existing account password/session endpoint, not a new native protocol.
+    /// Persist only the opaque HttpOnly session value in the existing Keychain.
+    public func loginSession(password: String) async throws -> WangkeUser {
+        let body: SessionLoginBody = try await send(makeRequest("/auth/password/login", method: "POST", body: ["password": password]))
+        let cookies = session.configuration.httpCookieStorage?.cookies(for: baseURL) ?? []
+        guard let cookie = cookies.first(where: { $0.name == "wangke_session" }), !cookie.value.isEmpty else {
+            throw APIError(status: 0, code: "session_cookie_missing")
+        }
+        setSessionCookie(cookie.value)
+        token = nil
+        return body.user
+    }
+
+    private func setSessionCookie(_ value: String?) { lock.lock(); _sessionCookie = value; lock.unlock() }
+
     public func logout() async {
+        await disconnectRemote()
         _ = try? await send(makeRequest("/auth/logout", method: "POST"), as: OkBody.self)
         token = nil
+        setSessionCookie(nil)
     }
 
     public func currentUser() async throws -> WangkeUser? {
@@ -133,15 +164,59 @@ public final class APIClient: @unchecked Sendable {
         _ = try await send(makeRequest("/messages/\(messageId.urlPathEscaped)/reactions", method: "POST", body: ["reaction": reaction]), as: ReactionBody.self)
     }
 
-    /// 事件流：服务端一次性回放 `after` 之后的事件然后关闭连接，调用方循环重连。
-    public func events(threadId: String, after: Int) async throws -> [ServerEvent] {
-        var request = try makeRequest("/threads/\(threadId.urlPathEscaped)/events?after=\(after)")
-        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        request.setValue(String(after), forHTTPHeaderField: "Last-Event-ID")
-        let (data, response) = try await session.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(status) else { throw APIError(status: status, code: "events_\(status)") }
-        return SSEParser.parse(String(decoding: data, as: UTF8.self))
+    public func botSnapshot(threadId: String) async throws -> BotSnapshot {
+        try await send(makeRequest("/threads/\(threadId.urlPathEscaped)/snapshot"))
+    }
+
+    public func botMessages(threadId: String, beforeSeq: Int) async throws -> BotMessagePage {
+        try await send(makeRequest("/threads/\(threadId.urlPathEscaped)/messages?beforeSeq=\(beforeSeq)&limit=50"))
+    }
+
+    /// Formal generated unary Remote. Correlation IDs and error envelopes are
+    /// DSH Connection's, not an ad-hoc REST RPC dialect.
+    public func receipt(operationId: String) async throws -> RuntimeReceipt {
+        let rpcId = UUID().uuidString
+        var request = try makeRequest("/unused")
+        request.url = URL(string: "api/clientRuntime/receipt", relativeTo: baseURL.appendingSlash)!.absoluteURL
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(RemoteJSON.object([
+            "type": .string("client-request"), "rpcId": .string(rpcId), "method": .string("clientRuntime/receipt"),
+            "payload": .object(["args": .object(["operationId": .string(operationId)])])]))
+        let response: ReceiptResponse = try await send(request)
+        guard response.type == "server-response", response.rpcId == rpcId else { throw APIError(status: 0, code: "invalid_remote_response") }
+        if response.result.ok, let value = response.result.value { return value }
+        if let error = response.result.error { throw error }
+        throw APIError(status: 0, code: "invalid_remote_response")
+    }
+
+    public func botState(threadId: String, fromSeq: Int, toSeq: Int) async throws -> BotSyncState {
+        try await send(makeRequest("/threads/\(threadId.urlPathEscaped)/sync-state?fromSeq=\(fromSeq)&toSeq=\(toSeq)"))
+    }
+
+    /// One mux per APIClient/account. Cookie sessions use the same URLSession;
+    /// native token login additionally supplies Authorization on the upgrade.
+    public func remoteConnection() throws -> RemoteConnection {
+        lock.lock(); defer { lock.unlock() }
+        if let remote = _remote { return remote }
+        var request = URLRequest(url: URL(string: "api/remote.mux", relativeTo: baseURL.appendingSlash)!.absoluteURL)
+        var parts = URLComponents(url: request.url!, resolvingAgainstBaseURL: true)!
+        parts.scheme = parts.scheme == "https" ? "wss" : "ws"
+        request.url = parts.url
+        if let token = _token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let cookie = _sessionCookie { request.setValue("wangke_session=\(cookie)", forHTTPHeaderField: "Cookie") }
+        let remote = RemoteConnection(request: request, session: session)
+        _remote = remote
+        return remote
+    }
+
+    private func takeRemote() -> RemoteConnection? {
+        lock.lock(); defer { lock.unlock() }
+        let remote = _remote; _remote = nil; return remote
+    }
+
+    public func disconnectRemote() async {
+        await takeRemote()?.close()
     }
 }
 
@@ -153,6 +228,7 @@ struct StopBody: Decodable { let stopped: Int }
 struct ReactionBody: Decodable { let active: Bool }
 struct ThreadsBody: Decodable { let threads: [ThreadSummary] }
 struct SessionBody: Decodable { let authenticated: Bool; let user: WangkeUser? }
+struct SessionLoginBody: Decodable { let user: WangkeUser }
 struct ApprovalBody: Encodable { let approved: Bool }
 
 struct AnyEncodable: Encodable {

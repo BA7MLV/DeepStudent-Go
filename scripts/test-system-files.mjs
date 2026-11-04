@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fixtureDomain } from './fixture-domain.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-system-files-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/bootstrap-secret'), CLOUD_WORKER_DISABLED: '1' });
@@ -68,11 +69,13 @@ try {
   assert.equal(fs.readFileSync(physical(agents), 'utf8'), preference.value);
   assert.equal((await save(initial, '过期草稿')).statusCode, 409);
   assert.equal((await post('/system/file', { ...initial, path: agents, expected: '', content: '恶意跨站' }, { ...headers, origin: 'https://evil.invalid' })).statusCode, 403);
-  const sync = await post('/cloud/records', { mutations: [{ id: 'settings-edit', table: 'preferences', key: 'agentInstructions', before: preference, after: { ...preference, value: '设置页更新的同一份指令' } }] }, headers);
-  assert.equal(sync.statusCode, 200, sync.body);
+  const sync = await fixtureDomain(app, cookie, 'setPreferences', { operationId: 'system-settings-edit-000001', changes: [{ key: 'agentInstructions', expected: preference.value, value: '设置页更新的同一份指令' }] });
+  assert.equal(sync.ok, true, JSON.stringify(sync));
   assert.equal((await read(agents)).content, '设置页更新的同一份指令');
   assert.equal(fs.readFileSync(physical(agents), 'utf8'), '设置页更新的同一份指令');
-  assert.equal((await post('/cloud/records', { mutations: [{ id: 'stale-settings-edit', table: 'preferences', key: 'agentInstructions', before: preference, after: { ...preference, value: '过期的设置页' } }] }, headers)).statusCode, 409);
+  const stalePreference = await fixtureDomain(app, cookie, 'setPreferences', { operationId: 'system-settings-stale-000001', changes: [{ key: 'agentInstructions', expected: preference.value, value: '过期的设置页' }] });
+  assert.equal(stalePreference.ok, false);
+  assert.equal(stalePreference.error.code, 'client/record-conflict');
   console.log('System instructions: real file, settings sync, CAS, auth and origin protection passed');
 
   const created = await post('/bot/memories', { scope: 'owner', scopeId: '', kind: 'preference', content: '# 学习偏好\n用简洁中文回答。', source: 'user:management' }, headers);

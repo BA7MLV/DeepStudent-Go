@@ -4,7 +4,7 @@ import { useCourseChat } from '../store/courseChat';
 import { useBotPanel } from '../store/botPanel';
 import { focusChatComposer } from './chatComposerFocus';
 import { useTranslation } from 'react-i18next';
-import { usePluginCatalog } from '../plugins/catalog';
+import type { PluginCatalog } from '../plugins/catalog';
 import { navigationEntries } from '../plugins/layout';
 
 /**
@@ -15,10 +15,9 @@ import { navigationEntries } from '../plugins/layout';
  * 不是另一个独立页面（见 pages/CourseChat.tsx 与 store/botPanel.ts）。
  * 「设置」也不在这里：它是全局弹窗，入口在侧栏底部。
  */
-export function useAppNav(): NavConfig {
+export function useAppNav(catalog?: PluginCatalog): NavConfig {
   const { t } = useTranslation('common');
   const { pathname, search } = useLocation();
-  const { data: catalog } = usePluginCatalog();
   const pages = navigationEntries(catalog);
   const query = new URLSearchParams(search);
   const selected = pages.find(p => pathname === `/plugins/${p.instance.id}` && (query.has('placement') ? query.get('placement') === p.placement.id : !query.has('view') || query.get('view') === p.placement.viewId));

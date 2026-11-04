@@ -215,7 +215,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
           //
           // 读进度失败不该拦住播放，所以吞掉异常、照样返回 0（从头上放）。
           try {
-            await db.videos.update(id, { finished: 0, lastPosition: 0 });
+            await (await import('../client/resources')).recordPlayback(id, 0, false);
           } catch {
             /* 落库失败只影响主页那根条，不影响本次从头播放 */
           }
@@ -228,10 +228,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
         if (!id || !Number.isFinite(time)) return;
         // 播完时 vidstack 传的是 duration（其 #onEnded 里 `setTime(duration(), true)`），
         // 正好就是「看到哪儿了」的真实位置，直接落盘
-        await db.videos.update(
-          id,
-          ended ? { lastPosition: time, finished: 1 } : { lastPosition: time },
-        );
+        await (await import('../client/resources')).recordPlayback(id, time, ended ? true : undefined);
       },
       // 其余 getter 返回 null（无保存值），音量/字幕/倍率等行为与之前一致
       async getVolume() { return null; },

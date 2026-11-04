@@ -1,5 +1,6 @@
 import type { BotMessagePage, BotSnapshot, BotSyncState, MessageDto } from '@wangke/contracts';
 import type { DatabaseStore } from '../storage/database.js';
+import { readBotActivity } from './activity.js';
 
 const fields = 'id,thread_id AS threadId,client_nonce AS clientNonce,seq,role,kind,content,reply_to AS replyTo,created_at AS createdAt';
 const visible = "NOT (role='assistant' AND kind='progress')";
@@ -46,7 +47,7 @@ export class BotMessageHistory {
       (status='pending' OR message_id IN (SELECT id FROM messages WHERE thread_id=? AND seq>=? AND seq<=?))`).all(thread, thread, fromSeq, toSeq) as BotSyncState['approvals'];
     const questions = db.prepare(`SELECT ${questionFields} FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE r.thread_id=? AND
       (q.status='pending' OR q.message_id IN (SELECT id FROM messages WHERE thread_id=? AND seq>=? AND seq<=?))`).all(thread, thread, fromSeq, toSeq) as BotSyncState['questions'];
-    return { thread: { ...metadata, archived: Boolean(metadata.archived) }, approvals, questions, runs, running: runs.some(run => ['queued', 'running', 'waiting_user', 'waiting_event'].includes(run.status)), eventCursor: this.cursor(thread) };
+    return { thread: { ...metadata, archived: Boolean(metadata.archived) }, approvals, questions, runs, running: runs.some(run => ['queued', 'running', 'waiting_user', 'waiting_event'].includes(run.status)), activity: readBotActivity(this.store, thread), eventCursor: this.cursor(thread) };
   }
 
   snapshot(thread: string, beforeSeq = Number.MAX_SAFE_INTEGER): BotSnapshot {

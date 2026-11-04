@@ -1,4 +1,5 @@
 import { db, type FolderRow } from '../store/db';
+import { cloud } from '../cloud/state';
 
 export function folderAncestors(folders: FolderRow[], id: number | null): FolderRow[] {
   const byId = new Map(folders.map((folder) => [folder.id, folder]));
@@ -23,6 +24,20 @@ export function validFolderDrop(folders: FolderRow[], keys: string[], target: nu
 
 /** Validate against fresh rows and commit the whole mixed selection atomically. */
 export async function moveLibraryItems(keys: string[], target: number | null) {
+  if (cloud.enabled) {
+    const folders = await db.folders.toArray();
+    if (!validFolderDrop(folders, keys, target)) throw new Error('不能将文件夹移入自身或子文件夹');
+    const placements = [];
+    for (const key of new Set(keys)) {
+      const row = key.startsWith('folder:') ? await db.folders.get(Number(key.slice(7))) : key.startsWith('file:') ? await db.videos.get(key.slice(5)) : undefined;
+      if (!row) throw new Error('资料已不存在');
+      const parent = ('parentId' in row ? row.parentId : 'folderId' in row ? row.folderId : null) ?? null;
+      if (parent !== target) placements.push({ key, parent, target });
+    }
+    const moved = placements.length ? await (await import('../client/resources')).resourceCommand({ kind: 'moveLibrarySelection', placements }) as unknown as typeof placements : [];
+    await (await import('../cloud/sync')).flushCloud();
+    return moved;
+  }
   return db.transaction('rw', [db.folders, db.videos], async () => {
     const placements: { key: string; parent: number | null; target: number | null }[] = [];
     const folders = await db.folders.toArray();
@@ -52,6 +67,11 @@ export async function moveLibraryItems(keys: string[], target: number | null) {
 }
 
 export async function undoLibraryMove(placements: Awaited<ReturnType<typeof moveLibraryItems>>) {
+  if (cloud.enabled) {
+    if (placements.length) await (await import('../client/resources')).resourceCommand({ kind: 'moveLibrarySelection', placements: placements.map(item => ({ ...item, parent: item.target, target: item.parent })) });
+    await (await import('../cloud/sync')).flushCloud();
+    return;
+  }
   await db.transaction('rw', [db.folders, db.videos], async () => {
     const folders = await db.folders.toArray();
     for (const placement of placements) {

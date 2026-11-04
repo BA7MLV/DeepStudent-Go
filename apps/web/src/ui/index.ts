@@ -15,9 +15,11 @@ export {
   confirmDialog,
   alertDialog,
   promptDialog,
+  popconfirm,
   FeedbackHost,
   type ConfirmOptions,
   type PromptOptions,
+  type PopconfirmOptions,
 } from './feedback';
 export {
   PageShell,
@@ -58,6 +60,7 @@ export {
   type CueRowProps,
 } from './panel';
 export { Sym, type SymProps } from './icons';
+export { Hint } from './Hint';
 export { SYMBOL_NAMES, type SymbolName } from './icons';
 export { LoadingButton, type LoadingButtonProps } from './loading-button';
 export { PageLoader } from './page-loader';

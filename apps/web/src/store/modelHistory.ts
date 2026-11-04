@@ -1,14 +1,17 @@
 import { db } from './db';
+import { cloud } from '../cloud/state';
+import { patchConversationSession } from './conversationProducts';
 import { historyFingerprint, messageTokens, replayTrace } from '@wangke/study-core/model/transcript';
 
 export async function sessionCacheKey(sessionId: number): Promise<string> {
-  return db.transaction('rw', db.chatSessions, async () => {
+  const save = async () => {
     const session = await db.chatSessions.get(sessionId);
     if (session?.promptCacheKey) return session.promptCacheKey;
     const key = crypto.randomUUID();
-    await db.chatSessions.update(sessionId, { promptCacheKey: key });
+    await patchConversationSession(sessionId, { promptCacheKey: key });
     return key;
-  });
+  };
+  return cloud.worker ? save() : db.transaction('rw', db.chatSessions, save);
 }
 
 /** Whole turns, durable cut, 20% headroom. A short new question cannot resurrect
@@ -30,7 +33,7 @@ export async function fitModelHistory<T extends { id?: number; rowId?: number; r
   }
   const first = effective[cut];
   const id = first?.id ?? first?.rowId;
-  if (cut > 0 && id != null) await db.chatSessions.update(sessionId, { contextCheckpoint: { fromId: id, source: first.originalContent ?? first.content, prefixHash: await historyFingerprint(rows.slice(0, Math.max(0, start) + cut)) } });
+  if (cut > 0 && id != null) await patchConversationSession(sessionId, { contextCheckpoint: { fromId: id, source: first.originalContent ?? first.content, prefixHash: await historyFingerprint(rows.slice(0, Math.max(0, start) + cut)) } });
   return effective.slice(cut);
 }
 

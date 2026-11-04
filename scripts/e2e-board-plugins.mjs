@@ -21,7 +21,7 @@ const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
 let browser, store, web;
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
-  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
+  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port, strictPort: true, proxy: { '/api': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false, ws: true } } } });
   await web.listen(); browser = await chromium.launch({ headless: true });
   // Playwright's SW-blocking probe itself throws in opaque sandboxed frames.
   const context = await browser.newContext({ locale: 'zh-CN' });

@@ -3,7 +3,7 @@ import Foundation
 import Security
 #endif
 
-/// 保存服务器地址和登录 token。token 在 Apple 平台进钥匙串，服务器地址放 UserDefaults。
+/// Session/token credentials stay in the existing Apple Keychain, never in a URL.
 public protocol TokenStore: Sendable {
     func load() -> StoredCredential?
     func save(_ credential: StoredCredential)
@@ -13,12 +13,16 @@ public protocol TokenStore: Sendable {
 public struct StoredCredential: Codable, Equatable, Sendable {
     public let serverURL: URL
     public let token: String
+    /// New native logins use the same account session as Remote. Old saved
+    /// bearer credentials remain decodable and are never mistaken for Worker tokens.
+    public let sessionCookie: String?
     public let user: WangkeUser
 
-    public init(serverURL: URL, token: String, user: WangkeUser) {
+    public init(serverURL: URL, token: String, user: WangkeUser, sessionCookie: String? = nil) {
         self.serverURL = serverURL
         self.token = token
         self.user = user
+        self.sessionCookie = sessionCookie
     }
 }
 

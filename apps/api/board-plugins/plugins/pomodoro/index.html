@@ -2,7 +2,7 @@
 <div class="row"><label id="duration-label" for="duration"></label><input id="duration" type="number" min="1" max="180" value="25"></div>
 <div class="row"><button id="start"></button><button id="reset"></button></div><p class="error" id="error" role="alert"></p>
 <script>
-let snapshot, busy = false;
+let snapshot, busy = false, version = 0;
 const error = document.getElementById('error'), duration = document.getElementById('duration');
 document.getElementById('duration-label').textContent = board.t('分钟', 'Minutes');
 document.getElementById('reset').textContent = board.t('重置', 'Reset');
@@ -13,7 +13,8 @@ function render() {
   document.getElementById('start').textContent = running ? board.t('暂停', 'Pause') : board.t('开始专注', 'Start focus');
   document.getElementById('status').textContent = seconds === 0 ? board.t('本轮完成，休息一下。', 'Session complete. Take a break.') : running ? board.t('专注中', 'Focusing') : board.t('准备好了吗？', 'Ready when you are');
 }
-async function load() { if (busy) return; try { snapshot = await board.read(); if (document.activeElement !== duration) duration.value = String(Math.round(snapshot.data.durationSeconds / 60)); render(); } catch (e) { error.textContent = e.message; } }
+function show(next) { snapshot = next; if (document.activeElement !== duration) duration.value = String(Math.round(snapshot.data.durationSeconds / 60)); render(); }
+async function load() { if (busy) return; const before = version; try { const next = await board.read(); if (before === version) show(next); } catch (e) { error.textContent = e.message; } }
 async function save(data) {
   if (busy || !snapshot) return;
   busy = true;
@@ -31,6 +32,13 @@ document.getElementById('reset').onclick = () => {
   if (!Number.isInteger(seconds) || seconds < 60 || seconds > 10800) return;
   save({durationSeconds: seconds, remainingSeconds: seconds, endsAt: null});
 };
-load(); setInterval(render, 250); setInterval(load, 5000);
+const off = plugin.events.subscribe('state.changed', document => {
+  version++;
+  if (busy) return;
+  try { show({ data: JSON.parse(document.content), content: document.content, revision: document.revision }); }
+  catch (e) { error.textContent = e.message; }
+});
+plugin.events.subscribe('dispose', off);
+load(); setInterval(render, 250);
 </script>
 <style>.timer{text-align:center;padding:8px}.timer output{display:block;font-size:3.5rem;font-variant-numeric:tabular-nums;letter-spacing:-.04em}.row{justify-content:center;margin-top:14px}#duration{max-width:100px}</style>

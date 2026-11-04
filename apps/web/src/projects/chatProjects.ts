@@ -4,6 +4,7 @@ import { request } from '../api/serverClient';
 import { cloud } from '../cloud/state';
 import { flushCloud } from '../cloud/sync';
 import { db } from '../store/db';
+import { readResources, resourceCommand } from '../client/resources';
 
 export interface ChatProject { folderId: number; name: string; color?: ResourceFolderColor }
 export const projectDisplayName = (name: string) => name.replace(/^项目[：:]\s*/, '');
@@ -15,7 +16,7 @@ export function projectFolderName(name: string) {
 export async function listChatProjects(): Promise<ChatProject[]> {
   if (cloud.enabled) {
     await flushCloud();
-    const data = await request<ResourceDirectory>('/resources');
+    const data = await readResources();
     return data.entries.filter(entry => entry.kind === 'directory' && entry.scope && entry.folderId != null)
       .map(entry => ({ folderId: entry.folderId!, name: entry.name, color: entry.color }));
   }
@@ -25,7 +26,7 @@ export async function listChatProjects(): Promise<ChatProject[]> {
 export async function createChatProject(name: string): Promise<ChatProject> {
   const folderName = projectFolderName(name);
   if (cloud.enabled) {
-    const project = await request<ProjectDetailDto & { folderId: number }>('/resources/folders', { method: 'POST', body: JSON.stringify({ name: folderName }) });
+    const project = await resourceCommand({ kind: 'createFolder', name: folderName }) as unknown as ProjectDetailDto & { folderId: number };
     return { folderId: project.folderId, name: project.name };
   }
   const folderId = await db.folders.add({ name: folderName, createdAt: Date.now() });

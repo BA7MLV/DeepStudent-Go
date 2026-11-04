@@ -1,0 +1,9 @@
+{
+  "name": "@wangke/client-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./bot-history": "./src/bot-history.ts" },
+  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json" },
+  "dependencies": { "@deepseek-ai/cordis": "4.0.6-alpha.1", "@wangke/contracts": "0.1.0", "@wangke/remote-artifacts": "0.1.0", "@deepseek-ai/dsh-api-gateway": "0.2.2-alpha.2", "@deepseek-ai/dsh-client-connection": "0.2.2-alpha.2", "@deepseek-ai/dsh-typert-registry": "0.2.2-alpha.2" }
+}

@@ -26,6 +26,7 @@ public enum MessageRole: String, Codable, Sendable {
 
 public enum MessageKind: String, Codable, Sendable {
     case text, progress, attachment, widget, question, approval
+    case webSources = "web_sources"
 }
 
 public struct Message: Codable, Identifiable, Hashable, Sendable {
@@ -49,6 +50,21 @@ public struct Message: Codable, Identifiable, Hashable, Sendable {
         self.content = content
         self.createdAt = createdAt
         self.replyTo = replyTo
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, threadId, clientNonce, seq, role, kind, content, createdAt, replyTo }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        threadId = try c.decode(String.self, forKey: .threadId)
+        // Nullable in the generated codec is not the same as an absent field.
+        clientNonce = try c.decode(String?.self, forKey: .clientNonce)
+        seq = try c.decode(Int.self, forKey: .seq)
+        role = try c.decode(MessageRole.self, forKey: .role)
+        kind = try c.decode(MessageKind.self, forKey: .kind)
+        content = try c.decode(String.self, forKey: .content)
+        createdAt = try c.decode(String.self, forKey: .createdAt)
+        replyTo = try c.decode(String?.self, forKey: .replyTo)
     }
 
     public var isMine: Bool { role == .user }
@@ -78,6 +94,10 @@ public struct ThreadDetail: Codable, Identifiable, Hashable, Sendable {
     public let updatedAt: String
     public var messages: [Message]
     public var approvals: [Approval]?
+    public init(id: String, mode: ConversationMode, title: String?, createdAt: String, updatedAt: String, messages: [Message], approvals: [Approval]?) {
+        self.id = id; self.mode = mode; self.title = title; self.createdAt = createdAt
+        self.updatedAt = updatedAt; self.messages = messages; self.approvals = approvals
+    }
 }
 
 /// 附件消息的 content 是 JSON 字符串。

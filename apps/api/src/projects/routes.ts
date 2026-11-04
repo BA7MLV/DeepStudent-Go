@@ -32,7 +32,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
     if (process.platform !== 'linux') projects.assertIdle(id);
   };
   const writable = (owner: string, id: string) => { projects.writable(owner, id); projects.assertIdle(id); };
-  type Location = { Params: { id: string }; Querystring: { path?: string } };
+  type Location = { Params: { id: string }; Querystring: { path?: string; operationId?: string } };
 
   app.get('/api/v1/projects', async (request, reply) => {
     const user = auth(request, reply); if (!user) return;
@@ -108,6 +108,23 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
     onRequest: async (request, reply) => { const user = auth(request, reply); if (user) writable(user.id, request.params.id); },
   }, async (request, reply) => {
     const user = auth(request, reply); if (!user) return;
+    const db = projects.store.db;
+    const operationId = request.query.operationId;
+    if (!operationId || !/^[a-zA-Z0-9_-]{16,100}$/.test(operationId)) throw new ProjectError('resource_upload_admission_required');
+    const receipt = db.prepare('SELECT status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(user.id, operationId) as { status: string; result: string } | undefined;
+    if (!receipt) throw new ProjectError('resource_upload_admission_required');
+    const admitted = JSON.parse(receipt.result);
+    if (receipt.status === 'completed') {
+      if (admitted.kind !== 'resourceUpload' || admitted.projectId !== request.params.id) throw new ProjectError('resource_upload_scope_denied', 403);
+      request.raw.resume();
+      return reply.send(admitted);
+    }
+    const operation = admitted.operation as Extract<import('@wangke/contracts/resources').ResourceOperation, { kind: 'upload' }>;
+    if (operation?.kind !== 'upload' || operation.projectId !== request.params.id) throw new ProjectError('resource_upload_scope_denied', 403);
+    // Claim the one admitted transfer before awaiting bytes. An interrupted
+    // transfer is inspectable, never implicitly replayed by a second request.
+    if (admitted.phase !== 'admitted') throw new ProjectError('resource_upload_uncertain', 409);
+    db.prepare('UPDATE client_commands SET result=? WHERE owner_id=? AND operation_id=?').run(JSON.stringify({ operation, phase: 'receiving' }), user.id, operationId);
     const declared = request.headers['content-length'];
     if (!(request.body instanceof Readable) || (declared !== undefined && (!Number.isSafeInteger(Number(declared)) || Number(declared) > deps.maxFileBytes))) throw new ProjectError('file_too_large_or_invalid', 413);
     // Stage outside all sandbox mounts. Commit only after the stream is complete
@@ -116,21 +133,29 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
     fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
     const temporary = path.join(staging, crypto.randomUUID());
     let size = 0;
+    const hash = crypto.createHash('sha256');
     try {
       await pipeline(request.body, new Transform({ transform(chunk, _encoding, callback) {
         size += chunk.length;
+        hash.update(chunk);
         callback(size > deps.maxFileBytes ? new ProjectError('file_too_large_or_invalid', 413) : null, chunk);
       } }), fs.createWriteStream(temporary, { flags: 'wx', mode: 0o600 }));
       if (declared !== undefined && Number(declared) !== size) throw new ProjectError('file_too_large_or_invalid', 413);
-      const requested = request.query.path ?? '';
+      if (size !== operation.size || hash.digest('hex') !== operation.sha256) throw new ProjectError('resource_upload_content_mismatch');
+      const requested = operation.path;
       if (!requested || requested.endsWith('/')) throw new ProjectError('invalid_project_path');
       const split = requested.lastIndexOf('/') + 1, leaf = requested.slice(split);
       const mime = await uploadedImageMime(temporary, leaf, 'application/octet-stream');
       const filename = requested.slice(0, split) + (mime ? imageFileName(leaf, mime, '图片') : safeFileName(leaf));
       writable(user.id, request.params.id);
       projects.files.installUpload(request.params.id, filename, temporary);
-      audit(user.id, 'project.file.uploaded', request.params.id);
-      return reply.code(201).send({ path: filename, size });
+      const result = { kind: 'resourceUpload', projectId: request.params.id, path: filename, size, sha256: operation.sha256 };
+      projects.store.transaction(() => {
+        db.prepare("UPDATE client_commands SET status='completed',result=? WHERE owner_id=? AND operation_id=?").run(JSON.stringify(result), user.id, operationId);
+        db.prepare("INSERT INTO client_changes(owner_id,domain,entity) VALUES(?,'resources',?)").run(user.id, operationId);
+        audit(user.id, 'resource.upload.committed', request.params.id);
+      });
+      return reply.code(201).send(result);
     } finally { fs.rmSync(temporary, { force: true }); }
   });
 }

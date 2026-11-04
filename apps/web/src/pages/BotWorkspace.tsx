@@ -1,13 +1,13 @@
 import { Suspense, lazy, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Avatar, Button, Dropdown, ListBox, Modal, Spinner, cn } from '@heroui/react';
-import { PageLoader, PageShell, Sym, toast, promptDialog, confirmDialog } from '../ui';
+import { PageLoader, PageShell, Sym, toast, promptDialog, popconfirm } from '../ui';
 import { openSettings } from '../components/settingsDialogStore';
 import { cloud } from '../cloud/state';
 import { MoreMenu, type MenuAction } from '../ui';
 import { useBotPanel } from '../store/botPanel';
 import { serverClient, type ApprovalDto, type ThreadDetail, type Session, type ThreadQuestionDto } from '../api/serverClient';
-import type { AgentProfileDto, BootstrapStatusDto, MessageDto, ProjectDetailDto, ThreadDto } from '@wangke/contracts';
+import type { AgentProfileDto, BootstrapStatusDto, BotActivityDto, MessageDto, ProjectDetailDto, ThreadDto } from '@wangke/contracts';
 import { parseBotAttachments, parseLegacyBotAttachments, MAX_BOT_ATTACHMENTS, type BotAttachment } from '@wangke/contracts';
 import { BotAttachmentDraft, BotMessageAttachments, type BotDraftFile } from '../components/BotAttachments';
 import { botProgressText } from '@wangke/contracts/cloud';
@@ -80,8 +80,6 @@ const BotAvatar = memo(function BotAvatar({ agent, size = 40, className }: { age
   );
 });
 
-const ACTIVITY_PHASES = ['scanning', 'connecting', 'checking', 'composing'] as const;
-
 /** 顶栏浮在消息之上；实测高度让首条消息避开安全区和动态状态行。 */
 function BotTopBar({ className, children }: { className: string; children: ReactNode }) {
   const ref = useRef<HTMLElement>(null);
@@ -108,17 +106,38 @@ function BotTopBar({ className, children }: { className: string; children: React
   );
 }
 
+const IDLE_ACTIONS = ['star', 'pillow', 'paws', 'cloud'] as const;
+
+/** Decorative waiting, not execution claims. Unmount immediately on real progress. */
+function BotIdleAction() {
+  const { t } = useTranslation();
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hidden) setIndex(value => (value + 1) % IDLE_ACTIONS.length);
+    }, 4200);
+    return () => window.clearInterval(timer);
+  }, []);
+  const text = t(`botHome.activity.idle.${IDLE_ACTIONS[index]}`);
+  return <span className="bot-activity__text" key={text} aria-hidden="true">{text}</span>;
+}
+
 /** Web live work label. Only selected runtime milestones are also projected to IM. */
-function BotActivity({ active, progress, beat }: { active: boolean; progress?: string; beat: number }) {
+function BotActivity({ active, activity, progress }: { active: boolean; activity?: BotActivityDto | null; progress?: string }) {
   const { t, i18n } = useTranslation();
   if (!active) return null;
-  const phase = ACTIVITY_PHASES[beat % ACTIVITY_PHASES.length];
-  const raw = progress ? botProgressText(progress, i18n.language) : t(`botHome.activity.${phase}`);
-  const text = raw.replace(/\s+/g, ' ').trim().slice(0, 120);
+  // 真实状态优先；泛化的 running / 无进度时才显示不冒充实际工作的可爱动作。
+  const reported = botProgressText(progress ?? '', i18n.language).replace(/\s+/g, ' ').trim();
+  const tools = activity?.tools.map(tool => tool.name).join(' · ');
+  const text = (activity && activity.phase !== 'running' ? activity.phase === 'tools'
+    ? t(activity.activeTools > 1 ? 'botHome.activity.parallel' : 'botHome.activity.tools', { tools, count: activity.activeTools })
+    : t(`botHome.activity.${activity.phase}`)
+    : (activity === undefined && reported) || '').slice(0, 200);
   return (
-    <div className="bot-activity" role="status" aria-live="polite">
+    <div className="bot-activity" role="status" aria-live={text ? 'polite' : 'off'} aria-label={text ? undefined : t('botHome.activity.waiting')} data-phase={activity?.phase ?? 'idle'}>
       <span className="bot-activity__spark" aria-hidden="true">✦</span>
-      <span className="bot-activity__text" key={`${progress ?? phase}-${beat}`}>{text}</span>
+      {text ? <span className="bot-activity__text" key={text} title={text}>{text}</span> : <BotIdleAction />}
+      {activity && activity.completedTools > 0 && <span className="bot-activity__count">{t('botHome.activity.returned', { count: activity.completedTools })}</span>}
     </div>
   );
 }
@@ -328,8 +347,6 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   }
   /** 每个线程有没有任务在跑：决定「正在输入」和已读。 */
   const [running, setRunning] = useState<Record<string, boolean>>({});
-  /** 最近一条内部进度用于 Web 顶栏；普通进度不会成为聊天或 IM 回复。 */
-  const [activityBeat, setActivityBeat] = useState(0);
   const chatMode = !projectId;
 
   const active = activeId ? details[activeId] ?? null : null;
@@ -353,6 +370,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const activeModelRunning = activeRuns.some(run => ['queued', 'running'].includes(run.status));
   const activeRunning = activeModelRunning || (!activeRuns.length && Boolean(activeId && (active?.running ?? running[activeId])));
   const activeRunTarget = activeRuns.find(run => ['queued', 'running', 'waiting_event'].includes(run.status));
+  /** 最近一条内部进度用于 Web 顶栏；普通进度不会成为聊天或 IM 回复。 */
   const activeProgress = history.reading?.progress;
   const groupMessages = useMemo(() => createMessageGrouper(), [activeId, locale]);
   const rows = useMemo(() => {
@@ -442,15 +460,6 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     } catch { setListMoreError(true); }
     finally { listMoreFlight.current = false; setListMoreBusy(false); }
   };
-
-  // A small rotating phrase keeps the header alive while a model/tool has not
-  // emitted a more specific progress update yet.
-  useEffect(() => {
-    if (!activeRunning) return;
-    setActivityBeat(0);
-    const timer = window.setInterval(() => setActivityBeat(value => value + 1), 2600);
-    return () => window.clearInterval(timer);
-  }, [activeRunning, activeId]);
 
   // 吸底：用户停在底部时，新消息和高度变化都把视图留在最新一条；往上翻了就不打扰。
   const followEnd = useCallback(() => {
@@ -635,7 +644,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const editThread = async (thread: ThreadDto, action: 'rename' | 'archive' | 'delete') => {
     try {
       if (action === 'delete') {
-        if (!await confirmDialog({ headline: tp('deleteConfirm', { name: thread.title }), description: tp('sessionDeleteHint'), confirmText: tp('delete'), cancelText: tp('cancel'), danger: true })) return;
+        if (!await popconfirm({ headline: tp('deleteConfirm', { name: thread.title }), description: tp('sessionDeleteHint'), confirmText: tp('delete'), danger: true, testId: 'bot-thread-delete-popconfirm' })) return;
         await serverClient.deleteThread(thread.id);
         setThreads(old => old.filter(row => row.id !== thread.id));
         if (activeId === thread.id) { newDraft(); setPane('list'); }
@@ -857,7 +866,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
                 <span className="bot-panel__switcher-name" title={currentAgent?.name || 'Bot'}>{currentAgent?.name || 'Bot'}</span>
               </h2>
             )}
-            <BotActivity active={activeRunning || activeWaiting} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} beat={activityBeat} />
+            <BotActivity active={activeBusy} activity={history.reading?.activity} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} />
           </div>
           <div className="bot-panel__actions">
             <Button isIconOnly variant="ghost" className="rounded-full" aria-label={t('botHome.compose')} data-testid="bot-panel-new"
@@ -951,7 +960,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
             {!filesOpen && <BotAvatar agent={currentAgent} size={28} />}
             <span className="bh-chat__identity">
               <span className="bh-chat__name" title={fullChatTitle}>{chatTitle}</span>
-              <BotActivity active={(activeRunning || activeWaiting) && !filesOpen} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} beat={activityBeat} />
+              <BotActivity active={activeBusy && !filesOpen} activity={history.reading?.activity} progress={activeWaiting ? t('botHome.waitingBackground') : activeProgress} />
             </span>
           </h2>
           {threadMenu.length > 0 && !filesOpen && <MoreMenu label={t('botHome.more')} actions={threadMenu} testId="bh-thread-more" />}

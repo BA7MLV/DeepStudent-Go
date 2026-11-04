@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { fixturePreference } from './fixture-domain.mjs';
 
 const temporary = path.join(os.tmpdir(), 'opencode');
 fs.mkdirSync(temporary, { recursive: true });
@@ -18,7 +19,7 @@ try {
   assert.equal(initialized.statusCode, 201, initialized.body);
   const login = await api.inject({ method: 'POST', url: '/api/v1/auth/password/login', payload: { password: 'storage-preview-password' } });
   const cookie = login.headers['set-cookie'].split(';')[0];
-  await api.inject({ method: 'POST', url: '/api/v1/cloud/records', headers: { cookie }, payload: { mutations: [{ id: 'language', table: 'preferences', key: 'uiLanguage', before: null, after: { id: 'uiLanguage', value: 'zh-CN' } }] } });
+  await fixturePreference(api, cookie, 'uiLanguage', 'zh-CN');
   fs.writeFileSync(path.join(directory, 'files/fixture.bin'), Buffer.alloc(2 * 1024 * 1024));
   fs.mkdirSync(path.join(directory, 'files/projects/storage-fixture'), { recursive: true });
   fs.writeFileSync(path.join(directory, 'files/projects/storage-fixture/notes.md'), Buffer.alloc(128 * 1024));
@@ -42,14 +43,14 @@ try {
   await page.goto(`${origin}/__storage_fixture`);
   const card = page.getByTestId('cloud-storage-card');
   await page.getByTestId('cloud-storage-total').waitFor({ timeout: 60000 });
-  assert.match(await page.getByTestId('cloud-storage-files').innerText(), /2\.0 MB/);
-  assert.match(await page.getByTestId('cloud-storage-workspaces').innerText(), /128 KB/);
+  assert.match(await page.getByTestId('cloud-storage-files').innerText(), /2\.0[ \u00a0]MB/);
+  assert.match(await page.getByTestId('cloud-storage-workspaces').innerText(), /128[ \u00a0]KB/);
   assert.equal(await page.getByTestId('card-storage').count(), 0, 'cloud view never shows browser quota');
   assert.equal(await card.getByRole('progressbar').count(), 1);
   fs.writeFileSync(path.join(directory, 'files/fixture.bin'), Buffer.alloc(3 * 1024 * 1024));
   const refresh = page.getByTestId('cloud-storage-refresh');
   await refresh.click();
-  await page.waitForFunction(() => document.querySelector('[data-testid="cloud-storage-files"]')?.textContent.includes('3.0 MB'));
+  await page.waitForFunction(() => /3\.0[ \u00a0]MB/.test(document.querySelector('[data-testid="cloud-storage-files"]')?.textContent ?? ''));
   const screenshotDir = path.resolve('test-results/server-storage');
   fs.mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({ path: path.join(screenshotDir, 'desktop.png') });
@@ -58,7 +59,7 @@ try {
   await refresh.click();
   await card.getByRole('alert').waitFor();
   assert.match(await card.getByRole('alert').innerText(), /上次统计/);
-  assert.match(await page.getByTestId('cloud-storage-files').innerText(), /3\.0 MB/, 'failed refresh preserves the last measurement');
+  assert.match(await page.getByTestId('cloud-storage-files').innerText(), /3\.0[ \u00a0]MB/, 'failed refresh preserves the last measurement');
   await page.reload();
   await card.getByRole('alert').waitFor();
   assert.equal(await page.getByTestId('cloud-storage-total').count(), 0, 'initial failure never displays a false zero');

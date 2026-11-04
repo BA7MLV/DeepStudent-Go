@@ -7,6 +7,7 @@ import { serverClient } from '../api/serverClient';
 import { SectionCard, toast } from '../ui';
 import { SettingSelect, SettingSwitch } from '../components/settings/controls';
 import BotManagement from './BotManagement';
+import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 
 type Policy = CloudConfig['policy'];
 type Capability = 'read' | 'write' | 'remove' | 'shell';
@@ -45,12 +46,19 @@ export default function BotSettings() {
     let alive = true;
     void cloudRequest<CloudConfig>('/config').then((value) => { if (alive) setConfig(value); }).catch((e) => alive && setError(e.message));
     void serverClient.agents().then((r) => { if (alive) setAgents(r.agents); }).catch(() => {});
-    const tick = () => void loadActivity().catch(() => {});
-    tick();
-    // 后台标签页不轮询：回到前台时立刻补一次。
-    const timer = setInterval(() => { if (document.visibilityState === 'visible') tick(); }, 4000);
-    document.addEventListener('visibilitychange', tick);
-    return () => { alive = false; clearInterval(timer); document.removeEventListener('visibilitychange', tick); clearTimeout(saveTimer.current); };
+    const owner = cloud.userId;
+    let off: (() => void) | undefined, release: (() => void) | undefined;
+    void serverRuntime(owner).then(runtime => {
+      if (!alive || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) return;
+      const model = runtime.permissions();
+      const refresh = () => {
+        if (!alive || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) return;
+        const snapshot = model.getSnapshot();
+        if (snapshot.status === 'ready') setPermissions((snapshot.data as unknown as { permissions: typeof permissions }).permissions.filter(permission => permission.status === 'pending'));
+      };
+      off = model.subscribe(refresh); release = model.acquire(); refresh();
+    }).catch(e => { if (alive) setError(e.message); });
+    return () => { alive = false; off?.(); release?.(); clearTimeout(saveTimer.current); };
   }, [loadActivity]);
 
   const persist = (next: CloudConfig, delay = 0) => {

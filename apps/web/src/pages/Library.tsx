@@ -31,6 +31,7 @@ import {
   Sym,
   alertDialog,
   confirmDialog,
+  popconfirm,
   toast,
   MODAL_CONTAINER_CLASS,
   useSkeletonGate,
@@ -241,7 +242,11 @@ export default function Library() {
   const [search] = useSearchParams();
   const [importing, setImporting] = useState<{ folderId?: number } | null>(null);
   const systemFolder = useLibraryNavigation(s => s.folderHistory.entries[s.folderHistory.index]?.startsWith('system'));
-  if (cloud.enabled && (search.has('folder') || (!systemFolder && !search.has('file')))) return <>
+  const file = search.get('file') ?? '';
+  const systemFile = file === 'AGENTS.md' || file === '/system/AGENTS.md' || file === '/system/mcp.json' || /^\/system\/(memory|skills|board)\//.test(file);
+  // Old arbitrary ?file= values must not expose the static table editor in
+  // server mode. System links retain their existing reader redirects.
+  if (cloud.enabled && (search.has('folder') || (!systemFolder && !systemFile))) return <>
     <ResourceLibrary onImport={folderId => setImporting({ folderId })} />
     {importing && <LegacyLibrary importing={{ ...importing, onClose: () => setImporting(null) }} />}
   </>;
@@ -296,6 +301,17 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const [systemError, setSystemError] = useState('');
   useEffect(() => {
     if (!inSystemFolder) return;
+    if (cloud.enabled && !cloud.worker) {
+      let stopped = false, off: (() => void) | undefined;
+      setSystemLoading(true);
+      void import('../client/resources').then(({ followDocument }) => {
+        if (stopped) return;
+        off = followDocument<SystemDirectory>({ kind: 'systemDirectory', path: systemPath, offset: systemOffset, query: searchText.trim() }, page => {
+          setSystemPage(page); setSystemError(''); setSystemLoading(false);
+        }, error => { setSystemError(error instanceof Error ? error.message : '读取系统文件失败'); setSystemLoading(false); });
+      });
+      return () => { stopped = true; off?.(); };
+    }
     let active = true;
     let requestId = 0;
     const refresh = () => {
@@ -309,8 +325,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     const debounce = setTimeout(refresh, 200);
     window.addEventListener('focus', refresh);
     window.addEventListener('system-files-changed', refresh);
-    const timer = setInterval(refresh, 5000);
-    return () => { active = false; clearTimeout(debounce); clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
+    return () => { active = false; clearTimeout(debounce); window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
   }, [inSystemFolder, systemPath, systemOffset, searchText]);
   useEffect(() => { setSystemOffset(0); }, [searchText, folderKey]);
   useEffect(() => {
@@ -681,6 +696,34 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     // 大视频拷入 OPFS 要数分钟，持 Wake Lock 防熄屏后 tab 被挂起中断导入
     await acquireWakeLock();
     try {
+      if (cloud.enabled) {
+        const { readResourceFolder, uploadResource, resourceCommand, readResources, recordMediaDuration } = await import('../client/resources');
+        patchTask(key, { status: 'writing', percent: 0 });
+        const directory = await readResourceFolder(importing?.folderId);
+        const projectId = directory.project?.id ?? directory.rootId;
+        const path = directory.path ? `${directory.path}/${file.name}` : file.name;
+        await uploadResource(projectId, path, file);
+        const fresh = await readResources(projectId, directory.path);
+        const entry = fresh.entries.find(entry => entry.path === path);
+        if (!entry?.courseId) throw new Error('上传已完成，但资料索引尚未建立，请在资源目录中核对。');
+        const id = entry.courseId;
+        await (await import('../cloud/sync')).flushCloud();
+        if (isMaterialFile(file)) {
+          const format = detectMaterialFormat(file);
+          void startMaterialJob(id, format).catch(error => toast.error(`解析失败：${formatCaughtError(error)}`));
+        } else {
+          const duration = await probeDuration(file);
+          if (duration) await recordMediaDuration(id, duration);
+          if (biliSource) await resourceCommand({ kind: 'setVideoSource', courseId: id, source: biliSource });
+          if (subtitles) await saveImportedSubtitles(id, subtitles);
+          if (!subtitles?.primary?.cues.length) startTranscription(id);
+        }
+        enqueueCover(id);
+        await (await import('../cloud/sync')).flushCloud();
+        setTasks(previous => previous.filter(task => task.key !== key));
+        toast.success(`已导入《${file.name}》`);
+        return;
+      }
       if (isMaterialFile(file)) {
         await importMaterial(file, key);
         return;
@@ -1110,12 +1153,14 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   };
 
   const confirmDeleteFolder = (folder: FolderRow, _count: number) => {
-    void confirmDialog({
+    const row = document.querySelector<HTMLElement>(`[data-group-key="folder:${CSS.escape(String(folder.id))}"]`);
+    void popconfirm({
       headline: `删除文件夹「${folder.name}」？`,
-      description: '其中的资料和子文件夹会移回上级目录，内容不会被删除。',
+      description: '其中的资料和子文件夹会移回上级目录，但文件夹本身无法恢复。',
       confirmText: '删除',
       danger: true,
-    }).then((ok) => {
+      testId: 'folder-delete-popconfirm',
+    }, row).then((ok) => {
       if (ok) void handleDeleteFolder(folder);
     });
   };

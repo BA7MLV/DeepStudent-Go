@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { confirmDialog, toast } from '../ui/feedback';
+import { popconfirm, toast } from '../ui/feedback';
 import { prepareMessageDust, type MessageDust } from '../utils/messageDust';
 
 /** Shared by the library assistant and the course-side chat panel. */
@@ -27,9 +27,9 @@ export function useMessageDeletion(
     let dust: MessageDust | undefined;
     let committed = false;
     try {
-      const ok = await confirmDialog({ headline: '删除这条消息？',
+      const ok = await popconfirm({ headline: '删除这条消息？',
         description: '只删除这一条消息及其中的图片，后续对话不受影响。此操作不可撤销。',
-        confirmText: '删除', danger: true });
+        confirmText: '删除', danger: true, testId: 'message-delete-popconfirm' });
       if (!ok || !signal || signal.aborted || currentScope.current !== scope) return;
       const node = Array.from(listRef.current?.querySelectorAll<HTMLElement>('[data-chat-message]') ?? [])
         .find((element) => element.dataset.chatMessage === key);

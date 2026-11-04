@@ -48,7 +48,7 @@ export default function BotManagement() {
     void Promise.all([request<Overview>(`/bot/manage?offset=${runOffset}`, { signal: controller.signal }), request<{ memories: Memory[] }>(`/bot/memories?deleted=true&query=${encodeURIComponent(search)}&offset=${offset}`, { signal: controller.signal })]).then(([next, list]) => { if (ignore) return; setOverview(next); setMemories(list.memories); }).catch(e => { if (!ignore) setError((e as Error).message); });
     return () => { ignore = true; controller.abort(); };
   }, [offset, runOffset, search]);
-  async function act(action: () => Promise<unknown>) { setBusy(true); setError(''); try { await action(); window.dispatchEvent(new Event('system-files-changed')); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
+  async function act(action: () => Promise<unknown>) { setBusy(true); setError(''); try { await action(); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } }
   async function openRun(run: Run, page = 0) {
     const [next, scope] = await Promise.all([request<Detail>(`/bot/runs/${run.id}?offset=${page}`), request<{ skills: typeof skills; scope: string | null }>(`/bot/threads/${run.threadId}/skills`)]);
     setSelected(run); setDetail(next); setDetailOffset(page); setSkills(scope.skills); setSkillScope(scope.scope ?? 'null');

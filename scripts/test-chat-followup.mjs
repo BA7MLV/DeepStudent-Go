@@ -31,7 +31,6 @@
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -39,6 +38,9 @@ import { pathToFileURL } from 'node:url';
 const { indexedDB, IDBKeyRange } = await import('fake-indexeddb');
 globalThis.indexedDB = indexedDB;
 globalThis.IDBKeyRange = IDBKeyRange;
+// Browser adapters register account-lifetime listeners at import time. Exercise
+// the real store graph without replacing models or requiring a DOM renderer.
+globalThis.window = new EventTarget();
 const persisted = new Map();
 Object.defineProperty(globalThis, 'localStorage', {
   value: {
@@ -49,10 +51,11 @@ Object.defineProperty(globalThis, 'localStorage', {
   configurable: true,
   writable: true,
 });
+window.localStorage = globalThis.localStorage;
 
 // ── 打 bundle（单入口，保证 store / db / settings 是同一份实例）─────────────
 const ROOT = new URL('..', import.meta.url).pathname;
-const OUT = mkdtempSync(join(tmpdir(), 'chat-followup-'));
+const OUT = mkdtempSync(join('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode', 'chat-followup-'));
 const entry = join(OUT, 'entry.ts');
 writeFileSync(
   entry,

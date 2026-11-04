@@ -24,7 +24,6 @@ import {
   Field,
   Sym,
   toast,
-  alertDialog,
   MODAL_CONTAINER_CLASS,
 } from '../ui';
 
@@ -108,7 +107,9 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
     setSkillModes(next);
     const pin = Object.entries(next).filter(([, v]) => v === 'pin').map(([k]) => Number(k));
     const drop = Object.entries(next).filter(([, v]) => v === 'drop').map(([k]) => Number(k));
-    await db.videos.update(videoId, { skillOverride: { pin, drop } });
+    const { cloud } = await import('../cloud/state');
+    if (cloud.enabled) await (await import('../client/resources')).resourceCommand({ kind: 'setCourseSkills', courseId: videoId, pin, drop });
+    else await db.videos.update(videoId, { skillOverride: { pin, drop } });
   };
 
   // 渲染 DOCX 预览（skeleton-reveal：脉冲占位 → cross-fade + cross-blur 到内容）
@@ -145,15 +146,8 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
       await runHandout(videoId, setProgress);
       toast.success('讲义生成完成');
     } catch (e) {
-      const errText = formatCaughtError(e);
-      setErrorText(errText);
-      // 原 antd Modal.error 带可复制的错误详情；mdui 用 alertDialog + copyText 复制
-      await alertDialog({
-        headline: '讲义生成失败',
-        description: errText,
-        copyText: errText,
-        confirmText: '知道了',
-      });
+      // 失败详情留在面板里（带复制按钮），不再自动弹出模态打断阅读。
+      setErrorText(formatCaughtError(e));
     } finally {
       setProgress(null);
       await loadLatest();

@@ -9,6 +9,7 @@ export const cloud = {
   permissionId: undefined as string | undefined,
   maxSteps: 100,
   acceptedPlugins: [] as string[],
+  taskSignal: undefined as AbortSignal | undefined,
 };
 export const remoteTasks = () => cloud.enabled && !cloud.worker;
 
@@ -65,19 +66,25 @@ export async function requestToolPermission(capability: 'read' | 'write' | 'remo
   if (!cloud.worker) return;
   let permissionId: string | undefined;
   for (;;) {
+    cloud.taskSignal?.throwIfAborted();
     const result = await cloudRequest<{ id?: string; status: string }>(`/tasks/${cloud.taskId}/authorize`, {
-      method: 'POST', body: JSON.stringify({ capability, arguments: args, permissionId }),
+      method: 'POST', body: JSON.stringify({ capability, arguments: args, permissionId }), signal: cloud.taskSignal,
     });
+    cloud.taskSignal?.throwIfAborted();
     if (result.status === 'approved') return result.id;
     if (result.status !== 'pending') throw new Error('该操作未获授权');
     permissionId = result.id;
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (!permissionId) throw new Error('executor_permission_identity_missing');
+    const runtime = await (await import('./executor-runtime')).executorRuntime();
+    const status = await runtime.waitAuthorization(permissionId, cloud.taskSignal);
+    if (status !== 'approved') throw new Error('该操作未获授权');
   }
 }
 
 export async function withToolPermission<T>(capability: 'read' | 'write' | 'remove', args: unknown, execute: () => Promise<T>): Promise<T> {
   if (!cloud.worker) return execute();
   const id = await requestToolPermission(capability, args);
+  cloud.taskSignal?.throwIfAborted();
   const previous = cloud.permissionId;
   cloud.permissionId = id;
   try { return await execute(); }

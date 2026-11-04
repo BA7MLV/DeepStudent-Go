@@ -28,3 +28,27 @@ export function preloadOnIdle(loaders: Array<() => Promise<unknown>>): () => voi
     globalThis.clearTimeout(handle);
   };
 }
+
+/** Prefetch only the destination a user points at or focuses, rather than every
+ * heavy reader/decoder on an unrelated screen. Navigation itself still loads
+ * normally if there was no hover (touch, keyboard shortcuts or direct links). */
+export function preloadOnIntent(routes: Record<string, () => Promise<unknown>>): () => void {
+  const connection = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection;
+  if (connection?.saveData) return () => {};
+  const pending = new Set<string>();
+  const intent = (event: Event) => {
+    const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+    if (!(link instanceof HTMLAnchorElement) || link.origin !== location.origin) return;
+    const pathname = link.hash.slice(1).split('?')[0];
+    const route = Object.keys(routes).find(route => pathname === route || pathname.startsWith(`${route}/`));
+    if (!route || pending.has(route)) return;
+    pending.add(route);
+    void routes[route]().catch(() => { pending.delete(route); });
+  };
+  document.addEventListener('pointerover', intent, { passive: true });
+  document.addEventListener('focusin', intent);
+  return () => {
+    document.removeEventListener('pointerover', intent);
+    document.removeEventListener('focusin', intent);
+  };
+}

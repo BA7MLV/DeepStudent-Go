@@ -3,6 +3,7 @@ import { assertPluginAvailable } from '../plugins/availability';
 import { runCardsPluginTask } from '../plugins/legacy-actions';
 import { getSettings, targetOfSlot } from '../store/settings';
 import { db } from '../store/db';
+import { publishLearningProducts, learningId } from '../cloud/learning-products';
 import { acquireWakeLock, releaseWakeLock } from '../utils/wakeLock';
 import { generateText, type TextProgress, type TextSegment } from './textGeneration';
 
@@ -27,10 +28,11 @@ export async function runCards(videoId: string, onProgress: (p: CardsProgress) =
   try {
     const cards = await generateText('cards', video.name, segments, targetOfSlot(getSettings(), 'chat'), onProgress);
     const now = Date.now();
-    await db.transaction('rw', db.cards, async () => {
-      await db.cards.where('videoId').equals(videoId).delete();
-      await db.cards.bulkAdd(cards.map(c => ({ videoId, ...c, status: 0 as const, createdAt: now })));
-    });
+    const old = await db.cards.where('videoId').equals(videoId).toArray();
+    await publishLearningProducts([
+      ...old.map(row => ({ kind: 'candidateCard' as const, expected: { ...row, id: row.id! }, value: null })),
+      ...cards.map(c => ({ kind: 'candidateCard' as const, expected: null, value: { id: learningId(), videoId, ...c, status: 0 as const, createdAt: now } })),
+    ]);
     return cards.length;
   } finally { await releaseWakeLock(); }
 }

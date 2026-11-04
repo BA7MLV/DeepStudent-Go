@@ -2,13 +2,16 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { EventEmitter } from 'node:events';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { BotApplicationService } from '../apps/api/src/agent/service.ts';
 import { BotMessageHistory } from '../apps/api/src/agent/message-history.ts';
-import { BotMessageStreams } from '../apps/api/src/agent/message-stream.ts';
+import { ClientRuntimeDomain } from '../apps/api/src/realtime/domain.ts';
+import { fixtureRemote } from './fixture-remote.mjs';
+import { publishBotEvent } from '../apps/api/src/agent/events.ts';
+import { UsageLedger } from '../apps/api/src/agent/budget.ts';
 import { mergeMessages, mergeById } from '../apps/web/src/pages/botMessageCache.ts';
 import { serverClient } from '../apps/web/src/api/serverClient.ts';
+import { isBotActivity } from '@wangke/contracts';
 import { createMessageGrouper } from '../apps/web/src/pages/botMessages.ts';
 import { acquireBotImage, clearBotImageCache, invalidateBotImage } from '../apps/web/src/components/botImageCache.ts';
 
@@ -93,6 +96,51 @@ test('persistent invalidations are atomic, survive reopen, cover old active runs
   } finally { f.close(); }
 });
 
+test('activity uses durable model/tool facts, handles parallel calls, approvals and terminal states without leaking arguments', () => {
+  const f = fixture();
+  try {
+    const db = f.store.db;
+    db.prepare("INSERT INTO runs(id,thread_id,mode,status,created_at) VALUES('activity',?,'bot','queued',?)").run(f.thread.id, at);
+    assert.equal(f.history.snapshot(f.thread.id).activity.phase, 'queued');
+    db.prepare("UPDATE runs SET status='running' WHERE id='activity'").run();
+    const ledger = new UsageLedger(f.store);
+    const request = ledger.reserve({ owner: 'owner', run: 'activity', purpose: 'bot', provider: 'fixture', model: 'fixture' }, 1, 100);
+    assert.equal(f.history.snapshot(f.thread.id).activity.phase, 'model');
+    ledger.settle(request, 'completed');
+    assert.equal(f.history.snapshot(f.thread.id).activity.phase, 'running');
+    for (let n = 0; n < 6; n++) db.prepare("INSERT INTO run_steps(id,run_id,tool,arguments,status,created_at) VALUES(?,'activity',?,?,'running',?)").run(`step-${n}`, `tool-${n}`, '{"secret":"do-not-expose"}', at);
+    publishBotEvent(f.store, { owner: 'owner', run: 'activity', step: 'step-0', type: 'tool.started' });
+    const snapshot = f.history.snapshot(f.thread.id);
+    assert.equal(snapshot.activity.phase, 'tools');
+    assert.equal(snapshot.activity.activeTools, 6);
+    assert.equal(snapshot.activity.tools.length, 4, 'bounded names with exact active count');
+    assert.equal(JSON.stringify(snapshot.activity).includes('do-not-expose'), false);
+    db.prepare("UPDATE run_steps SET status='completed',result='private output' WHERE id='step-0'").run();
+    publishBotEvent(f.store, { owner: 'owner', run: 'activity', step: 'step-0', type: 'tool.finished' });
+    assert.equal(f.history.state(f.thread.id).activity.activeTools, 5);
+    assert.equal(f.history.state(f.thread.id).activity.completedTools, 1);
+    f.bot.append(f.thread.id, 'assistant', 'progress', 'I claim everything is done');
+    assert.equal(f.history.state(f.thread.id).activity.activeTools, 5, 'narration cannot override execution facts');
+    db.prepare("UPDATE runs SET status='waiting_user' WHERE id='activity'").run();
+    assert.equal(f.history.state(f.thread.id).activity.phase, 'waiting_user');
+    assert.equal(f.history.state(f.thread.id).activity.activeTools, 0, 'suspended calls are not displayed as executing');
+    db.prepare("UPDATE runs SET status='waiting_event' WHERE id='activity'").run();
+    assert.equal(f.history.state(f.thread.id).activity.phase, 'waiting_event');
+    for (const status of ['completed', 'cancelled', 'failed', 'paused']) {
+      db.prepare('UPDATE runs SET status=? WHERE id=\'activity\'').run(status);
+      publishBotEvent(f.store, { owner: 'owner', run: 'activity', type: 'run.finished', status });
+      assert.equal(f.history.state(f.thread.id).activity, null);
+    }
+    const events = db.prepare("SELECT payload FROM message_events WHERE thread_id=? AND type='thread.activity' ORDER BY event_id").all(f.thread.id);
+    assert.ok(events.length >= 8);
+    assert.equal(JSON.parse(events.at(-1).payload).activity, null);
+    assert.ok(events.every(event => !/do-not-expose|private output/.test(event.payload)));
+    const cursor = f.history.cursor(f.thread.id);
+    publishBotEvent(f.store, { owner: 'someone-else', run: 'activity', type: 'tool.started' });
+    assert.equal(f.history.cursor(f.thread.id), cursor, 'owner mismatch cannot publish to a thread');
+  } finally { f.close(); }
+});
+
 test('nonce identity merge handles POST/SSE either way, duplicates, updates and history overlap', () => {
   const base = { threadId: 't', clientNonce: 'nonce', seq: 1, role: 'user', kind: 'text', content: 'hello', createdAt: at, replyTo: null };
   const pending = { ...base, id: 'pending-nonce', seq: Number.MAX_SAFE_INTEGER };
@@ -142,56 +190,41 @@ test('derived rows reuse unaffected identities; shared image URLs keep active re
 
 test('one durable stream replays the snapshot gap, follows other-store writes, respects backpressure and cleans up', async () => {
   const f = fixture();
-  class Response extends EventEmitter {
-    frames = []; writableEnded = false; blocked = false;
-    write(frame) { this.frames.push(frame); return !this.blocked; }
-    end() { this.writableEnded = true; this.emit('close'); }
-  }
-  const streams = new BotMessageStreams(f.store);
+  const domain = new ClientRuntimeDomain(f.store, undefined);
+  const control = new AbortController();
   let second;
   try {
     f.bot.append(f.thread.id, 'assistant', 'text', 'before');
     const snapshot = f.history.snapshot(f.thread.id);
     const gap = f.bot.append(f.thread.id, 'assistant', 'text', 'between snapshot and subscribe');
-    const response = new Response(); let allowed = true;
-    streams.add(f.thread.id, snapshot.eventCursor, response, () => allowed);
-    assert.ok(response.frames.join('').includes(gap.id));
-    assert.equal(response.frames.join('').includes('"content":"before"'), false);
+    const stream = domain.watchBot('owner', f.thread.id, snapshot.eventCursor, control.signal)[Symbol.asyncIterator]();
+    assert.equal((await stream.next()).value.type, 'ready');
+    const replayed = (await stream.next()).value;
+    assert.equal(replayed.event.message.id, gap.id);
+    assert.notEqual(replayed.event.message.content, 'before');
     second = new DatabaseStore(f.filename);
     const other = new BotApplicationService(second, { enqueue() {} });
-    response.blocked = true;
     const blocked = other.append(f.thread.id, 'assistant', 'text', 'blocked');
     const waiting = other.append(f.thread.id, 'assistant', 'text', 'waiting for drain');
     await new Promise(resolve => setTimeout(resolve, 350));
-    assert.ok(response.frames.join('').includes(blocked.id));
-    assert.equal(response.frames.join('').includes(waiting.id), false);
-    response.blocked = false; response.emit('drain');
+    assert.equal((await stream.next()).value.event.message.id, blocked.id);
+    // No request for the next item: the bounded generator is backpressured.
+    assert.equal(domain.diagnostics().subscriptions, 1);
     await new Promise(resolve => setTimeout(resolve, 350));
-    assert.ok(response.frames.join('').includes(waiting.id));
-    allowed = false;
-    await new Promise(resolve => setTimeout(resolve, 350));
-    assert.equal(response.writableEnded, true);
-    streams.close();
-  } finally { streams.close(); second?.close(); f.close(); }
+    assert.equal((await stream.next()).value.event.message.id, waiting.id);
+    control.abort();
+    assert.equal((await stream.next()).done, true);
+    assert.equal(domain.diagnostics().subscriptions, 0);
+  } finally { control.abort(); domain.close(); second?.close(); f.close(); }
 });
 
-test('SSE parser: byte-split UTF-8/CRLF, multiline data, heartbeats, callback failure and malformed payload', async () => {
-  const original = globalThis.fetch;
-  const message = { id: 'm', threadId: 't', seq: 1, role: 'assistant', kind: 'text', content: '你好', createdAt: at, replyTo: null, clientNonce: null };
-  const bytes = new TextEncoder().encode(`: heartbeat\r\n\r\nid: 7\r\nevent: message.accepted\r\ndata: {"message":\r\ndata: ${JSON.stringify(message)}}\r\n\r\n`);
-  try {
-    globalThis.fetch = async () => new Response(new ReadableStream({ start(controller) { for (const byte of bytes) controller.enqueue(Uint8Array.of(byte)); controller.close(); } }));
-    const events = [];
-    await serverClient.events('t', 3, (event, cursor) => events.push({ event, cursor }));
-    assert.equal(events.length, 1);
-    assert.equal(events[0].cursor, 7);
-    assert.equal(events[0].event.message.content, '你好');
-    await assert.rejects(serverClient.events('t', 3, () => { throw new Error('consumer failed'); }), /consumer failed/);
-    globalThis.fetch = async () => new Response('id: 8\nevent: message.accepted\ndata: {bad}\n\n');
-    await assert.rejects(serverClient.events('t', 7, () => assert.fail('bad event applied')), /invalid_sync_event/);
-    globalThis.fetch = async () => new Response('id: 8\nevent: message.accepted\ndata: {"message":{}}\n\n');
-    await assert.rejects(serverClient.events('t', 7, () => assert.fail('invalid message applied')), /invalid_sync_event/);
-  } finally { globalThis.fetch = original; }
+test('Web SSE parser is retired; shared activity validation still rejects malformed facts', () => {
+  assert.equal(Object.hasOwn(serverClient, 'events'), false);
+  // Carrier framing/replay/malformed codec tests now belong to the real typed
+  // HTTP/WS suite (test-client-runtime), not an unused browser SSE implementation.
+  const activity = { phase: 'tools', tools: [{ id: 's', name: 'read' }], activeTools: 1, completedTools: 2 };
+  assert.equal(isBotActivity(activity), true);
+  for (const invalid of [undefined, {}, { ...activity, activeTools: -1 }, { ...activity, completedTools: 1.5 }, { ...activity, tools: [{ id: 's', name: 7 }] }]) assert.equal(isBotActivity(invalid), false);
 });
 
 test('HTTP authorization, cursor validation, paged summaries, live stream replay, future cursor and logout', async () => {
@@ -199,7 +232,7 @@ test('HTTP authorization, cursor validation, paged summaries, live stream replay
   Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: root, FILES_DIR: path.join(root, 'files'), BOOTSTRAP_SECRET_FILE: path.join(root, 'config/bootstrap-secret') });
   const { buildServer } = await import('../apps/api/src/server.ts');
   const app = buildServer({ dbPath: path.join(root, 'db.sqlite') });
-  let store;
+  let store, remote;
   const controllers = [];
   try {
     await app.listen({ host: '127.0.0.1', port: 0 });
@@ -208,6 +241,7 @@ test('HTTP authorization, cursor validation, paged summaries, live stream replay
     assert.equal(initialized.statusCode, 201);
     const login = await app.inject({ method: 'POST', url: '/api/v1/auth/password/login', payload: { password: 'bot-sync-test-password' } });
     const cookie = login.headers['set-cookie'].split(';')[0];
+    remote = await fixtureRemote(origin, { cookie });
     const request = (url, method = 'GET', payload) => app.inject({ method, url: `/api/v1${url}`, headers: { cookie }, payload });
     const owner = login.json().user.id;
     assert.equal((await request('/bootstrap/status')).json().botSyncVersion, 1);
@@ -219,9 +253,10 @@ test('HTTP authorization, cursor validation, paged summaries, live stream replay
     const snapshot = (await request(`/threads/${thread.id}/snapshot`)).json();
     assert.equal(snapshot.messages.length, 50);
     assert.equal((await request(`/threads/${thread.id}/messages?beforeSeq=${snapshot.nextBeforeSeq}`)).json().messages.length, 50);
-    for (const suffix of ['snapshot', 'messages', 'sync-state', 'stream']) assert.equal((await app.inject(`/api/v1/threads/${thread.id}/${suffix}`)).statusCode, 401);
+    for (const suffix of ['snapshot', 'messages', 'sync-state']) assert.equal((await app.inject(`/api/v1/threads/${thread.id}/${suffix}`)).statusCode, 401);
     for (const query of ['beforeSeq=no', 'beforeSeq=-1', 'beforeSeq=0', 'limit=101', 'limit=0']) assert.equal((await request(`/threads/${thread.id}/messages?${query}`)).statusCode, 400);
-    assert.equal((await request(`/threads/${thread.id}/stream?after=no`)).statusCode, 400);
+    const invalid = remote.client.watchBot(thread.id, -1, new AbortController().signal)[Symbol.asyncIterator]();
+    await assert.rejects(invalid.next());
     assert.equal((await request('/threads/page?cursor=no')).statusCode, 400);
     const seen = new Set(); let cursor;
     do {
@@ -233,31 +268,20 @@ test('HTTP authorization, cursor validation, paged summaries, live stream replay
     assert.equal(seen.size, 120);
     store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run('other', 'Other', at);
     const foreign = bot.create('other', 'bot', 'Private');
-    for (const suffix of ['summary', 'snapshot', 'messages', 'sync-state', 'stream']) assert.equal((await request(`/threads/${foreign.id}/${suffix}`)).statusCode, 404);
+    for (const suffix of ['summary', 'snapshot', 'messages', 'sync-state']) assert.equal((await request(`/threads/${foreign.id}/${suffix}`)).statusCode, 404);
+    await assert.rejects(remote.client.watchBot(foreign.id, 0, new AbortController().signal)[Symbol.asyncIterator]().next());
     const gap = bot.append(thread.id, 'assistant', 'text', 'snapshot gap');
     const controller = new AbortController(); controllers.push(controller);
-    const response = await fetch(`${origin}/api/v1/threads/${thread.id}/stream?after=${snapshot.eventCursor}`, { headers: { cookie }, signal: controller.signal });
-    assert.equal(response.status, 200);
-    assert.equal(response.headers.get('x-accel-buffering'), 'no');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder(); let text = '';
-    const until = async predicate => {
-      const timeout = setTimeout(() => controller.abort(), 5000);
-      try { while (!predicate()) { const chunk = await reader.read(); if (chunk.done) return; text += decoder.decode(chunk.value, { stream: true }); } }
-      finally { clearTimeout(timeout); }
-    };
-    await until(() => text.includes(gap.id));
-    assert.ok(text.includes(gap.id), 'message committed in snapshot/subscribe gap is replayed');
+    const stream = remote.client.watchBot(thread.id, snapshot.eventCursor, controller.signal)[Symbol.asyncIterator]();
+    assert.equal((await stream.next()).value.type, 'ready');
+    assert.equal((await stream.next()).value.event.message.id, gap.id, 'message committed in snapshot/subscribe gap is replayed');
     bot.append(thread.id, 'assistant', 'text', 'live append');
-    await until(() => text.includes('live append'));
-    assert.ok(text.includes('live append'));
-    const future = await fetch(`${origin}/api/v1/threads/${thread.id}/stream?after=${Number.MAX_SAFE_INTEGER}`, { headers: { cookie } });
-    assert.match(await future.text(), /resync.required/);
+    assert.equal((await stream.next()).value.event.message.content, 'live append');
+    const future = remote.client.watchBot(thread.id, Number.MAX_SAFE_INTEGER, controller.signal)[Symbol.asyncIterator]();
+    assert.equal((await future.next()).value.event.type, 'resync.required');
+    await future.return?.();
     assert.equal((await request('/auth/logout', 'POST')).statusCode, 200);
-    let ended = false;
     const timeout = setTimeout(() => controller.abort(), 5000);
-    try { while (!ended) ended = (await reader.read()).done; } finally { clearTimeout(timeout); }
-    assert.equal(ended, true, 'revoked session closes its existing stream');
-    reader.releaseLock();
-  } finally { for (const controller of controllers) controller.abort(); store?.close(); await app.close(); fs.rmSync(root, { recursive: true, force: true }); }
+    try { await assert.rejects(stream.next(), 'revoked session closes its existing stream'); } finally { clearTimeout(timeout); }
+  } finally { for (const controller of controllers) controller.abort(); await remote?.close(); store?.close(); await app.close(); fs.rmSync(root, { recursive: true, force: true }); }
 });

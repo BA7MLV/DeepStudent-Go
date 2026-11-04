@@ -19,6 +19,7 @@
  */
 
 import { db } from '../store/db';
+import { publishLearningProducts, learningId } from '../cloud/learning-products';
 import { chunkUnits, countChars, judgeMaterialText, type MaterialBlock, type RawUnit } from './chunk.ts';
 import type { UnitKind } from './units.ts';
 
@@ -80,19 +81,15 @@ export async function reindexMaterial(
   const { scanned, empty } = judgeMaterialText(format, totalChars, contentUnits);
   const unitCount = declaredUnits ?? contentUnits;
 
-  await db.transaction('rw', db.materialBlocks, db.videos, async () => {
-    const old = await db.materialBlocks.where('materialId').equals(materialId).toArray();
-    if (old.length > 0) await db.materialBlocks.bulkDelete(old.map((b) => b.id!));
-    if (blocks.length > 0) {
-      await db.materialBlocks.bulkAdd(blocks.map((b) => ({ ...b, materialId })));
-    }
-    await db.videos.update(materialId, {
-      unitCount,
-      // 重新解析一份原本被误判为扫描件的文件时要能恢复：明确写 undefined 而不是跳过
-      scanned: scanned ? 1 : undefined,
-      empty: empty ? 1 : undefined,
-    });
-  });
+  const old = await db.materialBlocks.where('materialId').equals(materialId).toArray();
+  const course = await db.videos.get(materialId);
+  if (!course) throw new Error('course_not_found');
+  await publishLearningProducts([
+    ...old.map(row => ({ kind: 'materialBlock' as const, expected: { ...row, id: row.id! }, value: null })),
+    ...blocks.map(row => ({ kind: 'materialBlock' as const, expected: null, value: { ...row, id: learningId(), materialId } })),
+    { kind: 'courseDerivation', courseId: materialId, expected: { unitCount: course.unitCount, scanned: course.scanned, empty: course.empty },
+      value: { unitCount, scanned: scanned ? 1 : undefined, empty: empty ? 1 : undefined } },
+  ]);
 
   return { unitCount, blockCount: blocks.length, totalChars, scanned, empty };
 }

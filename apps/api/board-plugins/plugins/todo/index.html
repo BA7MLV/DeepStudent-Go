@@ -4,10 +4,11 @@
 const title = document.getElementById('title'), error = document.getElementById('error'), items = document.getElementById('items');
 title.placeholder = board.t('添加一件待办…', 'Add a task…'); title.setAttribute('aria-label', board.t('待办内容', 'Task title'));
 document.getElementById('add').textContent = board.t('添加', 'Add');
-let snapshot, busy = false;
+let snapshot, busy = false, version = 0;
 async function load() {
   if (busy) return;
-  try { snapshot = await board.read(); render(); } catch (e) { error.textContent = e.message; }
+  const before = version;
+  try { const next = await board.read(); if (before === version) { snapshot = next; render(); } } catch (e) { error.textContent = e.message; }
 }
 function render() {
   items.replaceChildren();
@@ -31,6 +32,13 @@ document.querySelector('form').onsubmit = async event => {
   event.preventDefault(); if (!snapshot || !title.value.trim() || busy) return;
   if (await save([...snapshot.data.items, {id: crypto.randomUUID(), title: title.value.trim(), done: false}])) title.value = '';
 };
-load(); setInterval(load, 5000);
+const off = plugin.events.subscribe('state.changed', document => {
+  version++;
+  if (busy) return;
+  try { snapshot = { data: JSON.parse(document.content), content: document.content, revision: document.revision }; render(); }
+  catch (e) { error.textContent = e.message; }
+});
+plugin.events.subscribe('dispose', off);
+load();
 </script>
 <style>.item{padding:12px 0;border-bottom:1px solid var(--border);overflow-wrap:anywhere}.item span{flex:1}.item input{flex:none;width:18px}</style>

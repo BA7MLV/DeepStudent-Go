@@ -604,7 +604,9 @@ export class GatewayCore {
   project() {
       for (const b of this.store.db.prepare('SELECT * FROM gateway_bindings WHERE revoked=0').all() as any[]) {
         const account = this.store.db.prepare('SELECT channel FROM gateway_accounts WHERE id=?').get(b.account_id) as { channel: string } | undefined;
-        const events = this.store.db.prepare('SELECT * FROM message_events WHERE thread_id=? AND event_id>? ORDER BY event_id LIMIT 200').all(b.thread_id, b.checkpoint) as any[];
+        // Web activity can be high-volume (parallel tools / image batches).
+        // It must not consume the delivery page and delay the actual IM reply.
+        const events = this.store.db.prepare("SELECT * FROM message_events WHERE thread_id=? AND event_id>? AND type!='thread.activity' ORDER BY event_id LIMIT 200").all(b.thread_id, b.checkpoint) as any[];
         for (const event of events) {
           const failed = this.store.db.prepare('SELECT next_at FROM gateway_projection_failures WHERE binding_id=? AND event_id=?').get(b.id, event.event_id) as any;
           if (failed?.next_at > Date.now()) break;

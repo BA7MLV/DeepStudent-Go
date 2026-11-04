@@ -3,7 +3,8 @@ import { remoteTasks } from '../cloud/state';
 import { assertPluginAvailable } from '../plugins/availability';
 import { runMaterialPluginTask } from '../plugins/legacy-actions';
 import { getSettings, targetOfSlot, visionTargetOrNull, type ModelTarget } from '../store/settings';
-import { db, type FrameRow, type SegmentRow } from '../store/db';
+import { db, type SegmentRow } from '../store/db';
+import { publishLearningProducts, learningId } from '../cloud/learning-products';
 import { getVideoFile } from '../store/fileStore';
 import { extractFrames, extractFramesAt, blobToDataURL, type ExtractedFrame } from '../media/frames';
 import { PROMPTS } from '../harness/prompts';
@@ -202,16 +203,11 @@ async function runHandoutInner(
   // 必须**先写新的、再删旧的，且放在同一个事务里**。原先的「先 delete 再 bulkAdd」
   // 有一个真实后果：bulkAdd 之前一旦抛错（配额、中断），旧的帧已经删掉了，
   // 讲义配图和「复用 slide 帧当封面」的素材就一起永久丢失。
-  await db.transaction('rw', db.frames, async () => {
-    const old = await db.frames.where('videoId').equals(videoId).toArray();
-    if (slides.length > 0) {
-      await db.frames.bulkAdd(
-        slides.map<FrameRow>((f) => ({ videoId, ts: f.ts, blob: f.blob, kind: 'slide', caption: f.caption })),
-      );
-    }
-    // 新的写成功了才删旧的（新增的行 id 与旧的不同，不会互相误删）
-    if (old.length > 0) await db.frames.bulkDelete(old.map((f) => f.id!));
-  });
+  const oldFrames = await db.frames.where('videoId').equals(videoId).toArray();
+  await publishLearningProducts([
+    ...slides.map(f => ({ kind: 'slideFrame' as const, expected: null, value: { id: learningId(), videoId, ts: f.ts, blob: f.blob, kind: 'slide' as const, caption: f.caption } })),
+    ...oldFrames.map(row => ({ kind: 'slideFrame' as const, expected: { ...row, id: row.id! }, value: null })),
+  ]);
 
   // 讲义跑完，手上这批幻灯片帧比入库时自动抽的那张更贴课件首页，所以让封面重做一次
   // （`ensureCover` 会挑最早的 slide 帧，并拒绝覆盖用户手选的封面）。
@@ -354,7 +350,8 @@ async function runHandoutInner(
     images,
   });
 
-  await db.handouts.add({
+  await publishLearningProducts([{ kind: 'handoutDocument', expected: null, value: {
+    id: learningId(),
     videoId,
     createdAt: Date.now(),
     title: outline.title || videoName,
@@ -362,7 +359,7 @@ async function runHandoutInner(
     outlineJson: JSON.stringify(outline),
     sectionsJson: JSON.stringify(doneSections),
     usedSkills: routed.selected.map((s) => s.name),
-  });
+  } }]);
 
   onProgress({ phase: 'done', done: 1, total: 1, message: '讲义生成完成' });
 }

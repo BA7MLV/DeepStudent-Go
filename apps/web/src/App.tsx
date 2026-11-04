@@ -1,6 +1,5 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
-import CourseChat from './pages/CourseChat';
 import AppLayout from './components/AppLayout';
 import { useMobileGlobals } from './utils/useMobile';
 import { isModelMetaStale, refreshModelMeta } from './api/modelMeta';
@@ -10,7 +9,7 @@ import { backfillCovers } from './pipelines/coverQueue';
 import { startStudyTracking } from './store/studyTime';
 import LiveShareBar from './components/LiveShareBar';
 import SettingsModal from './components/SettingsModal';
-import { preloadOnIdle } from './utils/preload';
+import { preloadOnIntent } from './utils/preload';
 import { FeedbackHost, PageLoader } from './ui';
 import { openSettingsFromHash } from './components/settingsDialogStore';
 import CloudActivity from './cloud/Activity';
@@ -18,13 +17,14 @@ import BrowserWorkerHost from './cloud/BrowserWorkerHost';
 import { useBotPanel } from './store/botPanel';
 
 /*
- * 按路由拆包：首页（对话）同步加载，其余页面点进去才下载。
+ * 按路由拆包：对话也按需加载，直接打开看板不下载对话界面。
  * 以前七个页面和设置弹窗全部打进同一个 App chunk（约 1.4 MB / gzip 440 KB），
  * 打开首页也要等资源库、播放器、PDF 阅读器的代码一起下完。
  */
 // 设置弹窗不在这里拆：各页面的「设置」按钮和它同一个文件，拆了也会被首页带回主包。
 // 它最重的部分（十个设置模块）在设置 PR 里已经改成按模块懒加载。
 const pages = {
+  chat: () => import('./pages/CourseChat'),
   library: () => import('./pages/Library'),
   player: () => import('./pages/Player'),
   study: () => import('./pages/Study'),
@@ -34,6 +34,7 @@ const pages = {
   tasks: () => import('./pages/Board'),
 };
 const Library = lazy(pages.library);
+const CourseChat = lazy(pages.chat);
 const Player = lazy(pages.player);
 const Study = lazy(pages.study);
 const BotWorkspace = lazy(pages.bot);
@@ -69,8 +70,8 @@ export default function App() {
   // 放在 App 而不是学习页里，是因为「在线时长」本来就不该只在那个页面被统计。
   useEffect(() => startStudyTracking(), []);
 
-  // 首屏画完后，利用空闲时间把最常去的页面预取进缓存，点击时不用等网络。
-  useEffect(() => preloadOnIdle([pages.library, pages.player, pages.study]), []);
+  // 指向导航时预取目标，不在看板空闲期间下载所有播放器/阅读器。
+  useEffect(() => preloadOnIntent({ '/library': pages.library, '/player': pages.player, '/study': pages.study }), []);
 
   // 启动时把上次没转完的视频接着转（刷新/关页会中断任务，但已完成段落了库，续跑不重复计费）
   useEffect(() => {

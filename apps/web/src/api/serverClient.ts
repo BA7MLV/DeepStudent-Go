@@ -2,7 +2,6 @@ import type {
   AgentProfileDto,
   BootstrapStatusDto,
   MessageDto,
-  SseEvent,
   ThreadDto,
   ProjectDto, ProjectDetailDto, ProjectPolicy, ProjectRole, ProjectFileDto, ProjectTextDto,
   BotSnapshot, BotMessagePage, BotSyncState, BotThreadPage,
@@ -87,11 +86,21 @@ export const serverClient = {
   grantProject: (id: string, agentId: string, role: ProjectRole | null) => request<ProjectDetailDto>(`/projects/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}`, { method: 'PUT', body: JSON.stringify({ role }) }),
   projectFiles: (id: string, path = '') => request<{ files: ProjectFileDto[] }>(`/projects/${encodeURIComponent(id)}/files?path=${encodeURIComponent(path)}`),
   projectText: (id: string, path: string) => request<ProjectTextDto>(`/projects/${encodeURIComponent(id)}/text?path=${encodeURIComponent(path)}`),
-  writeProjectText: (id: string, path: string, text: string, expectedRevision: string | null) => request<{ path: string; revision: string }>(`/projects/${encodeURIComponent(id)}/text?path=${encodeURIComponent(path)}`, { method: 'PUT', body: JSON.stringify({ text, expectedRevision }) }),
-  projectDirectory: (id: string, path: string) => request<{ created: true }>(`/projects/${encodeURIComponent(id)}/directories?path=${encodeURIComponent(path)}`, { method: 'POST' }),
-  uploadProjectFile: (id: string, path: string, file: File) => request<{ path: string; size: number }>(`/projects/${encodeURIComponent(id)}/uploads?path=${encodeURIComponent(path)}`, { method: 'POST', body: file, headers: { 'Content-Type': 'application/octet-stream' } }),
-  deleteProjectFile: (id: string, path: string, revision: string) => request<{ deleted: true }>(`/projects/${encodeURIComponent(id)}/files?path=${encodeURIComponent(path)}&revision=${encodeURIComponent(revision)}`, { method: 'DELETE' }),
-  deleteResourceFile: (id: string, path: string, revision: string) => request<{ deleted: true }>(`/resources/file?projectId=${encodeURIComponent(id)}&path=${encodeURIComponent(path)}&revision=${encodeURIComponent(revision)}`, { method: 'DELETE' }),
+  writeProjectText: async (id: string, path: string, text: string, expectedRevision: string | null) =>
+    await (await import('../client/resources')).resourceCommand({ kind: 'saveProjectText', projectId: id, path, text, expectedRevision }) as unknown as { path: string; revision: string },
+  projectDirectory: async (id: string, path: string) => {
+    await (await import('../client/resources')).resourceCommand({ kind: 'createDirectory', projectId: id, path });
+    return { created: true as const };
+  },
+  uploadProjectFile: async (id: string, path: string, file: File) => (await import('../client/resources')).uploadResource(id, path, file),
+  deleteProjectFile: async (id: string, path: string, revision: string) => {
+    await (await import('../client/resources')).resourceCommand({ kind: 'remove', projectId: id, path, revision });
+    return { deleted: true as const };
+  },
+  deleteResourceFile: async (id: string, path: string, revision: string) => {
+    await (await import('../client/resources')).resourceCommand({ kind: 'remove', projectId: id, path, revision });
+    return { deleted: true as const };
+  },
   projectDownloadUrl: (id: string, path: string) => `${API_ROOT}/projects/${encodeURIComponent(id)}/download?path=${encodeURIComponent(path)}`,
   fileDownloadUrl: (id: string) => `${API_ROOT}/files/${encodeURIComponent(id)}`,
   thread: (id: string) => request<ThreadDetail>(`/threads/${encodeURIComponent(id)}`),
@@ -107,56 +116,4 @@ export const serverClient = {
   react: (messageId: string, reaction: string) => request<{ messageId: string; reaction: string; active: boolean }>(`/messages/${encodeURIComponent(messageId)}/reactions`, { method: 'POST', body: JSON.stringify({ reaction }) }),
   approvals: (id: string) => request<ApprovalDto>(`/approvals/${encodeURIComponent(id)}`),
   resolveApproval: (id: string, approved: boolean, resolution?: string) => request<ApprovalDto>(`/approvals/${encodeURIComponent(id)}/resolve`, { method: 'POST', body: JSON.stringify({ approved, resolution }) }),
-  async events(id: string, after: number, onEvent: (event: SseEvent, id: number) => void, signal?: AbortSignal, live = false, onOpen?: () => void) {
-    const response = await fetch(`${API_ROOT}/threads/${encodeURIComponent(id)}/${live ? 'stream' : 'events'}?after=${after}`, { credentials: 'include', headers: { Accept: 'text/event-stream', 'Last-Event-ID': String(after) }, signal });
-    if (!response.ok || !response.body) {
-      const error = new ServerApiError(response.status, `events_${response.status}`);
-      const retry = response.headers.get('retry-after');
-      if (retry) error.retryAfterMs = /^\d+$/.test(retry) ? Number(retry) * 1000 : Math.max(0, Date.parse(retry) - Date.now());
-      throw error;
-    }
-    onOpen?.();
-    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let eventId = after;
-    const consume = (block: string) => {
-      let data = '';
-      let nextType = '';
-      let nextId = eventId;
-      let hasId = false;
-      for (const line of block.split('\n')) {
-        if (line.startsWith('id:')) {
-          const parsed = Number(line.slice(3).trim());
-          if (Number.isSafeInteger(parsed) && parsed > 0) { nextId = parsed; hasId = true; }
-        } else if (line.startsWith('event:')) nextType = line.slice(6).trim();
-        else if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).trim();
-      }
-      if (!data || !nextType) return;
-      let parsed;
-      try { parsed = JSON.parse(data); } catch { throw new Error('invalid_sync_event'); }
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid_sync_event');
-      const event = { ...parsed, type: nextType } as SseEvent;
-      if (!['message.pending', 'message.accepted', 'message.updated', 'message.reaction', 'run.started', 'run.progress', 'run.waiting_user', 'run.completed', 'run.failed', 'thread.state_invalidated', 'resync.required'].includes(nextType)) {
-        onEvent({ type: nextType } as SseEvent, nextId); eventId = nextId; return;
-      }
-      if (nextType !== 'resync.required' && !hasId) throw new Error('invalid_sync_event');
-      if (['message.pending', 'message.accepted', 'message.updated'].includes(nextType)) {
-        const message = 'message' in event ? event.message : null;
-        if (nextId <= 0 || !message || typeof message.id !== 'string' || message.threadId !== id || !Number.isSafeInteger(message.seq) || message.seq < 1 || typeof message.content !== 'string' || typeof message.createdAt !== 'string' || !Number.isFinite(Date.parse(message.createdAt)) || !['user', 'assistant', 'tool', 'system'].includes(message.role) || !['text', 'progress', 'attachment', 'widget', 'question', 'approval', 'web_sources'].includes(message.kind)) throw new Error('invalid_sync_event');
-      }
-      // Only advance after the consumer successfully validated/applied the event.
-      onEvent(event, nextId);
-      eventId = nextId;
-    };
-    try {
-      for (;;) {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const part = await Promise.race([reader.read(), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('sync_timeout')), 45_000); })]).finally(() => clearTimeout(timer));
-        if (part.done) break;
-        buffer = (buffer + decoder.decode(part.value, { stream: true })).replace(/\r\n/g, '\n');
-        if (buffer.length > 2 * 1024 * 1024) throw new Error('sync_event_too_large');
-        const blocks = buffer.split('\n\n'); buffer = blocks.pop() ?? ''; blocks.forEach(consume);
-      }
-      buffer += decoder.decode();
-      // An incomplete frame is replayed from the last applied ID, never applied partially.
-    } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-  },
 };

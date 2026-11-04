@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { Button, Input, Label, Modal, Spinner, TextArea, TextField } from '@heroui/react';
+import { Button, Drawer, Input, Label, Spinner, TextArea, TextField } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
 import type { ProjectDto, ProjectFileDto } from '@wangke/contracts';
 import { serverClient } from '../api/serverClient';
-import { confirmDialog, MODAL_CONTAINER_CLASS, promptDialog, Sym, toast } from '../ui';
+import { confirmDialog, promptDialog, Sym, toast } from '../ui';
 import { formatSize } from '../utils/format';
+import { useIsMobile } from '../utils/useMobile';
 import { projectError } from './errors';
+import { followResources } from '../client/resources';
 
 export default function ProjectFiles({ project }: { project: ProjectDto }) {
   const { t } = useTranslation('projects');
@@ -16,15 +18,15 @@ export default function ProjectFiles({ project }: { project: ProjectDto }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [editor, setEditor] = useState<{ path: string; text: string; revision: string | null } | null>(null);
+  const [editorBaseline, setEditorBaseline] = useState('');
   const [editorError, setEditorError] = useState('');
+  const mobile = useIsMobile();
+  const editorDirty = editor !== null && JSON.stringify({ path: editor.path, text: editor.text }) !== editorBaseline;
   const uploadInput = useRef<HTMLInputElement>(null);
   const join = (name: string) => directory ? `${directory}/${name}` : name;
   useEffect(() => {
-    let ignore = false;
     setLoading(true); setError(''); setFiles([]);
-    serverClient.projectFiles(project.id, directory).then(result => { if (!ignore) setFiles(result.files); })
-      .catch(error => { if (!ignore) setError(projectError(error)); }).finally(() => { if (!ignore) setLoading(false); });
-    return () => { ignore = true; };
+    return followResources(project.id, directory, result => { setFiles(result.entries); setLoading(false); setError(''); }, error => { setError(projectError(error)); setLoading(false); });
   }, [project.id, directory, refresh]);
 
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -46,9 +48,21 @@ export default function ProjectFiles({ project }: { project: ProjectDto }) {
   const open = async (file: ProjectFileDto) => {
     if (file.kind === 'directory') { setDirectory(file.path); return; }
     setBusy(true); setEditorError('');
-    try { const result = await serverClient.projectText(project.id, file.path); setEditor(result); }
-    catch (error) { toast.error(projectError(error)); }
+    try {
+      const result = await serverClient.projectText(project.id, file.path);
+      setEditor(result);
+      setEditorBaseline(JSON.stringify({ path: result.path, text: result.text }));
+    } catch (error) { toast.error(projectError(error)); }
     finally { setBusy(false); }
+  };
+  const closeEditor = async () => {
+    if (busy) return;
+    if (editorDirty && !await confirmDialog({
+      headline: '放弃未保存的修改？',
+      description: '关闭后本次编辑不会写入文件。',
+      confirmText: '放弃修改', danger: true,
+    })) return;
+    setEditor(null); setEditorError('');
   };
   const remove = async (file: ProjectFileDto) => {
     if (!await confirmDialog({ headline: t('deleteConfirm', { name: file.name }), confirmText: t('delete'), cancelText: t('cancel'), danger: true })) return;
@@ -69,7 +83,7 @@ export default function ProjectFiles({ project }: { project: ProjectDto }) {
     <div className="project-controls">
       <Button size="sm" variant="secondary" isDisabled={busy || project.archived} onPress={() => uploadInput.current?.click()}><Sym name="upload" />{t('upload')}</Button>
       <Button size="sm" variant="tertiary" isDisabled={busy || project.archived} onPress={() => void mkdir()}><Sym name="create_new_folder" />{t('newFolder')}</Button>
-      <Button size="sm" variant="tertiary" isDisabled={busy || project.archived} onPress={() => { setEditorError(''); setEditor({ path: '', text: '', revision: null }); }}><Sym name="edit" />{t('newFile')}</Button>
+      <Button size="sm" variant="tertiary" isDisabled={busy || project.archived} onPress={() => { setEditorError(''); setEditorBaseline(JSON.stringify({ path: '', text: '' })); setEditor({ path: '', text: '', revision: null }); }}><Sym name="edit" />{t('newFile')}</Button>
       <Button size="sm" variant="ghost" isDisabled={busy || loading} onPress={() => setRefresh(v => v + 1)}><Sym name="refresh" />{t('refresh')}</Button>
       {busy && <Spinner size="sm" />}
       <input ref={uploadInput} type="file" multiple hidden onChange={upload} />
@@ -88,14 +102,20 @@ export default function ProjectFiles({ project }: { project: ProjectDto }) {
         {file.kind === 'file' && <a className="project-download" href={serverClient.projectDownloadUrl(project.id, file.path)} download aria-label={`${t('download')} · ${file.name}`}><Sym name="download" /></a>}
         <Button isIconOnly size="sm" variant="ghost" aria-label={`${t('delete')} · ${file.name}`} isDisabled={busy || project.archived} onPress={() => void remove(file)}><Sym name="delete" /></Button>
       </li>)}</ul>}
-    {editor && <Modal.Root isOpen onOpenChange={open => { if (!open && !busy) setEditor(null); }}><Modal.Backdrop><Modal.Container size="lg" className={MODAL_CONTAINER_CLASS}><Modal.Dialog>
-      <Modal.Header><Modal.Heading>{editor.revision === null ? t('newFile') : editor.path}</Modal.Heading></Modal.Header>
-      <Modal.Body><div className="project-form">
-        {editor.revision === null && <TextField isRequired><Label>{t('filename')}</Label><Input value={editor.path} onChange={e => setEditor({ ...editor, path: e.target.value })} placeholder="notes.md" /></TextField>}
-        <TextField><Label>{t('content')}</Label><TextArea className="project-text-editor" value={editor.text} readOnly={project.archived} rows={15} onChange={e => setEditor({ ...editor, text: e.target.value })} /></TextField>
-        {editorError && <p className="project-error" role="alert">{editorError}</p>}
-      </div></Modal.Body>
-      <Modal.Footer><Button variant="tertiary" isDisabled={busy} onPress={() => setEditor(null)}>{t('cancel')}</Button><Button variant="primary" isDisabled={busy || project.archived || !editor.path.trim()} onPress={() => void save()}>{t('save')}</Button></Modal.Footer>
-    </Modal.Dialog></Modal.Container></Modal.Backdrop></Modal.Root>}
+    {editor && <Drawer.Root isOpen onOpenChange={open => { if (!open) void closeEditor(); }}>
+      <Drawer.Backdrop variant="opaque">
+        <Drawer.Content placement={mobile ? 'bottom' : 'right'} className={mobile ? 'max-h-[88vh]' : 'w-[min(36rem,100vw)]'}>
+          <Drawer.Dialog className="project-editor" data-testid="project-file-editor">
+            <Drawer.Header><Drawer.Heading>{editor.revision === null ? t('newFile') : editor.path}</Drawer.Heading><Drawer.CloseTrigger aria-label={t('cancel')} /></Drawer.Header>
+            <Drawer.Body><div className="project-form">
+              {editor.revision === null && <TextField isRequired><Label>{t('filename')}</Label><Input value={editor.path} onChange={e => setEditor({ ...editor, path: e.target.value })} placeholder="notes.md" /></TextField>}
+              <TextField><Label>{t('content')}</Label><TextArea className="project-text-editor" value={editor.text} readOnly={project.archived} rows={15} onChange={e => setEditor({ ...editor, text: e.target.value })} /></TextField>
+              {editorError && <p className="project-error" role="alert">{editorError}</p>}
+            </div></Drawer.Body>
+            <Drawer.Footer><Button variant="tertiary" isDisabled={busy} onPress={() => { setEditor(null); setEditorError(''); }}>{t('cancel')}</Button><Button variant="primary" isDisabled={busy || project.archived || !editor.path.trim()} onPress={() => void save()}>{t('save')}</Button></Drawer.Footer>
+          </Drawer.Dialog>
+        </Drawer.Content>
+      </Drawer.Backdrop>
+    </Drawer.Root>}
   </section>;
 }

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { fixturePreference, fixtureDomain } from './fixture-domain.mjs';
 import { FOLDER_SPRING_OPEN_MS } from '../apps/web/src/ui/interactionTiming.ts';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-resource-ui-'));
@@ -27,12 +28,13 @@ try {
   };
   const config = await call('GET', '/cloud/config');
   await call('PUT', '/cloud/config', { ...config, providers: [{ id: 'offline', name: 'Offline', baseUrl: 'https://offline.invalid/v1', protocol: 'openai-chat', apiKey: 'test-only', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'offline', model: 'test' }, visionModel: { providerId: '', model: '' }, asrModel: { providerId: '', model: '' }, decisionModel: { providerId: '', model: '' } });
-  await call('POST', '/cloud/records', { mutations: [{ id: 'language', table: 'preferences', key: 'uiLanguage', before: null, after: { id: 'uiLanguage', value: 'zh-CN' } }] });
+  await fixturePreference(api, cookie, 'uiLanguage', 'zh-CN');
   const recentSession = { id: 91001, videoId: '__library_assistant__', title: '最近的学习对话', createdAt: Date.now() };
-  await call('POST', '/cloud/records', { mutations: [
-    { id: 'recent-session', table: 'chatSessions', key: recentSession.id, before: null, after: recentSession },
-    { id: 'recent-message', table: 'chats', key: 91001, before: null, after: { id: 91001, sessionId: recentSession.id, videoId: recentSession.videoId, role: 'user', content: '资源页也能继续这段对话', createdAt: recentSession.createdAt } },
+  const recent = await fixtureDomain(api, cookie, 'editLearning', { operationId: 'fixture-resource-recent-000001', edits: [
+    { mutationId: 'recent-session', kind: 'conversationSession', expected: null, value: recentSession },
+    { mutationId: 'recent-message', kind: 'conversationMessage', expected: null, value: { id: 91001, sessionId: recentSession.id, videoId: recentSession.videoId, role: 'user', content: '资源页也能继续这段对话', createdAt: recentSession.createdAt } },
   ] });
+  assert.equal(recent.ok, true, JSON.stringify(recent));
   const fixture = await call('POST', '/resources/folders', { name: '设计资料' });
   await call('PUT', `/projects/${fixture.id}/text?path=${encodeURIComponent('笔记.txt')}`, { text: '人和 Bot 读写同一份文件。', expectedRevision: null });
   await call('PUT', `/projects/${fixture.id}/text?path=${encodeURIComponent('资料.md')}`, { text: '# 学习资料\n\nMarkdown 继续使用原来的封面文件样式。', expectedRevision: null });
@@ -215,8 +217,8 @@ try {
     const markdown = '# 共享 Markdown\n\n阅读器直接读取真实文件。';
     await call('PUT', `/projects/${fixture.id}/text?path=${encodeURIComponent('子文件夹/阅读笔记.md')}`, { text: markdown, expectedRevision: null });
     const indexed = (await call('GET', `/resources?projectId=${fixture.id}&path=${encodeURIComponent('子文件夹')}`)).entries.find(e => e.name === '阅读笔记.md');
-    const before = (await call('GET', `/cloud/record?table=videos&key=${encodeURIComponent(JSON.stringify(indexed.courseId))}`)).value;
-    await call('POST', '/cloud/records', { mutations: [{ id: 'parsed-markdown', table: 'videos', key: before.id, before, after: { ...before, status: 'transcribed', unitCount: 2 } }] });
+    const parsed = await fixtureDomain(api, cookie, 'resourceCommand', { operationId: 'fixture-resource-markdown-000001', operation: { kind: 'saveMarkdown', courseId: indexed.courseId, expected: markdown, text: markdown } });
+    assert.equal(parsed.ok, true, JSON.stringify(parsed));
     await page.getByTestId('resource-entry').filter({ hasText: '阅读笔记.md' }).locator('.resource-open').click({ timeout: 15000 });
     const reader = page.getByTestId('material-reader');
     await reader.getByText('阅读器直接读取真实文件。', { exact: true }).waitFor();

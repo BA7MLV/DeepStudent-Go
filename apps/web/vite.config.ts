@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { formatBuildTime } from './src/utils/buildInfo';
+import { dshEsm } from './dsh-esm';
 
 const require = createRequire(import.meta.url);
 const dependencyDirectory = (name: string) => {
@@ -174,6 +175,7 @@ function buildInfo() {
 
 export default defineConfig({
   plugins: [
+    dshEsm(),
     serveOrt(),
     serveUserscript(),
     pdfjsAssets(),
@@ -265,7 +267,7 @@ export default defineConfig({
     host: true,
     port: 5173,
     // Opt in for full-stack development; static-only mode keeps local attachment storage.
-    proxy: process.env.WANGKE_API_PROXY ? { '/api/v1': { target: process.env.WANGKE_API_PROXY, changeOrigin: false } } : undefined,
+    proxy: process.env.WANGKE_API_PROXY ? { '/api': { target: process.env.WANGKE_API_PROXY, changeOrigin: false, ws: true } } : undefined,
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp',
@@ -282,7 +284,7 @@ export default defineConfig({
   // pdfjs-dist 同理（材料阅读器是动态 import 的，不预打包会在首次打开 PDF 时触发依赖重优化 → 整页刷新，
   // 而那时用户正等着看文件，体验最差）。
   optimizeDeps: {
-    include: ['sql.js', 'onnxruntime-web', 'pdfjs-dist'],
+    include: ['sql.js', 'onnxruntime-web', 'pdfjs-dist', '@deepseek-ai/dsh-client-ui-slots'],
     exclude: ['@widget/chart-runtime', '@widget/chart-runtime?raw'],
   },
   build: { target: 'es2020', chunkSizeWarningLimit: 2000 },

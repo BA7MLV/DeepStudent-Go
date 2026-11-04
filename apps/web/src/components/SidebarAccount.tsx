@@ -44,7 +44,7 @@ export default function SidebarAccount({ settingsTestId }: { settingsTestId: str
           <span className="sidebar-account__avatar" aria-hidden="true" data-testid="account-avatar">
             {Array.from(name)[0].toLocaleUpperCase()}
           </span>
-          <span className="sidebar-account__name" title={name} data-testid="account-name">{name}</span>
+          <span className="sidebar-account__name" data-testid="account-name">{name}</span>
         </Dropdown.Trigger>
         <Dropdown.Popover placement="top start" offset={8} className="w-60 max-w-[calc(100vw-24px)] motion-reduce:animate-none">
           <Dropdown.Menu aria-label={t('account.actions')} onAction={(key) => {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Chip, EmptyState, Input, Modal, Switch, TextArea, TextField } from '@heroui/react';
-import { Field, SectionCard, Sym, confirmDialog, toast, MODAL_CONTAINER_CLASS } from '../ui';
+import { Button, Chip, Drawer, EmptyState, Input, Switch, TextArea, TextField } from '@heroui/react';
+import { Field, SectionCard, Sym, confirmDialog, toast } from '../ui';
+import { useIsMobile } from '../utils/useMobile';
 import { db, type SkillRow, type SkillRefRow } from '../store/db';
 import { ensureBuiltinSkills, importSkillFile } from '../skills/store';
 import { BUILTIN_SKILLS, LEGACY_HANDOUT_SKILLS } from '../skills/builtin';
@@ -23,6 +24,9 @@ export default function SkillsCard() {
   const [showLegacy, setShowLegacy] = useState(false);
   const [refCounts, setRefCounts] = useState<Record<number, number>>({});
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [draftBaseline, setDraftBaseline] = useState('');
+  const mobile = useIsMobile();
+  const draftDirty = draft !== null && JSON.stringify(draft) !== draftBaseline;
   const fileRef = useRef<HTMLInputElement>(null);
   const supportFileRef = useRef<HTMLInputElement>(null);
   const [draftError, setDraftError] = useState('');
@@ -32,7 +36,9 @@ export default function SkillsCard() {
     try {
       const refs = await db.skillRefs.where('skillId').equals(skill.id!).toArray();
       setDraftError('');
-      setDraft({ ...skill, builtin: !!skill.builtin, refs });
+      const next = { ...skill, builtin: !!skill.builtin, refs };
+      setDraftBaseline(JSON.stringify(next));
+      setDraft(next);
     } catch {
       toast.error('读取技能失败，请重试');
     }
@@ -147,6 +153,17 @@ export default function SkillsCard() {
     }
   };
 
+  const closeDraft = async () => {
+    if (saving) return;
+    if (draftDirty && !await confirmDialog({
+      headline: '放弃未保存的技能修改？',
+      description: '本次修改的名称、说明和支持文件都不会保存。',
+      confirmText: '放弃修改', danger: true,
+    })) return;
+    setDraft(null);
+    setDraftError('');
+  };
+
   const removeSkill = async (skill: SkillRow) => {
     await db.transaction('rw', [db.skills, db.skillRefs], async () => {
       await db.skillRefs.where('skillId').equals(skill.id!).delete();
@@ -184,7 +201,9 @@ export default function SkillsCard() {
             data-testid="btn-skill-new"
             onPress={() => {
               setDraftError('');
-              setDraft({ builtin: false, name: '', description: '', body: '', refs: [] });
+              const next = { builtin: false, name: '', description: '', body: '', refs: [] };
+              setDraftBaseline(JSON.stringify(next));
+              setDraft(next);
             }}
           >
             <Sym name="add" />
@@ -241,21 +260,21 @@ export default function SkillsCard() {
         </div>
       )}
 
-      {/* HeroUI Modal 默认响应 Esc 与点遮罩，onOpenChange 同步回 state（不会「关掉又弹回」）。 */}
-      <Modal.Root isOpen={draft != null} onOpenChange={(open) => { if (!open) setDraft(null); }}>
-        <Modal.Backdrop>
-          <Modal.Container placement="center" size="lg" className={MODAL_CONTAINER_CLASS}>
-            <Modal.Dialog data-testid="skill-dialog">
-              <Modal.Header>
-                <Modal.Heading>
+      <Drawer.Root isOpen={draft != null} onOpenChange={(open) => { if (!open) void closeDraft(); }}>
+        <Drawer.Backdrop variant="opaque">
+          <Drawer.Content placement={mobile ? 'bottom' : 'right'} className={mobile ? 'max-h-[90vh]' : 'w-[min(42rem,100vw)]'}>
+            <Drawer.Dialog data-testid="skill-dialog">
+              <Drawer.Header>
+                <Drawer.Heading>
                   {draft?.id == null
                     ? '新建技能'
                     : draft.builtin
                     ? `查看「${draft.name}」`
                     : `编辑「${draft.name}」`}
-                </Modal.Heading>
-              </Modal.Header>
-              <Modal.Body>
+                </Drawer.Heading>
+                <Drawer.CloseTrigger aria-label="取消" />
+              </Drawer.Header>
+              <Drawer.Body>
                 {draft && (
                   <>
                     {draft.builtin && (
@@ -319,19 +338,19 @@ export default function SkillsCard() {
                     {draftError && <p role="alert" className="text-sm text-danger">{draftError}</p>}
                   </>
                 )}
-              </Modal.Body>
-              <Modal.Footer>
+              </Drawer.Body>
+              <Drawer.Footer>
                 <Button variant="tertiary" data-testid="skill-cancel" onPress={() => setDraft(null)}>
                   取消
                 </Button>
                 <Button variant="primary" isDisabled={saving} data-testid="skill-save" onPress={() => void saveDraft()}>
                   {saving ? '保存中…' : draft?.builtin ? '存为副本' : '保存'}
                 </Button>
-              </Modal.Footer>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
-      </Modal.Root>
+              </Drawer.Footer>
+            </Drawer.Dialog>
+          </Drawer.Content>
+        </Drawer.Backdrop>
+      </Drawer.Root>
     </SectionCard>
   );
 }

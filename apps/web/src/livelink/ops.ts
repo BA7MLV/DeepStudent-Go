@@ -76,11 +76,18 @@ const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
  * 所以重复到达照样回 ok。
  * 不用 put 兜底：put 会凭空造出一行只有 id 的课程，主页立刻多出一个 0 秒的幽灵条目。
  */
-export async function applyPosition(videoId: string, position: number, finished: boolean): Promise<ApplyResult> {
+export async function applyPosition(videoId: string, position: number, finished: boolean, operationId?: string): Promise<ApplyResult> {
   // 来自远端帧的参数不完全可信，而这里写坏值的代价是永久的：NaN 进度会让主页那根条
   // 永远算成 NaN。宁可不写、回 bad-args 让来宾看见，也不写一行坏数据。
   if (!videoId) return { ok: false, reason: 'bad-args' };
   if (!Number.isFinite(position) || position < 0) return { ok: false, reason: 'bad-args' };
+  const { cloud } = await import('../cloud/state');
+  if (cloud.enabled) {
+    if (!await db.videos.get(videoId)) return { ok: false, reason: 'not-found' };
+    const { resourceCommand } = await import('../client/resources');
+    await resourceCommand({ kind: 'recordPlayback', courseId: videoId, position, ...(finished ? { finished: true } : {}) }, operationId);
+    return { ok: true, rowId: videoId };
+  }
   const hit = await db.videos.update(videoId, finished ? { lastPosition: position, finished: 1 } : { lastPosition: position });
   if (hit === 0) return { ok: false, reason: 'not-found' };
   return { ok: true, rowId: videoId };
@@ -289,7 +296,7 @@ export class OpQueue {
     switch (name) {
       case 'position.set':
         // finished 收 1/0 与 true/false 两种写法：DB 口径是 1|0，帧里用哪个都不该由 host 挑
-        return applyPosition(String(a.videoId ?? ''), Number(a.position), a.finished === true || a.finished === 1);
+        return applyPosition(String(a.videoId ?? ''), Number(a.position), a.finished === true || a.finished === 1, op.clientOpId);
       case 'study.add':
         return applyStudyAdd(
           String(a.date ?? ''),

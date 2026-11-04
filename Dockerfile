@@ -16,7 +16,7 @@ RUN sed -i "s|http://deb.debian.org|http://${DEBIAN_MIRROR}|g; s|https://deb.deb
 COPY --from=prune /repo/out/json/ ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY --from=prune /repo/out/full/ ./
-RUN npm run build -w @wangke/contracts && npm run build -w @wangke/study-core && npm run build -w @wangke/api
+RUN npm run build -w @wangke/contracts && npm run build -w @wangke/study-core && npm run build -w @wangke/remote-host && npm run build -w @wangke/api
 RUN npm prune --omit=dev
 
 FROM node:22-bookworm-slim AS runtime
@@ -26,11 +26,17 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/dist ./apps/api/dist
+COPY licenses/client-runtime/THIRD_PARTY_NOTICES.txt ./apps/api/dist/THIRD_PARTY_NOTICES.txt
+COPY licenses/client-runtime/provenance.json ./apps/api/dist/client-runtime-provenance.json
 COPY --from=build /app/apps/api/scripts/deployment-maintenance.mjs ./apps/api/scripts/deployment-maintenance.mjs
 COPY --from=build /app/packages/study-core/package.json ./packages/study-core/package.json
 COPY --from=build /app/packages/study-core/dist ./packages/study-core/dist
 COPY --from=build /app/packages/study-core/assets ./packages/study-core/assets
 COPY --from=build /app/packages/contracts ./packages/contracts
+COPY --from=build /app/packages/remote-host/package.json ./packages/remote-host/package.json
+COPY --from=build /app/packages/remote-host/dist ./packages/remote-host/dist
+COPY --from=build /app/packages/remote-artifacts/package.json ./packages/remote-artifacts/package.json
+COPY --from=build /app/packages/remote-artifacts/generated ./packages/remote-artifacts/generated
 COPY scripts/reset-password.mjs ./scripts/reset-password.mjs
 RUN test ! -d node_modules/react && test ! -d node_modules/react-dom && test ! -d node_modules/vite \
   && test "$(id -u node)" = 1000 && test "$(id -g node)" = 1000 \

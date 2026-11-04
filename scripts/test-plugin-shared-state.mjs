@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { transformSync } from 'esbuild';
 
-// Execute the shipped subscription/cache implementation, not a parallel mock.
+// Execute the remaining shipped HTML cache. Business subscriptions are now
+// covered by real HTTP/WS Models and production-component browser regressions.
 const source = fs.readFileSync(new URL('../apps/web/src/plugins/shared.ts', import.meta.url), 'utf8');
 const code = transformSync(source, { loader: 'ts', format: 'cjs', target: 'es2022' }).code;
 const events = new Map(), timers = new Map(), storage = new Map([['plugin-draft:test', 'draft'], ['other', 'keep']]);
@@ -17,27 +18,19 @@ const context = vm.createContext({ module, exports: module.exports, console, Dat
   setTimeout: callback => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: id => timers.delete(id),
 });
 vm.runInContext(code, context);
-const { pluginRpc, subscribePluginRead } = module.exports;
-const settle = () => new Promise(resolve => setImmediate(resolve));
-let reads = 0; const valuesA = [], valuesB = [];
-const read = async () => ({ revision: ++reads });
-const offA = subscribePluginRead('same-instance', read, value => valuesA.push(value));
-const offB = subscribePluginRead('same-instance', read, value => valuesB.push(value));
-await settle();
-assert.equal(reads, 1); assert.equal(timers.size, 1); assert.equal(valuesA.length, 1); assert.equal(valuesB.length, 1);
-offA(); assert.equal(timers.size, 1);
-const [id, tick] = [...timers][0]; timers.delete(id); await tick(); await settle();
-assert.equal(reads, 2); assert.equal(valuesA.length, 1); assert.equal(valuesB.length, 2);
-offB(); assert.equal(timers.size, 0);
-const offC = subscribePluginRead('same-instance', read, () => {}); await settle();
-assert.equal(reads, 3); assert.equal(timers.size, 1);
-const first = pluginRpc('/same', 1, 'state.read', {}), second = pluginRpc('/same', 1, 'state.read', {});
-assert.equal(first, second); assert.equal(requests, 1, 'same-instance mounts share one in-flight read');
+const { pluginRead } = module.exports;
+assert.equal('subscribePluginRead' in module.exports, false, 'legacy polling subscription must not return');
+for (const file of ['FlashcardsView', 'MaterialToolsView', 'PracticeView', 'ReviewView']) {
+  const view = fs.readFileSync(new URL(`../apps/web/src/plugins/learning/${file}.tsx`, import.meta.url), 'utf8');
+  assert.doesNotMatch(view, /subscribePluginRead|setInterval/);
+}
+const first = pluginRead('/same'), second = pluginRead('/same');
+assert.equal(first, second); assert.equal(requests, 1, 'same-path HTML reads share one in-flight request');
 events.get('wangke:bot-session-ended')();
 assert.equal(timers.size, 0); assert.equal(storage.has('plugin-draft:test'), false); assert.equal(storage.has('other'), true);
 resolveRequest({ secret: 'old-account-state' });
 await assert.rejects(first, /plugin_session_changed/);
-offC();
-const next = pluginRpc('/same', 1, 'state.read', {}); assert.equal(requests, 2);
+const next = pluginRead('/same'); assert.equal(requests, 2);
 resolveRequest({ fresh: true }); assert.equal((await next).fresh, true);
-console.log('Shipped plugin shared state passed: multi-mount single poll/cache, independent listener release, final unmount cleanup, remount, account-switch disposal, draft cleanup and rejection of late old-account reads.');
+assert.equal(timers.size, 0, 'HTML reads must not install a business polling timer');
+console.log('Plugin HTML cache passed: shared in-flight read, account disposal, draft cleanup, rejection of late old-account HTML and no legacy learning polling API. Business subscription lifecycle is covered by real Model/production-component tests.');

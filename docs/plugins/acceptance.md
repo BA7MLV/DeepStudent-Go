@@ -1,5 +1,13 @@
 # 插件实施验收记录
 
+## 客户端底座迁移中的追加回归（2026-11-03）
+
+- 迁移生产任务等待后完整回归曾在计数器初次挂载超时；root 诊断为 PageLoader，不能仅凭 body 无文本声称 React 崩溃。下一轮未复现该处，继续运行到资料笔记 resize 保存断言再次失败；当前完整回归仍未通过，先前退出码 0 不代表最新改动全绿。
+- 排查发现 PluginFrame 的 HTML 装载前 effect cleanup 会通过更新后的 `frame.current` 将 dispose 发给新 iframe。已改为仅在文档存在后装配，并捕获该 effect 的 iframe/window；文档 incarnation 使用独立 channel，旧回调不得写入新沙盒。
+- `npm run test:plugins:frame:e2e`：生产 React Host + 正式资料笔记模板，StrictMode、异步装载、resize/save、100 次挂载卸载及订阅归零通过。该专项的领域 I/O 为内存夹具；完整真实后端回归仍需以修复后的退出状态为准。
+- 补充每个 iframe 的文本、草稿及生命周期失败诊断，未删除原保存、重启、Worker 授权断言。最新证据持续记录于 `docs/client-runtime/baseline.md`。
+- 最新 `opencode/plugin-runtime-owned-frame` 完整回归退出 1：第 185 行原题作答后，在 `quiz-explain` 内等待“正确答案：A”超时；现场 body 有该答案文本，但不证明断言所需元素可见或已正确保存。本轮尚未执行资料笔记 resize/save 和 Worker 原题提取门槛。最终 useLayoutEffect/channel 调整后的 `npm run test:plugins:frame:e2e` 已再次通过；不将专项通过替代整套结果。
+
 本文件记录本轮**实际执行**的软件验收。父会话复核发现原项目范围未完成，已重开步骤 3–8；项目补齐后的最终状态以计划勾选与新增证据为准，旧“8/8”结论不作为项目验收证据。不将可控模型 fixture 的行为验收冒称为真实模型质量验收。所有修改留在当前 main 工作区；未提交、推送、部署，保留其他并发工作的改动。
 
 ## 最新方向：应用内创造模式（2026-11-03）
@@ -136,3 +144,12 @@
 前轮当时的入口为“添加功能 → 选择功能 → 侧边栏页面 → 使用已有内容/单独使用 → 添加”，并通过管理页面调整；**这些向导现已移除**，当前入口以本文顶部及 `pluggability.md` 的“创造模式与侧边栏页面”为准。手机仍从原导航菜单打开新增页面。计划步骤 10–12 的历史证据保留，不冒充本轮创造模式验收。未提交、推送或部署；保留技能和聊天的并发修改。
 
 实际限制：验证使用隔离临时账户/数据库、Chromium 和可控模型 fixture，不代表生产部署、真实付费模型质量、物理多设备或 iOS/Android 系统键盘与安全区实机验收；历史间歇性空白尚未取得可复现根因。
+# 客户端底座迁移补充（2026-11-03）
+
+- `plugin-model-production` 完整浏览器回归仍失败：资料笔记模板 resize 保存后等待“已保存”超时（脚本第 382 行），保留草稿与 iframe 生命周期现场，未确认根因。
+- `plugin-composite-diagnostics` 下一轮仍失败：第 207 行新看板页面挂载待办超时，页面尚未 render；诊断显示首次 cloud-sync 锁排队约 43 秒。未放宽断言，未计完整流程通过；该轮也不能验证后续 Worker 门槛。
+- 四学习视图已移除 `subscribePluginRead`，迁移到受插件实例授权的组合查询 Model；其旧 1500ms 轮询实现已删除。正式生成漂移、真实 Remote/Model 组合查询与撤权测试、学习/资料处理领域测试通过。学习收据/作答登记补充同事务通知，防止移除轮询后漏更新。
+- 新的 `test:plugins:models:e2e` 重跑通过：真实 Fastify/WS 与生产组件覆盖卡片三挂载、迟到收据、scoped 任务 watch/取消、三个各 60 秒零业务 HTTP 窗口及目录 100 次释放归零；严格区分 catalog 的 1 retain 与卡片的 3 retain。tasks 模板自身旧轮询仍在，不称全插件零轮询。ReviewView deadline 浏览器专项已通过，使用明确的领域夹具，不替代真实后端完整流程。
+- 最新生成漂移、完整 build、Remote/Model、插件、学习及资料处理领域测试均通过；bootstrap 约 387.51 kB（gzip 100.72 kB），既有警告保留。最新完整回归在 `opencode/plugin-learning-model-final` 单独采集，尚不计通过，六阶段仍为 0/6。
+- `plugin-learning-model-final` 随后退出 1，仍为第 207 行新看板首次挂载超时；记录到初次同步锁等待约 25 秒，随后约 50 秒才 iframe ready，不算原断言通过。周期同步改为锁忙时跳过而非排队，显式 flush 和持久提交仍等待原排他锁。新增真实 API/Chromium 双标签专项 `scripts/e2e-cloud-sync-locks.mjs` 通过零后台排队、outbox 不丢失和显式 flush 安全加入/读取基线；不代表 records 轮询已经删除。完整回归在 `opencode/plugin-sync-lock-fairness` 重跑，笔记保存与 Worker 许可故障尚未判定修复。
+- 上述完整重跑 `sh_1a07ce8a3001fDl4tkuJ4h4ZdI` 随后退出 0，原断言全部通过，含笔记 resize/save/A-B 隔离、真实浏览器 Worker 原题提取 completed/Markdown/收据、Bot 刷新 nonce 去重、资源动作、真实服务重启恢复及三尺寸三主题/27 张独立学习页截图。页面异常数组为空；仍有 CSP 不支持、403、显式离线与重启窗口网络/代理日志，未逐条归因的 403 不冒称预期。实拍位于 `opencode/plugin-sync-lock-fairness`，已人工查看 360 深色练习、390 浅色复习和 1440 深色卡片。先前笔记/Worker 间歇性失败本轮未再现，不等于已有根因闭环；当前全应用六阶段仍为 0/6，未提交或部署。

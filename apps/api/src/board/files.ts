@@ -7,11 +7,17 @@ import type { SystemDirectory, SystemDocument } from '@wangke/contracts/system';
 import type { DatabaseStore } from '../storage/database.js';
 
 // Upgrade only byte-identical shipped files. Edited or removed packages stay user-owned.
-const DEFAULT_UPGRADES: Record<string, string> = {
-  'plugins/tasks/index.html': '39544e7622bb98729a02e259c1026ab6f6e769efa4c7d6b0a2371cbb8473d208',
+const DEFAULT_UPGRADES: Record<string, string | string[]> = {
+  'plugins/todo/index.html': '00371c722d1de0f4dac8e2711a19ff4351d1dbd4e0741b5c450fe1134a4fcb74',
+  'plugins/tasks/index.html': ['39544e7622bb98729a02e259c1026ab6f6e769efa4c7d6b0a2371cbb8473d208', 'de9d14b6a4f05ee120b34f4ae71e18f03e878b05db94462dddf8aa003cfbb999'],
   'plugins/schedules/index.html': '7f2dc74765effd6561072ce861b11616ddeb6ff1589feba1106436530d2f0aa1',
   'README.md': '28d9509dabb2a031d1a93489c6cb90e714859042de235e0c19bc8da09144c748',
 };
+
+// Bundled upgrades are a process/store bootstrap operation, not a catalog read.
+// Cache only a completed, committed bootstrap; live package reads below still
+// inspect disk and revalidate manifests, entries and symlink boundaries.
+const bootstrapped = new WeakMap<DatabaseStore, Set<string>>();
 
 /** Directory discovery is the registry; no component or plugin-id switch exists in the host. */
 export class BoardFiles {
@@ -28,6 +34,13 @@ export class BoardFiles {
     return current;
   }
   ensure(owner: string) {
+    if (bootstrapped.get(this.store)?.has(owner) && this.store.systemFiles.entry(owner, `${BOARD_PATH}/README.md`)) return;
+    const completed = () => {
+      if (this.store.db.inTransaction) return;
+      let owners = bootstrapped.get(this.store);
+      if (!owners) bootstrapped.set(this.store, owners = new Set());
+      owners.add(owner);
+    };
     const marker = `${BOARD_PATH}/README.md`;
     const source = fileURLToPath(new URL(import.meta.url.endsWith('/runtime/node.mjs') ? '../board-plugins/' : '../../board-plugins/', import.meta.url));
     if (this.store.systemFiles.entry(owner, marker)) {
@@ -55,11 +68,12 @@ export class BoardFiles {
           });
           if (!exists) continue;
           const resource = `${BOARD_PATH}/${relative}`, current = this.store.systemFiles.read(owner, resource);
-          if (current !== undefined && crypto.createHash('sha256').update(current).digest('hex') === hash) {
+          if (current !== undefined && (Array.isArray(hash) ? hash : [hash]).includes(crypto.createHash('sha256').update(current).digest('hex'))) {
             this.store.systemFiles.write(owner, resource, fs.readFileSync(path.join(source, relative), 'utf8'), current);
           }
         } catch { /* A broken/edited default cannot block unrelated plugins. */ }
       }
+      completed();
       return;
     }
     const copy = (folder: string, resource: string) => {
@@ -70,6 +84,7 @@ export class BoardFiles {
       }
     };
     this.store.transaction(() => { copy(source, BOARD_PATH); this.store.systemFiles.register(owner, marker); });
+    completed();
   }
   read(owner: string, resource: string): SystemDocument {
     if (!boardPath(resource) || resource === BOARD_PATH) throw new Error('invalid_system_path');

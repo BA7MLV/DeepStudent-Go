@@ -159,7 +159,7 @@ export class CloudTaskRunner {
       const checkActive = () => {
         signal.throwIfAborted();
         if (row.parent_run_id && this.store.db.prepare("SELECT 1 FROM runs WHERE id=? AND status IN ('cancelled','failed','paused')").get(row.parent_run_id)) throw new Error('parent_run_not_active');
-        if (this.stopped || (this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(row.id) as { status: string } | undefined)?.status !== 'running') {
+        if (this.stopped || !['running', 'waiting_user'].includes((this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(row.id) as { status: string } | undefined)?.status ?? '')) {
           throw new DOMException('任务已停止', 'AbortError');
         }
       };
@@ -179,7 +179,7 @@ export class CloudTaskRunner {
         }, checkActive,
         report: progress => {
           checkActive();
-          this.store.db.prepare("UPDATE cloud_tasks SET progress=?,updated_at=? WHERE id=? AND status='running'")
+          this.store.db.prepare("UPDATE cloud_tasks SET progress=?,updated_at=? WHERE id=? AND status IN ('running','waiting_user')")
             .run(JSON.stringify(progress), new Date().toISOString(), row.id);
         },
       };

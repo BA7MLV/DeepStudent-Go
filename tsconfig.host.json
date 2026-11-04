@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "NodeNext", "moduleResolution": "NodeNext",
+    "strict": true, "skipLibCheck": true, "types": ["node"],
+    "paths": {
+      "@deepseek-ai/dsh-typert-protocol": ["./packages/dsh-typert-protocol-source/src/index.ts"],
+      "@wangke/contracts/client-runtime": ["./packages/contracts/src/client-runtime.ts"]
+    }
+  },
+  "files": [],
+  "references": [{ "path": "./packages/remote-host/tsconfig.json" }, { "path": "./packages/contracts/tsconfig.json" }, { "path": "./packages/dsh-typert-protocol-source/tsconfig.json" }]
+}

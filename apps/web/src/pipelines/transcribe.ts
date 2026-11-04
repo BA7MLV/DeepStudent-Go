@@ -4,6 +4,7 @@ import { assertPluginAvailable } from '../plugins/availability';
 import { runMaterialPluginTask } from '../plugins/legacy-actions';
 import { getSettings, targetOfSlot } from '../store/settings';
 import { db, type SegmentRow } from '../store/db';
+import { publishLearningProducts, publishCourseDerivation, learningId, type BrowserLearningProduct } from '../cloud/learning-products';
 import { getVideoFile } from '../store/fileStore';
 import { extractAndSegment } from '../media/extractClient';
 import { wavBlob } from '../media/wav';
@@ -47,7 +48,7 @@ export async function runTranscription(
   try {
     checkActive();
     const completed = video.status === 'transcribed' && await db.segments.where('videoId').equals(videoId).filter(r => r.status === 1 && !!r.text.trim()).count() > 0;
-    if (!completed) await db.videos.update(videoId, { status: 'transcribing', transcriptionPaused: false });
+    if (!completed) await publishCourseDerivation(videoId, { status: 'transcribing', transcriptionPaused: false });
     if (video.biliSource && !completed) onProgress({ phase: 'source', done: 0, total: 1, message: '优先读取 B 站自带字幕…' });
     if (await preferOriginalSubtitles({
       completed, hasSource: !!video.biliSource, checkActive,
@@ -102,21 +103,20 @@ export async function runTranscription(
 
     if (planMismatch) {
       // VAD 结果与已有数据差异过大，清空重来
-      await db.segments.where('videoId').equals(videoId).delete();
       doneByIdx.clear();
     }
 
     const pendingIdx: number[] = [];
-    await db.transaction('rw', db.segments, async () => {
+    const planProducts: BrowserLearningProduct[] = planMismatch ? existingRows.map(row => ({ kind: 'transcriptSegment', expected: { ...row, id: row.id! }, value: null })) : [];
       for (let i = 0; i < vadSegs.length; i++) {
         if (doneByIdx.has(i)) continue;
-        const existing = await db.segments.where('videoId').equals(videoId).filter((r) => r.idx === i).first();
+        const existing = planMismatch ? undefined : existingRows.find(row => row.idx === i);
         const row = { videoId, idx: i, start: vadSegs[i].start, end: vadSegs[i].end, text: '', status: 0 as const };
-        if (existing?.id != null) await db.segments.update(existing.id, row);
-        else await db.segments.add(row);
+        const id = existing?.id ?? learningId();
+        planProducts.push({ kind: 'transcriptSegment', expected: existing ? { ...existing, id } : null, value: { ...row, id } });
         pendingIdx.push(i);
       }
-    });
+    await publishLearningProducts(planProducts);
 
     // 3. 并发转写（AIMD 自适应：初始值来自设置，遇 429 自动降速）
     const limiter = new AdaptiveLimit(settings.asrConcurrency);
@@ -158,11 +158,9 @@ export async function runTranscription(
           .filter((c) => c.end > c.start);
         const patch: Partial<SegmentRow> = { text, status: 1 };
         if (cues?.length) patch.cues = cues;
-        await db.segments
-          .where('videoId')
-          .equals(videoId)
-          .filter((r) => r.idx === idx)
-          .modify(patch);
+        const existing = await db.segments.where('videoId').equals(videoId).filter(row => row.idx === idx).first();
+        if (!existing?.id) throw new Error('transcription_checkpoint_missing');
+        await publishLearningProducts([{ kind: 'transcriptSegment', expected: { ...existing, id: existing.id }, value: { ...existing, ...patch, id: existing.id } }]);
         done++;
         report();
       }, { signal: asr.signal });
@@ -175,11 +173,11 @@ export async function runTranscription(
     }
 
     checkActive();
-    await db.videos.update(videoId, { status: 'transcribed' });
+    await publishCourseDerivation(videoId, { status: 'transcribed' });
     onProgress({ phase: 'done', done: total, total, message: '字幕生成完成' });
   } catch (e) {
     // 浏览器租约失效时不要写回：旧宿主已无权覆盖新宿主的数据。
-    if (!isCancel(e) && !opts.signal?.aborted) await db.videos.update(videoId, { status: 'error' });
+    if (!isCancel(e) && !opts.signal?.aborted) await publishCourseDerivation(videoId, { status: 'error' });
     throw e;
   }
 }

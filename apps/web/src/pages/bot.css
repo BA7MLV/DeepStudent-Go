@@ -268,6 +268,12 @@
   animation: bot-activity-swap var(--duration-quick) var(--ease-in-out) both;
 }
 
+.bot-activity__count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
 /* ── 项目工作区：左列会话，右列对话或文件 ───────────── */
 
 .bh {

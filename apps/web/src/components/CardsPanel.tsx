@@ -24,7 +24,6 @@ import {
   Sym,
   toast,
   confirmDialog,
-  alertDialog,
 } from '../ui';
 import '../cards.css';
 
@@ -111,15 +110,8 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
       const count = await runCards(videoId, setProgress);
       toast.success(count > 0 ? `制卡完成，共 ${count} 张候选卡，滑动审核吧` : '生成完成：这段课程没有挖出合适的卡片');
     } catch (e) {
-      const errText = formatCaughtError(e);
-      setErrorText(errText);
-      // 原 antd Modal.error 带可复制的错误详情；mdui 用 alertDialog + copyText 复制
-      await alertDialog({
-        headline: '制卡失败',
-        description: errText,
-        copyText: errText,
-        confirmText: '知道了',
-      });
+      // 失败详情留在面板里（带复制按钮），不再自动弹出模态打断正在做的审核。
+      setErrorText(formatCaughtError(e));
     } finally {
       setProgress(null);
       await reload();

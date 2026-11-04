@@ -1,4 +1,5 @@
 import { db, type CoverRow, type VideoRow } from '../store/db';
+import { publishLearningProducts, publishCourseDerivation } from '../cloud/learning-products';
 import { assertPluginAvailable } from '../plugins/availability';
 import { getMaterialFile, getVideoFile } from '../store/fileStore';
 import { COVER_EDGE, downscaleToCover, encodeCanvas, pickCoverFrame } from '../media/frames';
@@ -181,7 +182,7 @@ export async function ensureCover(id: string, opts: { force?: boolean } = {}): P
   const current = await db.covers.get(id);
   if (!opts.force) {
     if (current) {
-      if (row.coverState !== 'done') await db.videos.update(id, { coverState: 'done' });
+      if (row.coverState !== 'done') await publishCourseDerivation(id, { coverState: 'done' });
       return false;
     }
   } else if (current?.source === 'user') {
@@ -189,30 +190,29 @@ export async function ensureCover(id: string, opts: { force?: boolean } = {}): P
     return false;
   }
   if (row.fileDeleted === 1) {
-    await db.videos.update(id, { coverState: 'skipped' });
+    await publishCourseDerivation(id, { coverState: 'skipped' });
     return false;
   }
 
   const isMaterial = row.kind === 'material';
   const blob = isMaterial ? await getMaterialFile(id) : await getVideoFile(id);
   if (!blob) {
-    await db.videos.update(id, { coverState: 'skipped' });
+    await publishCourseDerivation(id, { coverState: 'skipped' });
     return false;
   }
 
   const picked = isMaterial ? await pickMaterialCover(row, blob) : await pickVideoCover(id, blob);
   if (!picked) {
-    await db.videos.update(id, { coverState: 'done' });
+    await publishCourseDerivation(id, { coverState: 'done' });
     return false;
   }
 
   const color = await extractColor(picked.blob);
-  let written = false;
-  await db.transaction('rw', db.covers, db.videos, async () => {
+  const latest = await db.videos.get(id);
     // 生成期间这份资源可能已经被删了 —— 别留一条孤儿封面
-    if (!(await db.videos.get(id))) return;
+    if (!latest) return false;
     // `covers.put` 是主键覆盖，天然原子：不存在「旧的删了、新的没写进去」的窗口
-    await db.covers.put({
+    await publishLearningProducts([{ kind: 'courseCover', expected: current ?? null, value: {
       videoId: id,
       blob: picked.blob,
       w: picked.w,
@@ -220,9 +220,7 @@ export async function ensureCover(id: string, opts: { force?: boolean } = {}): P
       ts: picked.ts,
       source: picked.source,
       createdAt: Date.now(),
-    });
-    await db.videos.update(id, { coverState: 'done', dominantColor: color });
-    written = true;
-  });
-  return written;
+    } }, { kind: 'courseDerivation', courseId: id,
+      expected: { coverState: latest.coverState, dominantColor: latest.dominantColor }, value: { coverState: 'done', dominantColor: color } }]);
+  return true;
 }

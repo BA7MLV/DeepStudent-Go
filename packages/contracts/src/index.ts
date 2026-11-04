@@ -1,5 +1,6 @@
 export type ConversationMode = 'chat' | 'bot';
-export type { BotApprovalDto, BotQuestionDto, BotRunDto, BotSyncState, BotMessagePage, BotSnapshot, BotThreadPage } from './bot-sync.js';
+export type { BotApprovalDto, BotQuestionDto, BotRunDto, BotActivityDto, BotSyncState, BotMessagePage, BotSnapshot, BotThreadPage } from './bot-sync.js';
+export { isBotActivity } from './bot-sync.js';
 export type { ServerStorageStats, StorageCategoryId } from './storage.js';
 export { parseBotAttachments, parseLegacyBotAttachments, MAX_BOT_ATTACHMENTS, MAX_BOT_MESSAGE_ATTACHMENTS, type BotAttachment } from './bot-attachments.js';
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
@@ -54,6 +55,7 @@ export interface RunDto {
 
 export type SseEvent =
   | { type: 'thread.state_invalidated' }
+  | { type: 'thread.activity'; activity: import('./bot-sync.js').BotActivityDto | null }
   | { type: 'resync.required' }
   | { type: 'message.pending'; message: MessageDto }
   | { type: 'message.accepted'; message: MessageDto }

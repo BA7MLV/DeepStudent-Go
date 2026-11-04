@@ -8,8 +8,10 @@ import Database from 'better-sqlite3';
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-resources-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
 const { buildServer } = await import('../apps/api/src/server.ts');
+const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');
+const { CloudRecords } = await import('../apps/api/src/cloud/records.ts');
 let app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
-let cookie = '', db;
+let cookie = '', db, fixtureStore;
 const call = async (method, url, payload, expected = 200, headers = {}) => {
   const result = await app.inject({ method, url: `/api/v1${url}`, headers: { cookie, ...headers }, ...(payload !== undefined ? { payload } : {}) });
   assert.equal(result.statusCode, expected, `${method} ${url}: ${result.body}`);
@@ -23,6 +25,9 @@ try {
   const login = await call('POST', '/auth/password/login', { password: 'resource-test-password' });
   cookie = login.headers['set-cookie'].split(';')[0];
   db = new Database(path.join(directory, 'db.sqlite'));
+  // Legacy migration/compatibility fixture, not a production table-write API.
+  fixtureStore = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
+  const records = new CloudRecords(fixtureStore), fixtureOwner = login.json().user.id;
   const agent = (await json('GET', '/agents')).agents[0];
   const oldProject = await json('POST', '/projects', { name: '原工作区', agentId: agent.id }, 201);
   const oldThread = await json('POST', '/threads', { mode: 'bot', projectId: oldProject.id, agentId: agent.id, title: '保留会话' }, 201);
@@ -36,7 +41,7 @@ try {
     ['courseFiles', 'legacy-course', { id: 'legacy-course', fileId: upload.id, mimeType: 'text/markdown', size: Buffer.byteLength(original) }],
     ['materialBlocks', 1, { id: 1, materialId: 'legacy-course', unit: 1, text: '旧资料正文。' }],
   ];
-  await json('POST', '/cloud/records', { mutations: entries.map(([table, key, after]) => ({ id: crypto.randomUUID(), table, key, before: null, after })) });
+  records.apply(fixtureOwner, entries.map(([table, key, after]) => ({ id: crypto.randomUUID(), table, key, before: null, after })));
   const root = await json('GET', '/resources');
   const folder = root.entries.find(e => e.name === '课程资料');
   assert.ok(folder?.scope, 'old virtual root folder becomes a real sandbox scope');
@@ -85,7 +90,7 @@ try {
   const destination = await json('POST', '/resources/folders', { name: '移动目标' }, 201);
   const child = (await listing(fresh.id)).entries.find(e => e.name === '子目录');
   const botNote = (await listing(fresh.id, '子目录')).entries.find(e => e.name === 'bot.md');
-  await json('POST', '/cloud/records', { mutations: [{ id: 'bot-material-block', table: 'materialBlocks', key: 2, before: null, after: { id: 2, materialId: botNote.courseId, unit: 1, text: 'Bot 资料块' } }] });
+  records.apply(fixtureOwner, [{ id: 'bot-material-block', table: 'materialBlocks', key: 2, before: null, after: { id: 2, materialId: botNote.courseId, unit: 1, text: 'Bot 资料块' } }]);
   const childFolderId = (await listing(fresh.id, '子目录')).folderId;
   await json('PATCH', '/resources/folders/color', { projectId: fresh.id, path: '子目录', color: 'green' });
   assert.equal((await listing(fresh.id)).entries.find(e => e.name === '子目录').folderId, childFolderId);
@@ -97,7 +102,7 @@ try {
   assert.equal((await listing(destination.id, '搬来的目录')).entries.find(e => e.name === 'bot.md').courseId, botNote.courseId);
   const change = async (table, key, patch) => {
     const before = (await json('GET', `/cloud/record?table=${table}&key=${encodeURIComponent(JSON.stringify(key))}`)).value;
-    await json('POST', '/cloud/records', { mutations: [{ id: crypto.randomUUID(), table, key, before, after: { ...before, ...patch } }] });
+    records.apply(fixtureOwner, [{ id: crypto.randomUUID(), table, key, before, after: { ...before, ...patch } }]);
   };
   await change('folders', childFolderId, { name: '兼容改名' });
   assert.equal((await listing(destination.id)).entries.find(e => e.name === '兼容改名').color, 'green', 'renaming preserves folder color');
@@ -172,5 +177,5 @@ try {
   assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 0);
   console.log('Resource folders: migration, I/O, permissions, restart, trash/restore and permanent deletion OK');
 } finally {
-  await app.close(); db?.close(); fs.rmSync(directory, { recursive: true, force: true });
+  await app.close(); fixtureStore?.close(); db?.close(); fs.rmSync(directory, { recursive: true, force: true });
 }

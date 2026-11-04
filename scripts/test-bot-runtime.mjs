@@ -92,14 +92,14 @@ try {
   ]) {
     const failed = createRun();
     const messagesBefore = store.db.prepare('SELECT COUNT(*) n FROM messages WHERE thread_id=?').get(thread).n;
-    const eventsBefore = store.db.prepare("SELECT COUNT(*) n FROM message_events WHERE thread_id=? AND type!='thread.state_invalidated'").get(thread).n;
+    const eventsBefore = store.db.prepare("SELECT COUNT(*) n FROM message_events WHERE thread_id=? AND type NOT IN ('thread.state_invalidated','thread.activity')").get(thread).n;
     const invalidationsBefore = store.db.prepare("SELECT COUNT(*) n FROM message_events WHERE thread_id=? AND type='thread.state_invalidated'").get(thread).n;
     runner = new BotRunner(store, { fetch: fetcher });
     runner.start(); await until(() => state(failed).status === 'failed'); await runner.close();
     assert.equal(state(failed).error_code, code);
     assert.ok(state(failed).completed_at);
     assert.equal(store.db.prepare('SELECT COUNT(*) n FROM messages WHERE thread_id=?').get(thread).n, messagesBefore);
-    assert.equal(store.db.prepare("SELECT COUNT(*) n FROM message_events WHERE thread_id=? AND type!='thread.state_invalidated'").get(thread).n, eventsBefore);
+    assert.equal(store.db.prepare("SELECT COUNT(*) n FROM message_events WHERE thread_id=? AND type NOT IN ('thread.state_invalidated','thread.activity')").get(thread).n, eventsBefore);
     assert.ok(store.db.prepare("SELECT COUNT(*) n FROM message_events WHERE thread_id=? AND type='thread.state_invalidated'").get(thread).n > invalidationsBefore);
   }
   console.log('Bot runtime: multi-step, persistent wake, crash recovery, cancellation and silent model failures passed');

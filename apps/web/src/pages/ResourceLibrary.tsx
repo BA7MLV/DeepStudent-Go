@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button, Input, Label, Modal, SearchField, TextArea, TextField } from '@heroui/react';
+import { Button, Drawer, Input, Label, SearchField, TextArea, TextField } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
 import type { AgentProfileDto, ProjectDetailDto } from '@wangke/contracts';
 import type { ResourceDirectory, ResourceEntry } from '@wangke/contracts/resources';
 import { request, serverClient } from '../api/serverClient';
+import { followResources, readResources, resourceCommand } from '../client/resources';
 import { FolderIcon } from '../components/FolderIcon';
 import FolderColorMenu from '../components/FolderColorMenu';
 import { PluginActions } from '../plugins/PluginActions';
@@ -12,7 +13,7 @@ import { ResourceFileIcon } from '../components/ResourceFileIcon';
 import { useLibraryNavigation } from '../store/libraryNavigation';
 import { db } from '../store/db';
 import { flushCloud } from '../cloud/sync';
-import { MoreMenu, PageShell, Sym, toast, promptDialog, confirmDialog, MODAL_CONTAINER_CLASS } from '../ui';
+import { MoreMenu, PageShell, Sym, toast, promptDialog, confirmDialog } from '../ui';
 import { SkeletonReveal, useSkeletonGate } from '../ui/skeleton';
 import { overflowTitleProps } from '../ui/overflowTitle';
 import { projectError } from '../projects/errors';
@@ -67,6 +68,8 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const [view, setView] = useState<'icons' | 'list'>('icons');
   const [settings, setSettings] = useState<{ project: ProjectDetailDto; agents: AgentProfileDto[] } | null>(null);
   const [editor, setEditor] = useState<{ projectId: string; path: string; text: string; revision: string | null } | null>(null);
+  const [editorBaseline, setEditorBaseline] = useState('');
+  const editorDirty = editor !== null && JSON.stringify({ path: editor.path, text: editor.text }) !== editorBaseline;
   const [image, setImage] = useState<ResourceEntry | null>(null);
   const [draggedEntries, setDraggedEntries] = useState<ResourceEntry[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -78,6 +81,15 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const locationKey = `${projectId ?? ''}:${directory}`;
   const loadedLocation = useRef('');
   const refresh = () => setRevision(n => n + 1);
+  const closeEditor = async () => {
+    if (busy) return;
+    if (editorDirty && !await confirmDialog({
+      headline: '放弃未保存的修改？',
+      description: '关闭后本次编辑不会写入文件。',
+      confirmText: '放弃修改', danger: true,
+    })) return;
+    setEditor(null);
+  };
   useEffect(() => { setSelection(new Set()); }, [locationKey, query]);
   useEffect(() => {
     const available = new Set((data?.entries ?? []).map(keyOf));
@@ -90,21 +102,11 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     if (projectId) useLibraryNavigation.getState().setFolderHistory(h => h.entries[h.index]?.startsWith('system') ? { entries: [null], index: 0 } : h);
   }, [projectId]);
   useEffect(() => {
-    let ignore = false;
     if (loadedLocation.current !== locationKey) { setLoading(true); setData(null); }
-    const params = new URLSearchParams({ path: directory, archived: 'true' });
-    if (projectId) params.set('projectId', projectId);
-    request<ResourceDirectory>(`/resources?${params}`).then(result => {
-      if (!ignore) { setData(result); setError(''); loadedLocation.current = locationKey; }
-    }).catch(error => { if (!ignore) setError(projectError(error)); }).finally(() => { if (!ignore) setLoading(false); });
-    return () => { ignore = true; };
+    return followResources(projectId, directory, result => {
+      setData(result); setError(''); loadedLocation.current = locationKey; setLoading(false);
+    }, error => { setError(projectError(error)); setLoading(false); });
   }, [projectId, directory, revision, locationKey]);
-  useEffect(() => {
-    const update = () => { if (!document.hidden) setRevision(n => n + 1); };
-    const timer = setInterval(update, 5000);
-    window.addEventListener('focus', update);
-    return () => { clearInterval(timer); window.removeEventListener('focus', update); };
-  }, []);
   const openDirectory = (id?: string, path = '') => {
     springLoader.cancel();
     setDropTarget(null);
@@ -153,8 +155,8 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     const name = await promptDialog({ headline: t('newFolder'), confirmText: t('save'), cancelText: t('cancel'), validate: value => validName(value) ? t('errors.invalid_project_path') : null });
     if (!name) return;
     await perform(async () => {
-      if (projectId) await serverClient.projectDirectory(projectId, join(directory, name.trim()));
-      else await request('/resources/folders', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
+      if (projectId) await resourceCommand({ kind: 'createDirectory', projectId, path: join(directory, name.trim()) });
+      else await resourceCommand({ kind: 'createFolder', name: name.trim() });
     });
   };
   const uploadFiles = async (files: File[]) => {
@@ -166,12 +168,12 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
           const id = projectId ?? data.rootId;
           await serverClient.uploadProjectFile(id, join(directory, file.name), file);
           if (file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|flv|ts|m2ts|mpeg|mpg|wmv|3gp|rmvb|rm)$/i.test(file.name)) {
-            const listing = await request<ResourceDirectory>(`/resources?${new URLSearchParams({ projectId: id, path: directory })}`);
+            const listing = await readResources(id, directory);
             const entry = listing.entries.find(entry => entry.name === file.name);
             if (entry?.courseId) {
               const duration = await probeDuration(file);
               await flushCloud();
-              if (duration) await db.videos.update(entry.courseId, { duration });
+              if (duration) await (await import('../client/resources')).recordMediaDuration(entry.courseId, duration);
               enqueueCover(entry.courseId);
               startTranscription(entry.courseId);
               toast.info(`《${file.name}》已上传，正在浏览器中自动生成字幕，请保持页面打开`);
@@ -200,6 +202,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
         navigate(`/player/${encodeURIComponent(entry.courseId)}`, { state: { libraryReturn: `/library${search.size ? `?${search}` : ''}` } });
       } else {
         const file = await serverClient.projectText(entry.projectId, entry.path);
+        setEditorBaseline(JSON.stringify({ path: file.path, text: file.text }));
         setEditor({ ...file, projectId: entry.projectId });
       }
     });
@@ -211,12 +214,12 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const rename = async (entry: ResourceEntry) => {
     const name = await promptDialog({ headline: t('rename'), defaultValue: entry.name, confirmText: t('save'), cancelText: t('cancel'), validate: value => validName(value) ? t('errors.invalid_project_path') : null });
     if (!name || name === entry.name) return;
-    await perform(() => entry.scope ? serverClient.updateProject(entry.projectId, { name }) : request('/resources/move', { method: 'POST', body: JSON.stringify({ projectId: entry.projectId, path: entry.path, targetProjectId: entry.projectId, target: join(directory, name), revision: entry.revision }) }));
+    await perform(() => resourceCommand(entry.scope ? { kind: 'renameFolder', projectId: entry.projectId, name } : { kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId: entry.projectId, target: join(directory, name), revision: entry.revision }));
   };
   const remove = async (entry: ResourceEntry) => {
     if (entry.scope) {
       await perform(async () => {
-        await request(`/resources/folders/${encodeURIComponent(entry.projectId)}/trash`, { method: 'POST' });
+        await resourceCommand({ kind: 'trash', projectId: entry.projectId });
         toast.success(t('movedToTrash'));
       });
       return;
@@ -237,7 +240,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
       finishResourceDrag(true);
       void perform(async () => {
         for (const entry of entries) {
-          await request('/resources/move', { method: 'POST', body: JSON.stringify({ projectId: entry.projectId, path: entry.path, targetProjectId: id, target: join(path, entry.name), revision: entry.revision }) });
+          await resourceCommand({ kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId: id, target: join(path, entry.name), revision: entry.revision });
         }
       });
     } catch { /* Unrelated drag payload. */ }
@@ -290,7 +293,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
           <Button isIconOnly variant="ghost" aria-label={t('upload')} isDisabled={busy || readOnly || loading} onPress={() => input.current?.click()}><Sym name="upload" /></Button>
           <MoreMenu label={t('more')} actions={[
             { key: 'import', label: t('importMaterials'), icon: <Sym name="link" />, disabled: busy || readOnly || !data, onAction: () => onImport(data?.folderId) },
-            { key: 'new', label: t('newFile'), icon: <Sym name="edit" />, disabled: busy || readOnly || !data, onAction: () => setEditor({ projectId: projectId ?? data!.rootId, path: '', text: '', revision: null }) },
+            { key: 'new', label: t('newFile'), icon: <Sym name="edit" />, disabled: busy || readOnly || !data, onAction: () => { setEditorBaseline(JSON.stringify({ path: '', text: '' })); setEditor({ projectId: projectId ?? data!.rootId, path: '', text: '', revision: null }); } },
             { key: 'refresh', label: t('refresh'), icon: <Sym name="refresh" />, onAction: refresh },
             ...(projectId ? [
               { key: 'chat', label: t('botChat'), icon: <Sym name="chat" />, onAction: () => navigate(`/library/folders/${projectId}/chat`) },
@@ -358,7 +361,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
                 ...(!entry.missing ? [{ key: 'remove', label: t(entry.scope ? 'moveToTrash' : 'delete'), icon: <Sym name="delete" />, danger: true, disabled: busy || readOnly, onAction: () => void remove(entry) }] : []),
               ]}>
                 {entry.kind === 'directory' && <FolderColorMenu color={entry.color} disabled={busy || readOnly || !!entry.scope?.archived}
-                  onChange={color => void perform(() => request('/resources/folders/color', { method: 'PATCH', body: JSON.stringify({ projectId: entry.projectId, path: entry.path, color }) }))} />}
+                  onChange={color => void perform(() => resourceCommand({ kind: 'folderColor', projectId: entry.projectId, path: entry.path, color }))} />}
               </MoreMenu>
               {entry.kind === 'file' && entry.courseId ? <PluginActions surface="resource.actions" materialId={entry.courseId} /> : null}
             </li>)}
@@ -373,15 +376,21 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
       </nav><div className="finder-status"><span className="resource-count">{busy ? t('working') : selection.size ? t('selectionCount', { selected: selection.size, count: entryCount }) : t('itemCount', { count: entryCount })}</span><span className="finder-interaction-hint">{mobile ? t('selectionMobileHint') : t('selectionHint')}</span>{data?.project && <code>{data.project.workspacePath}{directory ? `/${directory}` : ''}</code>}</div></footer>
     </section>
     {settings && <ProjectSettings project={settings.project} agents={settings.agents} onClose={() => setSettings(null)} onChange={project => { setSettings(s => s && ({ ...s, project })); refresh(); }} />}
-    {editor && <Modal.Root isOpen onOpenChange={open => { if (!open && !busy) setEditor(null); }}><Modal.Backdrop><Modal.Container size="lg" className={MODAL_CONTAINER_CLASS}><Modal.Dialog>
-      <Modal.Header><Modal.Heading>{editor.revision === null ? t('newFile') : editor.path}</Modal.Heading></Modal.Header>
-      <Modal.Body><div className="project-form">
-        {editor.revision === null && <TextField><Label>{t('filename')}</Label><Input value={editor.path} onChange={e => setEditor({ ...editor, path: e.target.value })} placeholder="notes.md" /></TextField>}
-        <TextField><Label>{t('content')}</Label><TextArea className="project-text-editor" rows={15} value={editor.text} readOnly={readOnly} onChange={e => setEditor({ ...editor, text: e.target.value })} /></TextField>
-      </div></Modal.Body>
-      <Modal.Footer><Button variant="tertiary" isDisabled={busy} onPress={() => setEditor(null)}>{t('cancel')}</Button><Button variant="primary" isDisabled={busy || readOnly || !editor.path.trim() || (editor.revision === null && validName(editor.path))} onPress={() => void perform(async () => {
-        await serverClient.writeProjectText(editor.projectId, editor.revision === null ? join(directory, editor.path.trim()) : editor.path, editor.text, editor.revision); setEditor(null);
-      })}>{t('save')}</Button></Modal.Footer>
-    </Modal.Dialog></Modal.Container></Modal.Backdrop></Modal.Root>}
+    {editor && <Drawer.Root isOpen onOpenChange={open => { if (!open) void closeEditor(); }}>
+      <Drawer.Backdrop variant="opaque">
+        <Drawer.Content placement={mobile ? 'bottom' : 'right'} className={mobile ? 'max-h-[88vh]' : 'w-[min(36rem,100vw)]'}>
+          <Drawer.Dialog className="project-editor" data-testid="resource-file-editor">
+            <Drawer.Header><Drawer.Heading>{editor.revision === null ? t('newFile') : editor.path}</Drawer.Heading><Drawer.CloseTrigger aria-label={t('cancel')} /></Drawer.Header>
+            <Drawer.Body><div className="project-form">
+              {editor.revision === null && <TextField><Label>{t('filename')}</Label><Input value={editor.path} onChange={e => setEditor({ ...editor, path: e.target.value })} placeholder="notes.md" /></TextField>}
+              <TextField><Label>{t('content')}</Label><TextArea className="project-text-editor" rows={15} value={editor.text} readOnly={readOnly} onChange={e => setEditor({ ...editor, text: e.target.value })} /></TextField>
+            </div></Drawer.Body>
+            <Drawer.Footer><Button variant="tertiary" isDisabled={busy} onPress={() => setEditor(null)}>{t('cancel')}</Button><Button variant="primary" isDisabled={busy || readOnly || !editor.path.trim() || (editor.revision === null && validName(editor.path))} onPress={() => void perform(async () => {
+              await serverClient.writeProjectText(editor.projectId, editor.revision === null ? join(directory, editor.path.trim()) : editor.path, editor.text, editor.revision); setEditor(null);
+            })}>{t('save')}</Button></Drawer.Footer>
+          </Drawer.Dialog>
+        </Drawer.Content>
+      </Drawer.Backdrop>
+    </Drawer.Root>}
   </PageShell>;
 }

@@ -14,7 +14,7 @@ const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
 let web, browser, store;
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
-  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port: 0, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
+  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { watch: null, hmr: false, host: 'localhost', port: 0, proxy: { '/api': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false, ws: true } } } });
   await web.listen(); const origin = `http://localhost:${web.httpServer.address().port}`;
   process.env.PUBLIC_ORIGIN = origin;
   browser = await chromium.launch({ headless: true });

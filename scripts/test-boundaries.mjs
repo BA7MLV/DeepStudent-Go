@@ -29,6 +29,21 @@ for (const source of ["import fs from 'node:fs';", 'localStorage.getItem("key");
 }
 assert.equal(allowed('contracts', 'study-core'), false);
 assert.equal(allowed('study-core', 'contracts'), true);
+for (const source of [
+  "import { useState } from 'react';", "import { create } from 'zustand';", "import Dexie from 'dexie';",
+  'window.fetch("/api");', 'indexedDB.open("cache");', "import { ClientRuntimeService } from '@wangke/remote-host';",
+  "import { TYPERT } from '@wangke/remote-artifacts/host';",
+]) assert.ok(inspectSource(path.resolve('packages/client-core/src/probe.ts'), source).length, source);
+assert.ok(inspectSource(path.resolve('apps/web/src/probe.ts'), "import { TYPERT } from '@wangke/remote-artifacts/host';").length);
+assert.equal(allowed('client-core', 'remote-artifacts'), true);
+assert.equal(allowed('web', 'remote-host'), false);
+const migratedView = path.resolve('apps/web/src/plugins/learning/FlashcardsView.tsx');
+for (const source of [
+  "import { pluginRpc } from '../shared';", "import { serverRuntime } from '../../client/bootstrap';",
+  "import { db } from '../../store/db';", "import { RuntimeModel } from '@wangke/client-core';",
+  "fetch('/api/clientRuntime/read');", "new EventSource('/events');", "new WebSocket('ws://fixture');",
+]) assert.ok(inspectSource(migratedView, source).length, source);
+assert.equal(inspectSource(migratedView, "import type { CardRow } from '../../store/db'; import { useState } from 'react';").length, 0);
 for (const line of ['COPY . .', 'COPY src ./src', 'COPY apps/web ./apps/web', 'COPY --from=build /app/dist ./dist', 'COPY ["src", "./src"]', 'COPY ${WEB_DIR} ./web', 'COPY .env ./']) {
   assert.ok(inspectDocker(line, 'api').length, line);
 }

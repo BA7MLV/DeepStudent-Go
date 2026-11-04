@@ -9,17 +9,12 @@ const error = document.getElementById('error'), thread = document.getElementById
 for (const [id, zh, en] of [['prompt-label','交给 Bot 的任务','Task for Bot'],['thread-label','目标会话','Conversation'],['time-label','执行时间（本地）','Run at (local time)'],['repeat-label','重复间隔','Repeat interval'],['add','创建定时任务','Schedule task']]) document.getElementById(id).textContent = board.t(zh,en);
 for (const [i, zh, en] of [[0,'一次','Once'],[1,'每小时','Every hour'],[2,'每 24 小时','Every 24 hours']]) document.getElementById('repeat').options[i].textContent = board.t(zh,en);
 const next = new Date(Date.now() + 3600000); next.setMinutes(next.getMinutes() - next.getTimezoneOffset()); document.getElementById('time').value = next.toISOString().slice(0,16);
-let snapshot, busy = false;
-async function load() {
-  if (busy) return;
-  try {
-    const [state, conversations] = await Promise.all([board.read('schedules'), board.call('schedules.threads')]); snapshot = state;
+let snapshot, busy = false, latestState;
+function showConversations(conversations) {
     const selected = thread.value; thread.replaceChildren();
     for (const item of conversations.threads) { const option = document.createElement('option'); option.value = item.id; option.textContent = item.title || item.id; thread.append(option); }
     if ([...thread.options].some(o => o.value === selected)) thread.value = selected;
     if (!thread.options.length) { const option = document.createElement('option'); option.value = ''; option.textContent = board.t('请先创建一个 Bot 会话', 'Create a Bot conversation first'); thread.append(option); }
-    render();
-  } catch (e) { error.textContent = e.message; }
 }
 function render() {
   jobs.replaceChildren();
@@ -47,7 +42,7 @@ async function save(rows) {
   busy = true; document.getElementById('add').disabled = true;
   try { snapshot = await board.write({jobs: rows}, snapshot, 'schedules'); error.textContent = ''; render(); return true; }
   catch (e) { error.textContent = e.message; }
-  finally { busy = false; document.getElementById('add').disabled = false; await load(); }
+  finally { busy = false; document.getElementById('add').disabled = false; if (latestState) showState(latestState); }
 }
 document.querySelector('form').onsubmit = async event => {
   event.preventDefault(); if (!snapshot || busy) return;
@@ -56,6 +51,15 @@ document.querySelector('form').onsubmit = async event => {
   const seconds = Number(document.getElementById('repeat').value);
   if (await save([...snapshot.data.jobs, {id: crypto.randomUUID(), prompt: prompt.value.trim(), threadId: thread.value, nextRunAt: at.toISOString(), ...(seconds ? {everySeconds: seconds} : {}), enabled: true}])) prompt.value = '';
 };
-load(); setInterval(load, 5000);
+function showState(document) {
+  latestState = document;
+  if (busy) return;
+  if (snapshot && document.revision < snapshot.revision) return;
+  try { snapshot = { data: JSON.parse(document.content), content: document.content, revision: document.revision }; render(); }
+  catch (e) { error.textContent = e.message; }
+}
+const onError = e => { error.textContent = e.message; };
+plugin.queries.observe('schedules.read', {}, showState, { onError });
+plugin.queries.observe('schedules.threads', {}, showConversations, { onError });
 </script>
 <style>label{display:grid;gap:5px;min-width:0;flex:1}textarea,select,input{width:100%;box-sizing:border-box}.job{padding:14px 0;border-top:1px solid var(--border);overflow-wrap:anywhere}.job p{font-size:.85rem}</style>

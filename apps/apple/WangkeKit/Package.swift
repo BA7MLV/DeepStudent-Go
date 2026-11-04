@@ -11,10 +11,12 @@ let package = Package(
     products: [
         .library(name: "WangkeKit", targets: ["WangkeKit"]),
         .library(name: "WangkeUI", targets: ["WangkeUI"]),
+        .executable(name: "NativeProtocolHarness", targets: ["NativeProtocolHarness"]),
     ],
     targets: [
         .target(name: "WangkeKit"),
         .target(name: "WangkeUI", dependencies: ["WangkeKit"]),
+        .executableTarget(name: "NativeProtocolHarness", dependencies: ["WangkeKit", "WangkeUI"], path: "Harness"),
         .testTarget(name: "WangkeKitTests", dependencies: ["WangkeKit"]),
     ]
 )

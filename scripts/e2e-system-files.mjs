@@ -5,6 +5,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { fixtureBrowserDomain } from './fixture-domain.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-system-files-ui-'));
 const reservation = net.createServer();
@@ -36,7 +37,7 @@ try {
   const configuration = await (await context.request.get(`${origin}/api/v1/cloud/config`)).json();
   const configured = await context.request.put(`${origin}/api/v1/cloud/config`, { headers: { origin }, data: { ...configuration, providers: [{ id: 'offline', name: 'Offline', baseUrl: 'https://offline.invalid/v1', protocol: 'openai-chat', apiKey: 'test-only', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'offline', model: 'test' }, visionModel: { providerId: '', model: '' }, asrModel: { providerId: '', model: '' }, decisionModel: { providerId: '', model: '' } } });
   assert.equal(configured.ok(), true, `configure fixture: ${configured.status()} ${await configured.text()}`);
-  await post('/cloud/records', { mutations: [{ id: 'language', table: 'preferences', key: 'uiLanguage', before: null, after: { id: 'uiLanguage', value: 'zh-CN' } }] });
+   await fixtureBrowserDomain(context.request, origin, 'setPreferences', { operationId: 'fixture-system-language-000001', changes: [{ key: 'uiLanguage', expected: null, value: 'zh-CN' }] });
   const memory = await (await post('/bot/memories', { scope: 'owner', scopeId: '', kind: 'preference', content: '# 学习偏好\n\n用简洁中文回答。', source: 'user:management' })).json();
   const resource = `/system/memory/${memory.id}.md`;
   const diaryPath = '/system/memory/2026-10-28.md';

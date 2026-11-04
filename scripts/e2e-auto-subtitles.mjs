@@ -2,14 +2,15 @@
 // macOS can synthesize a fixture; elsewhere provide TEST_FILE with spoken audio.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { fixturePreference, seedFixtureRecords } from './fixture-domain.mjs';
 import { encodeMessage, fieldBytes, utf8 } from '../apps/web/src/bilibili/wire.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-auto-subtitles-'));
+const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/auto-subtitles-');
+console.log(`Auto subtitles evidence: ${directory}`);
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 delete process.env.CLOUD_WORKER_DISABLED;
 let calls = 0, mode = 'success';
@@ -40,6 +41,7 @@ try {
   assert.equal(response.statusCode, 201, response.body);
   response = await api.inject({ method: 'POST', url: '/api/v1/auth/password/login', payload: { password: 'auto-subtitles-password' } });
   const cookie = response.headers['set-cookie'].split(';')[0];
+  const fixtureOwner = response.json().user.id;
   const call = async (method, url, payload) => {
     const result = await api.inject({ method, url: `/api/v1${url}`, headers: { cookie }, ...(payload !== undefined ? { payload } : {}) });
     assert.ok(result.statusCode < 300, result.body); return result.json();
@@ -49,7 +51,7 @@ try {
     providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://asr.invalid/v1', protocol: 'openai-chat', apiKey: 'test-only', catalogId: '', serves: ['chat', 'asr'] }],
     llmModel: { providerId: 'fixture', model: 'test' }, asrModel: { providerId: 'fixture', model: 'speech' },
   });
-  await call('POST', '/cloud/records', { mutations: [{ id: crypto.randomUUID(), table: 'preferences', key: 'uiLanguage', before: null, after: { id: 'uiLanguage', value: 'zh-CN' } }] });
+  await fixturePreference(api, cookie, 'uiLanguage', 'zh-CN');
   process.env.WANGKE_API_PROXY = backend;
   vite = await createServer({ root: new URL('../apps/web', import.meta.url).pathname, server: { host: '127.0.0.1', port: 0, watch: { ignored: ['**/*'] } } });
   await vite.listen();
@@ -114,8 +116,8 @@ try {
     } };
   }, [...frame]);
   const previous = await record('videos');
-  await call('POST', '/cloud/records', { mutations: [{ id: crypto.randomUUID(), table: 'videos', key: videoId, before: previous,
-    after: { ...previous, status: 'new', biliSource: { bvid: 'BV1GJ411x7h7', aid: 101, cid: 202, page: 1 } } }] });
+  await seedFixtureRecords(directory, fixtureOwner, [{ id: crypto.randomUUID(), table: 'videos', key: videoId, before: previous,
+    after: { ...previous, status: 'new', biliSource: { bvid: 'BV1GJ411x7h7', aid: 101, cid: 202, page: 1 } } }]);
   await call('POST', '/cloud/tasks', { nonce: crypto.randomUUID(), kind: 'transcribe', resource: `course:${videoId}`, input: { videoId } });
   await until(async () => (await tasks()).filter(t => t.kind === 'transcribe' && t.status === 'completed').length === 2, 'Bilibili original captions');
   assert.equal(calls, beforeReload, 'original subtitles skip ASR');
@@ -128,8 +130,8 @@ try {
   mode = 'error';
   // Clear the source/completed marker to exercise ASR failure, keeping the video.
   const withSource = await record('videos');
-  await call('POST', '/cloud/records', { mutations: [{ id: crypto.randomUUID(), table: 'videos', key: videoId, before: withSource,
-    after: { ...withSource, status: 'new', biliSource: null } }] });
+  await seedFixtureRecords(directory, fixtureOwner, [{ id: crypto.randomUUID(), table: 'videos', key: videoId, before: withSource,
+    after: { ...withSource, status: 'new', biliSource: null } }]);
   await call('POST', '/cloud/tasks', { nonce: crypto.randomUUID(), kind: 'transcribe', resource: `course:${videoId}`, input: { videoId } });
   await until(async () => (await tasks()).some(t => t.kind === 'transcribe' && t.status === 'failed'), 'ASR error is visible, not empty success');
   await page.goto(`${origin}/#/player/${videoId}`);
@@ -159,7 +161,48 @@ try {
   assert.equal((await record('videos')).transcriptionPaused, false);
   assert.deepEqual(errors, []);
   console.log('✓ Cancellation survives reload and explicit retry completes without marking partial subtitles as finished');
+  const faultCourseId = crypto.randomUUID();
+  const binary = await api.inject({ method: 'POST', url: '/api/v1/files', headers: { cookie, 'content-type': 'application/octet-stream', 'x-file-mime': 'video/mp4' }, payload: fs.readFileSync(fixture) });
+  assert.equal(binary.statusCode, 201);
+  await seedFixtureRecords(directory, fixtureOwner, [
+    { id: crypto.randomUUID(), table: 'videos', key: faultCourseId, before: null, after: { id: faultCourseId, name: '丢响应转写', size: binary.json().sizeBytes, mimeType: 'video/mp4', duration: 20, createdAt: 1, status: 'new' } },
+    { id: crypto.randomUUID(), table: 'files', key: faultCourseId, before: null, after: { id: faultCourseId, blob: { $file: binary.json().id, type: 'video/mp4' } } },
+  ]);
+  let loseSegment = true;
+  const faultOperations = [];
+  await context.route('**/api/executorRuntime/commitArtifacts', async route => {
+    const request = route.request().postDataJSON().payload.args.request;
+    const target = request.products.some(product => product.kind === 'transcriptSegment' && product.value?.videoId === faultCourseId && product.value?.status === 1);
+    if (target) faultOperations.push(request);
+    const response = await route.fetch();
+    if (target && loseSegment) {
+      assert.equal(response.status(), 200); assert.equal((await response.json()).result.ok, true);
+      loseSegment = false; await route.abort('failed');
+    } else await route.fulfill({ response });
+  });
+  const faultTask = await call('POST', '/cloud/tasks', { nonce: crypto.randomUUID(), kind: 'transcribe', resource: `course:${faultCourseId}`, input: { videoId: faultCourseId } });
+  await until(async () => ['failed', 'completed'].includes((await call('GET', `/cloud/tasks/${faultTask.id}`)).status), 'transcription response-loss reconciliation');
+  fs.writeFileSync(path.join(directory, 'response-loss-observed.json'), JSON.stringify({ faultTask, faultOperations }, null, 2));
+  assert.equal(loseSegment, false, 'actual decoder/VAD/ASR producer reached transcript commit');
+  const lost = faultOperations[0], replays = faultOperations.filter(request => request.operationId === lost.operationId);
+  assert.equal(replays.length, 2, 'failure checkpoint first resolves the original idempotent receipt');
+  assert.deepEqual(replays[0], replays[1], 'exact original task/operation/mutation/expected/value retained');
+  for (const request of faultOperations.filter(request => request.operationId !== lost.operationId)) assert.equal(faultOperations.filter(row => row.operationId === request.operationId).length, 1, 'other parallel ASR segments are not duplicate resubmissions');
+  const observedCommits = faultOperations.length;
+  await page.reload(); await page.getByTestId('study-assistant-toggle').waitFor();
+  await page.waitForTimeout(2000);
+  assert.equal(faultOperations.length, observedCommits, 'acknowledged transcripts are not resubmitted on reload');
+  const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');
+  const evidenceStore = new DatabaseStore(path.join(directory, 'db.sqlite'));
+  try {
+    const originalMutation = faultOperations[0].products.find(product => product.kind === 'transcriptSegment');
+    const saved = evidenceStore.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='segments' AND record_key=?").get(fixtureOwner, JSON.stringify(originalMutation.value.id));
+    assert.equal(JSON.parse(saved.value).text, originalMutation.value.text);
+  } finally { evidenceStore.close(); }
+  fs.writeFileSync(path.join(directory, 'response-loss.json'), JSON.stringify({ pass: true, faultTask, faultOperations, errors, checks: ['actual browser decoder/VAD/ASR producer', 'committed transcript response lost', 'same original receipt and mutation identities', 'reload no duplicate', 'persistent transcript bytes/text'] }, null, 2));
+  console.log(`✓ Actual transcript committed-response loss/receipt/reload passed (${directory})`);
 } finally {
   await browser?.close(); await vite?.close(); await api.close();
-  fs.rmSync(directory, { recursive: true, force: true });
+  // Retain both successful and failed runs for independent review.
+  fs.writeFileSync(path.join(directory, 'browser-errors.json'), JSON.stringify(errors, null, 2));
 }

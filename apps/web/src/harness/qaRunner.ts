@@ -16,6 +16,7 @@ import { getSettings, type ModelTarget } from '../store/settings';
 import type { ChatMessage, ContentPart } from '../api/siliconflow';
 import type { WidgetPayload } from './widgetRuntime';
 import { persistAssistantSnapshot } from '../store/assistantSnapshot';
+import { appendConversationMessage, patchConversationMessage, removeConversationMessage } from '../store/conversationProducts';
 import { widgetReference } from './widgetLayout';
 import { nextChatTurnTimes } from '@wangke/study-core/chat-order';
 import type { UnitKind } from '../materials/units.ts';
@@ -172,7 +173,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
   // Tool checkpoints can be committed before the rest of the answer. Reserve
   // ordered turn times so a fast next question cannot sort before that answer.
   const turnTimes = nextChatTurnTimes(await readChatHistory(sessionId), Date.now(), Date.now());
-  const userRowId = await db.chats.add({
+  const userRowId = await appendConversationMessage({
     videoId,
     sessionId,
     role: 'user',
@@ -243,7 +244,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
     messages.push({ role: 'user', content: currentText });
   }
   messages = reconcileSkillMessages(messages, skillMetas);
-  await db.chats.update(userRowId, { modelTrace: modelTrace(input.displayText ?? text, [...activated.messages, messages.at(-1)!]) });
+  await patchConversationMessage(userRowId, { modelTrace: modelTrace(input.displayText ?? text, [...activated.messages, messages.at(-1)!]) });
   assertSkillRequestBudget(settings.contextWindow, messages, activated);
   const baseLength = messages.length;
   let rawTurn: ChatMessage[] = [];
@@ -338,7 +339,7 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
       executeTool,
       {
         cacheKey,
-        onRequest: async record => { modelRequests.push(record); await db.chats.update(userRowId, { modelRequests: [...modelRequests] }); },
+        onRequest: async record => { modelRequests.push(record); await patchConversationMessage(userRowId, { modelRequests: [...modelRequests] }); },
         onTranscript: async out => {
           rawTurn = out.slice(baseLength);
           pendingModelText = '';
@@ -477,8 +478,8 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
     // Keep completed protocol evidence with the existing user row, without an
     // empty assistant bubble. It remains replayable after refresh.
     const user = await db.chats.get(userRowId);
-    if (user) await db.chats.update(userRowId, { modelTrace: modelTrace(user.content, [...(user.modelTrace?.messages ?? []), ...rawTurn]) });
-    await db.chats.delete(widgetRowId);
+    if (user) await patchConversationMessage(userRowId, { modelTrace: modelTrace(user.content, [...(user.modelTrace?.messages ?? []), ...rawTurn]) });
+    await removeConversationMessage(widgetRowId);
   }
   return {
     tools: traces,

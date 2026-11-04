@@ -21,7 +21,7 @@ import { IlinkPlugin } from './gateway/adapters/ilink.js';
 import { registerGatewayRoutes } from './gateway/routes.js';
 import { CloudRecords } from './cloud/records.js';
 import { CloudConfiguration } from './cloud/config.js';
-import { receiveFile, byteRange } from './cloud/files.js';
+import { receiveFile, byteRange, fileOperationId } from './cloud/files.js';
 import { registerCloudRoutes } from './cloud/routes.js';
 import { SystemMaterials } from './storage/system-materials.js';
 import { registerSystemRoutes } from './storage/system-routes.js';
@@ -31,7 +31,7 @@ import { registerBoardRoutes } from './board/routes.js';
 import { registerPluginRoutes } from './plugins/routes.js';
 import { pluginTool } from './plugins/tool.js';
 import { workerIdentity } from './cloud/tasks.js';
-import { workerTokens } from './cloud/workerAuth.js';
+import { workerTokens, workerTokenHash } from './cloud/workerAuth.js';
 import { McpRepository } from './mcp/repository.js';
 import { McpManager } from './mcp/manager.js';
 import { registerMcpRoutes } from './mcp/routes.js';
@@ -48,7 +48,8 @@ import { settleWithin } from './lifecycle.js';
 import { inspectDatabase } from './storage/release.js';
 import { storageUsageReader } from './storage/usage.js';
 import { BotMessageHistory } from './agent/message-history.js';
-import { BotMessageStreams } from './agent/message-stream.js';
+import { registerClientRuntime } from './realtime/host.js';
+import { submitOwnerTask } from './cloud/task-commands.js';
 
 const defaultDataDir = process.env.DATA_DIR ?? path.resolve(process.cwd(), 'data');
 const messageKinds = new Set(['text', 'progress', 'attachment', 'widget', 'question', 'approval']);
@@ -121,7 +122,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   fs.mkdirSync(filesDir, { recursive: true });
   const store = new DatabaseStore(dbPath, path.join(filesDir, 'system-files'));
   const messageHistory = new BotMessageHistory(store);
-  const messageStreams = new BotMessageStreams(store);
   const systemMaterials = new SystemMaterials(store);
   systemMaterials.migrate();
   const cloudRecords = new CloudRecords(store);
@@ -268,7 +268,13 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
    registerSystemRoutes(app, systemMaterials, cloudConfig, requireAuth, checkOrigin);
    registerBoardRoutes(app, boardFiles, cloudRunner, botService, requireAuth, checkOrigin);
     const pluginService = registerPluginRoutes(app, store, botService, cloudRunner, requireAuth, checkOrigin, { filesDir, resources });
-    cloudRunner.pluginService = pluginService;
+     cloudRunner.pluginService = pluginService;
+      const clientRuntime = registerClientRuntime(app, { store, plugins: pluginService,
+         resources, configuration: cloudConfig,
+       identity: request => workerIdentity(request as FastifyRequest) ? null : session(request as FastifyRequest),
+         origin: checkOrigin, canStart: () => !held && !draining, canExecute: () => !held,
+        submitTask: (owner, request) => submitOwnerTask(store, cloudRecords, cloudConfig, owner, request),
+        prepareRecords: owner => { if (store.db.prepare('SELECT 1 FROM resource_roots WHERE owner_id=?').get(owner)) resources.migrate(owner); } });
     study.register(pluginTool(pluginService));
    registerMcpRoutes(app, { manager: mcp, store, records: cloudRecords, requireAuth, checkOrigin });
    registerWebSearchRoutes(app, { service: webSearch, store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin });
@@ -330,8 +336,11 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const worker = workerIdentity(request);
     if (worker && request.url.startsWith('/api/')) {
       const url = request.url.split('?')[0];
+      // This facade performs task/hash/lease checks itself, including receipt-only
+      // access after terminal commit. It never grants the account facade.
+      if (request.method === 'POST' && /^\/api\/executorRuntime\/(read|report|complete|receipt|commitArtifacts|resourceCommand|admitBlob|resetConversation|deliverInteraction|beginExecution)$/.test(url)) return;
        const read = request.method === 'GET' && (['/api/v1/cloud/status', '/api/v1/cloud/config', '/api/v1/cloud/records', '/api/v1/auth/session', '/api/v1/bootstrap/status', '/api/v1/system/file', '/api/v1/system/files'].includes(url) || /^\/api\/v1\/(files|resources\/courses)\/[^/]+$/.test(url));
-        const write = request.method === 'POST' && (['/api/v1/cloud/records', '/api/v1/files', '/api/v1/cloud/mcp/catalog', '/api/v1/cloud/mcp/call', '/api/v1/cloud/web-search/catalog', '/api/v1/cloud/web-search/call', '/api/v1/system/file'].includes(url) || url.startsWith('/api/v1/cloud/models/') || [`/api/v1/cloud/tasks/${worker.taskId}/report`, `/api/v1/cloud/tasks/${worker.taskId}/complete`, `/api/v1/cloud/tasks/${worker.taskId}/authorize`, `/api/v1/cloud/tasks/${worker.taskId}/authorize/finish`, `/api/v1/cloud/tasks/${worker.taskId}/commands/claim`].includes(url));
+         const write = request.method === 'POST' && (['/api/v1/files', '/api/v1/cloud/mcp/catalog', '/api/v1/cloud/mcp/call', '/api/v1/cloud/web-search/catalog', '/api/v1/cloud/web-search/call', '/api/v1/system/file'].includes(url) || url.startsWith('/api/v1/cloud/models/') || [`/api/v1/cloud/tasks/${worker.taskId}/authorize`, `/api/v1/cloud/tasks/${worker.taskId}/authorize/finish`, `/api/v1/cloud/tasks/${worker.taskId}/commands/claim`].includes(url));
       if (!read && !write) return reply.code(403).send({ error: 'worker_scope_denied' });
       const task = store.db.prepare('SELECT status FROM cloud_tasks WHERE id=? AND owner_id=?').get(worker.taskId, worker.id) as { status: string } | undefined;
       if (!task || !['running', 'waiting_user'].includes(task.status)) return reply.code(403).send({ error: 'worker_task_inactive' });
@@ -652,7 +661,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const user = requireAuth(request, reply); if (!user) return;
     return { files: (store.db.prepare('SELECT * FROM files WHERE owner_id=? ORDER BY created_at DESC LIMIT 500').all(user.id) as any[]).map(fileDto) };
   });
-  app.post('/api/v1/files', async (request, reply) => {
+  app.post<{ Querystring: { operationId?: string } }>('/api/v1/files', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
     const user = requireAuth(request, reply); if (!user) return;
     const body = request.body instanceof Readable ? request.body : null;
@@ -664,6 +673,39 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     try { originalName = decodeURIComponent(originalName); } catch { return bad(reply, 400, 'invalid_file_name'); }
     if ((encodedName !== undefined && !originalName) || originalName.length > 255 || /[\u0000\\/]/.test(originalName)) return bad(reply, 400, 'invalid_file_name');
     const mimeType = typeof mimeHeader === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(mimeHeader) ? mimeHeader.slice(0, 200) : 'application/octet-stream';
+    if (request.query.operationId !== undefined) {
+      const executor = workerIdentity(request);
+      const operationId = request.query.operationId;
+      const admitted = store.db.prepare('SELECT digest,status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(user.id, operationId) as { digest: string; status: string; result: string } | undefined;
+      if (!admitted) return bad(reply, 409, 'library_blob_not_admitted');
+      const receipt = JSON.parse(admitted.result);
+      if (executor) {
+        const token = request.headers.authorization!.slice(7);
+        if (receipt.operation?.kind !== 'executorProductBlob' || receipt.operation.taskId !== executor.taskId || !admitted.digest.startsWith(`executor:${executor.taskId}:${workerTokenHash(token)}:blob:`)) return bad(reply, 403, 'executor_blob_not_admitted');
+      } else if (receipt.operation?.kind !== 'importLibraryBlob') return bad(reply, 403, 'library_blob_not_admitted');
+      if (admitted.status === 'completed') return reply.code(201).send(receipt.file);
+      if (admitted.status !== 'pending' || receipt.phase !== 'admitted') return bad(reply, 409, 'library_blob_uncertain');
+      const assertBlobPrincipal = () => {
+        if (!executor) { if (session(request)?.id !== user.id) throw new Error('library_import_account_changed'); return; }
+        const task = store.db.prepare('SELECT status,worker_id,lease_expires_at,parent_run_id FROM cloud_tasks WHERE owner_id=? AND id=?').get(user.id, executor.taskId) as any;
+        if (!workerIdentity(request) || !task || !['running', 'waiting_user'].includes(task.status) || task.worker_id !== workerTokenHash(request.headers.authorization!.slice(7)) || !Number.isFinite(Date.parse(task.lease_expires_at)) || Date.parse(task.lease_expires_at) <= Date.now()
+           || task.parent_run_id && (cloudConfig.taskPolicy(user.id, executor.taskId).write !== 'allow' || store.db.prepare("SELECT 1 FROM runs WHERE id=? AND status IN ('cancelled','failed','paused')").get(task.parent_run_id))) throw Object.assign(new Error('executor_blob_lease_expired'), { statusCode: 403 });
+      };
+      assertBlobPrincipal();
+      store.db.prepare('UPDATE client_commands SET result=? WHERE owner_id=? AND operation_id=?').run(JSON.stringify({ ...receipt, phase: 'receiving' }), user.id, operationId);
+      try {
+        const operation = receipt.operation;
+        const file = await receiveFile(store, filesDir, user.id, body, 'cache-blob', operation.contentType || 'application/octet-stream', maxFileBytes, operation.size,
+          assertBlobPrincipal, fileOperationId(user.id, operationId, executor ? 'executor-product' : 'library-import'));
+        if (file.sha256 !== operation.sha256 || file.sizeBytes !== operation.size) throw new Error('library_blob_hash_mismatch');
+        store.db.prepare("UPDATE client_commands SET status='completed',result=? WHERE owner_id=? AND operation_id=?").run(JSON.stringify({ ...receipt, phase: 'completed', file }), user.id, operationId);
+        return reply.code(201).send(file);
+      } catch (error) {
+        store.db.prepare('UPDATE client_commands SET error=? WHERE owner_id=? AND operation_id=?').run(String(error), user.id, operationId);
+        throw error;
+      }
+    }
+    if (workerIdentity(request)) return bad(reply, 403, 'executor_blob_admission_required');
     return reply.code(201).send(await receiveFile(store, filesDir, user.id, body, originalName, mimeType, maxFileBytes, declaredSize));
   });
   app.get<{ Params: { id: string } }>('/api/v1/files/:id', async (request, reply) => {
@@ -842,48 +884,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     return resolved;
   });
 
-  app.get<{ Params: { id: string }; Querystring: { after?: string } }>('/api/v1/threads/:id/stream', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const id = request.params.id;
-    if (!ownedThread(user.id, id)) return bad(reply, 404, 'thread_not_found');
-    const after = Number(request.query.after ?? request.headers['last-event-id'] ?? 0);
-    if (!Number.isSafeInteger(after) || after < 0) return bad(reply, 400, 'invalid_event_cursor');
-    if (draining) return reply.header('retry-after', '5').code(503).send({ error: 'api_draining' });
-    const cursor = messageHistory.cursor(id);
-    reply.header('content-type', 'text/event-stream; charset=utf-8').header('cache-control', 'no-cache, no-transform').header('x-accel-buffering', 'no');
-    // Keep CORS/security headers installed by the normal hooks when taking over raw.
-    reply.hijack();
-    for (const [name, value] of Object.entries(reply.getHeaders())) if (value !== undefined) reply.raw.setHeader(name, value);
-    reply.raw.writeHead(200);
-    if (after > cursor) { reply.raw.end('event: resync.required\ndata: {}\n\n'); return; }
-    messageStreams.add(id, after, reply.raw, () => !draining && session(request)?.id === user.id && Boolean(ownedThread(user.id, id)));
-  });
-  app.get<{ Params: { id: string }; Querystring: { after?: string } }>('/api/v1/threads/:id/events', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    const rawCursor = request.query.after ?? request.headers['last-event-id'];
-    const after = rawCursor === undefined || rawCursor === '' ? 0 : Number(rawCursor);
-    if (!Number.isSafeInteger(after) || after < 0) return bad(reply, 400, 'invalid_event_cursor');
-    const events = store.db.prepare('SELECT event_id,type,payload FROM message_events WHERE thread_id=? AND event_id>? ORDER BY event_id').all(thread.id, after) as any[];
-    reply.raw.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
-     for (const event of events) {
-       // Message events created by early migrations stored the DTO directly;
-       // the versioned contract exposes it under `message`. Normalize both
-       // shapes at the transport boundary so old volumes remain readable.
-       let payload = event.payload;
-       if (event.type.startsWith('message.')) {
-         try {
-           const parsed = JSON.parse(event.payload) as Record<string, unknown>;
-           if (!('message' in parsed)) payload = JSON.stringify({ message: parsed });
-         } catch {
-           payload = JSON.stringify({ message: { content: '消息事件格式无效。' } });
-         }
-       }
-       reply.raw.write(`id: ${event.event_id}\nevent: ${event.type}\ndata: ${payload}\n\n`);
-     }
-    reply.raw.end();
-  });
-
   app.post<{ Body: { threadId?: string; mode?: ConversationMode } }>('/api/v1/runs', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
     const user = requireAuth(request, reply); if (!user) return;
@@ -907,7 +907,6 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if (drainTask) return drainTask;
     draining = true;
     boardScheduler.close();
-    messageStreams.close();
     // Calling each operation before awaiting closes all admission paths at once.
     // A false deadline result is NOT a snapshot or proof that writers stopped.
     const bot = runner.quiesce(milliseconds);
@@ -919,7 +918,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     return drainTask;
   }
   app.addHook('preClose', async () => { await drainForRelease(0); });
-  app.addHook('onClose', async () => { await pluginService.close(); await gateway.close(); await memoryWorker.close(); await cloudRunner.close(); await runner.close(); await mcp.close(); store.close(); });
+  app.addHook('onClose', async () => { await clientRuntime.close(); await pluginService.close(); await gateway.close(); await memoryWorker.close(); await cloudRunner.close(); await runner.close(); await mcp.close(); store.close(); });
   return Object.assign(app, { drainForRelease });
 }
 

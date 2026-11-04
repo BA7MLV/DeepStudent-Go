@@ -1,29 +1,24 @@
 import { create } from 'zustand';
+import { appendConversationMessage, patchConversationMessage, patchConversationSession, reviseConversationMessage, reviseConversationSession } from './conversationProducts';
 import { cloud, remoteTasks } from '../cloud/state';
-import { cancelResourceTasks, commandChatTask, submitCloudTask, syncTaskWidgets } from '../cloud/tasks';
+import { syncTaskWidgets } from '../cloud/tasks';
 import type { CloudTask } from '@wangke/contracts/cloud';
 import { useChatNotifications } from './chatNotifications';
 import { readChatPage, readChatHistory } from './chatHistory';
 import { framePatch } from '../utils/framePatch';
-import { CONTINUE_INSTRUCTION, createContinuationFilter } from '@wangke/study-core/continuation';
+import { createContinuationFilter } from '@wangke/study-core/continuation';
 import type { ProcessPhase } from '../utils/responseProcess';
-import { decisionConfigOf, getSettings } from './settings';
+import { getSettings } from './settings';
 import { db, type AskUserState, type ChatRow, type ChatSessionRow, type ChatToolCall, type FolderPlanState, type TurnResume } from './db';
-import { estimateTokens, fitHistoryToBudget } from '../harness/context';
-import { prepareSessionHistory } from './contextCompression';
-import { runAgentLoop, noAnswerNotice, type AgentStopInfo } from '../harness/agent';
+import { noAnswerNotice, type AgentStopInfo } from '../harness/agent';
 import { resolveMaxRounds } from '../harness/loopGuard';
-import { createResourceExecutor, libraryResourceTools } from '../harness/resources';
 import {
   type CourseContextItem,
   folderPlanToolResult,
   LIBRARY_ASSISTANT_ID,
-  libraryAssistantSystemPrompt,
 } from '../harness/libraryAssistant';
 import { applyFolderPlan, type AppliedPlanResult } from '../pipelines/folderPlan';
-import { loadSessionSkillMeta, skillMetaBlock } from '../skills/store';
-import { activateSkills, assertSkillBudget, assertSkillRequestBudget, explicitSkillIds, recordSkillActivation } from '../skills/activation';
-import { reconcileSkillMessages } from '@wangke/study-core/model/transcript';
+import { explicitSkillIds, recordSkillActivation } from '../skills/activation';
 import type { ChatMessage } from '../api/siliconflow';
 import { askUserToolResult, askAnswerText, validateAskAnswer, type AskUserData, type AskUserAnswer } from '../harness/askUser';
 import type { FolderPlan } from '../harness/folderPlan';
@@ -31,17 +26,18 @@ import { ToolTraceLedger, toolHint } from '../utils/toolTrace';
 import { readPartialWidgetArguments } from '../utils/streamingHtml';
 import { beginResponseSegment, nextResponseRound, type ResponseSegment } from '../utils/responseOrder';
 import { widgetReference } from '../harness/widgetLayout';
-import { persistAssistantSnapshot } from './assistantSnapshot';
-import { messageTokens, modelTrace, replayTrace, runtimeContext, splitSystemPrompt } from '@wangke/study-core/model/transcript';
-import { fitModelHistory, sessionCacheKey } from './modelHistory';
-import { displayEnvironmentPrompt } from '../harness/displayEnvironment';
+import { modelTrace } from '@wangke/study-core/model/transcript';
+import { sessionCacheKey } from './modelHistory';
 import type { WidgetPayload } from '../harness/widgetRuntime';
-import { attachmentText, type ChatAttachment } from '../chat/attachments';
-import { attachmentsForModel, messageForModel } from '../chat/attachmentModel';
-import { removeAttachmentFile } from '../chat/prepareAttachment';
+import type { ChatAttachment } from '../chat/attachments';
 import { useChatAttachments } from './chatAttachments';
 import { normalizeCourseContextIds } from '../harness/courseContext';
 import type { ChatProject } from '../projects/chatProjects';
+import { SessionTimelineModel, SessionQueueModel, type SessionQueueItem } from '@wangke/client-core';
+import { followServerSession } from '../client/session';
+import { browserChatQueue, beginChatDraft } from '../client/chat-queue';
+import { stopServerChat, commandServerChat } from '../client/chat-server-execution';
+import { prepareLocalChat, prepareLocalContinuation, runLocalChat, runLocalContinuation, localChatPersistence } from '../client/chat-local-execution';
 
 /**
  * 课程助手的全局会话状态。
@@ -88,8 +84,8 @@ import type { ChatProject } from '../projects/chatProjects';
  *    一律降级成排队（`steer` 末尾那条）；队列本身也可以逐条编辑 / 删除 / 立即发送。
  * 2. **`pendingAsk` 优先于两种模式。** 提问卡悬着时用户打的字是**对那张卡的回答**
  *    （那时循环在等用户，不是「正在生成一份回答」），所以排队与插入都让位。
- * 3. **队列只活在内存里，不落库。** 它是「还没交出去的话」，不是历史 ——
- *    真正的持久化发生在它被 `send` 出去那一刻（那一刻起它就是一条普通的 user 消息）。
+ * 3. **队列不是聊天历史。** 待发项持久化到私有 metadata，保留原 operationId；
+ *    已领取项刷新后只查 admission，不将未知结果当作未发送重放。
  *
  * ## 生成期间的会话切换：一轮属于它自己的会话（真并发）
  *
@@ -120,8 +116,7 @@ import type { ChatProject } from '../projects/chatProjects';
  *
  * ## 刻意不做的事
  *
- * - **不 persist**。这里只有「正在跑的会话」的内存态，历史真源永远是 `chats` 表。
- *   持久化一份会立刻引入「两份真源」（刷新时以哪份为准？），而收益只是省一次读库。
+ * - **不 persist 流式视图**。历史真源仍是会话模型/`chats`，私有队列 metadata 不上传为历史。
  * - **不做「刷新后续跑」**。刷新会杀掉整个 JS 上下文，要续跑得把工具调用栈重建一遍，
  *   代价远大于收益。刷新后未作答的提问卡会退化成只读（见 CourseChat 里的说明文案）。
  * - **草稿仍是全局的**（`draft` 不进会话视图）：切会话时输入框里打了一半的字跟着走，
@@ -130,6 +125,8 @@ import type { ChatProject } from '../projects/chatProjects';
 
 /** 视图用的一条消息（比 `ChatRow` 多的是流式中间态） */
 export interface CourseChatMessage {
+  operationId?: string;
+  pendingOperationId?: string;
   taskId?: string;
   /** Generation may finish before the committed row reaches this device. */
   syncPending?: boolean;
@@ -239,12 +236,7 @@ export interface PendingPlan {
 export type SendMode = 'queue' | 'steer';
 
 /** 排队中的一条消息（还没交给模型的话） */
-export interface QueuedMessage {
-  id: string;
-  text: string;
-  attachments?: ChatAttachment[];
-  explicitSkillIds?: number[];
-}
+export type QueuedMessage = SessionQueueItem<ChatAttachment>;
 
 export interface CourseChatStore {
   ready: boolean;
@@ -312,8 +304,7 @@ export interface CourseChatStore {
   /**
    * 排队中的消息（生成期间按「排队」投递的那些）。
    *
-   * ⚠️ **只活在内存里**，与 `messages` 不同：它是「还没交出去的话」，不是历史数据。
-   * 刷新、切会话都会丢掉它 —— 真正的持久化发生在它被 `send` 出去那一刻。
+   * 它不是历史数据：私有 metadata 持久化后可刷新恢复；未知 admission 保留原命令等待显式核对。
    */
   queued: QueuedMessage[];
   /**
@@ -406,7 +397,7 @@ export interface CourseChatStore {
    * 提问卡作答 / 方案确认的**恢复态**用它（活着的循环不走这条，它们 resolve 内存 promise）。
    * 见 docs/plans/2026-10-16-ask-user-resume-design.md。
    */
-  send: (text: string, mode?: SendMode, target?: number, resume?: ResumeRequest, attachments?: ChatAttachment[], skills?: number[]) => Promise<void>;
+   send: (text: string, mode?: SendMode, target?: number, resume?: ResumeRequest, attachments?: ChatAttachment[], skills?: number[], queuedCommand?: QueuedMessage & { explicitRetry?: boolean }) => Promise<void>;
   /**
    * 改当前会话的技能范围。
    *
@@ -443,7 +434,7 @@ export interface CourseChatStore {
    * 没有正在跑的一轮时退化成普通发送；等收尾期间新一轮已经跑起来时降级成排队。
    * 两条兜底都是为了同一件事：**这句话不会丢**。
    */
-  steer: (text: string, attachments?: ChatAttachment[], skills?: number[]) => Promise<void>;
+  steer: (text: string, attachments?: ChatAttachment[], skills?: number[], queuedCommand?: QueuedMessage) => Promise<void>;
   /**
    * 重试一条消息。按这条消息的状态分流：
    *
@@ -507,19 +498,45 @@ const DRAFT_STATE: Partial<CourseChatStore> = {
  *
  * 空课程库时整套课程工具都不注册（见 `libraryAssistantTools`），技能工具始终并入。
  */
-const toolsForLibrary = libraryResourceTools;
 
 let keySeq = 0;
 const nextKey = () => `course-chat-${Date.now()}-${keySeq++}`;
-let queuedSeq = 0;
-const nextQueuedId = () => `queued-${Date.now()}-${queuedSeq++}`;
+const nextQueuedId = () => crypto.randomUUID();
 
 /** 队列里的附件已经离开草稿区；删掉队列时也要释放本机 / 服务端文件。 */
 function disposeQueuedAttachments(items: QueuedMessage[]): void {
-  const files = new Map<string, ChatAttachment>();
-  for (const item of items) for (const file of item.attachments ?? []) files.set(file.id, file);
-  void Promise.allSettled([...files.values()].map((file) => removeAttachmentFile(file)));
+  void sessionQueue().release(items);
 }
+
+let queueBinding: { adapter: ReturnType<typeof browserChatQueue>; model: SessionQueueModel<ChatAttachment> } | undefined;
+function sessionQueue() {
+  if (queueBinding?.adapter.current()) return queueBinding.model;
+  const adapter = browserChatQueue();
+  const model = new SessionQueueModel<ChatAttachment>({
+  persistence: adapter,
+  failed: error => { if (adapter.current()) writeView(activeKey(), { historyError: `待发消息保存失败，已阻止派发，请勿刷新：${error instanceof Error ? error.message : String(error)}` }); },
+  read: id => readView(id),
+  replace: (id, queued) => { if (adapter.current()) writeView(id, { queued }); },
+  nextId: nextQueuedId,
+  send: (id, item) => {
+    if (!adapter.current()) return Promise.reject(new Error('client_account_changed'));
+    const run = () => useCourseChat.getState().send(item.text, undefined, id, undefined, item.attachments ?? [], item.explicitSkillIds ?? [], item);
+    return remoteTasks() ? run() : adapter.local(id, item, run);
+  },
+  steer: (id, item) => remoteTasks()
+    ? useCourseChat.getState().send(item.text, 'steer', id, undefined, item.attachments ?? [], item.explicitSkillIds ?? [], { ...item, explicitRetry: true })
+    : id === activeKey()
+    ? useCourseChat.getState().steer(item.text, item.attachments ?? [], item.explicitSkillIds ?? [], item)
+    : adapter.local(id, item, () => useCourseChat.getState().send(item.text, undefined, id, undefined, item.attachments ?? [], item.explicitSkillIds ?? [], item), true),
+  attachmentId: file => file.id,
+  releaseAttachment: file => useChatAttachments.getState().items.some(item => item.value?.id === file.id) ? Promise.resolve() : adapter.releaseAttachment(file),
+});
+  queueBinding = { adapter, model };
+  return model;
+}
+
+/** Durability barrier used by unload-safe callers and production-path probes. */
+export async function flushChatQueue() { await sessionQueue().flush(); }
 
 /**
  * 用户中止这一轮时到底**想要什么**。
@@ -579,9 +596,11 @@ function beginInflight(sessionId: number, abort: AbortController): InflightTurn 
 
 /** 收尾：注销这轮记录 + 放行在等它的人。**必须在 `finally` 里调**，否则 `steer` 会一直挂着 */
 function endInflight(sessionId: number, record: InflightTurn): void {
-  if (inflight.get(sessionId) === record) inflight.delete(sessionId);
+  if (inflight.get(sessionId) === record) {
+    inflight.delete(sessionId);
+    inflightDone.delete(sessionId);
+  }
   record.settle?.();
-  inflightDone.delete(sessionId);
 }
 
 /** 草稿态懒创建出真实 id 之后，把这一轮的登记从 `0` 挪到新 id */
@@ -652,44 +671,51 @@ const parked = new Map<number, SessionView>();
 /** Local turns awaiting sync / task acceptance must survive activity polls. */
 const pendingCloudSubmissions = new Map<string, ViewKey>();
 let cloudReflection = 0;
+let accountGeneration = 0;
 const finishedCloudTasks = new Set<string>();
 const historyLoads = new Map<number, symbol>();
+const serverSessions = new Map<number, () => void>();
+const timelines = new Map<number, SessionTimelineModel<CourseChatMessage, ChatRow>>();
+function timeline(id: number) {
+  let model = timelines.get(id);
+  if (!model) { model = new SessionTimelineModel(id, toMessage); timelines.set(id, model); }
+  return model;
+}
+function followSession(id: number) {
+  if (!remoteTasks() || serverSessions.has(id)) return;
+  for (const [other, stop] of serverSessions) if (other !== id && !useCourseChat.getState().runningIds.includes(other)) { stop(); serverSessions.delete(other); }
+  serverSessions.set(id, followServerSession(id, {
+    changed: page => refreshCloudSession(id, cloudReflection, page),
+    failed: error => writeView(id, { historyError: `消息同步失败：${error}` }),
+  }));
+}
+if (typeof window !== 'undefined') window.addEventListener('wangke:bot-session-ended', () => {
+  accountGeneration++;
+  cloudReflection++;
+  for (const turn of inflight.values()) turn.abort.abort();
+  parked.clear(); historyLoads.clear(); pendingCloudSubmissions.clear();
+  queueBinding = undefined;
+  awaiting.clear(); finishedCloudTasks.clear();
+  useCourseChat.setState({ ...DRAFT_STATE, ready: false, loaded: false, sessions: [], archivedSessions: [], runningIds: [], awaitingIds: [], draft: '' });
+  for (const stop of serverSessions.values()) stop(); serverSessions.clear();
+  for (const model of timelines.values()) model.dispose(); timelines.clear();
+});
 
 /** Background revalidation never tears down a ready timeline. Read older visible
  * rows as well as the tail, so refreshing does not undo history pagination. */
-async function refreshCloudSession(id: number, reflection: number) {
+async function refreshCloudSession(id: number, reflection: number, remotePage?: { rows: ChatRow[]; hasOlder: boolean }) {
   const before = readView(id);
   const ids = before.messages.flatMap(message => {
     const id = message.rowId ?? message.committedRowId;
     return id == null ? [] : [id];
   });
   try {
-    const [page, visible] = await Promise.all([readChatPage(id), db.chats.bulkGet(ids)]);
+    const [page, visible] = await Promise.all([remotePage ?? readChatPage(id), db.chats.bulkGet(ids)]);
     // A newer poll, a new turn or a user edit wins over this stale snapshot.
     if (reflection !== cloudReflection || readView(id).messages !== before.messages) return;
-    const rows = new Map([...visible.filter((row): row is ChatRow => !!row && row.sessionId === id), ...page.rows]
-      .map(row => [row.id!, row]));
-    const byTask = new Map([...rows.values()].filter(row => row.taskId)
-      .map(row => [`${row.taskId}:${row.role}`, row]));
-    const messages: CourseChatMessage[] = [];
-    for (const message of before.messages) {
-      const rowId = message.rowId ?? message.committedRowId;
-      const row = (rowId == null ? undefined : rows.get(rowId))
-        ?? (message.taskId ? byTask.get(`${message.taskId}:${message.role === 'ai' ? 'assistant' : 'user'}`) : undefined);
-      if (row) {
-        messages.push({ ...toMessage(row), key: message.key, streaming: false, syncPending: false });
-        rows.delete(row.id!);
-      } else if (message.rowId == null || message.syncPending || message.streaming) {
-        // Missing unacknowledged rows mean sync lag, never deletion.
-        messages.push(message);
-      }
-    }
-    // Rows already matched through task identity must not appear a second time.
-    const seen = new Set(messages.flatMap(message => message.rowId == null ? [] : [message.rowId]));
-    for (const row of [...rows.values()].filter(row => !seen.has(row.id!)).sort((a, b) => a.createdAt - b.createdAt)) {
-      const index = messages.findIndex(message => (message.createdAt ?? Infinity) > row.createdAt);
-      messages.splice(index < 0 ? messages.length : index, 0, toMessage(row));
-    }
+    const earlier = visible.filter((row): row is ChatRow => !!row && row.sessionId === id
+      && (!remotePage || page.rows.length > 0 && row.createdAt < page.rows[0].createdAt));
+    const messages = timeline(id).reconcile(before.messages, [...earlier, ...page.rows]);
     const includesEarlierHistory = page.rows.length > 0 && messages.some(message => message.createdAt != null && message.createdAt < page.rows[0].createdAt);
     writeView(id, { messages, loaded: true, historyError: null, hasOlder: includesEarlierHistory ? before.hasOlder : page.hasOlder });
   } catch (error) {
@@ -772,6 +798,8 @@ function writeView(key: ViewKey, patch: Partial<SessionView>): void {
   parked.set(key, next);
   syncAwaiting(key, next);
 }
+const projectSessionView = writeView;
+const chatDatabase = () => db;
 
 /** Reflect a committed block edit in its own session, even after switching tabs. */
 export function reflectArtifactEdit(row: ChatRow): void {
@@ -794,6 +822,7 @@ export async function reflectCloudTasks(tasks: CloudTask[], dataChanged = false)
   useCourseChat.setState({ runningIds, sessions });
   for (const task of active) {
     const id = Number(task.input.sessionId);
+    followSession(id);
     // A poll may see the task before its POST response reaches send(). Wait for
     // the optimistic keys to be renamed before applying that task's view.
     if (submittingIds.has(id)) continue;
@@ -820,10 +849,6 @@ export async function reflectCloudTasks(tasks: CloudTask[], dataChanged = false)
       const widgets = Array.isArray(progress.widgets) ? progress.widgets as WidgetPayload[] : undefined;
       const phase: ProcessPhase = progress.phase === 'thinking' || progress.phase === 'tool' || progress.phase === 'answer'
         ? (progress.phase === 'answer' ? 'answering' : progress.phase) : 'preparing';
-      const messages = [...current.messages];
-      if (text && !messages.some((message) => message.key === userKey || message.taskId === task.id && message.role === 'user')) {
-        messages.push({ key: userKey, taskId: task.id, syncPending: true, role: 'user', content: text, createdAt: Date.parse(task.createdAt) || Date.now() });
-      }
       const answer = {
         key: answerKey,
         taskId: task.id,
@@ -843,10 +868,8 @@ export async function reflectCloudTasks(tasks: CloudTask[], dataChanged = false)
         processPhase: phase,
         processStartedAt: Date.parse(task.createdAt) || Date.now(),
       };
-      const answerIndex = messages.findIndex((message) => message.key === answerKey || message.taskId === task.id && message.role === 'ai'
-        || task.input.action === 'continue' && message.rowId === task.input.rowId);
-      if (answerIndex < 0) messages.push(answer);
-      else messages[answerIndex] = { ...messages[answerIndex], ...answer, key: messages[answerIndex].key };
+      const messages = timeline(id).progress(current.messages, task as unknown as import('@wangke/contracts/client-runtime').RuntimeTask,
+        text ? { key: userKey, taskId: task.id, syncPending: true, role: 'user', content: text, createdAt: Date.parse(task.createdAt) || Date.now() } : undefined, answer);
       writeView(id, { messages, loaded: true, loading: true });
     } else writeView(id, { loading: true });
   }
@@ -891,6 +914,7 @@ export async function reflectCloudTasks(tasks: CloudTask[], dataChanged = false)
   await Promise.all([...ids].filter((id): id is number => id != null && !runningIds.includes(id)
     && (dataChanged || refreshIds.has(id)))
     .map(id => refreshCloudSession(id, reflection)));
+  if (reflection === cloudReflection) for (const id of ids) if (id != null && !runningIds.includes(id)) drainQueue(id);
 }
 
 /** 把当前顶层的活动视图存回它那条会话（切走前调）。草稿态不 park：它每次由「新会话」重开 */
@@ -965,10 +989,10 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
   // ── 启动 / 会话装载 ────────────────────────────────────────────────────────
   bootstrap: async () => {
     if (get().ready) return;
-    const [sessions, count] = await Promise.all([unarchivedSessions(), db.videos.count()]);
+    const [sessions, count, pendingDraft] = await Promise.all([unarchivedSessions(), db.videos.count(), browserChatQueue().list(0)]);
     const current = get().activeId;
     const keepCurrent = current != null && sessions.some((row) => row.id === current);
-    const activeId = keepCurrent ? current : (sessions[sessions.length - 1]?.id ?? null);
+    const activeId = keepCurrent ? current : pendingDraft.length ? null : (sessions[sessions.length - 1]?.id ?? null);
     set({ sessions, ready: true, courseCount: count, activeId });
     /**
      * 一条会话都没有就**不建**（`activeId` 留 `null` = 草稿态），同时把 `loaded` 置 true。
@@ -977,7 +1001,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
      * 而没有 `activeId` 也就没有任何地方会去把它置 true（页面 effect 的条件是
      * `activeId != null`）。症状是全新用户进来一片死寂 —— 打字打不进去。
      */
-    if (activeId == null) set({ loaded: true });
+    if (activeId == null) { set({ loaded: true }); await sessionQueue().restore(0); }
   },
 
   refreshCourseCount: async () => {
@@ -992,7 +1016,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (!view.hasOlder || view.loadingOlder || first?.rowId == null || first.createdAt == null) return;
     writeView(id, { loadingOlder: true, historyError: null });
     try {
-      const page = await readChatPage(id, { id: first.rowId, createdAt: first.createdAt });
+      const page = await readChatPage(id, { id: first.rowId, createdAt: first.createdAt, role: first.role === 'ai' ? 'assistant' : 'user' });
       const latest = readView(id);
       if (latest.messages[0]?.key !== first.key) return;
       const keys = new Set(latest.messages.map((message) => message.rowId));
@@ -1009,6 +1033,9 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
   },
 
   loadSession: async (id) => {
+    const queue = sessionQueue();
+    try {
+    followSession(id);
     /**
      * 生成中**可以**切会话（2026-10-16）：正在跑的那一轮绑在它自己的会话上，切走 = `park`
      * 它的视图，循环照旧往 `parked[id]` 写；切回来再 `restore`，所以那条流式回答不会丢。
@@ -1104,7 +1131,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
           resolve: () => {},
         };
       } else {
-        void db.chats.where('id').equals(lastRow.id).modify((row) => {
+        void reviseConversationMessage(lastRow.id, (row) => {
           delete row.resume;
         });
       }
@@ -1115,6 +1142,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     // 恢复出来的卡（上一步 `view.pendingAsk/Plan`）要一并登进「等用户作答」列表 ——
     // 否则刷新后标题上的「●」不会亮，用户以为没人在等他
     syncAwaiting(id, view);
+    } finally { await queue.restore(id); }
   },
 
   createSession: async () => {
@@ -1123,9 +1151,11 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
      * 也就不会留下第二条空会话。「当前会话是空的就别再建一条」这条规则在这里
      * 之所以是**免费**的，正是因为草稿态天然可复用。
      */
-    if (get().activeId == null) return;
+    if (get().activeId == null) { await sessionQueue().restore(0); return; }
+    await sessionQueue().flush();
     // 生成中也允许：当前这条（可能正在跑）被 park 进它自己的会话，循环照旧在后台写
     parkActive();
+    beginChatDraft(); queueBinding = undefined;
     set(DRAFT_STATE);
   },
 
@@ -1150,6 +1180,8 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       await db.chatSessions.delete(id);
     });
     parked.delete(id);
+    serverSessions.get(id)?.(); serverSessions.delete(id);
+    timelines.get(id)?.dispose(); timelines.delete(id);
     useChatNotifications.getState().dismiss(id);
     const sessions = await unarchivedSessions();
     set({ sessions });
@@ -1206,6 +1238,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     });
     if (archived) {
       parked.delete(id);
+      serverSessions.get(id)?.(); serverSessions.delete(id);
       useChatNotifications.getState().dismiss(id);
     }
 
@@ -1308,7 +1341,12 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
   },
 
   // ── 发一轮 ────────────────────────────────────────────────────────────────
-  send: async (rawText, mode, target, resume, suppliedAttachments, suppliedSkills) => {
+  send: async (rawText, mode, target, resume, suppliedAttachments, suppliedSkills, queuedCommand) => {
+    const generation = accountGeneration;
+    const db = chatDatabase();
+    const persistAssistantSnapshot = localChatPersistence(db).snapshot;
+    const current = () => generation === accountGeneration && db === chatDatabase();
+    const writeView = (key: ViewKey, patch: Partial<SessionView>) => { if (current()) projectSessionView(key, patch); };
     const state = get();
     /**
      * 目标会话：不传 = 当前活动会话（UI 永远走这条）；只有后台会话的队列续发会带 `target`。
@@ -1345,17 +1383,27 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     let selectedSkills = explicitSkillIds(suppliedSkills ?? (fromComposer ? view.turnSkillIds : []));
 
     if (remoteTasks()) {
-      if (view.pendingAsk && !resume && await commandChatTask(state.activeId, 'answerAsk', text)) { set({ draft: '' }); return; }
+      if (view.loading && !view.pendingAsk && !resume && !queuedCommand && (mode ?? state.sendMode) !== 'steer') {
+        sessionQueue().enqueue(key, text, attachments, selectedSkills);
+        consumeAttachments();
+        if (fromComposer) writeView(key, { turnSkillIds: [] });
+        if (isActive && fromComposer) set({ draft: '' });
+        return;
+      }
+      if (view.pendingAsk && !resume && await commandServerChat(state.activeId, 'answerAsk', text)) { set({ draft: '' }); return; }
       let id = resume?.sessionId ?? (key || null);
-      const submissionKey = nextKey();
+      const queueAdapter = browserChatQueue();
+      const submissionKey = queuedCommand?.operationId ?? queuedCommand?.id ?? crypto.randomUUID();
       const userKey = `cloud-pending-user-${submissionKey}`;
-      const answerKey = `cloud-pending-answer-${submissionKey}`;
+      const continuing = queuedCommand?.action === 'continue';
+      const answerKey = (continuing ? view.messages.find(message => message.rowId === queuedCommand.rowId)?.key : undefined) ?? `cloud-pending-answer-${submissionKey}`;
       pendingCloudSubmissions.set(submissionKey, key);
       try {
         if (id == null) {
           writeView(0, { loading: true });
           const row = await newSessionRow(view.skillIds, view.contextCourses.map(c => c.id), view.mcpServerIds, view.project?.folderId);
           id = row.id!;
+          if (!queueAdapter.current()) return;
           if (activeKey() === key) set(s => ({ sessions: [...s.sessions, row], activeId: id, loaded: true }));
           else {
             set(s => ({ sessions: [...s.sessions, row] }));
@@ -1363,19 +1411,25 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
           }
         }
         pendingCloudSubmissions.set(submissionKey, id);
+        timeline(id).begin(submissionKey);
         // Render before any network work: flushCloud() and task submission can
         // both take seconds. Persist only the session here; the server owns rows.
         const current = readView(id);
         const messages = [...current.messages];
-        if (!resume && text) {
+        if (!resume && text && !continuing) {
           messages.push({ key: userKey, role: 'user', content: text, attachments, createdAt: Date.now() });
         }
-        messages.push({ key: answerKey, role: 'ai', content: '', streaming: true, processPhase: 'preparing', processStartedAt: Date.now() });
+        if (continuing && messages.some(message => message.key === answerKey)) {
+          const index = messages.findIndex(message => message.key === answerKey);
+          messages[index] = { ...messages[index], streaming: true, interrupted: false, pendingOperationId: submissionKey };
+        } else messages.push({ key: answerKey, operationId: submissionKey, role: 'ai', content: '', streaming: true, processPhase: 'preparing', processStartedAt: Date.now() });
         writeView(id, { messages, loading: true, historyError: null }); markRunning(id, true);
         if (fromComposer && activeKey() === id) set({ draft: '' });
-        if ((mode ?? state.sendMode) === 'steer') await cancelResourceTasks(`session:${id}`);
         const settings = getSettings();
-        const task = await submitCloudTask('chat', `session:${id}`, { sessionId: id, text, mode, resume, attachments, explicitSkillIds: selectedSkills, modelRef: settings.llmModel, thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none' });
+        const task = await queueAdapter.submit(id, queuedCommand ?? { id: submissionKey, operationId: submissionKey, text, attachments, explicitSkillIds: selectedSkills }, { sessionId: id, text, mode: mode ?? state.sendMode, resume, attachments, explicitSkillIds: selectedSkills, modelRef: settings.llmModel, thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none' }, queuedCommand?.explicitRetry);
+        if (!queueAdapter.current()) return;
+        timeline(id).accept(submissionKey, task.id);
+        followSession(id);
         consumeAttachments();
         if (fromComposer) writeView(id, { turnSkillIds: [] });
         // Bind server identity without changing React / reading-anchor keys.
@@ -1383,16 +1437,25 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
           ? { ...message, taskId: task.id, syncPending: true }
           : message.key === answerKey ? { ...message, taskId: task.id, syncPending: true } : message) });
       } catch (e) {
+        if (!queueAdapter.current()) return;
         const turnKey = id ?? key;
+        if (id != null) timeline(id).uncertain(submissionKey);
         const error = e instanceof Error ? e.message : String(e);
         writeView(turnKey, {
           messages: readView(turnKey).messages.map(message => message.key === answerKey
-            ? { ...message, content: `发送失败：${error}`, streaming: false, error: true } : message),
+            ? continuing ? { ...message, streaming: false, interrupted: true, interruptReason: error }
+              : { ...message, content: `发送失败：${error}`, streaming: false, error: true } : message),
           loading: view.loading,
           historyError: error,
         });
         markRunning(turnKey, view.loading);
-        if (fromComposer && activeKey() === turnKey && !get().draft) set({ draft: rawText });
+        // The durable queue owns this command, including attachment references.
+        // Do not turn an unknown admission back into a fresh composer command.
+        if (id != null) {
+          consumeAttachments();
+          if (fromComposer) writeView(id, { turnSkillIds: [] });
+          await sessionQueue().restore(id).catch(() => {});
+        }
       } finally {
         pendingCloudSubmissions.delete(submissionKey);
       }
@@ -1422,8 +1485,8 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       if (isActive && fromComposer) set({ draft: '' });
       consumeAttachments();
       if (fromComposer) writeView(key, { turnSkillIds: [] });
-      if ((mode ?? state.sendMode) === 'steer') await get().steer(text, attachments, selectedSkills);
-      else get().enqueue(text, attachments, selectedSkills);
+      if ((mode ?? state.sendMode) === 'steer') await get().steer(text, attachments, selectedSkills, queuedCommand);
+      else sessionQueue().enqueue(key, text, attachments, selectedSkills, queuedCommand ? { ...queuedCommand, state: 'uncertain' } : undefined);
       return;
     }
 
@@ -1492,12 +1555,14 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       try {
         // 草稿态里用户可能已经选过技能范围（那时只写内存，见 setSkillIds），随行一起落库
         const row = await newSessionRow(view.skillIds, view.contextCourses.map((course) => course.id), view.mcpServerIds, view.project?.folderId);
+        if (!current()) { endInflight(0, record); return; }
         sessionId = row.id!;
         justCreated = true;
         // 草稿那一轮的登记（key 0）挪到真实 id 上：`stop` / `steer` 按 activeId 找它
         rekeyInflight(0, sessionId);
         set((s) => ({ sessions: [...s.sessions, row], activeId: sessionId }));
       } catch (error) {
+        if (!current()) { endInflight(0, record); return; }
         // 这一轮从未开始：把登记与 loading 都收回，别让 `stop()` 去 abort 一个已经作废的控制器，
         // 也别让在等这一轮的 `steer` 一直挂着
         endInflight(0, record);
@@ -1530,7 +1595,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
      * 只有续跑走这里；活着的循环那条路由 `rotateAi` 落库。
      */
     if (resume) {
-      await db.chats.where('id').equals(resume.rowId).modify((row) => {
+      await reviseConversationMessage(resume.rowId, (row) => {
         row.modelTrace ??= modelTrace(row.content, resume.midTurn);
         delete row.resume;
         row.tools = row.tools?.map((call) => call.status === 'running' && call.name === resume.toolName
@@ -1647,7 +1712,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       let rowId = message.rowId;
       if (rowId != null) {
         // 挂起时已落过库：改成 update，并把检查点结掉（这一轮不再可续跑）
-        await db.chats.where('id').equals(rowId).modify((row) => {
+        await reviseConversationMessage(rowId, (row) => {
           row.content = message.content;
           row.modelTrace = traceFor(message.content);
           row.responseSegments = message.responseSegments;
@@ -1665,7 +1730,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
           delete row.resume;
         });
       } else {
-        rowId = (await db.chats.add({
+        rowId = (await appendConversationMessage({
           videoId: LIBRARY_ASSISTANT_ID,
           sessionId: turnKey,
           role: 'assistant',
@@ -1760,7 +1825,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
        */
       const userRowContent = resume ? resume.userContent : text;
       if (userRowContent != null) {
-        const userRowId = await db.chats.add({
+        const userRowId = await appendConversationMessage({
           videoId: LIBRARY_ASSISTANT_ID,
           sessionId: turnKey,
           role: 'user',
@@ -1777,92 +1842,22 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
 
       if (firstMessage) {
         const title = text.length > 18 ? `${text.slice(0, 18)}…` : text;
-        await db.chatSessions.update(turnKey, { title });
+        await patchConversationSession(turnKey, { title });
         set((s) => ({ sessions: s.sessions.map((row) => (row.id === turnKey ? { ...row, title } : row)) }));
       }
 
-      const settings = getSettings();
-      /**
-       * 课程数**每轮现查**，不用 store 里那个 `courseCount`。
-       *
-       * 用户很可能在课程库导入完就切回对话页 —— 那个计数是 bootstrap 时读的快照，
-       * 拿它判断「有没有课」会让刚导入完的第一轮仍按空库模式回答。
-       */
-      const courseCount = await db.videos.count();
-      const hasCourses = courseCount > 0;
-      set({ courseCount });
-      /**
-       * 空库时必须把上下文课程清空，不能只靠提示词绕开。
-       *
-       * 场景：用户先导入课程 → 助手把上下文设成某门课 → 用户回课程库把它删了 →
-       * 回到对话页继续问。这时 `contextCourses` 里还挂着那个已不存在的 courseId，
-       * 提示词会宣称「当前课程上下文：《已删除的课》」—— 那是在对着幽灵上课。
-       */
-      let contextCourses = view.contextCourses;
-      if (!hasCourses && contextCourses.length > 0) {
-        contextCourses = [];
-        writeView(turnKey, { contextCourses });
-        await db.chatSessions.where('id').equals(turnKey).modify((row) => {
-          delete row.contextCourseIds;
-        });
-      }
-      const [history, skillMetas] = await Promise.all([
-        readChatHistory(turnKey),
-        loadSessionSkillMeta(view.skillIds),
-      ]);
-      if (resume) {
-        const resumeIndex = history.findIndex(row => row.id === resume.rowId);
-        const origin = history.slice(0, resumeIndex < 0 ? history.length : resumeIndex + 1).reverse().find(row => row.role === 'user' && row.explicitSkillIds !== undefined);
-        selectedSkills = origin?.explicitSkillIds ?? selectedSkills;
-      }
-      const activated = await activateSkills(selectedSkills, view.skillIds, turnKey);
+      const prepared = await prepareLocalChat({ sessionId: turnKey, text, attachments, selectedSkills,
+        skillIds: view.skillIds, contextCourses: view.contextCourses, project: view.project, resume, requestOwnerId, signal: abort.signal }, {
+        context: (courseCount, contextCourses) => { set({ courseCount }); writeView(turnKey, { contextCourses }); },
+        attachments: files => writeView(turnKey, { messages: readView(turnKey).messages.map(message => message.key === userKey ? { ...message, attachments: files } : message) }),
+        hint: hint => patchAi({ hint }),
+      });
+      if (!current()) return;
+      const { settings, hasCourses, contextCourses, activated, tail, chatMessages, cacheKey } = prepared;
+      attachments = prepared.attachments;
       recordSkillActivation(activated, toolTrace);
       patchAi({ tools: [...toolCalls] });
-      const skillBlock = skillMetas.length > 0 ? skillMetaBlock(skillMetas) : undefined;
-      const systemPrompt = libraryAssistantSystemPrompt(skillBlock, contextCourses, hasCourses, settings.agentInstructions);
-      assertSkillBudget(settings.contextWindow - estimateTokens(systemPrompt) - messageTokens(activated.messages) - estimateTokens(text) - 4096, activated);
-      if (requestOwnerId != null && attachments.some(file => file.dataUrl)) {
-        patchAi({ hint: '正在读取图片…' });
-        attachments = await attachmentsForModel(attachments, text, abort.signal);
-        await db.chats.update(requestOwnerId, { attachments });
-        writeView(turnKey, { messages: readView(turnKey).messages.map(message => message.key === userKey ? { ...message, attachments } : message) });
-      }
-      /**
-       * 续跑要用的是「这一轮开始前」的历史：
-       * - 普通一轮：刚写的 user 行之前（`slice(0, -1)`）；
-       * - 续跑：**卡片行之前**（卡片行由 `midTurn` 里的等价消息补回，留在这里就会重复一份）。
-       *
-       * 找不到卡片行（不该发生）时退回整段历史，宁可多带一点也别把上下文切没了。
-       */
-      const cut = resume ? history.findIndex((row) => row.id === resume.rowId) : history.length - 1;
-      const baseRows = history.slice(0, cut < 0 ? history.length : cut).map((row) => ({ ...row, originalContent: row.content, content: attachmentText(row.content, row.attachments) }));
-      const tail: ChatMessage = resume
-        ? { role: 'tool', tool_call_id: resume.toolCallId, name: resume.toolName, content: resume.toolResult }
-        : messageForModel({ role: 'user', content: runtimeContext({ courses: contextCourses, ...(view.project ? { project: view.project } : {}), layout: displayEnvironmentPrompt('course').split('\n').slice(1).join('\n') }) + text, attachments });
-      const tailText = resume ? resume.toolResult : attachmentText(text, attachments);
-      const imageBudget = attachments.filter((file) => file.dataUrl).length * 1600;
-      const budget = settings.contextWindow - estimateTokens(systemPrompt) - messageTokens(activated.messages) - estimateTokens(tailText) - imageBudget - 4096;
-      assertSkillBudget(budget, activated);
-      if (budget < 0) throw new Error('附件正文超过当前模型的上下文预算，请减少附件、改用更大上下文模型，或将文件导入课程库后检索');
       if (fromComposer) writeView(turnKey, { turnSkillIds: [] });
-      // 挂起续跑保持原有历史与工具链，不重新做语义筛选。
-      const recent = resume
-        ? await fitModelHistory(turnKey, baseRows, Math.max(2000, budget))
-        : await prepareSessionHistory(turnKey, baseRows, Math.max(2000, budget), text, decisionConfigOf(settings), {
-            signal: abort.signal,
-            onStart: () => patchAi({ hint: 'Jev 正在筛选历史上下文…' }),
-            onCompressed: (turns) => patchAi({ hint: `已省略 ${turns} 个旧轮次，原始记录保留` }),
-          });
-      const chatMessages: ChatMessage[] = reconcileSkillMessages([
-        ...splitSystemPrompt(systemPrompt),
-        ...await historyMessagesWithAttachments(recent, abort.signal),
-        ...activated.messages,
-        // 续跑：把挂起点之前攒下的 assistant tool_calls 与工具结果原样拼回，
-        // 于是旧工具一次都不用重跑 —— 结果本来就在里面。
-        ...(resume ? resume.midTurn : []),
-        tail,
-      ], skillMetas);
-      assertSkillRequestBudget(settings.contextWindow, chatMessages, activated);
       // 记录初始长度，供 onCheckpoint 截出「本回合新增的部分」（midTurn）
       baseLen = chatMessages.length;
       if (resume) baseLen -= 1; // prior card owns midTurn; the new row owns its result
@@ -1871,20 +1866,19 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         requestOwnerId = resume.rowId;
         modelRequests.push(...((await db.chats.get(requestOwnerId))?.modelRequests ?? []));
       }
-      if (!resume && requestOwnerId != null) await db.chats.update(requestOwnerId, { modelTrace: modelTrace(text, [...activated.messages, tail]) });
-      const cacheKey = await sessionCacheKey(turnKey);
-
-      const executeTool = createResourceExecutor({
+      if (!resume && requestOwnerId != null) await patchConversationMessage(requestOwnerId, { modelTrace: modelTrace(text, [...activated.messages, tail]) });
+      const resources = {
         sessionId: turnKey,
         signal: abort.signal,
         allowedSkillIds: view.skillIds,
-        onWidget: async (w) => {
+        onWidget: async (w: WidgetPayload) => {
+          if (!current()) return;
           // 校验与文档预检通过后才切换到真正的隔离 iframe。流式中间帧
           // 始终由 StreamingHtmlPreview 以静态白名单方式显示。
           widgetPreview = undefined;
           updates.flush();
-          const current = readView(turnKey).messages.find((message) => message.key === currentKey);
-          const widgets = current?.widgets ?? (current?.widget ? [current.widget] : []);
+          const currentMessage = readView(turnKey).messages.find((message) => message.key === currentKey);
+          const widgets = currentMessage?.widgets ?? (currentMessage?.widget ? [currentMessage.widget] : []);
           if (widgets.some(widget => widget.id === w.id)) return;
           // Place the validated visual at delivery time. Later model references are echoes,
           // not instructions to move an already-mounted interactive frame.
@@ -1893,16 +1887,17 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
             videoId: LIBRARY_ASSISTANT_ID, sessionId: turnKey, role: 'assistant', createdAt: Date.now(),
             content, reasoning: reasoning || undefined, responseSegments, tools: toolCalls,
             widget: w, widgets: [...widgets, w], interrupted: true, interruptReason: '作品已保存，后续回答尚未完成',
-          }, current?.rowId);
+          }, currentMessage?.rowId);
           answer = content;
           patchAi({ rowId, content: answer, widget: w, widgets: [...widgets, w], widgetPreview: undefined });
         },
         library: {
           contextCourseIds: contextCourses.map((course) => course.id),
           projectFolderId: view.project?.folderId,
-          onContextChange: async (courses) => {
+          onContextChange: async (courses: CourseContextItem[]) => {
+            if (!current()) return;
             writeView(turnKey, { contextCourses: courses });
-            await db.chatSessions.where('id').equals(turnKey).modify((row) => {
+            await reviseConversationSession(turnKey, (row) => {
               if (courses.length === 0) delete row.contextCourseIds;
               else row.contextCourseIds = courses.map((course) => course.id);
             });
@@ -1910,20 +1905,22 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
           onAskUser: holdAsk,
           onPlanFolders: holdPlan,
         },
-      });
+      };
 
-      await runAgentLoop(
+      await runLocalChat(
         chatMessages,
-        toolsForLibrary(hasCourses),
-        executeTool,
+        hasCourses,
+        resources,
         {
           mcpSessionId: turnKey,
           cacheKey,
           onRequest: async record => {
+            if (!current()) return;
             modelRequests.push(record);
-            if (requestOwnerId != null) await db.chats.update(requestOwnerId, { modelRequests: [...modelRequests] });
+            if (requestOwnerId != null) await patchConversationMessage(requestOwnerId, { modelRequests: [...modelRequests] });
           },
           onTranscript: async out => {
+            if (!current()) return;
             latestOut = out;
             pendingModelText = '';
             updates.flush();
@@ -2038,6 +2035,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       }, finalMessage?.rowId)) as number;
       patchAi({ rowId });
     } catch (error) {
+      if (!current()) return;
       /**
        * 用户中止了请求 —— 但「中止」有两种意图（见 `AbortIntent`），留下的痕迹不同：
        * 按停止键是「到此为止」，插入新消息是「换个方向」。两者都不算错误。
@@ -2220,6 +2218,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         }
       }
     } finally {
+      if (!current()) { endInflight(turnKey, record); return; }
       // 悬着的提问/确认在这里一定已经有人 resolve 过（正常路径），但异常路径下可能还挂着 ——
       // releasePending 会把没 resolve 的收掉，绝不让某个 promise 永远等下去。
       releasePending(turnKey);
@@ -2250,42 +2249,36 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
   setSendMode: (mode) => set({ sendMode: mode }),
 
   enqueue: (text, attachments = [], skills = []) => {
-    const next = text.trim();
-    if (!next) return;
-    set((s) => ({ queued: [...s.queued, { id: nextQueuedId(), text: next, attachments, explicitSkillIds: skills }] }));
+    sessionQueue().enqueue(activeKey(), text, attachments, skills);
   },
 
   removeQueued: (id) => {
-      const item = get().queued.find((entry) => entry.id === id);
-      if (!item) return;
-      set((s) => ({ queued: s.queued.filter((entry) => entry.id !== id) }));
-      disposeQueuedAttachments([item]);
+      sessionQueue().remove(activeKey(), id);
     },
 
   updateQueued: (id, text) => {
-    const next = text.trim();
-    // 改成空白 = 删掉这条：留一条永远发不出去的空气泡，只会让队列看着还在做事
-    if (!next && !get().queued.find((item) => item.id === id)?.attachments?.length) return get().removeQueued(id);
-    set((s) => ({ queued: s.queued.map((item) => (item.id === id ? { ...item, text: next } : item)) }));
+    sessionQueue().update(activeKey(), id, text);
   },
 
   clearQueue: () => {
-    const items = get().queued;
-    set({ queued: [] });
-    disposeQueuedAttachments(items);
+    sessionQueue().clear(activeKey());
   },
 
   sendQueuedNow: async (id) => {
-    const item = get().queued.find((entry) => entry.id === id);
-    if (!item) return;
-    // 先出队再插：`steer` 会走 `send`，那条路可能失败 —— 但让它同时留在队里就会出现两条一样的消息
-    set((s) => ({ queued: s.queued.filter((entry) => entry.id !== id) }));
-    await get().steer(item.text || '请分析这些附件。', item.attachments, item.explicitSkillIds);
+    await sessionQueue().sendNow(activeKey(), id);
   },
 
-  steer: async (rawText, attachments = [], skills = []) => {
+  steer: async (rawText, attachments = [], skills = [], queuedCommand) => {
     const text = rawText.trim();
     if (!text) return;
+    const adapter = browserChatQueue();
+    const targetKey = activeKey();
+    if (remoteTasks()) { await get().send(text, 'steer', targetKey, undefined, attachments, skills, queuedCommand); return; }
+    const send = () => {
+      if (!adapter.current()) return Promise.reject(new Error('client_account_changed'));
+      const run = () => get().send(text, undefined, targetKey, undefined, attachments, skills, queuedCommand);
+      return queuedCommand ? adapter.local(targetKey, queuedCommand, run, true) : run();
+    };
     // 只打断**当前在看的那条会话**；别的一条在后台跑不关它的事
     const turn = inflight.get(activeKey());
     /**
@@ -2295,29 +2288,29 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
      * 而界面上的插入按钮只看得到 `loading`。
      */
     if (turn == null) {
-      await get().send(text, undefined, undefined, undefined, attachments, skills);
+      await send();
       return;
     }
     turn.intent = 'steer';
     turn.abort.abort();
     // 等这一轮收尾（落库写完、loading 置回）。不等的话下面那次 send 会被自己的分发逻辑
     // 当成「生成中」，于是插入变成排队 —— 反了
-    const targetKey = activeKey();
     await inflightDone.get(targetKey);
+    if (!adapter.current()) return;
     /**
      * 等收尾的这几百毫秒里可能又有人插了一条（于是新一轮已经在跑）：
      * 那这条**降级成排队**，绝不让它凭空消失。
      */
     if (readView(targetKey).loading) {
-      writeView(targetKey, { queued: [...readView(targetKey).queued, { id: nextQueuedId(), text, attachments, explicitSkillIds: skills }] });
+      sessionQueue().enqueue(targetKey, text, attachments, skills, queuedCommand);
       return;
     }
-    await get().send(text, undefined, targetKey, undefined, attachments, skills);
+    await send();
   },
 
   // ── 停止生成 ──────────────────────────────────────────────────────────────
   stop: () => {
-    if (remoteTasks()) { void cancelResourceTasks(`session:${activeKey()}`); return; }
+    if (remoteTasks()) { void stopServerChat(activeKey()); return; }
     // Only stop this conversation. A blocked tool is awaiting its user promise,
     // not fetch: abort alone cannot reach finally to release that promise.
     const key = activeKey();
@@ -2349,8 +2342,25 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     const state = get();
     if (state.loading) return;
     const message = state.messages.find((m) => m.key === key);
-    if (!message) return;
     const sessionId = state.activeId;
+    if (cloud.worker) {
+      // This command has no caller-selected rows: the server derives its exact
+      // terminal target from the admitted task and archives the old result.
+      const task = await (await (await import('../cloud/executor-runtime')).executorRuntime()).read();
+      const mode = task.input.action;
+      if (mode !== 'continue' && mode !== 'retry') throw new Error('executor_retry_action_denied');
+      const receipt = await (await import('../cloud/executor-conversation')).resetTaskConversation(mode);
+      if (receipt.sessionId !== sessionId || receipt.target.id !== task.input.rowId) throw new Error('executor_retry_target_changed');
+      if (mode === 'continue') {
+        if (!message || message.rowId !== receipt.target.id) throw new Error('executor_continue_target_missing');
+        await continueInterrupted(key, message, sessionId!); return;
+      }
+      const removed = new Set(receipt.removed.map(row => row.id));
+      set(s => ({ messages: s.messages.filter(row => !removed.has(row.rowId!)) }));
+      await get().send(receipt.user.content, undefined, receipt.sessionId, undefined, (receipt.user.attachments ?? []) as unknown as ChatAttachment[], receipt.user.explicitSkillIds ?? []);
+      return;
+    }
+    if (!message) return;
 
     /**
      * 没有正文的失败回答没有 rowId，但仍要能从回答旁边的「继续回答」入口重跑。
@@ -2358,6 +2368,11 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
      * 此时 send 的文本仍保留在输入框里。
      */
     if (message.error) {
+      if (remoteTasks() && message.operationId && sessionId != null) {
+        const item = (await browserChatQueue().list(sessionId)).find(item => (item.operationId ?? item.id) === message.operationId);
+        if (item) await get().send(item.text, undefined, sessionId, undefined, item.attachments ?? [], item.explicitSkillIds ?? [], { ...item, explicitRetry: true });
+        return;
+      }
       if (sessionId == null) {
         const retryText = state.draft.trim();
         if (!retryText) return;
@@ -2427,18 +2442,24 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (message.interrupted) {
       if (remoteTasks()) {
         const pendingKey = nextKey();
+        const adapter = browserChatQueue();
+        const operationId = message.pendingOperationId ?? crypto.randomUUID();
         pendingCloudSubmissions.set(pendingKey, sessionId);
         markRunning(sessionId, true);
         writeView(sessionId, { loading: true });
+        writeView(sessionId, { messages: readView(sessionId).messages.map(item => item.key === key ? { ...item, pendingOperationId: operationId } : item) });
         try {
           const settings = getSettings();
-          const task = await submitCloudTask('chat', `session:${sessionId}`, { sessionId, rowId: message.rowId, action: 'continue', modelRef: settings.llmModel, thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none' });
+          const task = await adapter.submit(sessionId, { id: operationId, operationId, text: '继续回答', action: 'continue', rowId: message.rowId }, { sessionId, rowId: message.rowId, action: 'continue', modelRef: settings.llmModel, thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none' }, !!message.pendingOperationId);
+          if (!adapter.current()) return;
           writeView(sessionId, { messages: readView(sessionId).messages.map(item => item.key === key
-            ? { ...item, taskId: task.id, streaming: true, interrupted: false, interruptReason: undefined } : item) });
+            ? { ...item, taskId: task.id, pendingOperationId: undefined, streaming: true, interrupted: false, interruptReason: undefined } : item) });
         } catch (error) {
+          if (!adapter.current()) return;
           writeView(sessionId, { loading: false, messages: readView(sessionId).messages.map(item => item.key === key
             ? { ...item, streaming: false, interrupted: true, interruptReason: error instanceof Error ? error.message : String(error) } : item) });
           markRunning(sessionId, false);
+          await sessionQueue().restore(sessionId).catch(() => {});
         } finally { pendingCloudSubmissions.delete(pendingKey); }
         return;
       }
@@ -2550,7 +2571,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
 
   // ── 提问卡作答 ────────────────────────────────────────────────────────────
   answerAsk: async (option) => {
-    if (remoteTasks() && await commandChatTask(get().activeId, 'answerAsk', option)) return;
+    if (remoteTasks()) { await commandServerChat(get().activeId, 'answerAsk', option); return; }
     const { pendingAsk, activeId } = get();
     /**
      * `activeId == null`（草稿态）在这里**不可能**发生：提问卡只能由 agent 循环产生，
@@ -2562,6 +2583,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (!message?.ask || message.ask.picked != null) return;
     const answer = validateAskAnswer(message.ask, option);
     const picked = askAnswerText(answer);
+    if (cloud.worker && message.rowId != null) await reviseConversationMessage(message.rowId, row => { if (row.ask) row.ask = { ...row.ask, picked, answer }; });
     set((s) => ({
       messages: s.messages.map((m) =>
         m.key === pendingAsk.messageKey && m.ask
@@ -2589,7 +2611,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     // 同时要**插进内存里的消息列表**：只落库不插列表的话当前这一屏看不到「你回答了什么」，
     // 要刷新才冒出来 —— 卡片与对话行当场对不上。
     const createdAt = Date.now();
-    const rowId = (await db.chats.add({
+    const rowId = (await appendConversationMessage({
       videoId: LIBRARY_ASSISTANT_ID,
       sessionId: activeId,
       role: 'user',
@@ -2606,7 +2628,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
 
   // ── 目录整理方案 ──────────────────────────────────────────────────────────
   confirmPlan: async () => {
-    if (remoteTasks() && await commandChatTask(get().activeId, 'confirmPlan')) return { ok: true };
+    if (remoteTasks()) return { ok: await commandServerChat(get().activeId, 'confirmPlan') };
     const { pendingPlan } = get();
     if (!pendingPlan) return { ok: false };
     const plan = get().messages.find((m) => m.key === pendingPlan.messageKey)?.folderPlan;
@@ -2624,6 +2646,10 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       set({ planApplying: true });
       try {
         const result = await applyFolderPlan(plan);
+        if (cloud.worker) {
+          const rowId = get().messages.find(m => m.key === pendingPlan.messageKey)?.rowId;
+          if (rowId != null) await reviseConversationMessage(rowId, row => { if (row.folderPlan) row.folderPlan.applied = 1; });
+        }
         set((s) => ({
           planApplying: false,
           messages: s.messages.map((m) =>
@@ -2654,6 +2680,10 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     set({ planApplying: true });
     try {
       const result = await applyFolderPlan(plan);
+      if (cloud.worker) {
+        const rowId = get().messages.find(m => m.key === pendingPlan.messageKey)?.rowId;
+        if (rowId != null) await reviseConversationMessage(rowId, row => { if (row.folderPlan) row.folderPlan.applied = 1; });
+      }
       set((s) => ({
         planApplying: false,
         messages: s.messages.map((m) =>
@@ -2682,9 +2712,13 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
   },
 
   cancelPlan: async () => {
-    if (remoteTasks() && await commandChatTask(get().activeId, 'cancelPlan')) return;
+    if (remoteTasks()) { await commandServerChat(get().activeId, 'cancelPlan'); return; }
     const { pendingPlan } = get();
     if (!pendingPlan) return;
+    if (cloud.worker) {
+      const rowId = get().messages.find(m => m.key === pendingPlan.messageKey)?.rowId;
+      if (rowId != null) await reviseConversationMessage(rowId, row => { if (row.folderPlan) row.folderPlan.applied = 2; });
+    }
     set((s) => ({
       messages: s.messages.map((m) =>
         m.key === pendingPlan.messageKey && m.folderPlan
@@ -2740,6 +2774,10 @@ async function continueInterrupted(
   message: CourseChatMessage,
   sessionId: number,
 ): Promise<void> {
+  const generation = accountGeneration;
+  const db = chatDatabase();
+  const current = () => generation === accountGeneration && db === chatDatabase();
+  const writeView = (id: ViewKey, patch: Partial<SessionView>) => { if (current()) projectSessionView(id, patch); };
   const rowId = message.rowId;
   if (rowId == null) return;
   const partial = message.content;
@@ -2788,7 +2826,7 @@ async function continueInterrupted(
   const persist = async (content: string, extra: { interrupted?: boolean; interruptReason?: string }) => {
     const reasoningMs = reasoningFrom ? reasoningTo - reasoningFrom : undefined;
     patch({ content, responseSegments, streaming: false, hint: undefined, reasoningMs, ...extra });
-    await db.chats.where('id').equals(rowId).modify((row) => {
+    await reviseConversationMessage(rowId, (row) => {
       row.content = content;
       row.modelTrace = modelTrace(content, [...priorTrace, ...rawContinuation, ...(pendingText ? [{ role: 'assistant' as const, content: pendingText }] : [])]);
       row.responseSegments = responseSegments;
@@ -2807,47 +2845,23 @@ async function continueInterrupted(
   };
 
   try {
-    const courseCount = await db.videos.count();
-    const hasCourses = courseCount > 0;
-    useCourseChat.setState({ courseCount });
-
     const view = readView(sessionId);
-    const rows = await readChatHistory(sessionId);
-    const idx = rows.findIndex((row) => row.id === rowId);
-    // 历史只取到这条为止：它后面不该有东西，有也不能带进来（那些消息不在这条回答的上下文里）
-    const history = idx >= 0 ? rows.slice(0, idx + 1) : rows;
-
-    const skillMetas = await loadSessionSkillMeta(view.skillIds);
-    const skillBlock = skillMetas.length > 0 ? skillMetaBlock(skillMetas) : undefined;
-    const systemPrompt = libraryAssistantSystemPrompt(skillBlock, view.contextCourses, hasCourses, settings.agentInstructions);
-    const origin = [...history].reverse().find(row => row.role === 'user' && row.explicitSkillIds !== undefined);
-    const activated = await activateSkills(origin?.explicitSkillIds ?? [], view.skillIds, sessionId);
-    const budget = settings.contextWindow - estimateTokens(systemPrompt) - messageTokens(activated.messages) - estimateTokens(CONTINUE_INSTRUCTION) - 4096;
-    assertSkillBudget(budget, activated);
-    const recent = await fitModelHistory(sessionId, history.map((row) => ({ ...row, originalContent: row.content, content: attachmentText(row.content, row.attachments) })), Math.max(2000, budget));
-    const original = rows.find(row => row.id === rowId);
-    priorTrace = original && replayTrace(original) || [{ role: 'assistant', content: partial }];
-    const chatMessages: ChatMessage[] = reconcileSkillMessages([
-      ...splitSystemPrompt(systemPrompt),
-      ...await historyMessagesWithAttachments(recent, abort.signal),
-      ...activated.messages,
-      { role: 'user', content: CONTINUE_INSTRUCTION },
-    ], skillMetas);
-    assertSkillRequestBudget(settings.contextWindow, chatMessages, activated);
+    const prepared = await prepareLocalContinuation(sessionId, rowId, partial, view, abort.signal);
+    if (!current()) return;
+    useCourseChat.setState({ courseCount: prepared.courseCount });
+    priorTrace = prepared.priorTrace;
+    const { chatMessages } = prepared;
     rawContinuation = [chatMessages.at(-1)!];
 
-    await runAgentLoop(
+    await runLocalContinuation(
       chatMessages,
-      [],
-      // 没给工具，这个执行器不会被调用；留一个说得清的返回值而不是抛错
-      async () => '（续写中不需要调用工具）',
       {
         cacheKey: await sessionCacheKey(sessionId),
-        onRequest: async request => { await db.chats.where('id').equals(rowId).modify(row => { row.modelRequests = [...(row.modelRequests ?? []), request]; }); },
+        onRequest: async request => { await reviseConversationMessage(rowId, row => { row.modelRequests = [...(row.modelRequests ?? []), request]; }); },
         onTranscript: async out => {
           pendingText = '';
           rawContinuation = out.slice(chatMessages.length - 1);
-          await db.chats.update(rowId, { modelTrace: modelTrace(carried + answer, [...priorTrace, ...rawContinuation]), content: carried + answer });
+          await patchConversationMessage(rowId, { modelTrace: modelTrace(carried + answer, [...priorTrace, ...rawContinuation]), content: carried + answer });
         },
         // 思考档位与 `send` 同一套口径，理由见那边的注释
         thinkingEffort: settings.thinkingEnabled ? settings.thinkingEffort : 'none',
@@ -2881,8 +2895,6 @@ async function continueInterrupted(
         },
         signal: abort.signal,
       },
-      // 只给一轮 + 收尾：续写是「把话说完」，不是新一轮检索
-      2,
     );
 
     answer += continuation.flush();
@@ -2892,6 +2904,7 @@ async function continueInterrupted(
     // Markdown fence or indented code. trim() corrupts that boundary.
     await persist(carried + answer, {});
   } catch (error) {
+    if (!current()) return;
     answer += continuation.flush();
     const reason = error instanceof Error ? error.message : String(error);
     if (abort.signal.aborted) {
@@ -2909,6 +2922,7 @@ async function continueInterrupted(
       await persist(carried + answer, { interrupted: true, interruptReason: reason });
     }
   } finally {
+    if (!current()) { endInflight(sessionId, record); return; }
     endInflight(sessionId, record);
     writeView(sessionId, { loading: false });
     markRunning(sessionId, false);
@@ -2942,12 +2956,7 @@ const STEER_INTERRUPT_REASON = '你发了一条新消息，这一轮先停下来
  * （`send(text, undefined, sessionId)`），而不是用户此刻在看的另一条。
  */
 function drainQueue(sessionId: number): void {
-  const view = readView(sessionId);
-  if (view.loading || !view.loaded || view.pendingAsk || view.queued.length === 0) return;
-  const [next, ...rest] = view.queued;
-  writeView(sessionId, { queued: rest });
-  // `.catch` 是给「发送本身炸了」兜底：这条已经出队了，别让异常冒成 unhandled rejection
-  void useCourseChat.getState().send(next.text, undefined, sessionId, undefined, next.attachments ?? [], next.explicitSkillIds ?? []).catch(() => {});
+  sessionQueue().drain(sessionId);
 }
 
 /**
@@ -2959,6 +2968,9 @@ function drainQueue(sessionId: number): void {
  * 老数据里「不限定」的形态就是**字段不存在**。
  */
 async function newSessionRow(skillIds?: number[], contextCourseIds: string[] = [], mcpServerIds?: string[], projectFolderId?: number): Promise<ChatSessionRow> {
+  const database = db;
+  const queue = sessionQueue();
+  const adapter = browserChatQueue();
   const now = Date.now();
   const row: ChatSessionRow = {
     videoId: LIBRARY_ASSISTANT_ID,
@@ -2969,7 +2981,13 @@ async function newSessionRow(skillIds?: number[], contextCourseIds: string[] = [
     ...(contextCourseIds.length ? { contextCourseIds } : {}),
     ...(projectFolderId != null ? { projectFolderId } : {}),
   };
-  const id = (await db.chatSessions.add(row)) as number;
+  await queue.flush();
+  if (!adapter.current()) throw new Error('client_account_changed');
+  const id = await database.transaction('rw', database.chatSessions, database.table('_cloudMeta'), async () => {
+    const id = (await database.chatSessions.add(row)) as number;
+    await adapter.rekeyDraft(id);
+    return id;
+  });
   return { ...row, id };
 }
 
@@ -3031,20 +3049,6 @@ function releasePending(sessionId: number) {
   });
   if (!view.pendingPlan?.restored) view.pendingPlan?.resolve({ ok: false, result: null });
   writeView(sessionId, { pendingAsk: null, pendingPlan: null });
-}
-
-async function historyMessagesWithAttachments(rows: (ChatRow & { originalContent: string })[], signal: AbortSignal): Promise<ChatMessage[]> {
-  const messages: ChatMessage[] = [];
-  for (const row of rows) {
-    const raw = replayTrace(row);
-    if (raw) { messages.push(...raw); continue; }
-    const attachments = await attachmentsForModel(row.attachments ?? [], row.originalContent, signal);
-    if (row.id != null && attachments.some((file, i) => file.description !== row.attachments?.[i]?.description)) {
-      await db.chats.update(row.id, { attachments });
-    }
-    messages.push(messageForModel({ ...row, content: row.originalContent, attachments }));
-  }
-  return messages;
 }
 
 function toMessage(row: ChatRow): CourseChatMessage {

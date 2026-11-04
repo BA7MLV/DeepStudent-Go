@@ -32,7 +32,7 @@ const output = process.env.SCREENSHOT_DIR ?? path.join(directory, 'screenshots')
 fs.mkdirSync(output, { recursive: true });
 try {
   await app.listen({ host: '127.0.0.1', port: 0 });
-  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { hmr: false, watch: null, host: 'localhost', port, strictPort: true, proxy: { '/api/v1': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false } } } });
+  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { hmr: false, watch: null, host: 'localhost', port, strictPort: true, proxy: { '/api': { target: `http://127.0.0.1:${app.server.address().port}`, changeOrigin: false, ws: true } } } });
   await web.listen();
   browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 900 } });

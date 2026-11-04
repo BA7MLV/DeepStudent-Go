@@ -422,6 +422,7 @@ export class BotRunner {
                   if (!meta) step.result = 'MCP operation unavailable after authorization changed.';
                     else {
                     this.store.db.prepare("UPDATE run_steps SET status='running' WHERE id=? AND status='waiting_approval'").run(step.id);
+                    publishBotEvent(this.store, { owner, run: run.id, step: step.id, type: 'tool.started' }, this.options.onEvent);
                     const registry = new ToolRegistry(); registry.register(mcpToolDefinition(meta), 'uncertain');
                     const result = await registry.execute(step.tool, args.arguments, { owner, thread: run.thread_id, run: run.id, step: step.id, signal, checkActive: () => { checkActive(); currentScope(); } }, async scoped => {
                       try {
@@ -442,6 +443,7 @@ export class BotRunner {
                 allowed = approval.status === 'approved' && decision !== 'deny';
                 if (allowed) {
                   this.store.db.prepare("UPDATE run_steps SET status='running' WHERE id=? AND status='waiting_approval'").run(step.id);
+                  publishBotEvent(this.store, { owner, run: run.id, step: step.id, type: 'tool.started' }, this.options.onEvent);
                   step.result = managed.execute(step.tool, args, thread);
                 }
               } else {
@@ -452,6 +454,7 @@ export class BotRunner {
                 allowed = approval.status === 'approved' && capabilities.every(k => operationPolicy[k] !== 'deny') && (Boolean(plugin) || shellDecision(operationPolicy, args.command, args.requiresApproval === true, args.systemWrite === true).permission !== 'deny' && (!args.network || operationPolicy.network === 'allow'));
                 if (allowed) {
                   this.store.db.prepare("UPDATE run_steps SET status='running' WHERE id=? AND status='waiting_approval'").run(step.id);
+                  publishBotEvent(this.store, { owner, run: run.id, step: step.id, type: 'tool.started' }, this.options.onEvent);
                   if (plugin) step.result = await this.executeStudy(plugin.name, args, owner, run, step.id, signal);
                   else {
                     const registry = new ToolRegistry(); registry.register(tools.find(t => t.function.name === 'shell')!, 'uncertain', shellToolTimeoutMs);
@@ -469,6 +472,7 @@ export class BotRunner {
             }
             checkActive();
             this.store.db.prepare("UPDATE run_steps SET status='completed',result=?,completed_at=? WHERE id=?").run(step.result, now(), step.id);
+            publishBotEvent(this.store, { owner, run: run.id, step: step.id, type: 'tool.finished' }, this.options.onEvent);
             this.configuration?.audit(owner, 'shell.resolved', { step: step.id, allowed });
           }
           checkActive();

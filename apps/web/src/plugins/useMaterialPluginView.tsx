@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PluginInstance, PluginPackage } from '@wangke/contracts/plugins';
-import { flushCloud } from '../cloud/sync';
 import { usePluginCatalog, refreshPlugins } from './catalog';
 import { materialPluginInstance } from './legacy-actions';
 import { PluginHost } from './PluginHost';
@@ -19,7 +18,6 @@ export function useMaterialPluginView(materialId: string) {
   useEffect(() => { const element = dialog.current; if (opened && element) element.showModal(); return () => { element?.close(); }; }, [opened]);
   const open = async (pluginId: string, viewId = 'main') => {
     const ticket = ++generation.current;
-    await flushCloud();
     const result = await materialPluginInstance(pluginId, materialId);
     if (!result.plugin.manifest?.views[viewId]?.surfaces.includes('reader.sidepanel')) throw new Error('plugin_view_unavailable');
     await refreshPlugins();

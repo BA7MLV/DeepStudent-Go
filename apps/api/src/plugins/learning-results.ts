@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { DatabaseStore } from '../storage/database.js';
+import { installClientNotifications } from '../realtime/migration.js';
 
 /** References only: cards and notebook files remain the authoritative domain records. */
 export function ensureLearningResults(store: DatabaseStore) {
@@ -16,6 +17,14 @@ export function ensureLearningResults(store: DatabaseStore) {
     CREATE TABLE IF NOT EXISTS plugin_practice_submissions (
     id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     row_id INTEGER NOT NULL, question_index INTEGER NOT NULL, delivered_at TEXT, error TEXT);`);
+  // These tables are initialized after the core database migration. Install
+  // their durable notifications here, including on databases already at v34.
+  installClientNotifications(store.db, [
+    ['plugin_learning_tasks', 'ROW.owner_id', 'ROW.task_id'],
+    ['plugin_learning_receipts', '(SELECT owner_id FROM cloud_tasks WHERE id=ROW.task_id)', 'ROW.task_id'],
+    ['plugin_practice_snapshots', 'ROW.owner_id', 'CAST(ROW.row_id AS TEXT)'],
+    ['plugin_practice_submissions', 'ROW.owner_id', 'ROW.id'],
+  ]);
 }
 export function learningCards(store: DatabaseStore, owner: string, materialId: string): Record<string, any>[] {
   return (store.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='cards' AND value IS NOT NULL AND json_extract(value,'$.videoId')=? ORDER BY record_key").all(owner, materialId) as { value: string }[]).map(r => JSON.parse(r.value));

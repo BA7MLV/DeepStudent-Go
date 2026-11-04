@@ -4,10 +4,51 @@ import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { installCloudCache, markCloudApply } from '../apps/web/src/cloud/cache.ts';
 import { cloudTransaction, isLostCloudTransaction } from '../apps/web/src/cloud/transactions.ts';
+import { WangkeDB, cloudDatabaseName } from '../apps/web/src/store/db.ts';
+import { quarantineExecutorOutbox } from '../apps/web/src/cloud/executor-recovery.ts';
 
 const lostTransaction = () => new DOMException(
   'Attempt to delete range from database without an in-progress transaction', 'UnknownError',
 );
+
+test('legacy/expired executor transactions move atomically to recoverable journal, never to another task', async t => {
+  const database = new WangkeDB(cloudDatabaseName(crypto.randomUUID(), true), true);
+  t.after(() => database.delete());
+  const rows = [
+    { id: 'legacy-operation', transaction: 'legacy-transaction', table: 'files', key: 'file', before: null, after: { id: 'file', blob: new Blob(['retain original bytes']) } },
+    { id: 'old-permitted-operation', transaction: 'old-transaction', table: 'chats', key: 1, before: null, after: { id: 1 }, permissionId: 'old-permit', executorTaskId: 'old-task' },
+    { id: 'current-operation', transaction: 'current-transaction', table: 'chats', key: 2, before: null, after: { id: 2 }, executorTaskId: 'current-task' },
+  ];
+  await database.table('_cloudOutbox').bulkAdd(rows);
+  assert.equal(await quarantineExecutorOutbox(database, 'current-task'), 2);
+  assert.equal((await database.table('_cloudOutbox').toArray())[0].id, 'current-operation');
+  const legacy = await database.table('_cloudMeta').get('executor-recovery:legacy-transaction');
+  assert.equal(legacy.status, 'requires-reconciliation');
+  assert.equal(legacy.rows[0].id, 'legacy-operation');
+  assert.equal(await legacy.rows[0].after.blob.text(), 'retain original bytes');
+  assert.equal((await database.table('_cloudMeta').get('executor-recovery:old-transaction')).rows[0].permissionId, 'old-permit');
+  assert.equal(await quarantineExecutorOutbox(database, 'current-task'), 0, 'conversion is idempotent');
+});
+
+test('executor cache cannot drain interactive study-time/outbox transactions', async t => {
+  const owner = crypto.randomUUID();
+  const interactive = new WangkeDB(cloudDatabaseName(owner), true);
+  const executor = new WangkeDB(cloudDatabaseName(owner, true), true);
+  t.after(async () => { await interactive.delete(); await executor.delete(); });
+  assert.equal(interactive.name, `wangke-cloud-${owner}`, 'existing UI data keeps its original database name');
+  assert.notEqual(interactive.name, executor.name);
+  await interactive.studyDays.put({ date: '2026-11-03', seconds: 60, updatedAt: Date.now() });
+  const queued = await interactive.table('_cloudOutbox').toArray();
+  assert.equal(queued.length, 1); assert.equal(queued[0].table, 'studyDays');
+  assert.equal(await executor.table('_cloudOutbox').count(), 0);
+  assert.equal(await executor.studyDays.count(), 0);
+  await executor.chatSessions.put({ id: 1, videoId: 'course', createdAt: Date.now(), updatedAt: Date.now() });
+  const executorQueue = await executor.table('_cloudOutbox').toArray();
+  assert.deepEqual(executorQueue.map(row => row.table), ['chatSessions']);
+  await executor.table('_cloudOutbox').clear();
+  assert.deepEqual(await interactive.table('_cloudOutbox').toArray(), queued, 'executor acknowledgement never removes UI edits');
+  assert.equal(await interactive.chatSessions.count(), 0);
+});
 
 async function fixture(t) {
   const database = new Dexie(`cloud-transaction-${crypto.randomUUID()}`);

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { seedFixtureRecords } from './fixture-domain.mjs';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-video-http-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
@@ -23,13 +24,14 @@ const snapshot = () => JSON.stringify({ records: db.prepare('SELECT * FROM cloud
   placements: db.prepare('SELECT * FROM resource_files').all(), projects: db.prepare('SELECT * FROM projects').all() });
 try {
   await call('POST', '/bootstrap/initialize', { adminPassword: 'video-http-password' }, 201, { 'x-bootstrap-secret': fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim() });
-  cookie = (await call('POST', '/auth/password/login', { password: 'video-http-password' })).headers['set-cookie'].split(';')[0];
+  const login = await call('POST', '/auth/password/login', { password: 'video-http-password' });
+  cookie = login.headers['set-cookie'].split(';')[0];
   const uploaded = (await call('POST', '/files', bytes, 201, { 'content-type': 'application/octet-stream', 'x-file-name': 'test.mp4', 'x-file-mime': 'video/mp4' })).json();
   const entries = [
     ['videos', 'progressive-video', { id: 'progressive-video', name: '渐进播放', mimeType: 'video/mp4', size: bytes.length, duration: 60, createdAt: 1, status: 'new' }],
     ['courseFiles', 'progressive-video', { id: 'progressive-video', fileId: uploaded.id, mimeType: 'video/mp4', size: bytes.length }],
   ];
-  await call('POST', '/cloud/records', { mutations: entries.map(([table, key, after]) => ({ id: crypto.randomUUID(), table, key, before: null, after })) });
+  await seedFixtureRecords(directory, login.json().user.id, entries.map(([table, key, after]) => ({ id: crypto.randomUUID(), table, key, before: null, after })));
   const initial = snapshot();
   const head = await call('HEAD', url);
   assert.equal(head.body, '');

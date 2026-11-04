@@ -113,7 +113,6 @@ export async function saveSystemMarkdown(id: string, text: string, expected?: st
       const { applySystemAgentInstructions } = await import('../cloud/preferences');
       await applySystemAgentInstructions(saved.content);
     }
-    window.dispatchEvent(new Event('system-files-changed'));
     return true;
   }
   if (id !== AGENT_INSTRUCTIONS_FILE_ID) throw new Error('请登录后读取或编辑 Bot 记忆。');

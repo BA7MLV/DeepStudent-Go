@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const core = fs.readFileSync('packages/client-core/src/session-queue.ts','utf8');
+const store = fs.readFileSync('apps/web/src/store/courseChat.ts','utf8');
+const local = fs.readFileSync('apps/web/src/client/chat-local-execution.ts','utf8');
+const server = fs.readFileSync('apps/web/src/client/chat-server-execution.ts','utf8');
+const queue = fs.readFileSync('apps/web/src/client/chat-queue.ts','utf8');
+const tasks = fs.readFileSync('apps/web/src/cloud/tasks.ts','utf8');
+const forbiddenCore = /\b(?:window|document|navigator|indexedDB|fetch|localStorage)\b|from\s+['"](?:react|zustand|dexie)/;
+assert.equal(forbiddenCore.test(core),false,'queue/execution policy is independent of React and platform IO');
+const forbiddenStore = /import[^;]*(?:runAgentLoop|createResourceExecutor|libraryResourceTools|prepareSessionHistory|activateSkills|submitCloudTask)[^;]*;/;
+assert.equal(forbiddenStore.test(store),false,'UI store may not construct Agent tools/context or submit transport tasks directly');
+assert.equal(forbiddenStore.test("import { runAgentLoop } from '../harness/agent';"),true,'negative boundary fixture must fail');
+assert.equal(/import[^;]*(?:cloud\/state|cloud\/tasks|bootstrap|zustand|react)[^;]*;/.test(local),false,'Local carrier has no server mode selection or UI store dependency');
+assert.equal(/import[^;]*(?:chat-local|harness\/agent|harness\/resources)[^;]*;/.test(server),false,'Server failure cannot import or fall back to Local execution');
+assert.ok(queue.includes('task-command:${operationId}'),'queue must reuse canonical task command journal');
+assert.equal(/\bfetch\s*\(/.test(queue+server),false,'typed admission/submit adapters only, no independent HTTP protocol');
+assert.ok(core.includes("state: 'uncertain' as const"));
+const retry = tasks.slice(tasks.indexOf('export async function retryPendingTaskCommand'),tasks.indexOf('export async function runCloudTask'));
+assert.ok(retry.indexOf('await retryQueuedChatOperation(operationId)') < retry.indexOf('const command: RuntimeTaskSubmit'), 'global retry delegates before any generic fallback');
+assert.ok(retry.includes('if (queued) { forgetUncertain(operationId); return queued; }'),'matched chat operations never fall through');
+assert.equal(/retryPendingTaskCommand/.test(server+queue),false,'Server submit and queue cannot recursively invoke global retry');
+assert.equal(store.includes("if ((mode ?? state.sendMode) === 'steer') await stopServerChat(id)"),false,'steer must claim before cancellation, not cancel accepted recovery');
+console.log('PASS chat queue/execution boundaries and violation negative fixture');

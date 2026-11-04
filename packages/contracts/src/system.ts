@@ -1,3 +1,10 @@
+export interface SavePluginLayout {
+  content: string;
+  expected: string;
+  revision: number;
+  operationId: string;
+}
+
 /** System documents share the Bot/settings revision, not a second material record. */
 export interface SystemDocument {
   path: string;

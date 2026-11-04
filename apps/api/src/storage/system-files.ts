@@ -2,15 +2,21 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { AGENTS_PATH, MCP_PATH, MEMORY_PATH, SKILLS_PATH, memoryName } from '@wangke/contracts/system';
 import { BOARD_PATH, boardPath } from '@wangke/contracts/board';
 import { pluginPath } from '@wangke/contracts/plugins';
 
-type Entry = { owner_id: string; path: string; memory_id: string | null; pending: number; content: string | null; expected: string | null };
+type Entry = { owner_id: string; path: string; memory_id: string | null; pending: number; content: string | null; expected: string | null; intent_id: string | null };
+export type FileIntent = { id: string; owner_id: string; path: string; content: string | null; expected: string | null; observed: string | null;
+  status: 'pending' | 'applied' | 'conflict' | 'superseded' | 'discarded'; created_at: string; completed_at: string | null; resolution: string | null; successor_id: string | null; operation_id: string | null };
 
 /** Files are authoritative. SQLite journals pending atomic writes and indexes revisions. */
 export class SystemFiles {
+  private readonly operation = new AsyncLocalStorage<{ owner: string; id: string }>();
   constructor(readonly root: string, private readonly db: Database.Database) {}
+
+  withOperation<T>(owner: string, id: string, action: () => T): T { return this.operation.run({ owner, id }, action); }
 
   private filename(owner: string, resource: string) {
     const board = boardPath(resource) && resource !== BOARD_PATH ? resource.slice(BOARD_PATH.length + 1).split('/') : undefined;
@@ -67,8 +73,8 @@ export class SystemFiles {
   }
   read(owner: string, resource: string): string | undefined {
     const entry = this.entry(owner, resource);
-    if (entry?.pending && this.db.inTransaction) return entry.content ?? undefined;
-    if (entry?.pending) this.flush();
+    if (entry?.pending === 1 && this.db.inTransaction) return entry.content ?? undefined;
+    if (entry?.pending === 1 && entry.intent_id) this.flush({ owner, intentId: entry.intent_id });
     return this.physical(owner, resource);
   }
   list(owner: string) {
@@ -83,25 +89,109 @@ export class SystemFiles {
       const previous = this.read(owner, resource);
       if (expected !== undefined && previous !== (expected ?? undefined)) throw new Error('system_revision_conflict');
       this.register(owner, resource);
+      const entry = this.entry(owner, resource)!;
+      if (entry.pending === 2) throw Object.assign(new Error('system_file_intent_conflict'), { intentId: entry.intent_id });
       if (previous === (content ?? undefined)) return;
-      this.db.prepare('UPDATE system_file_entries SET pending=1,content=?,expected=CASE WHEN pending=1 THEN expected ELSE ? END WHERE owner_id=? AND path=?').run(content, previous ?? null, owner, resource);
+      const id = crypto.randomUUID(), at = new Date().toISOString();
+      if (entry.pending === 1) this.db.prepare("UPDATE system_file_intents SET status='superseded',completed_at=?,successor_id=? WHERE id=? AND status='pending'").run(at, id, entry.intent_id);
+      const baseline = entry.pending === 1 ? entry.expected : previous ?? null;
+      const operation = this.operation.getStore();
+      this.db.prepare("INSERT INTO system_file_intents(id,owner_id,path,content,expected,status,created_at,operation_id) VALUES(?,?,?,?,?,'pending',?,?)").run(id, owner, resource, content, baseline, at, operation?.owner === owner ? operation.id : null);
+      this.db.prepare('UPDATE system_file_entries SET pending=1,content=?,expected=?,intent_id=? WHERE owner_id=? AND path=?').run(content, baseline, id, owner, resource);
     };
     if (this.db.inTransaction) stage();
-    else { this.db.transaction(stage)(); this.flush(); }
+    else {
+      this.db.transaction(stage)();
+      const intentId = this.entry(owner, resource)?.intent_id;
+      if (intentId) this.flush({ owner, intentId });
+    }
     return content;
   }
 
+  receipt(owner: string, id: string) {
+    return this.db.prepare('SELECT * FROM system_file_intents WHERE owner_id=? AND id=?').get(owner, id) as FileIntent | undefined;
+  }
+  /** Query recovery may finish only a durable conditional intent, never its handler. */
+  reconcile(owner: string, id: string) {
+    const intent = this.receipt(owner, id);
+    if (intent?.status === 'pending') {
+      try { this.flush({ owner, intentId: id }); } catch { /* Keep pending/conflict visible with all original bytes. */ }
+    }
+    return this.receipt(owner, id);
+  }
+  current(owner: string, resource: string) { return this.physical(owner, resource) ?? null; }
+
+  conflicts(owner: string) {
+    return this.db.prepare("SELECT * FROM system_file_intents WHERE owner_id=? AND status='conflict' ORDER BY created_at,id").all(owner) as FileIntent[];
+  }
+
+  operationOutcome(owner: string, operation: string): 'applied' | 'pending' | 'conflict' | 'discarded' {
+    const intents = this.db.prepare('SELECT * FROM system_file_intents WHERE owner_id=? AND operation_id=?').all(owner, operation) as FileIntent[];
+    let pending = false;
+    for (let intent of intents) {
+      const visited = new Set<string>();
+      while (intent.status === 'superseded' && intent.successor_id && !visited.has(intent.id)) {
+        visited.add(intent.id);
+        const successor = this.receipt(owner, intent.successor_id);
+        if (!successor) break;
+        intent = successor;
+      }
+      if (intent.status === 'conflict' || intent.status === 'superseded') return 'conflict';
+      if (intent.status === 'discarded') return 'discarded';
+      if (intent.status === 'pending') pending = true;
+    }
+    return pending ? 'pending' : 'applied';
+  }
+
+  /** Explicit CAS resolution only. Never replay a conflicted intent on startup. */
+  resolve(owner: string, id: string, observed: string | null, action: 'retry' | 'discard') {
+    let replacement: string | undefined;
+    const resolution = JSON.stringify({ observed, action });
+    this.db.transaction(() => {
+      const intent = this.receipt(owner, id);
+      if (intent?.resolution) {
+        if (intent.resolution !== resolution) throw new Error('system_file_resolution_conflict');
+        replacement = intent.successor_id ?? undefined;
+        return;
+      }
+      if (!intent || intent.status !== 'conflict' || this.entry(owner, intent.path)?.intent_id !== id) throw new Error('system_file_intent_not_conflicted');
+      if ((this.physical(owner, intent.path) ?? null) !== observed) throw new Error('system_revision_conflict');
+      this.db.prepare("UPDATE system_file_intents SET status=?,completed_at=? WHERE id=?").run(action === 'retry' ? 'superseded' : 'discarded', new Date().toISOString(), id);
+      this.db.prepare('UPDATE system_file_entries SET pending=0,content=NULL,expected=NULL,intent_id=NULL WHERE owner_id=? AND path=?').run(owner, intent.path);
+      if (action === 'retry') {
+        this.write(owner, intent.path, intent.content, observed); replacement = this.entry(owner, intent.path)?.intent_id ?? undefined;
+        if (!replacement) {
+          replacement = crypto.randomUUID();
+          const at = new Date().toISOString();
+          this.db.prepare("INSERT INTO system_file_intents(id,owner_id,path,content,expected,observed,status,created_at,completed_at) VALUES(?,?,?,?,?,?,'applied',?,?)").run(replacement, owner, intent.path, intent.content, observed, observed, at, at);
+        }
+      }
+      this.db.prepare('UPDATE system_file_intents SET resolution=?,successor_id=? WHERE id=?').run(resolution, replacement ?? null, id);
+    })();
+    if (replacement) this.flush({ owner, intentId: replacement });
+    return replacement ? this.receipt(owner, replacement) : this.receipt(owner, id);
+  }
+
+  private conflicted(entry: Entry, observed: string | null) {
+    this.db.transaction(() => {
+      this.db.prepare("UPDATE system_file_intents SET status='conflict',observed=?,completed_at=? WHERE id=?").run(observed, new Date().toISOString(), entry.intent_id);
+      this.db.prepare('UPDATE system_file_entries SET pending=2 WHERE owner_id=? AND path=? AND intent_id=?').run(entry.owner_id, entry.path, entry.intent_id);
+    })();
+    return Object.assign(new Error('system_file_changed'), { intentId: entry.intent_id });
+  }
+
   /** Crash replay is conditional: never overwrite a newer external edit. */
-  flush() {
+  flush(operation?: { owner: string; id: string } | { owner: string; intentId: string }) {
     if (this.db.inTransaction) return;
-    const pending = this.db.prepare('SELECT * FROM system_file_entries WHERE pending=1').all() as Entry[];
+    const pending = (operation
+      ? this.db.prepare(`SELECT e.* FROM system_file_entries e JOIN system_file_intents i ON i.id=e.intent_id WHERE e.pending=1 AND i.owner_id=? AND ${'intentId' in operation ? 'i.id' : 'i.operation_id'}=?`).all(operation.owner, 'intentId' in operation ? operation.intentId : operation.id)
+      : this.db.prepare('SELECT * FROM system_file_entries WHERE pending=1').all()) as Entry[];
     for (const entry of pending) {
       const current = this.physical(entry.owner_id, entry.path) ?? null;
       const filename = this.filename(entry.owner_id, entry.path);
       if (current !== entry.content) {
         if (current !== entry.expected) {
-          this.db.prepare('UPDATE system_file_entries SET pending=0,content=NULL,expected=NULL WHERE owner_id=? AND path=?').run(entry.owner_id, entry.path);
-          throw new Error('system_file_changed');
+          throw this.conflicted(entry, current);
         }
         if (entry.content === null) fs.rmSync(filename, { force: true });
         else {
@@ -110,7 +200,8 @@ export class SystemFiles {
             const mode = fs.statSync(filename, { throwIfNoEntry: false })?.mode ?? 0o600;
             const fd = fs.openSync(temporary, 'wx', mode & 0o777);
             try { fs.writeFileSync(fd, entry.content, 'utf8'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-            if ((this.physical(entry.owner_id, entry.path) ?? null) !== current) throw new Error('system_file_changed');
+            const observed = this.physical(entry.owner_id, entry.path) ?? null;
+            if (observed !== current) throw this.conflicted(entry, observed);
             fs.renameSync(temporary, filename);
           } finally { fs.rmSync(temporary, { force: true }); }
         }
@@ -118,7 +209,10 @@ export class SystemFiles {
       // Persist the rename/unlink (including replay) before completing its intent.
       const directory = fs.openSync(path.dirname(filename), 'r');
       try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
-      this.db.prepare('UPDATE system_file_entries SET pending=0,content=NULL,expected=NULL WHERE owner_id=? AND path=?').run(entry.owner_id, entry.path);
+      this.db.transaction(() => {
+        this.db.prepare("UPDATE system_file_intents SET status='applied',observed=?,completed_at=? WHERE id=?").run(entry.content, new Date().toISOString(), entry.intent_id);
+        this.db.prepare('UPDATE system_file_entries SET pending=0,content=NULL,expected=NULL WHERE owner_id=? AND path=? AND intent_id=?').run(entry.owner_id, entry.path, entry.intent_id);
+      })();
     }
   }
 }

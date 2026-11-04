@@ -1,0 +1,192 @@
+{
+  "reference": "f3803c96974ad4a94195fb97e5c637e9c2a3afe3",
+  "releaseTag": "dsh-v0.2.2-alpha.2",
+  "archive": {
+    "url": "https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/f3803c96974ad4a94195fb97e5c637e9c2a3afe3",
+    "sha256": "798cab9a2acbc886a40ad9f7916e52f9380fbd4b51b41f685f3ed681f77e0ccb"
+  },
+  "auditSha256": "a5b6a149108ec3f7781035838ca9c9675246cc1191635df0e200ac91e452f7fb",
+  "auditedLockSha256": "c028435841b7b29706bf8359b9d645e6ed2134b9c14237e38fe99b60470f5952",
+  "noticesSha256": "d4d589456b387016b375aa83abf417e5ba8e2341a196dd6be2bfbbea1dd88f62",
+  "summary": {
+    "packageCount": 15,
+    "identityAndSources": true,
+    "reconstruction": true,
+    "closureLegalFiles": true,
+    "missingEdges": 0,
+    "closureSecurityEntries": 0,
+    "buildOnlyProtocolCopy": true
+  },
+  "packages": [
+    {
+      "directory": "node_modules/@deepseek-ai/cordis",
+      "name": "@deepseek-ai/cordis",
+      "version": "4.0.6-alpha.1",
+      "integrity": "sha512-GgUFYPkAERAhjq/H7ASM9G2tWu07bY6XOD/q16jUXqsj/arawh0EIZKB+PjTXLjC7vgG3XptSvJ/8dZkkIWsfQ=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/cosmokit",
+      "name": "@deepseek-ai/cosmokit",
+      "version": "1.8.7-alpha.1",
+      "integrity": "sha512-+R+9sx+SJbkyeidV3s+fvgsqCMZAfx2Z00YCQNhc5RsTen1SnvIYWM8neQah/1SxjlsXRo9jxX9U58Wk68JjvA=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-api-gateway",
+      "name": "@deepseek-ai/dsh-api-gateway",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-5Wlz+8ejElX5t8zSc7cHeGk9eCDGAQApHaeJXwzycfkbAngglVoUVCdrp6xqmKqBRS45IUZHLh6IShiU/o1Xqw=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-brand",
+      "name": "@deepseek-ai/dsh-brand",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-VFHjxHZbfQRjaQHC9fO6oSeCZcHQeA54nThij/WB2Q6Qv8VBdJkitbVzYNLr54gmVDxQXfdK/yYJzHAQade6lg=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-client-connection",
+      "name": "@deepseek-ai/dsh-client-connection",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-FRazdhNDkp2j3jiykqMouOJlv26wg+BEMNOTw/Ex3QO0BHeTv0GKeo8uwVXZQZoA/kIsmUP8zRf75ZfbEeGaiA=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-client-ui-renderer",
+      "name": "@deepseek-ai/dsh-client-ui-renderer",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-aEqbZxnzudASF7C2mK6a6uNkDoSpfHYwJPNnYfOBqYCjHxVf/o7kHbt2F5AWkeHiqlcFc5W0JCs3Qg4m2oIiJg=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-client-ui-slots",
+      "name": "@deepseek-ai/dsh-client-ui-slots",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-OOl2LZXuoR2hXr4WHdl8dFnp2eONepBaphhnQLYSd+EAvtOKoh2xA7Uj1NvESgyYAzRzkYgJEzbNl6an/K47hQ=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-credentials",
+      "name": "@deepseek-ai/dsh-credentials",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-2CBJncX9FvDNfXQOkaA4p/FoliK/6clNzsfQ9oB73f4s9d5NWYC2EARY8iB4BBn8KMtz6XDRC5d9vnDjIhtY5Q=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-deque",
+      "name": "@deepseek-ai/dsh-deque",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-NAEPdkznqy+i3s9tWaWB2krOTf/ac8LsNkUc6vISk00JkM4PL7onHut0VfiT8wNpqnVp8jVsFIC5AVFzpK2zVA=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-scope",
+      "name": "@deepseek-ai/dsh-scope",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-BiniiKjbLL7bRzzqCcq2ldVqi6ZnFKOTWhCvooyl/r2CDhstZfV6x2Z1hxSe4z/Gi5Vk7/sRjpPrO30bGBEYfw=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-timeout",
+      "name": "@deepseek-ai/dsh-timeout",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-Rn5+DsqeUpytiSIOiN8Rdw6vAvMBG8CZTG8W2l0zXstHt0w0UiFQxv6UI21uFHjWL2fUVPvP6KLamv+nE72nmw=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-typert-generator",
+      "name": "@deepseek-ai/dsh-typert-generator",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-6W4ssPqArpghmF4eF2Wx2lCyJ/lxs9wzjQabC0SuotfbUQ77oLVdu9Wp4/BH3/OxxDtGB6BBWudYp0jyfkqOiQ=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-typert-protocol",
+      "name": "@deepseek-ai/dsh-typert-protocol",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-jFA+ub/v6jBwhmrdZtcVHKV6taJ731O2fzC9PXdIVOnOQ9bYds1kIdYsbhgBL7YFd40xWwV/LlJnE5L52v0jFw=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-typert-registry",
+      "name": "@deepseek-ai/dsh-typert-registry",
+      "version": "0.2.2-alpha.2",
+      "integrity": "sha512-Hfxy8A6Hlg/GZ0fZBPNwoeO/byREszZtKWKdYst3kjYDyFBRpb5ZxErellcz70ny5JMlCmAcD6O+9GNmswn/jg=="
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/schemastery",
+      "name": "@deepseek-ai/schemastery",
+      "version": "3.18.6-alpha.1",
+      "integrity": "sha512-ID5DKpWa0BnrcNdZ3ofWkhOoRLQ3MsFr1FdRVHBiALeE9egaCm4QatuCvQK0Cd/haRBcEvefacz2JEYYMFAEnw=="
+    },
+    {
+      "directory": "node_modules/zod",
+      "name": "zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg=="
+    },
+    {
+      "directory": "node_modules/@standard-schema/spec",
+      "name": "@standard-schema/spec",
+      "version": "1.1.0",
+      "integrity": "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="
+    },
+    {
+      "directory": "node_modules/ws",
+      "name": "ws",
+      "version": "8.22.0"
+    },
+    {
+      "directory": "node_modules/react",
+      "name": "react",
+      "version": "19.3.0"
+    },
+    {
+      "directory": "node_modules/react-dom",
+      "name": "react-dom",
+      "version": "19.3.0"
+    },
+    {
+      "directory": "node_modules/@jridgewell/gen-mapping",
+      "name": "@jridgewell/gen-mapping",
+      "version": "0.3.13"
+    },
+    {
+      "directory": "node_modules/@deepseek-ai/dsh-typert-generator/node_modules/typescript",
+      "name": "typescript",
+      "version": "6.0.3",
+      "integrity": "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="
+    },
+    {
+      "directory": "node_modules/scheduler",
+      "name": "scheduler",
+      "version": "0.28.0"
+    },
+    {
+      "directory": "node_modules/@jridgewell/sourcemap-codec",
+      "name": "@jridgewell/sourcemap-codec",
+      "version": "1.6.0"
+    },
+    {
+      "directory": "node_modules/@jridgewell/trace-mapping",
+      "name": "@jridgewell/trace-mapping",
+      "version": "0.3.31"
+    },
+    {
+      "directory": "node_modules/@jridgewell/resolve-uri",
+      "name": "@jridgewell/resolve-uri",
+      "version": "3.1.2"
+    }
+  ],
+  "embedded": [
+    {
+      "name": "use-sync-external-store",
+      "version": "1.6.0",
+      "legal": [
+        {
+          "path": "LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "@deepseek-ai/dsh-util-crypto",
+      "version": "0.2.2-alpha.2",
+      "legal": [
+        {
+          "path": "LICENSE",
+          "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+        }
+      ]
+    }
+  ]
+}

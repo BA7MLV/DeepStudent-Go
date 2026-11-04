@@ -6,11 +6,19 @@ import { useAppNav } from './appNav';
 import { useRecentChats } from './useRecentChats';
 import { SettingsButton } from './SettingsModal';
 import { PageLoader } from '../ui';
+import { usePluginRenderer } from '../plugins/usePluginRenderer';
+import type { PluginCatalog } from '../plugins/catalog';
 
 /** 只让 Outlet 内的页面切换；导航和最近会话的查询始终保持同一份。 */
 export default function AppLayout() {
+  const { renderer, error } = usePluginRenderer();
+  if (error) return <p role="alert">{error}</p>;
+  return renderer ? renderer.renderNavigation({ children: catalog => <AppLayoutView catalog={catalog} /> }) : <PageLoader label="正在加载页面…" />;
+}
+
+function AppLayoutView({ catalog }: { catalog?: PluginCatalog }) {
   const { pathname } = useLocation();
-  const nav = useAppNav();
+  const nav = useAppNav(catalog);
   const chatPage = ['/', '/chat', '/course-chat'].includes(pathname) || pathname.startsWith('/settings');
   const recent = useRecentChats(chatPage);
   const bootstrap = useCourseChat((s) => s.bootstrap);

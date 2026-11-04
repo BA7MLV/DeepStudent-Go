@@ -8,14 +8,35 @@ import { extractMdUnits, MD_MIME } from '../materials/md';
 import { reindexMaterial, type MaterialParseResult } from '../materials/reindex';
 import { useLibraryRevision } from '../pipelines/folderPlan';
 import { saveMarkdownMaterial } from '../materials/markdownFile';
+import { cloud } from '../cloud/state';
+import { getMaterialFile } from './fileStore';
+import { followDocument } from '../client/resources';
 
 /** One Markdown Blob is the only source of truth; no parallel question table. */
 const FILE_ID = WRONGBOOK_MATERIAL_ID;
 export async function readWrongbook(): Promise<string> {
+  if (cloud.enabled) {
+    const file = await getMaterialFile(FILE_ID);
+    return file ? file.text() : EMPTY_WRONGBOOK;
+  }
   const row = await db.files.get(FILE_ID);
   return row ? Dexie.waitFor(row.blob.text()) : EMPTY_WRONGBOOK;
 }
 export function observeWrongbook(next: (markdown: string) => void, error: (e: unknown) => void) {
+  if (cloud.enabled && !cloud.worker) {
+    let stopped = false, off: (() => void) | undefined;
+    // Do not create an empty wrongbook just by visiting its panel. The initial
+    // records cache baseline precedes this view; creation follows committed data.
+    const subscription = liveQuery(() => db.table('courseFiles').get(FILE_ID)).subscribe({
+      next: row => {
+        off?.(); off = undefined;
+        if (stopped) return;
+        if (!row) next(EMPTY_WRONGBOOK);
+        else off = followDocument({ kind: 'courseDocument', courseId: FILE_ID }, document => next(document.text ?? EMPTY_WRONGBOOK), error);
+      }, error,
+    });
+    return { unsubscribe() { stopped = true; off?.(); subscription.unsubscribe(); } };
+  }
   return liveQuery(readWrongbook).subscribe({ next, error });
 }
 
@@ -33,6 +54,13 @@ async function persist(markdown: string): Promise<MaterialParseResult> {
 }
 
 async function mutate(update: (markdown: string) => string, create = false): Promise<void> {
+  if (cloud.enabled) {
+    const markdown = await readWrongbook();
+    const base = /<!-- wrongbook:v[12] -->/.test(markdown) ? migrateWrongbook(markdown) : `${markdown.trimEnd()}\n\n<!-- wrongbook:v2 -->\n`;
+    const result = update(base);
+    if (result !== markdown || create && !await db.videos.get(FILE_ID)) await saveMarkdownMaterial(FILE_ID, result, await getMaterialFile(FILE_ID) ? markdown : '', WRONGBOOK_FILE_NAME);
+    return;
+  }
   let changed = false;
   // IndexedDB serializes read-modify-write across tabs and commits the whole file atomically.
   await db.transaction('rw', db.files, db.videos, db.materialBlocks, async () => {
@@ -52,6 +80,14 @@ async function mutate(update: (markdown: string) => string, create = false): Pro
 
 /** Also registers legacy archives as ordinary library materials. No new empty file on startup. */
 export async function ensureWrongbookMaterial(create = false): Promise<void> {
+  if (cloud.enabled) {
+    const file = await getMaterialFile(FILE_ID);
+    if (!file && !create) return;
+    const text = file ? await file.text() : EMPTY_WRONGBOOK;
+    const migrated = text.includes('<!-- wrongbook:v1 -->') ? migrateWrongbook(text) : text;
+    if (migrated !== text || !file) await saveMarkdownMaterial(FILE_ID, migrated, file ? text : '', WRONGBOOK_FILE_NAME);
+    return;
+  }
   const row = await db.files.get(FILE_ID);
   if (!row && !create) return;
   const text = row ? await row.blob.text() : EMPTY_WRONGBOOK;
