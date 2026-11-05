@@ -61,7 +61,7 @@ probe.mount(); document.body.dataset.ready = 'true';`;
   await page.goto(`${origin}/__activity`);
   await page.locator('body[data-ready="true"]').waitFor({ timeout: 30000 });
   await page.waitForFunction(() => probe.state().tasks !== null);
-  assert.equal(await page.evaluate(() => probe.diagnostics().models.filter(m => m.active).length), 1);
+   assert.equal(await page.evaluate(() => probe.diagnostics().models.filter(m => m.active).length), 2, 'task list and file-intent recovery share the same carrier');
   const at = new Date().toISOString();
   store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,executor,created_at,updated_at) VALUES('activity-task',?,'activity-nonce','qa','fixture','{}','queued','browser',?,?)").run(owner, at, at);
   await page.waitForFunction(() => probe.state().tasks?.some(t => t.id === 'activity-task' && t.status === 'queued'));

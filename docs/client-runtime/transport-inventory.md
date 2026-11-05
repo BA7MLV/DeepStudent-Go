@@ -1,5 +1,7 @@
 # 通信路径盘点
 
+> 历史源码盘点，不代表当前协议兼容承诺。当前规范：[当前架构](../architecture.md)；[历史导航](archive/index.md)。
+
 ## 新路径（隔离实测与已迁移生产入口）
 
 - `POST /api/clientRuntime/read|command|receipt`：Typert 生成入站/出站 codec + Gateway dispatch；named action 使用明确 command target，复用持久 operationId。

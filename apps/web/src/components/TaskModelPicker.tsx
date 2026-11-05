@@ -4,8 +4,8 @@ import ModelPicker from './ModelPicker';
 import { useSettings } from '../store/settings';
 import { taskModelKey, useTaskModel } from '../store/taskModel';
 import { db } from '../store/db';
-import { cloud, remoteTasks } from '../cloud/state';
-import { serverRuntime } from '../client/bootstrap';
+import { cloud } from '../cloud/state';
+import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { toast } from '../ui';
 
 export default function TaskModelPicker({ sessionId }: { sessionId: number | string | null }) {
@@ -21,10 +21,12 @@ export default function TaskModelPicker({ sessionId }: { sessionId: number | str
   }, [key, sessionId]);
   const saveDefault = async () => {
     if (sessionId == null || !choice) return;
+    const owner = cloud.userId, database = db;
     try {
-      if (remoteTasks()) await (await serverRuntime(cloud.userId!)).delegation(typeof sessionId === 'number' ? { action: 'session.default', sessionId, expected: sessionDefault, value: choice } : { action: 'bot.default', threadId: sessionId, expected: sessionDefault, value: choice });
-      else if (typeof sessionId === 'number') await db.chatSessions.update(sessionId, { defaultModel: choice });
-      else throw new Error('server_execution_required');
+      const runtime = await serverRuntime(owner);
+      if (owner !== cloud.userId || database !== db || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
+      await runtime.delegation(typeof sessionId === 'number' ? { action: 'session.default', sessionId, expected: sessionDefault, value: choice } : { action: 'bot.default', threadId: sessionId, expected: sessionDefault, value: choice });
+      if (owner !== cloud.userId || database !== db || !isCurrentServerRuntime(runtime) || runtime.signal.aborted) return;
       setSessionDefault(choice); set(key); toast.success('已设为本会话默认，已受理任务不变');
     } catch { toast.error('会话默认模型保存失败，请刷新后重试'); }
   };

@@ -1,7 +1,7 @@
 import { Context } from '@deepseek-ai/cordis';
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type { RuntimeCommand, RuntimeJson, RuntimeRead, RuntimeSnapshot, RuntimeFrame, RuntimeTaskFrame, RuntimeTasksFrame, RuntimeReceipt, BotJournalFrame } from '@wangke/contracts/client-runtime';
-import type { RuntimeRecordsPage, RuntimeRecordsCommit, RuntimeRecordsReceipt } from '@wangke/contracts/client-runtime';
+import type { RuntimeRecordsPage, RuntimeRecordsReceipt } from '@wangke/contracts/client-runtime';
 import type { RuntimeSessionFrame } from '@wangke/contracts/client-runtime';
 import type { SessionJournalRequest, SessionJournalFrame } from '@wangke/contracts/client-runtime';
 import type { RuntimeTaskSubmit, RuntimeTask } from '@wangke/contracts/client-runtime';
@@ -29,7 +29,6 @@ export interface RuntimeDomain {
   watchBot(owner: string, threadId: string, after: number, signal: AbortSignal): AsyncIterable<BotJournalFrame>;
   recordsPage(owner: string, after: number): Promise<RuntimeRecordsPage>;
   watchRecords(owner: string, after: number, signal: AbortSignal): AsyncIterable<RuntimeRecordsPage>;
-  commitRecords(owner: string, request: RuntimeRecordsCommit): Promise<RuntimeRecordsReceipt>;
   watchSession(owner: string, request: Extract<RuntimeRead, { kind: 'session' }>, signal: AbortSignal): AsyncIterable<RuntimeSessionFrame>;
   watchSessionJournal(owner: string, request: SessionJournalRequest, signal: AbortSignal): AsyncIterable<SessionJournalFrame>;
   submitTask(owner: string, request: RuntimeTaskSubmit): Promise<RuntimeTask>;
@@ -95,11 +94,6 @@ export class ClientRuntimeService extends TypertRemoteService {
   @Remote
   recordsPage(after: number): Promise<RuntimeRecordsPage> {
     return this.domain.recordsPage(this.domain.owner(this.ctx), after);
-  }
-
-  @Remote
-  commitRecords(request: RuntimeRecordsCommit): Promise<RuntimeRecordsReceipt> {
-    return this.domain.commitRecords(this.domain.owner(this.ctx), request);
   }
 
   @Remote({ mode: 'stream' })

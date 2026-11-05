@@ -47,7 +47,6 @@ import { useChatNotifications } from '../store/chatNotifications';
 import { useSettingsDialog } from '../components/settingsDialogStore';
 import { decisionConfigOf, useSettings } from '../store/settings';
 import { estimateTokens } from '../harness/context';
-import { libraryAssistantSystemPrompt } from '../harness/libraryAssistant';
 import { loadSessionSkillMeta, skillMetaBlock } from '../skills/store';
 import { buildSessionMarkdown, exportFileName, markdownToPlainText } from '../utils/chatExport';
 import { copyText } from '../utils/clipboard';
@@ -780,7 +779,9 @@ export default function CourseChat() {
    * 环的作用是让用户看出「快满了」，不是报一个能被审计的账。
    */
   const ctxBreakdown = useMemo(() => {
-    const system = estimateTokens(libraryAssistantSystemPrompt(skillBlock, contextCourses, hasCourses));
+    // Only the selected display context is known here. The authoritative system
+    // prompt and tool budget are assembled and enforced by the server task.
+    const system = estimateTokens(`${skillBlock ?? ''}\n${contextCourses.map(course => course.name).join('\n')}`);
     const historyRows = compressionEnabled ? retainedContext(messages, contextPlan) : messages;
     const history = historyRows.reduce((sum, message) => sum + estimateTokens(message.content), 0);
     return { system, history, current: estimateTokens(draft) };

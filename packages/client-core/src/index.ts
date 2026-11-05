@@ -1,11 +1,10 @@
 import { Context } from '@deepseek-ai/cordis';
-import { clientLearningEdits } from './artifacts.js';
 import { installConnection, type ConnectionInstallOptions, type ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client';
 import { apply as installGateway, RemoteSnapshotStream } from '@deepseek-ai/dsh-api-gateway/client';
 import { TypertRegistry } from '@deepseek-ai/dsh-typert-registry';
 import { TYPERT_REMOTE } from '@wangke/remote-artifacts';
 import type { RuntimeRead, RuntimeJson, RuntimeSnapshot, RuntimeFrame, RuntimeCommand, RuntimeTask } from '@wangke/contracts/client-runtime';
-import type { RuntimeRecordsCommit, RuntimeRecordsPage } from '@wangke/contracts/client-runtime';
+import type { ClientLearningCommand, RuntimeRecordsPage } from '@wangke/contracts/client-runtime';
 import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -340,9 +339,9 @@ export async function createClientRuntime(identity: { server: string; account: s
       if (disposed) throw new Error('client_runtime_disposed');
       return result.value;
     },
-    commitRecords: async (request: RuntimeRecordsCommit) => {
+    editLearning: async (request: ClientLearningCommand) => {
       if (disposed) throw new Error('client_runtime_disposed');
-      const result = await ctx.remote.clientRuntime.editLearning({ operationId: request.operationId, edits: clientLearningEdits(request.mutations) });
+      const result = await ctx.remote.clientRuntime.editLearning(request);
       if (!result.ok) {
         if (result.error.code === 'client/record-conflict') throw Object.assign(new Error('sync_conflict'), { code: result.error.code, detail: result.error.details });
         throw Object.assign(new Error(result.error.message), { code: result.error.code, detail: result.error.details });

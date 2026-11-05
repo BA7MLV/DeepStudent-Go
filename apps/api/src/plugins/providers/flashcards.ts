@@ -1,7 +1,7 @@
 import { FLASHCARDS_PLUGIN } from '@wangke/contracts/learning-plugins';
 import crypto from 'node:crypto';
 import { CloudRecords } from '../../cloud/records.js';
-import { recordMutation } from '../../cloud/execution.js';
+import { cardReviewMutation } from '../../learning/card-review.js';
 import { taskDto } from '../../cloud/tasks.js';
 import { materialResolver } from '../learning.js';
 import { cardsRevision, learningCards } from '../learning-results.js';
@@ -17,10 +17,11 @@ export const flashcardsProvider = {
       const id = resolveMaterial(a, c), cards = learningCards(store, c.owner, id);
       return { materialId: id, cards, revision: cardsRevision(cards) };
     } });
-    service.register({ id: 'cards.update', capability: 'learning', access: 'write', atomic: 'sqlite', schema: schema({ materialId: material, id: { type: 'integer', minimum: 1 }, status: { enum: [0, 1, 2] } }), run: (a, c) => {
-      const id = resolveMaterial(a, c), card = records.get(c.owner, 'cards', a.id);
-      if (!card || card.videoId !== id) throw new Error('plugin_card_not_found');
-      records.apply(c.owner, [recordMutation('cards', card.id, card, { ...card, status: a.status })]);
+    service.register({ id: 'cards.update', capability: 'learning', access: 'write', atomic: 'sqlite', schema: schema({ materialId: material, id: { type: 'integer', minimum: 1 }, expected: { enum: [0, 1, 2] }, status: { enum: [0, 1, 2] } }), run: (a, c) => {
+      const id = resolveMaterial(a, c);
+      records.apply(c.owner, [cardReviewMutation(records, c.owner, {
+        courseId: id, cardId: a.id, expected: a.expected, status: a.status, mutationId: crypto.randomUUID(),
+      })]);
       return { saved: true };
     } });
     service.register({ id: 'cards.generate', capability: 'learning', access: 'write', atomic: 'sqlite', schema: schema({ materialId: material, clientNonce: { type: 'string', minLength: 1, maxLength: 100 }, replaceRevision: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, ['materialId', 'clientNonce']), run: (a, c) => {

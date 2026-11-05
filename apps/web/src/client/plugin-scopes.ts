@@ -1,4 +1,5 @@
 import { Context, type Fiber } from '@deepseek-ai/cordis';
+import type { AccountLifetime } from './account-lifecycle';
 
 export interface ScopeIdentity { server: string; account: string; project: string; instance: string; placement: string; revision: number | undefined }
 type Level = 'account' | 'project' | 'instance' | 'placement';
@@ -25,7 +26,8 @@ export function createPluginScopes(root: Context) {
     pending.add(work);
     void work.catch(() => { failures++; });
   };
-  const acquire = (identity: ScopeIdentity): PlacementLease => {
+  const acquire = (identity: ScopeIdentity, lifetime?: AccountLifetime): PlacementLease => {
+    lifetime?.assertCurrent();
     const chain: Node[] = [];
     let parent = root;
     const values = [identity.server, identity.account];
@@ -48,7 +50,8 @@ export function createPluginScopes(root: Context) {
     // One child per committed mount; duplicate mounts cannot release each other.
     const owner = placement.ctx.plugin({ name: 'plugin-occurrence', inject: ['wangke.plugin.account', 'wangke.plugin.project', 'wangke.plugin.instance', 'wangke.plugin.placement'], apply() {} });
     retains++;
-    const current = () => live && chain.every(node => node.active) && owner.uid !== null;
+    const current = () => live && (!lifetime || lifetime.current()) && chain.every(node => node.active) && owner.uid !== null;
+    let detach: (() => void) | undefined;
     const lease: PlacementLease = {
       incarnation: ++sequence, current,
       assertCurrent() { if (!current()) throw new Error('plugin_scope_expired'); },
@@ -64,11 +67,15 @@ export function createPluginScopes(root: Context) {
       release() {
         if (!live) return;
         live = false; retains--; leases.delete(lease);
-        void Promise.resolve(owner.dispose()).catch(() => { failures++; });
+        detach?.();
+        const work = Promise.resolve(owner.dispose()).finally(() => pending.delete(work));
+        pending.add(work);
+        void work.catch(() => { failures++; });
         for (const node of [...chain].reverse()) if (--node.refs === 0) dispose(node);
       },
     };
     leases.add(lease);
+    detach = lifetime?.own(() => lease.release());
     return lease;
   };
   return {

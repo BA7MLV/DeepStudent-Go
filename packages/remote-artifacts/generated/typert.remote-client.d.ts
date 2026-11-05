@@ -5,14 +5,13 @@ import type {
   TypertRemoteInfo,
   TypertRemoteMethod,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { BotJournalFrame, ClientLearningCommand, DelegationCommand, PreferencesCommand, PreferencesProjection, RuntimeCommand, RuntimeFileIntent, RuntimeFileIntentsFrame, RuntimeFrame, RuntimeJson, RuntimeRead, RuntimeReceipt, RuntimeRecordsCommit, RuntimeRecordsPage, RuntimeRecordsReceipt, RuntimeSessionFrame, RuntimeSnapshot, RuntimeTask, RuntimeTaskAdmission, RuntimeTaskFrame, RuntimeTasksFrame, RuntimeTaskSubmit, SessionJournalFrame, SessionJournalRequest } from '@wangke/contracts/client-runtime'
+import type { BotJournalFrame, ClientLearningCommand, DelegationCommand, PreferencesCommand, PreferencesProjection, RuntimeCommand, RuntimeFileIntent, RuntimeFileIntentsFrame, RuntimeFrame, RuntimeJson, RuntimeRead, RuntimeReceipt, RuntimeRecordsPage, RuntimeRecordsReceipt, RuntimeSessionFrame, RuntimeSnapshot, RuntimeTask, RuntimeTaskAdmission, RuntimeTaskFrame, RuntimeTasksFrame, RuntimeTaskSubmit, SessionJournalFrame, SessionJournalRequest } from '@wangke/contracts/client-runtime'
 import type { ResourceCommand } from '@wangke/contracts/resources'
 import type { SavePluginLayout, SystemDocument } from '@wangke/contracts/system'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$636c69656e7452756e74696d65 {
     command: (request: RuntimeCommand) => Promise<RemoteResult<RuntimeJson>>
-    commitRecords: (request: RuntimeRecordsCommit) => Promise<RemoteResult<RuntimeRecordsReceipt>>
     delegation: (request: DelegationCommand) => Promise<RemoteResult<RuntimeJson>>
     editLearning: (request: ClientLearningCommand) => Promise<RemoteResult<RuntimeRecordsReceipt>>
     fileIntent: (id: string) => Promise<RemoteResult<RuntimeFileIntent | null>>
@@ -36,7 +35,6 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   }
   interface TypertRemoteMap {
     'clientRuntime/command': (request: RuntimeCommand) => Promise<RemoteResult<RuntimeJson>>
-    'clientRuntime/commitRecords': (request: RuntimeRecordsCommit) => Promise<RemoteResult<RuntimeRecordsReceipt>>
     'clientRuntime/delegation': (request: DelegationCommand) => Promise<RemoteResult<RuntimeJson>>
     'clientRuntime/editLearning': (request: ClientLearningCommand) => Promise<RemoteResult<RuntimeRecordsReceipt>>
     'clientRuntime/fileIntent': (id: string) => Promise<RemoteResult<RuntimeFileIntent | null>>
@@ -65,7 +63,6 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
 
 export declare const TYPERT_REMOTE: TypertRemoteInfo<{
   readonly 'clientRuntime/command': TypertRemoteMethod<{ readonly 'request': RuntimeCommand }, RuntimeJson>
-  readonly 'clientRuntime/commitRecords': TypertRemoteMethod<{ readonly 'request': RuntimeRecordsCommit }, RuntimeRecordsReceipt>
   readonly 'clientRuntime/delegation': TypertRemoteMethod<{ readonly 'request': DelegationCommand }, RuntimeJson>
   readonly 'clientRuntime/editLearning': TypertRemoteMethod<{ readonly 'request': ClientLearningCommand }, RuntimeRecordsReceipt>
   readonly 'clientRuntime/fileIntent': TypertRemoteMethod<{ readonly 'id': string }, RuntimeFileIntent | null>

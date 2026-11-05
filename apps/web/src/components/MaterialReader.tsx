@@ -107,36 +107,11 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
   // original snapshot before saving, rather than overwriting concurrent answers.
   useEffect(() => {
     if (format !== 'md') return;
-    if (cloud.enabled) {
-      const path = systemMaterialPath(materialId);
-      return followDocument(path ? { kind: 'systemDocument', path } : { kind: 'courseDocument', courseId: materialId }, document => {
-        const content = document.content ?? document.text;
-        if (content !== undefined) setBlob(new Blob([content], { type: 'text/markdown' }));
-      }, error => toast.error(`资料更新失败：${formatCaughtError(error)}`));
-    }
-    if (materialId === AGENT_INSTRUCTIONS_FILE_ID) {
-      const refresh = () => setBlob(getSystemMaterialFile(materialId)!);
-      refresh();
-      return useSettings.subscribe((state, previous) => {
-        if (state.agentInstructions !== previous.agentInstructions) refresh();
-      });
-    }
-    if (systemMaterialPath(materialId)) {
-      let active = true;
-      const refresh = () => { void loadSystemMaterialFile(materialId).catch(error => { if (active) toast.error(`资料更新失败：${formatCaughtError(error)}`); }); };
-      const unsubscribe = useSystemDocuments.subscribe((state, previous) => {
-        const path = systemMaterialPath(materialId)!;
-        if (state.documents[path] !== previous.documents[path]) setBlob(new Blob([state.documents[path].content], { type: 'text/markdown' }));
-      });
-      window.addEventListener('focus', refresh);
-      window.addEventListener('system-files-changed', refresh);
-      return () => { active = false; unsubscribe(); window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
-    }
-    const subscription = liveQuery(() => db.files.get(materialId)).subscribe({
-      next: (row) => { if (row) setBlob(row.blob); },
-      error: (error) => toast.error(`资料更新失败：${formatCaughtError(error)}`),
-    });
-    return () => subscription.unsubscribe();
+    const path = systemMaterialPath(materialId);
+    return followDocument(path ? { kind: 'systemDocument', path } : { kind: 'courseDocument', courseId: materialId }, document => {
+      const content = document.content ?? document.text;
+      if (content !== undefined) setBlob(new Blob([content], { type: 'text/markdown' }));
+    }, error => toast.error(`资料更新失败：${formatCaughtError(error)}`));
   }, [materialId, format]);
 
   /** 断点续读：阅读位置写回 videos.lastUnit（与视频的 lastPosition 对称） */

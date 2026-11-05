@@ -19,6 +19,8 @@ import { PluginNavigationView, type PluginNavigationProps } from '../plugins/Plu
 import { createPluginScopes, type PlacementLease } from './plugin-scopes';
 import { cloud } from '../cloud/state';
 import { API_BASE_URL } from '../api/base';
+import { onServerRuntimeDisposed } from './bootstrap';
+import { accountLifetime } from './account-lifecycle';
 
 const PlacementOwner = createContext<PlacementLease | undefined>(undefined);
 class PluginErrorBoundary extends Component<{ children: ReactNode; onFailure(): void }, { failed: boolean }> {
@@ -80,8 +82,7 @@ export async function createPluginRenderer() {
   };
   scopeDiagnostics.set(ctx, scopes.diagnostics);
   const sessionEnded = () => scopes.invalidate();
-  window.addEventListener('wangke:bot-session-ended', sessionEnded);
-  ctx.effect(() => () => window.removeEventListener('wangke:bot-session-ended', sessionEnded), 'plugin account invalidation');
+  ctx.effect(() => onServerRuntimeDisposed(sessionEnded), 'plugin account invalidation');
   live.add(ctx);
   try {
     await ctx.plugin(installRenderer);
@@ -93,20 +94,21 @@ export async function createPluginRenderer() {
     ctx.slots.register({ name: 'root', children: { 'wangke.plugin.view': { kind: 'single', scope: 'root' }, 'wangke.plugin.surface': { kind: 'single', scope: 'root' }, 'wangke.plugin.actions': { kind: 'single', scope: 'root' }, 'wangke.plugin.page': { kind: 'single', scope: 'root' }, 'wangke.plugin.message': { kind: 'single', scope: 'root' }, 'wangke.plugin.navigation': { kind: 'single', scope: 'root' } } }, PluginOutlet);
     function ScopedPluginView(props: Parameters<typeof PluginView>[0]) {
       const [owned, setOwned] = useState<{ key: string; lease: PlacementLease }>();
-      const account = cloud.userId || 'local';
+      const [generation, setGeneration] = useState(0);
+      const account = cloud.userId;
       const project = props.context.projectId ?? (props.instance.scope?.kind === 'project' ? props.instance.scope.id : 'account');
       const available = !!props.plugin.manifest?.enabled && !props.plugin.error && props.plugin.installation !== 'uninstalled' && !!props.plugin.manifest.views[props.placement.viewId];
       const key = JSON.stringify([account, project, props.plugin.id, props.instance.id, props.placement.id, props.plugin.revision]);
       const lease = owned?.key === key ? owned.lease : undefined;
       useEffect(() => {
-        if (!available) { setOwned(undefined); return; }
-        const owned = scopes.acquire({ server: API_BASE_URL || location.origin, account, project, instance: `${props.plugin.id}:${props.instance.id}`, placement: props.placement.id, revision: props.plugin.revision });
+        if (!available || account !== cloud.userId) { setOwned(undefined); return; }
+        const owned = scopes.acquire({ server: API_BASE_URL || location.origin, account, project, instance: `${props.plugin.id}:${props.instance.id}`, placement: props.placement.id, revision: props.plugin.revision }, account ? accountLifetime(account) : undefined);
         projectionOwners.set(owned.incarnation, owned);
         setOwned({ key, lease: owned });
-        const ended = () => { setOwned(undefined); };
-        window.addEventListener('wangke:bot-session-ended', ended);
-        return () => { window.removeEventListener('wangke:bot-session-ended', ended); projectionOwners.delete(owned.incarnation); owned.release(); };
-      }, [key, available]);
+        const ended = () => { setOwned(undefined); setGeneration(value => value + 1); };
+        const stop = onServerRuntimeDisposed(ended);
+        return () => { stop(); projectionOwners.delete(owned.incarnation); owned.release(); };
+      }, [key, available, generation]);
       const call = useCallback<typeof callPlugin>(async (...args) => {
         if (!lease) throw new Error('plugin_scope_pending');
         lease.assertCurrent();

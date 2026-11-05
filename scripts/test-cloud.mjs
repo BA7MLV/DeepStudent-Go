@@ -65,19 +65,17 @@ try {
   assert.throws(() => records.apply(owner, [mutation('files', legacyFile.id, { ...editedFile, blob: { ...editedFile.blob, type: 'image/png' } }, browserFile)]), CloudConflict, 'non-empty MIME differences are not normalized');
 
   await db.open();
-  const id = await db.table('chats').add({ content: 'hello' });
-  assert.ok(id > 1000000 && Number.isSafeInteger(id));
-  let box = await db.table('_cloudOutbox').toArray();
-  assert.equal(box[0].after.id, id);
-  await assert.rejects(db.transaction('rw', db.table('videos'), async () => { await db.table('videos').put({ id: 'rollback' }); throw new Error('rollback'); }));
-  assert.equal(await db.table('_cloudOutbox').count(), 1);
+  await assert.rejects(db.table('chats').add({ content: 'hello' }), /cloud_projection_read_only/);
+  await assert.rejects(db.transaction('rw', db.table('videos'), async () => { markCloudApply(); await db.table('videos').put({ id: 'rollback' }); throw new Error('rollback'); }), /rollback/);
+  assert.equal(await db.table('videos').get('rollback'), undefined);
+  assert.equal(await db.table('_cloudOutbox').count(), 0);
   await db.transaction('rw', db.table('videos'), async () => { markCloudApply(); await db.table('videos').put({ id: 'server' }); });
-  assert.equal(await db.table('_cloudOutbox').count(), 1);
-  await db.table('chats').update(id, { content: 'updated' });
-  await db.table('chats').clear();
-  box = await db.table('_cloudOutbox').toArray();
-  assert.equal(box[1].before.content, 'hello');
-  assert.equal(box.at(-1).key, id); assert.equal(box.at(-1).after, null);
+  await db.transaction('rw', db.table('chats'), async () => { markCloudApply(); await db.table('chats').put({id:41,content:'server hello'}); });
+  await assert.rejects(db.table('chats').update(41, { content: 'updated' }), /cloud_projection_read_only/);
+  await assert.rejects(db.table('chats').delete(41), /cloud_projection_read_only/);
+  await assert.rejects(db.table('chats').clear(), /cloud_projection_read_only/);
+  assert.equal((await db.table('chats').get(41)).content,'server hello');
+  assert.equal(await db.table('_cloudOutbox').count(), 0, 'reducers never manufacture client intents');
 
   const config = new CloudConfiguration(store, path.join(dir, 'config'));
   const value = { ...config.get(owner), providers: [{ id: 'test', name: 'Test', baseUrl: 'https://model.example/v1', apiKey: 'super-secret', protocol: 'openai-chat', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'test', model: 'test-model' } };
@@ -144,7 +142,7 @@ try {
   runner = new BotRunner(store, { configuration: config, fetch: async () => response('send_message', { kind: 'text', text: 'done' }), sandbox: async req => { executed++; assert.equal(req.command, 'echo approved'); return { stdout: 'approved', stderr: '', exitCode: 0 }; } });
   runner.start(); await until(() => store.db.prepare('SELECT status FROM runs WHERE id=?').get(run).status === 'completed');
   assert.equal(executed, 1);
-  console.log('Cloud records, conflicts, atomic outbox, credentials, streaming files and durable one-shot approvals passed');
+  console.log('Cloud records, conflicts, read-only projection/rollback, credentials, streaming files and durable one-shot approvals passed');
 } finally {
   await runner?.close(); await db.delete(); store.close(); fs.rmSync(dir, { recursive: true, force: true });
 }

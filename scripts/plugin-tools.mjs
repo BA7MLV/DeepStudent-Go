@@ -1,10 +1,14 @@
-// Browser regressions configure through the same production tools as Create mode.
+// Browser regressions configure through the production server plugin tool API.
 // These helpers are fixtures, not a claim that a real model followed the skill.
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 
 export async function pluginTool(page, args) {
-  return page.evaluate(async args => JSON.parse(await (await import('/src/harness/resources.ts')).createResourceExecutor()('plugins', args)), args);
+  return page.evaluate(async args => {
+    const result = await (await import('/src/api/serverClient.ts')).request('/plugins/tool', { method: 'POST', body: JSON.stringify(args) });
+    if (['configure', 'invoke', 'lifecycle'].includes(args.operation)) await (await import('/src/plugins/catalog.ts')).refreshPlugins();
+    return result;
+  }, args);
 }
 export async function editLayout(page, change) {
   const before = await pluginTool(page, { operation: 'layout' });
@@ -57,19 +61,9 @@ export async function addPlugin(page, options) {
   });
   return instanceId;
 }
-export async function changePlugin(page, id, action, { local = false } = {}) {
+export async function changePlugin(page, id, action) {
   const status = { '停用插件': 'disabled', '启用插件': 'enabled', '卸载（保留数据）': 'uninstalled', '重新安装并恢复': 'enabled' }[action];
   assert.ok(status);
-  if (local) {
-    await page.evaluate(async ({ id, status }) => {
-      const { localPluginLayout, saveLocalPluginLayout } = await import('/src/plugins/availability.ts');
-      const before = localPluginLayout(), layout = JSON.parse(before.content);
-      (layout.installations ??= {})[`builtin:${id}`] = status;
-      saveLocalPluginLayout(JSON.stringify(layout), before.content, before.revision);
-      await (await import('/src/plugins/catalog.ts')).refreshPlugins();
-    }, { id, status });
-  } else {
-    const before = await pluginTool(page, { operation: 'layout' });
-    await pluginTool(page, { operation: 'lifecycle', pluginId: id, status, expected: before.content, revision: before.revision });
-  }
+  const before = await pluginTool(page, { operation: 'layout' });
+  await pluginTool(page, { operation: 'lifecycle', pluginId: id, status, expected: before.content, revision: before.revision });
 }

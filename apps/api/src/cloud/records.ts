@@ -46,6 +46,12 @@ export class CloudRecords {
   }
   ownedFile(owner: string, id: string) { return !!this.store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(id, owner); }
 
+  studyDays(owner: string): Record<string, unknown>[] {
+    const rows = this.store.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='studyDays' AND value IS NOT NULL ORDER BY record_key")
+      .all(owner) as { value: string }[];
+    return rows.map(row => JSON.parse(row.value));
+  }
+
   get(owner: string, table: string, key: string | number): Record<string, any> | null {
     if ((table === 'skills' || table === 'skillRefs') && !this.store.db.inTransaction) this.store.skillRecords.sync(owner);
     const row = this.store.db.prepare('SELECT value FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?')
@@ -91,10 +97,12 @@ export class CloudRecords {
           if (current && !equal(current, op.before)) throw new CloudConflict(op.table, op.key, ['delete']);
           deletedHere.add(recordId);
         } else if (op.before === null) {
-          if (op.table === 'studyDays' && current) {
+          if (op.table === 'studyDays') {
             const delta = Number(op.after.seconds);
             if (!Number.isFinite(delta) || delta < 0 || delta > 86400) throw new Error('invalid_study_delta');
-            value = { ...current, seconds: Number(current.seconds) + delta, updatedAt: op.after.updatedAt };
+            // A new additive receipt after an explicit clear starts this date
+            // again. Deduplication above still prevents replaying old deltas.
+            if (current) value = { ...current, seconds: Number(current.seconds) + delta, updatedAt: op.after.updatedAt };
           } else if (op.table === 'preferences' && current) {
             if (op.key === 'agentInstructions' && !equal(current, op.after)) throw new CloudConflict(op.table, op.key, ['value']);
             value = op.after;

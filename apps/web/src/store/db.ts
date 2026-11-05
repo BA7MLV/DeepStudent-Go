@@ -1,5 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import { installCloudCache } from '../cloud/cache';
+import { databaseNotice, setDatabaseNotice } from './database-lifecycle';
+import { invalidateAccountLifetime } from '../client/account-lifecycle';
 import type { QuizData } from '../harness/quiz';
 import type { WidgetPayload } from '../harness/widgetRuntime';
 import type { WidgetState } from '../harness/widgetState';
@@ -638,6 +640,19 @@ export class WangkeDB extends Dexie {
       courseFiles: 'id', _cloudOutbox: '++sequence, transaction', _cloudMeta: 'id', _cloudBlobs: 'hash',
     });
     this.version(17).stores({ preferences: 'id' });
+    this.version(18).stores({ _learningCommands: '++sequence, &operationId', _historyRecovery: 'id', _historyTransactions: 'id', _projectionStage: 'id' });
+    this.on('blocked', () => { setDatabaseNotice({ database: name, state: 'blocked' }); });
+    this.on('ready', () => {
+      if (databaseNotice()?.database === name && databaseNotice()?.state === 'blocked') setDatabaseNotice(null);
+    });
+    this.on('versionchange', () => {
+      // Close explicitly (disables implicit reopen); do not discard local drafts
+      // or reload a reader with unsaved input behind their back.
+      if (this === db) invalidateAccountLifetime();
+      this.close();
+      setDatabaseNotice({ database: name, state: 'update-required' });
+      return false;
+    });
     if (cloudCache) installCloudCache(this);
   }
 }
@@ -645,8 +660,12 @@ export class WangkeDB extends Dexie {
 export let db = new WangkeDB();
 /** Historical executor databases are opened read-only by the recovery exporter. */
 export const legacyExecutorDatabaseName = (owner: string) => `wangke-cloud-executor-${owner}`;
-export const cloudDatabaseName = (owner: string) => `wangke-cloud-${owner}`;
+export const legacyCloudDatabaseName = (owner: string) => `wangke-cloud-${owner}`;
+// Old tabs cannot mutate the new committed namespace with their old middleware.
+export const cloudDatabaseName = (owner: string) => `wangke-cloud-projection-v2-${owner}`;
 export function useCloudDatabase(owner: string) {
+  invalidateAccountLifetime();
   db.close();
+  setDatabaseNotice(null);
   db = new WangkeDB(cloudDatabaseName(owner), true);
 }

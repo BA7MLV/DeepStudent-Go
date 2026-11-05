@@ -2,6 +2,10 @@ import { createContext, memo, useCallback, useContext, useEffect, useId, useMemo
 import { Button, Popover, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { Sym } from '../ui/icons';
 import { db } from '../store/db';
+import { cloud } from '../cloud/state';
+import { saveAnnotations, type LearningCommandRow } from '../client/learning';
+import { liveQuery } from 'dexie';
+import { useTranslation } from 'react-i18next';
 import { hitsInk, inkPath, inkOpacity, type InkNib, type InkPoint, type InkStroke, type InkTool } from '../materials/ink';
 import { useSelectionAsk } from '../store/selectionAsk';
 import { uuid } from '../utils/uuid';
@@ -48,6 +52,7 @@ export const useMaterialInk = () => useContext(InkContext)!;
 const EMPTY: InkStroke[] = [];
 
 export function MaterialInkProvider({ materialId, children, toolbarActions, defaultTool = 'pan' }: { materialId: string; children: ReactNode; toolbarActions?: ReactNode; defaultTool?: 'pan' | 'read' }) {
+  const { t } = useTranslation('settings', { keyPrefix: 'recovery' });
   const [tool, setTool] = useState<InkTool>(defaultTool);
   const [penColor, setPenColor] = useState('#dc2626');
   const [highlightColor, setHighlightColor] = useState('#facc15');
@@ -59,10 +64,11 @@ export function MaterialInkProvider({ materialId, children, toolbarActions, defa
   const [finger, setFinger] = useState(false);
   const [ready, setReady] = useState(false);
   const [rows, setRows] = useState<InkStroke[]>([]);
+  const [databaseScope] = useState(() => db);
   const [status, setStatus] = useState('正在读取批注…');
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<{ past: Change[]; future: Change[] }>({ past: [], future: [] });
-  const queue = useRef<Change[]>([]);
+  const queue = useRef<(Change & { operationId: string })[]>([]);
   const saving = useRef(false);
   const mounted = useRef(false);
   const [input] = useState(() => new InkInput());
@@ -86,25 +92,36 @@ export function MaterialInkProvider({ materialId, children, toolbarActions, defa
 
   const load = useCallback(async () => {
     try {
-      const saved = await db.materialInk.where('materialId').equals(materialId).sortBy('createdAt');
-      if (!mounted.current) return;
-      setRows(saved);
+      const saved = await databaseScope.materialInk.where('materialId').equals(materialId).sortBy('createdAt');
+      const pending = (await databaseScope.table<LearningCommandRow>('_learningCommands').toArray()).filter(row => row.entities.includes(`ink:${materialId}`));
+      if (!mounted.current || databaseScope !== db) return;
+      const projection = new Map(saved.map(row => [row.id, row]));
+      for (const command of pending) for (const edit of command.request.edits) {
+        if (edit.kind !== 'materialAnnotation') continue;
+        if (edit.expected) projection.delete(edit.expected.id);
+        if (edit.value) projection.set(edit.value.id, edit.value);
+      }
+      for (const change of queue.current) {
+        for (const row of change.remove) projection.delete(row.id);
+        for (const row of change.add) projection.set(row.id, row);
+      }
+      setRows([...projection.values()]);
       setReady(true);
       setError(null);
-      setStatus('批注自动保存在本机');
+      setStatus(pending.some(row => row.state === 'conflict') ? t('inkConflict') : pending.length ? t('inkPending') : t('inkConfirmed'));
     } catch {
       if (mounted.current) setError('批注读取失败，请重试后再书写。');
     }
-  }, [materialId]);
+  }, [materialId, databaseScope, t]);
 
   useEffect(() => {
     mounted.current = true;
-    void load();
+    const subscription = liveQuery(load).subscribe();
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (queue.current.length) { event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', beforeUnload);
-    return () => { mounted.current = false; window.removeEventListener('beforeunload', beforeUnload); };
+    return () => { mounted.current = false; subscription.unsubscribe(); window.removeEventListener('beforeunload', beforeUnload); };
   }, [load]);
 
   // 每笔立即开始事务；队列保证快速画/撤销/重做的落盘顺序，离开阅读器也继续完成。
@@ -114,25 +131,21 @@ export function MaterialInkProvider({ materialId, children, toolbarActions, defa
     if (mounted.current) { setError(null); setStatus('正在保存批注…'); }
     try {
       while (queue.current.length) {
+        if (databaseScope !== db) throw new Error('client_account_changed');
         const change = queue.current[0];
-        await db.transaction('rw', db.materialInk, db.videos, async () => {
-          // 已删除材料的后台写入不能复活孤立笔迹。
-          if (!await db.videos.get(materialId)) return;
-          await db.materialInk.bulkDelete(change.remove.map((s) => s.id));
-          await db.materialInk.bulkPut(change.add);
-        });
+        await saveAnnotations(materialId, change.remove, change.add, change.operationId, true);
         queue.current.shift();
       }
-      if (mounted.current) setStatus('批注已保存到本机');
+      if (mounted.current && databaseScope === db) await load();
     } catch {
       if (mounted.current) setError('批注尚未保存，请重试。');
     } finally { saving.current = false; }
-  }, [materialId]);
+  }, [materialId, databaseScope, load]);
 
   const apply = useCallback((change: Change) => {
     const deleted = new Set(change.remove.map((s) => s.id));
     setRows((previous) => [...previous.filter((s) => !deleted.has(s.id)), ...change.add]);
-    queue.current.push(change);
+    queue.current.push({ ...change, operationId: crypto.randomUUID() });
     void flush();
   }, [flush]);
   const commit = useCallback((change: Change) => {

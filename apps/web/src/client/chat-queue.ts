@@ -3,9 +3,10 @@ import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
 import type { CloudTask } from '@wangke/contracts/cloud';
 import type { ChatAttachment } from '../chat/attachments';
 import { db } from '../store/db';
-import { cloud, remoteTasks } from '../cloud/state';
+import { cloud } from '../cloud/state';
 import { createServerChatExecution } from './chat-server-execution';
 import { API_BASE_URL } from '../api/base';
+import { accountLifecycle } from './account-lifecycle';
 
 type Item = SessionQueueItem<ChatAttachment>;
 type Journal = Parameters<typeof SessionQueueModel.commands<ChatAttachment, RuntimeTaskSubmit, CloudTask>>[0];
@@ -29,16 +30,16 @@ export function beginChatDraft() {
  * existing task-command:* records remain the only task receipt journal. */
 export function browserChatQueue() {
   const database = db;
+  const owner = accountLifecycle.current();
   const lifetime = accountLifetime;
   const account = cloud.userId;
   const server = API_BASE_URL || (typeof location === 'undefined' ? 'local' : location.origin);
-  const remote = remoteTasks();
-  const serverExecution = remote ? createServerChatExecution() : undefined;
-  const namespace = JSON.stringify([server, account, remote ? 'server' : 'local', 'interactive']);
+  const serverExecution = createServerChatExecution();
+  const namespace = JSON.stringify([server, account, 'server', 'interactive']);
   const draft = draftOwner;
   const draftId = `session-draft:${namespace}:${draft}`;
   const prefix = `session-queue:${namespace}:`;
-  const current = () => lifetime === accountLifetime && database === db && account === cloud.userId && remote === remoteTasks();
+  const current = () => lifetime === accountLifetime && database === db && account === cloud.userId && (!owner || owner.current());
   const check = () => { if (!current()) throw new Error('client_account_changed'); };
   const table = database.table('_cloudMeta');
   const journal: Journal = {
@@ -48,14 +49,14 @@ export function browserChatQueue() {
       const saved = await table.get(id);
       if (saved?.removed) throw new Error('session_queue_removed');
       const receiptId = `task-command:${operationId}`;
-      const receipt = remote ? await table.get(receiptId) : undefined;
+      const receipt = await table.get(receiptId);
       const previous = saved?.record ? { ...saved.record, ...(receipt?.command ? { request: receipt.command } : {}) } : undefined;
       const result = change(previous);
       if (result.record) {
         const { request, ...record } = result.record;
         // The canonical task-command record owns the frozen request; queue
         // metadata stores only its operationId/reference, never a second receipt.
-        if (remote && request && !receipt) await table.put({ id: receiptId, command: request, status: 'pending', createdAt: Date.now() });
+        if (request && !receipt) await table.put({ id: receiptId, command: request, status: 'pending', createdAt: Date.now() });
         await table.put({ id, record });
       }
       return result.value;
@@ -66,35 +67,14 @@ export function browserChatQueue() {
     prepare: (request, item) => request.input.action === 'continue' ? request : {
       ...request, input: { ...request.input, text: item.text, attachments: JSON.parse(JSON.stringify(item.attachments ?? [])), explicitSkillIds: item.explicitSkillIds ?? [], ...(item.modelSelection ? { modelSelection: JSON.parse(JSON.stringify(item.modelSelection)) } : {}), ...(item.thinkingLevel ? { thinkingLevel: item.thinkingLevel } : {}) },
     },
-    receipt: operationId => { check(); if (!serverExecution) throw new Error('server_execution_required'); return serverExecution.receipt(operationId); },
+    receipt: operationId => { check(); return serverExecution.receipt(operationId); },
     submit: request => {
       check();
-      if (!serverExecution) throw new Error('server_execution_required');
       return serverExecution.submit(request);
     },
   });
   return {
     current,
-    async local(sessionId: number, item: Item, run: () => Promise<void>, explicit = false) {
-      const execute = async () => {
-        check();
-        const claimed = await journal.atomic(item.operationId ?? item.id, record => {
-          if (record && (record.state === 'accepted' || record.state !== 'pending' && !explicit)) return { record, value: false };
-          if (record?.state === 'uncertain' && (typeof navigator === 'undefined' || !navigator.locks)) return { record, value: false };
-          return { record: { sessionId, item, state: 'uncertain' }, value: true };
-        });
-        check();
-        if (!claimed) throw new Error('local_execution_uncertain');
-        await run();
-        check();
-        await journal.atomic(item.operationId ?? item.id, record => ({ record: record ? { ...record, state: 'accepted' } : record, value: undefined }));
-      };
-      if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(prefix + (item.operationId ?? item.id), { ifAvailable: true }, lock => {
-        if (!lock) throw new Error('local_execution_uncertain');
-        return execute();
-      });
-      return execute();
-    },
     async save(sessionId: number, item: Item) {
       check();
       await database.transaction('rw', table, async () => {
@@ -128,8 +108,8 @@ export function browserChatQueue() {
       // that the original command never arrived at the Host.
       for (const row of rows) {
         const record: Record = row.record;
-        if (row.removed || record.sessionId !== sessionId || record.state !== 'uncertain' || !remote) continue;
-        const receipt = await serverExecution!.receipt(record.item.operationId ?? record.item.id).catch(() => undefined);
+        if (row.removed || record.sessionId !== sessionId || record.state !== 'uncertain') continue;
+        const receipt = await serverExecution.receipt(record.item.operationId ?? record.item.id).catch(() => undefined);
         check();
         const taskId = receipt?.status === 'accepted' ? receipt.task?.id : undefined;
         if (taskId) await journal.atomic(record.item.operationId ?? record.item.id, latest => ({ record: latest ? { ...latest, state: 'accepted', taskId } : latest, value: undefined }));
@@ -143,7 +123,6 @@ export function browserChatQueue() {
     },
     async submit(sessionId: number, item: Item, input: object, explicitRetry = false) {
       check();
-      if (!remote) throw new Error('server_execution_required');
       const operationId = item.operationId ?? item.id;
       const execute = () => commands.execute(sessionId, { ...item, createdAt: item.createdAt ?? Date.now() }, { operationId, kind: 'chat', resource: `session:${sessionId}`, input: JSON.parse(JSON.stringify(input)) }, explicitRetry);
       if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(prefix + operationId, { ifAvailable: true }, lock => {
@@ -157,7 +136,7 @@ export function browserChatQueue() {
       check();
       const saved = await table.get(prefix + operationId);
       check();
-      if (!saved || saved.removed || !remote) return;
+      if (!saved || saved.removed) return;
       const receipt = await table.get(`task-command:${operationId}`);
       if (!receipt?.command) throw new Error('task_original_command_missing');
       if (typeof navigator === 'undefined' || !navigator.locks) throw new Error('cross_tab_lock_required');

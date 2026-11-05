@@ -14,7 +14,7 @@ export function scopeAvailable(scope: PluginScope, catalog: PluginCatalog) {
   return scope.kind === 'account' || (scope.kind === 'project' ? !!catalog.scopes?.projects.some(p => p.id === scope.id) : !!catalog.scopes?.materials?.some(m => m.id === scope.id));
 }
 export function navigationEntries(catalog?: PluginCatalog) {
-  if (!catalog || catalog.local) return [];
+  if (!catalog) return [];
   const layout = readLayout(catalog);
   return (layout.navigation ?? []).slice().sort((a, b) => a.order - b.order).flatMap(entry => {
     const placement = layout.placements.find(p => p.id === entry.placementId && p.surface === 'app.page');

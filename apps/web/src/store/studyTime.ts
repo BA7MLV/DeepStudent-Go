@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { db } from './db';
+import { addStudyTime, clearStudyTime } from '../client/learning';
 import { useSettings } from './settings';
+import { accountLifecycle } from '../client/account-lifecycle';
 import { mergeSeconds, round1, splitByDay, type StudyDay } from '../utils/studyLog';
 
 /**
@@ -74,6 +76,7 @@ let mediaPlaying = false;
 /** 落库串行链：两次心跳挨得太近时不让它们并发写同一天 */
 let flushChain: Promise<void> = Promise.resolve();
 let unsubscribeSettings: (() => void) | undefined;
+let clearing: { current(): boolean } | undefined;
 
 /** 记一次「人在场」（事件很密，这里只写一个变量，不做任何 DOM 操作） */
 function markActive(): void {
@@ -94,18 +97,15 @@ function shouldCount(now: number): boolean {
 
 /** 把内存里攒的秒数写进库；写成功后才从 pending 里扣掉（写入期间的增量要留着） */
 function flush(): Promise<void> {
-  const entries = Object.entries(pending);
-  if (entries.length === 0) return flushChain;
+  if (clearing?.current()) return flushChain;
+  if (!Object.keys(pending).length) return flushChain;
   flushChain = flushChain
     .then(async () => {
-      const now = Date.now();
-      await db.transaction('rw', db.studyDays, async () => {
-        for (const [date, seconds] of entries) {
-          const row = await db.studyDays.get(date);
-          if (row) await db.studyDays.update(date, { seconds: round1(row.seconds + seconds), updatedAt: now });
-          else await db.studyDays.put({ date, seconds: round1(seconds), updatedAt: now });
-        }
-      });
+      // Snapshot when this serialized flush actually starts. Capturing it before
+      // joining flushChain can bill one interval twice on back-to-back unloads.
+      const entries = Object.entries(pending);
+      if (!entries.length) return;
+      await addStudyTime(entries);
       for (const [date, seconds] of entries) {
         const left = round1((pending[date] ?? 0) - seconds);
         if (left > 0) pending[date] = left;
@@ -222,11 +222,33 @@ export async function loadStudyDays(): Promise<StudyDay[]> {
 }
 
 /** 清空全部记录（设置页的「清空记录」用） */
-export async function clearStudyDays(): Promise<void> {
-  pending = {};
-  // 先等在飞的落库落地再清：否则那次落库会排在 clear 之后，把刚清掉的几秒写回来
-  await flushChain;
-  await db.studyDays.clear();
-  publish();
-  useStudyTime.setState({ flushCount: useStudyTime.getState().flushCount + 1 });
+export async function loadStudySnapshot(): Promise<{ date: string; seconds: number; updatedAt: number }[]> {
+  return db.studyDays.toArray();
+}
+export async function clearStudyDays(expected: { date: string; seconds: number; updatedAt: number }[]): Promise<void> {
+  const lifetime = accountLifecycle.current(), database = db;
+  const current = () => !!lifetime?.current() && database === db;
+  const assertCurrent = () => { if (!current()) throw new Error('client_account_changed'); };
+  assertCurrent();
+  if (clearing?.current()) throw new Error('正在清空学习记录，请稍候。');
+  const operation = { current };
+  clearing = operation;
+  try {
+    // Let already queued deltas settle, but never replace the displayed baseline.
+    // Concurrent committed changes must conflict rather than silently disappear.
+    await flushChain;
+    assertCurrent();
+    await clearStudyTime(expected);
+    assertCurrent();
+    useStudyTime.setState({ flushCount: useStudyTime.getState().flushCount + 1 });
+  } finally {
+    // An invalidated operation must not release a newer account's clear lock.
+    if (clearing === operation) clearing = undefined;
+    // Unsubmitted seconds (including time spent in the confirmation dialog) were
+    // never part of the server snapshot and must remain pending after clear.
+    if (current()) {
+      publish();
+      void flush();
+    }
+  }
 }

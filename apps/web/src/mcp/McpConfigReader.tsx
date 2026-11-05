@@ -6,7 +6,6 @@ import { readSystemDocument, saveSystemMarkdown, systemMaterialId } from '../mat
 import { ServerApiError } from '../api/serverClient';
 import messages from '../i18n/locales/zh-CN/settings.json';
 import { followDocument } from '../client/resources';
-import { cloud } from '../cloud/state';
 
 /** Raw JSON editing for the resource; visual management lives in Settings. Pushes never overwrite drafts. */
 export default function McpConfigReader() {
@@ -23,24 +22,10 @@ export default function McpConfigReader() {
   }, [t]);
 
   useEffect(() => {
-    if (cloud.enabled) return followDocument<SystemDocument>({ kind: 'systemDocument', path: MCP_PATH }, next => {
+    return followDocument<SystemDocument>({ kind: 'systemDocument', path: MCP_PATH }, next => {
       setDocument(next);
       setEditor(current => current ?? { base: next, text: next.content });
     }, error => setError(message(error)));
-    let active = true, request = 0;
-    const refresh = () => {
-      const id = ++request;
-      void readSystemDocument(MCP_PATH).then(file => {
-        if (active && id === request) {
-          setDocument(file);
-          setEditor(current => current ?? { base: file, text: file.content });
-        }
-      }).catch(error => { if (active && id === request) setError(message(error)); });
-    };
-    refresh();
-    window.addEventListener('focus', refresh);
-    window.addEventListener('system-files-changed', refresh);
-    return () => { active = false; window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
   }, [message]);
 
   const save = async () => {

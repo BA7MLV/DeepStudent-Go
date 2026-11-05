@@ -4,15 +4,46 @@ import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { installCloudCache, markCloudApply } from '../apps/web/src/cloud/cache.ts';
 import { cloudTransaction, isLostCloudTransaction } from '../apps/web/src/cloud/transactions.ts';
-import { WangkeDB, cloudDatabaseName } from '../apps/web/src/store/db.ts';
-import { quarantineExecutorOutbox } from '../apps/web/src/cloud/executor-recovery.ts';
+import { WangkeDB, cloudDatabaseName, legacyCloudDatabaseName } from '../apps/web/src/store/db.ts';
+import { preserveLegacyCloudData } from '../apps/web/src/cloud/legacy-migration.ts';
+import { cloud } from '../apps/web/src/cloud/state.ts';
+import * as storage from '../apps/web/src/store/db.ts';
+import { databaseNotice, setDatabaseNotice, subscribeDatabaseNotice } from '../apps/web/src/store/database-lifecycle.ts';
+
+test('blocked upgrades resume without deleting drafts; old generations close and require reload', async t => {
+  const name = `lifecycle-${crypto.randomUUID()}`;
+  const old = await new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('drafts', { keyPath: 'id' });
+    request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+  });
+  const database = new WangkeDB(name);
+  t.after(async () => { old.close(); database.close(); await Dexie.delete(name); setDatabaseNotice(null); });
+  const blocked = new Promise(resolve => {
+    const off = subscribeDatabaseNotice(() => { if (databaseNotice()?.state === 'blocked') { off(); resolve(); } });
+  });
+  const opening = database.open();
+  await blocked;
+  assert.equal(databaseNotice().database, name);
+  old.close(); await opening;
+  assert.equal(databaseNotice(), null);
+  await database.table('_cloudMeta').put({ id: 'draft', value: 'retain me' });
+  const next = new Dexie(name); next.version(19).stores({ _cloudMeta: 'id' });
+  await next.open();
+  assert.equal(databaseNotice()?.state, 'update-required');
+  assert.equal(database.isOpen(), false);
+  await assert.rejects(database.table('_cloudMeta').get('draft'), /DatabaseClosedError|closed/i);
+  assert.equal((await next.table('_cloudMeta').get('draft')).value, 'retain me');
+  next.close();
+});
 
 const lostTransaction = () => new DOMException(
   'Attempt to delete range from database without an in-progress transaction', 'UnknownError',
 );
 
-test('legacy/expired executor transactions move atomically to recoverable journal, never to another task', async t => {
-  const database = new WangkeDB(cloudDatabaseName(crypto.randomUUID(), true), true);
+test('legacy transactions preserve every original row, permit and Blob without changing identity or source', async t => {
+  const owner = crypto.randomUUID();
+  const database = new WangkeDB(legacyCloudDatabaseName(owner));
   t.after(() => database.delete());
   const rows = [
     { id: 'legacy-operation', transaction: 'legacy-transaction', table: 'files', key: 'file', before: null, after: { id: 'file', blob: new Blob(['retain original bytes']) } },
@@ -20,31 +51,47 @@ test('legacy/expired executor transactions move atomically to recoverable journa
     { id: 'current-operation', transaction: 'current-transaction', table: 'chats', key: 2, before: null, after: { id: 2 }, executorTaskId: 'current-task' },
   ];
   await database.table('_cloudOutbox').bulkAdd(rows);
-  assert.equal(await quarantineExecutorOutbox(database, 'current-task'), 2);
-  assert.equal((await database.table('_cloudOutbox').toArray())[0].id, 'current-operation');
-  const legacy = await database.table('_cloudMeta').get('executor-recovery:legacy-transaction');
-  assert.equal(legacy.status, 'requires-reconciliation');
+  cloud.enabled = true; cloud.userId = owner; storage.useCloudDatabase(owner);
+  t.after(() => storage.db.delete());
+  await preserveLegacyCloudData();
+  const legacy = await storage.db.table('_historyTransactions').get(`${database.name}:legacy-transaction`);
   assert.equal(legacy.rows[0].id, 'legacy-operation');
   assert.equal(await legacy.rows[0].after.blob.text(), 'retain original bytes');
-  assert.equal((await database.table('_cloudMeta').get('executor-recovery:old-transaction')).rows[0].permissionId, 'old-permit');
-  assert.equal(await quarantineExecutorOutbox(database, 'current-task'), 0, 'conversion is idempotent');
+  assert.equal((await storage.db.table('_historyTransactions').get(`${database.name}:old-transaction`)).rows[0].permissionId, 'old-permit');
+  assert.equal(await database.table('_cloudOutbox').count(), 3, 'source remains read-only');
+  await preserveLegacyCloudData();
+  assert.equal(await storage.db.table('_historyTransactions').count(), 3, 'copy is reentrant');
+  assert.equal(await storage.db.table('_learningCommands').count(), 0, 'unknown effects never get new commands');
+  const source = await database.table('_cloudOutbox').where('transaction').equals('legacy-transaction').first();
+  // Simulate an old page changing bytes without changing any operation/key.
+  await database.table('_cloudOutbox').update(source.sequence, { after: { id: 'file', blob: new Blob(['changed original bytes']) } });
+  await preserveLegacyCloudData();
+  const archives = await storage.db.table('_historyTransactions').toArray();
+  assert.equal(archives.length, 4, 'same-key changed bytes produce new evidence, not an overwrite');
+  const original = archives.find(row => row.id === `${database.name}:legacy-transaction`);
+  const newer = archives.find(row => row.transaction === 'legacy-transaction' && row.id !== original.id);
+  assert.equal(await original.rows[0].after.blob.text(), 'retain original bytes');
+  assert.equal(await newer.rows[0].after.blob.text(), 'changed original bytes');
+  assert.equal((await storage.db.table('_historyRecovery').get(newer.id)).changedEvidence, true, 'an identity-only old receipt cannot confirm replaced bytes');
+  await preserveLegacyCloudData();
+  assert.equal(await storage.db.table('_historyTransactions').count(), 4, 'changed evidence also copies idempotently');
 });
 
-test('executor cache cannot drain interactive study-time/outbox transactions', async t => {
+test('new cloud namespace fences old tabs, rejects business writes and leaves explicit local mode writable', async t => {
   const owner = crypto.randomUUID();
   const interactive = new WangkeDB(cloudDatabaseName(owner), true);
-  const executor = new WangkeDB(cloudDatabaseName(owner, true), true);
+  const executor = new WangkeDB(legacyCloudDatabaseName(owner));
   t.after(async () => { await interactive.delete(); await executor.delete(); });
-  assert.equal(interactive.name, `wangke-cloud-${owner}`, 'existing UI data keeps its original database name');
+  assert.equal(interactive.name, `wangke-cloud-projection-v2-${owner}`);
   assert.notEqual(interactive.name, executor.name);
-  await interactive.studyDays.put({ date: '2026-11-03', seconds: 60, updatedAt: Date.now() });
+  await assert.rejects(interactive.studyDays.put({ date: '2026-11-03', seconds: 60, updatedAt: Date.now() }), /cloud_projection_read_only/);
   const queued = await interactive.table('_cloudOutbox').toArray();
-  assert.equal(queued.length, 1); assert.equal(queued[0].table, 'studyDays');
+  assert.equal(queued.length, 0);
   assert.equal(await executor.table('_cloudOutbox').count(), 0);
   assert.equal(await executor.studyDays.count(), 0);
   await executor.chatSessions.put({ id: 1, videoId: 'course', createdAt: Date.now(), updatedAt: Date.now() });
   const executorQueue = await executor.table('_cloudOutbox').toArray();
-  assert.deepEqual(executorQueue.map(row => row.table), ['chatSessions']);
+  assert.deepEqual(executorQueue, [], 'static/local database has no cloud writer installed');
   await executor.table('_cloudOutbox').clear();
   assert.deepEqual(await interactive.table('_cloudOutbox').toArray(), queued, 'executor acknowledgement never removes UI edits');
   assert.equal(await interactive.chatSessions.count(), 0);
@@ -82,7 +129,12 @@ async function fixture(t) {
   });
   t.after(() => database.delete());
   await database.open();
-  await database.table('videos').put({ id: 'course', name: 'local' });
+  await database.transaction('rw', database.table('videos'), async () => {
+    markCloudApply(); await database.table('videos').put({ id: 'course', name: 'local' });
+  });
+  // A pre-upgrade draft, not a new producer; acknowledgement failures must
+  // continue to preserve it atomically with its version metadata.
+  await database.table('_cloudOutbox').add({ transaction: 'original', id: 'original', table: 'videos', key: 'course', before: null, after: { id: 'course', name: 'local' } });
   await database.table('_cloudMeta').bulkPut([{ id: 'revision', value: 4 }, { id: 'cursor', value: 0 }]);
   return { database, fault };
 }

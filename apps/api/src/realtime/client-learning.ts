@@ -1,10 +1,12 @@
 import type { ClientLearningEdit } from '@wangke/contracts/client-runtime';
 import type { CloudMutation } from '@wangke/contracts/cloud';
 import { CloudRecords } from '../cloud/records.js';
+import { cardReviewMutation } from '../learning/card-review.js';
+import { clearStudyTimeMutations } from '../learning/clear-study-time.js';
 
 const schemas = {
   conversationMessage: ['chats', 'id taskId videoId sessionId role content createdAt modelTrace modelRequests explicitSkillIds images attachments reasoning reasoningMs tools responseSegments quiz ask folderPlan resume interrupted interruptReason widget widgets legacyHtmlWorks widgetState widgetStates'],
-  conversationSession: ['chatSessions', 'id videoId title createdAt contextCourseIds projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions'],
+  conversationSession: ['chatSessions', 'id videoId title createdAt contextCourseIds projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions defaultModel'],
   skillDefinition: ['skills', 'id name description body enabled builtin updatedAt mcpRequired'],
   skillReference: ['skillRefs', 'id skillId path body'],
   materialAnnotation: ['materialInk', 'id materialId surface tool color width height points createdAt renderer nib opacity smoothing input anchor rects'],
@@ -15,13 +17,14 @@ const schemas = {
  * annotations, card decisions, reading position and additive study time. No
  * resource identity, derived products or server task authority is writable. */
 export function clientLearningMutations(records: CloudRecords, owner: string, edits: ClientLearningEdit[]): CloudMutation[] {
+  if (edits.some(edit => edit.kind === 'clearStudyTime') && edits.length !== 1) throw new Error('study_clear_must_be_separate');
   // Validate dependent documents against prior edits in the same original
   // transaction (e.g. a newly created session followed by its first message).
   // This is only a validation view; CloudRecords applies everything atomically.
   const pending = new Map<string, Record<string, any> | null>();
   const identity = (table: string, key: string | number) => JSON.stringify([table, key]);
   const get = (owner: string, table: string, key: string | number) => pending.has(identity(table, key)) ? pending.get(identity(table, key))! : records.get(owner, table, key);
-  const compile = (edit: ClientLearningEdit): CloudMutation => {
+  const compile = (edit: ClientLearningEdit): CloudMutation | CloudMutation[] => {
     if (!edit.mutationId || edit.mutationId.length > 200) throw new Error('invalid_learning_operation');
     const mutation = (table: string, key: string | number, before: any, after: any): CloudMutation => ({ id: edit.mutationId, table, key, before, after, baseRevision: edit.baseRevision });
     const course = (id: string) => {
@@ -33,11 +36,9 @@ export function clientLearningMutations(records: CloudRecords, owner: string, ed
       // CloudRecords' additive create semantics are idempotent by mutation ID.
       return mutation('studyDays', edit.date, null, { date: edit.date, seconds: edit.seconds, updatedAt: edit.updatedAt });
     }
+    if (edit.kind === 'clearStudyTime') return clearStudyTimeMutations(records, owner, edit);
     if (edit.kind === 'reviewCard') {
-      const current = get(owner, 'cards', edit.cardId);
-      course(edit.courseId);
-      if (!current || current.videoId !== edit.courseId || ![0, 1, 2].includes(edit.status)) throw new Error('learning_card_denied');
-      return mutation('cards', edit.cardId, { ...current, status: edit.expected }, { ...current, status: edit.status });
+      return cardReviewMutation({ get }, owner, edit);
     }
     if (edit.kind === 'handoutReading') {
       const current = get(owner, 'handouts', edit.handoutId);
@@ -68,9 +69,10 @@ export function clientLearningMutations(records: CloudRecords, owner: string, ed
     }
     return mutation(table, key, edit.expected, edit.value);
   };
-  return edits.map(edit => {
-    const mutation = compile(edit);
-    pending.set(identity(mutation.table, mutation.key), mutation.after);
-    return mutation;
+  return edits.flatMap(edit => {
+    const compiled = compile(edit);
+    const mutations = Array.isArray(compiled) ? compiled : [compiled];
+    for (const mutation of mutations) pending.set(identity(mutation.table, mutation.key), mutation.after);
+    return mutations;
   });
 }

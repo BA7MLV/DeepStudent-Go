@@ -17,7 +17,6 @@
     "./system": { "types": "./src/system.ts", "default": "./dist/system.js" },
     "./board": { "types": "./src/board.ts", "default": "./dist/board.js" },
     "./plugins": { "types": "./src/plugins.ts", "default": "./dist/plugins.js" },
-    "./plugin-registry": { "types": "./src/plugin-registry.ts", "default": "./dist/plugin-registry.js" },
     "./learning-plugins": { "types": "./src/learning-plugins.ts", "default": "./dist/learning-plugins.js" },
     "./model-settings": { "types": "./src/model-settings.ts", "default": "./dist/model-settings.js" }
   },

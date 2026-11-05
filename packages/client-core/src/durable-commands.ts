@@ -1,9 +1,11 @@
 /** Ports deliberately contain no React, browser globals, cache or storage API. */
-export interface DurableCommand<Request> { operationId: string; request: Request; state: 'queued' | 'uncertain' | 'conflict'; error?: string }
+export interface DurableCommand<Request> { operationId: string; request: Request; state: 'queued' | 'uncertain' | 'conflict'; error?: string; entities?: string[] }
 export interface CommandJournal<Request> {
   list(): Promise<DurableCommand<Request>[]>;
   save(command: DurableCommand<Request>): Promise<void>;
   remove(operationId: string): Promise<void>;
+  /** Keep an overlay until the acknowledged authoritative versions arrive. */
+  acknowledge?(operationId: string, value: unknown): Promise<void>;
 }
 export type CommandReceipt = { status: 'missing' | 'pending' | 'uncertain' | 'failed'; code?: string } | { status: 'completed'; value: unknown };
 /** Every send is preceded by a receipt lookup. Uncertain external effects never
@@ -17,6 +19,7 @@ export class DurableCommands<Request> {
     send(request: Request): Promise<unknown>;
     current(): boolean;
     replaySafe: boolean;
+    isolateFailures?: boolean;
   }) {}
   private guard() { if (this.disposed || !this.port.current()) throw new Error('client_account_changed'); }
   drain(): Promise<void> {
@@ -29,22 +32,32 @@ export class DurableCommands<Request> {
   }
   private async run() {
     this.guard();
+    const blocked = new Set<string>();
+    const acknowledge = async (operationId: string, value: unknown) => {
+      this.guard();
+      if (this.journal.acknowledge) await this.journal.acknowledge(operationId, value);
+      else await this.journal.remove(operationId);
+    };
     for (const command of await this.journal.list()) {
       this.guard();
+      if (this.port.isolateFailures && (command.state === 'conflict' || command.entities?.some(key => blocked.has(key)))) {
+        command.entities?.forEach(key => blocked.add(key)); continue;
+      }
       if (command.state === 'conflict') throw new Error(command.error ?? 'command_conflict');
       try {
         const receipt = await this.port.receipt(command.operationId); this.guard();
-        if (receipt.status === 'completed') { await this.journal.remove(command.operationId); continue; }
+        if (receipt.status === 'completed') { await acknowledge(command.operationId, receipt.value); continue; }
         if (receipt.status !== 'missing' || command.state === 'uncertain' && !this.port.replaySafe) throw new Error('command_requires_reconciliation');
         await this.journal.save({ ...command, state: 'uncertain' }); this.guard();
-        await this.port.send(command.request); this.guard();
-        await this.journal.remove(command.operationId);
+        const value = await this.port.send(command.request); this.guard();
+        await acknowledge(command.operationId, value);
       } catch (error) {
         // Never write an old account's error into a newly selected journal.
         this.guard();
-        const conflict = ['client/record-conflict', 'client/conflict'].includes((error as { code?: string }).code ?? '');
+        const conflict = ['client/record-conflict', 'client/conflict', ...(this.port.isolateFailures ? ['client/domain', 'gateway/forbidden', 'gateway/unauthorized'] : [])].includes((error as { code?: string }).code ?? '');
         await this.journal.save({ ...command, state: conflict ? 'conflict' : 'uncertain', error: error instanceof Error ? error.message : String(error) });
-        throw error;
+        if (!this.port.isolateFailures) throw error;
+        command.entities?.forEach(key => blocked.add(key));
       }
     }
   }

@@ -1,19 +1,20 @@
 import { readRendererPluginAsset } from '../client/plugin-renderer-assets';
+import { accountLifecycle, accountLifetime, type AccountLifetime } from '../client/account-lifecycle';
+import { cloud } from '../cloud/state';
 
 /** One in-flight read per account session/resource, never cache mutations. */
-const reads = new Map<string, { promise: Promise<unknown>; at: number }>();
-let epoch = 0;
+const reads = new Map<string, { promise: Promise<unknown>; at: number; lifetime: AccountLifetime }>();
 export function pluginRead<T>(path: string, ttl = 1000): Promise<T> {
+  if (!cloud.enabled || !cloud.userId) return Promise.reject(new Error('client_unauthenticated'));
+  const lifetime = accountLifetime(cloud.userId);
   const previous = reads.get(path);
-  if (previous && Date.now() - previous.at < ttl) return previous.promise as Promise<T>;
-  const before = epoch;
-  const entry = { at: Date.now(), promise: readRendererPluginAsset<T>(path).then(value => { if (before !== epoch) throw new Error('plugin_session_changed'); return value; }) };
+  if (previous?.lifetime === lifetime && Date.now() - previous.at < ttl) return previous.promise as Promise<T>;
+  const entry = { at: Date.now(), lifetime, promise: readRendererPluginAsset<T>(path).then(value => { lifetime.assertCurrent(); return value; }) };
   reads.set(path, entry);
   void entry.promise.catch(() => { if (reads.get(path) === entry) reads.delete(path); });
   return entry.promise;
 }
 export function clearPluginReads() { reads.clear(); }
-window.addEventListener('wangke:bot-session-ended', () => {
-  epoch++; reads.clear();
-  try { for (const key of Object.keys(sessionStorage)) if (key.startsWith('plugin-draft:')) sessionStorage.removeItem(key); } catch { /* Storage may be unavailable. */ }
-});
+// Account-keyed drafts are durable user intent, not a disposable read cache.
+const stopDisposal = accountLifecycle.onDisposed(clearPluginReads);
+import.meta.hot?.dispose(stopDisposal);

@@ -110,6 +110,18 @@ export interface CloudConfig {
   trustedAgentIds?: string[];
 }
 export type CloudTaskKind = 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce';
+export type HandoutEditBlock =
+  | { type: 'lead' | 'para' | 'note' | 'h2'; text: string }
+  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'table'; caption?: string; header: string[]; rows: string[][] }
+  | { type: 'figure'; ts: number; caption?: string };
+/** Full IR edit. expected is captured when editing starts, never at dispatch. */
+export interface HandoutPersistInput {
+  action: 'persist'; videoId: string; handoutId: number;
+  sections: Array<{ heading: string; blocks: HandoutEditBlock[] }>; summary: string;
+  expected: { sectionsJson: string; outlineJson: string; blob: { $file: string; type?: string } };
+}
+export interface HandoutPersistResult { handoutId: number; fileId: string; sectionsJson: string; outlineJson: string }
 export interface CloudTask {
   frozenModel?: import('./model-gateway.js').FrozenTaskModel;
   /** Server-derived provenance; absent on older servers. */

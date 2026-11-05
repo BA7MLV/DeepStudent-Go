@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { cloud } from './state';
 import { useCloudSync } from './sync';
 import { reflectCloudTasks } from '../store/courseChat';
@@ -9,14 +10,22 @@ import { useCloudActivity } from './activityStore';
 import { usePendingTaskCommands, retryPendingTaskCommand } from './tasks';
 import FileIntentRecovery from './FileIntentRecovery';
 import PreferenceRecovery from './PreferenceRecovery';
-import ExecutorRecovery from './ExecutorRecovery';
 import ResourceRecovery from './ResourceRecovery';
+import LearningRecovery from './LearningRecovery';
 
 export default function CloudActivity() {
+  const { t } = useTranslation('settings', { keyPrefix: 'recovery' });
   const error = useCloudSync(s => s.error);
+  const syncedAt = useCloudSync(s => s.syncedAt);
+  const [online, setOnline] = useState(() => navigator.onLine);
   const commands = usePendingTaskCommands(s => s.commands);
   const [retrying, setRetrying] = useState<string>();
   const [retryError, setRetryError] = useState('');
+  useEffect(() => {
+    const changed = () => setOnline(navigator.onLine);
+    window.addEventListener('online', changed); window.addEventListener('offline', changed);
+    return () => { window.removeEventListener('online', changed); window.removeEventListener('offline', changed); };
+  }, []);
   useEffect(() => {
     if (!cloud.enabled) return;
     const account = cloud.userId;
@@ -76,10 +85,11 @@ export default function CloudActivity() {
   }, []);
   if (!cloud.enabled) return null;
   return <>
+    {!online || error ? <p role="status" className="bg-surface p-3">{t(!online ? 'offline' : 'reconnecting')}{syncedAt ? ` ${t('lastConfirmed', { time: new Date(syncedAt).toLocaleString() })}` : ''}</p> : null}
     <FileIntentRecovery />
     <PreferenceRecovery />
-    <ExecutorRecovery />
     <ResourceRecovery />
+    <LearningRecovery />
     {error ? <p role="alert" className="bg-surface p-3 text-danger">{error}</p> : null}
     {commands.map(({ command }) => <section key={command.operationId} role="alert" className="bg-surface p-3">
       <p>发送尚未确认。原命令已保留，未自动重复执行。</p>

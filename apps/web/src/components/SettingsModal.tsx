@@ -5,7 +5,6 @@ import './settings-sheet.css';
 import { Sym } from '../ui/icons';
 import { MODAL_CONTAINER_CLASS } from '../ui/modalContainer';
 import { allowSettingsLeave, canonicalSettingsModule, closeSettingsAndClearHash, openSettings, useSettingsDialog, type SettingsModule } from './settingsDialogStore';
-import { cloud } from '../cloud/state';
 import { useTranslation } from 'react-i18next';
 import SheetChrome from '../ui/SheetChrome';
 import SidebarAccount from './SidebarAccount';
@@ -27,7 +26,7 @@ import { SettingsActionsScope } from './settings/SettingsActions';
  */
 type Module = { key: SettingsModule; icon: string; tint: string; Component: LazyExoticComponent<ComponentType>; cloudOnly?: boolean };
 const ALL_MODULES: Module[] = [
-  { key: 'models', icon: 'neurology', tint: '#5e5ce6', Component: lazy(() => import('./settings/ModelsModule')) },
+  { key: 'models', icon: 'neurology', tint: '#5e5ce6', Component: lazy(() => import('../cloud/Models')) },
   { key: 'assistant', icon: 'neurology', tint: '#0a84ff', Component: lazy(() => import('./settings/AssistantModule')) },
   { key: 'websearch', icon: 'search', tint: '#30b0c7', Component: lazy(() => import('../web-search/WebSearchSettings')), cloudOnly: true },
   // Bot 与消息渠道只在连着自己服务器时存在：本机模式没有 Bot 运行时，也就没有这一屏。
@@ -39,8 +38,7 @@ const ALL_MODULES: Module[] = [
   { key: 'study', icon: 'calendar_month', tint: '#ff453a', Component: lazy(() => import('./settings/StudyModule')) },
   { key: 'data', icon: 'folder', tint: '#64d2ff', Component: lazy(() => import('./settings/DataModule')) },
 ];
-const CloudModels = lazy(() => import('../cloud/Models'));
-const MODULES = ALL_MODULES.filter((m) => !m.cloudOnly || cloud.enabled);
+const MODULES = ALL_MODULES;
 
 function ModuleFallback() {
   return <div className="settings-module-fallback"><Spinner size="sm" color="current" /></div>;
@@ -103,7 +101,7 @@ export default function SettingsModal() {
 
   const canonicalModule = canonicalSettingsModule(localModule);
   const active = MODULES.find((m) => m.key === canonicalModule) ?? MODULES[0];
-  const ActiveContent = cloud.enabled && localModule === 'models' ? CloudModels : active.Component;
+  const ActiveContent = active.Component;
   const RenderContent = ActiveContent as unknown as ComponentType<{ initialTab?: string }>;
   const initialTab = localModule === 'agent' || localModule === 'skills' || localModule === 'appearance' || localModule === 'playback' || localModule === 'shortcuts' || localModule === 'bot' || localModule === 'gateway'
     ? localModule

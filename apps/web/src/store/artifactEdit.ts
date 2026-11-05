@@ -5,6 +5,7 @@ import { uuid } from '../utils/uuid';
 import { messageWidgets } from '../harness/widgetLayout';
 import { rebaseResponseSegments } from '../utils/responseOrder';
 import { versionWidget } from '../harness/widgetProtocol';
+import { editMessage } from '../client/learning';
 
 export interface ArtifactTarget {
   rowId: number; kind: ArtifactKind; location: ArtifactLocation; source: string; widgetId?: string;
@@ -39,8 +40,10 @@ function replaceHtmlBlock(content: string, source: string, next: string): string
 
 /** Compare-and-swap inside one IndexedDB transaction; unrelated row metadata is preserved. */
 export async function persistArtifactEdit(input: ArtifactTarget & { next: string }): Promise<ChatRow> {
-  return db.transaction('rw', db.chats, async () => {
-    const row = await db.chats.get(input.rowId);
+  const database = db;
+  const run = async () => {
+    const row = await database.chats.get(input.rowId);
+    if (database !== db) throw new Error('client_account_changed');
     assertArtifactTarget(row, input);
     let patch: Partial<ChatRow>;
     if (input.location === 'widget') {
@@ -67,7 +70,8 @@ export async function persistArtifactEdit(input: ArtifactTarget & { next: string
     if (patch.content != null && row.responseSegments) {
       patch.responseSegments = rebaseResponseSegments(row.responseSegments, row.content, patch.content);
     }
-    await db.chats.update(input.rowId, patch);
+    await editMessage(row, { ...row, ...patch });
     return { ...row, ...patch };
-  });
+  };
+  return run();
 }

@@ -9,6 +9,7 @@ import { SettingRow } from '../components/settings/controls';
 import ArchivedSessionsCard from '../components/settings/ArchivedSessionsCard';
 import { logoutCloud } from './logout';
 import ServerStorageCard from './ServerStorageCard';
+const HistoryRecovery = lazy(() => import('./HistoryRecovery'));
 const LibraryImportFiles = lazy(() => import('./LibraryImportFiles'));
 
 /**
@@ -26,6 +27,7 @@ const LibraryImportFiles = lazy(() => import('./LibraryImportFiles'));
 export default function DataSettings() {
   const sync = useCloudSync();
   const [busy, setBusy] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [passkeys, setPasskeys] = useState<Array<{ id: string; createdAt: string }>>([]);
 
   const loadPasskeys = useCallback(async () => {
@@ -90,6 +92,13 @@ export default function DataSettings() {
   return (
     <>
       <ServerStorageCard />
+      <SectionCard title="历史数据恢复" testId="cloud-history-recovery">
+        <p className="text-sm text-muted">旧库仅按需读取，原稿和附件保留在此浏览器。查看与完整导出不要求服务器在线，不会自动重放历史操作。</p>
+        <Button size="sm" variant="secondary" onPress={() => setHistoryOpen(value => !value)}>
+          {historyOpen ? '关闭历史恢复' : '打开历史恢复'}
+        </Button>
+        {historyOpen ? <Suspense fallback={<p role="status">正在加载历史恢复…</p>}><HistoryRecovery /></Suspense> : null}
+      </SectionCard>
       <SectionCard title="同步" testId="cloud-sync-card">
         <SettingRow label="状态">
           <span className={`text-sm ${sync.error ? 'text-danger' : 'text-muted'}`} role="status">{syncLabel}</span>
@@ -98,7 +107,7 @@ export default function DataSettings() {
         {conflict && (
           <SettingRow label="冲突">
             <Button size="sm" variant="secondary" isDisabled={busy !== null}
-              onPress={() => void run('conflict', resolveCloudConflict, '已采用服务器版本，本机副本已下载')}>采用服务器版本</Button>
+              onPress={() => void run('conflict', resolveCloudConflict, '原稿已导出，未改变服务器资料')}>导出冲突原稿</Button>
           </SettingRow>
         )}
           <SettingRow label="旧版浏览器数据">

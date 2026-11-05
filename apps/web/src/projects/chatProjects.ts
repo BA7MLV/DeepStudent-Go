@@ -1,9 +1,6 @@
 import type { ProjectDetailDto } from '@wangke/contracts';
-import type { ResourceDirectory, ResourceFolderColor } from '@wangke/contracts/resources';
-import { request } from '../api/serverClient';
-import { cloud } from '../cloud/state';
+import type { ResourceFolderColor } from '@wangke/contracts/resources';
 import { flushCloud } from '../cloud/sync';
-import { db } from '../store/db';
 import { readResources, resourceCommand } from '../client/resources';
 
 export interface ChatProject { folderId: number; name: string; color?: ResourceFolderColor }
@@ -14,21 +11,13 @@ export function projectFolderName(name: string) {
   return `项目：${title}`;
 }
 export async function listChatProjects(): Promise<ChatProject[]> {
-  if (cloud.enabled) {
-    await flushCloud();
-    const data = await readResources();
-    return data.entries.filter(entry => entry.kind === 'directory' && entry.scope && entry.folderId != null)
-      .map(entry => ({ folderId: entry.folderId!, name: entry.name, color: entry.color }));
-  }
-  return (await db.folders.toArray()).filter(folder => folder.parentId == null && folder.id != null)
-    .map(folder => ({ folderId: folder.id!, name: folder.name, color: folder.color }));
+  await flushCloud();
+  const data = await readResources();
+  return data.entries.filter(entry => entry.kind === 'directory' && entry.scope && entry.folderId != null)
+    .map(entry => ({ folderId: entry.folderId!, name: entry.name, color: entry.color }));
 }
 export async function createChatProject(name: string): Promise<ChatProject> {
   const folderName = projectFolderName(name);
-  if (cloud.enabled) {
-    const project = await resourceCommand({ kind: 'createFolder', name: folderName }) as unknown as ProjectDetailDto & { folderId: number };
-    return { folderId: project.folderId, name: project.name };
-  }
-  const folderId = await db.folders.add({ name: folderName, createdAt: Date.now() });
-  return { folderId, name: folderName };
+  const project = await resourceCommand({ kind: 'createFolder', name: folderName }) as unknown as ProjectDetailDto & { folderId: number };
+  return { folderId: project.folderId, name: project.name };
 }

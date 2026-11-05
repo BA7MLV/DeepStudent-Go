@@ -14,12 +14,14 @@ import {flushSync} from 'react-dom';
 import {pluginRendererDiagnostics,pluginScopeDiagnostics} from '/src/client/plugin-renderer.tsx';
 import {PluginHost} from '/src/plugins/PluginHost.tsx';
 import {cloud} from '/src/cloud/state.ts';
+import {disposeServerRuntime} from '/src/client/bootstrap.ts';
 const occurrence = {plugin:{id:'fixture',revision:1,source:'builtin',manifest:{enabled:true,capabilities:[],views:{main:{surfaces:['board.main']}}}},instance:{id:'instance',pluginId:'fixture',scope:{kind:'account'}},placement:{id:'placement',instanceId:'instance',pluginId:'fixture',viewId:'main'},context:{surface:'board.main'}};
 const root = createRoot(document.getElementById('root'));
 const mount = enabled => flushSync(() => root.render(enabled ? React.createElement(React.StrictMode, null, React.createElement(PluginHost, occurrence)) : null));
 const never = new Promise(()=>{});
 function Abandon(){throw never;}
 window.probe = {diagnostics:pluginRendererDiagnostics,scopes:pluginScopeDiagnostics,mount,
+  reset:()=>disposeServerRuntime(),
   availability: enabled => {occurrence.plugin.manifest.enabled=enabled;mount(true);},
   dependency: enabled => {occurrence.plugin.error=enabled?undefined:'plugin_dependency_unavailable';mount(true);},
   crash:()=>{occurrence.plugin.manifest.capabilities=undefined;occurrence.plugin.revision++;mount(true);},
@@ -70,6 +72,9 @@ mount(true);
   await page.evaluate(()=>probe.account('account-replacement'));
   await page.waitForFunction(()=>probe.scopes()[0]?.retains===1);
   assert.notEqual(await page.evaluate(()=>probe.scopes()[0].fibers.find(f=>f.level==='account').incarnation),beforeAccount);
+  const beforeReset = await page.evaluate(()=>probe.scopes()[0].fibers.find(f=>f.level==='account').incarnation);
+  await page.evaluate(()=>probe.reset());
+  await page.waitForFunction(before=>probe.scopes()[0]?.retains===1 && probe.scopes()[0]?.fibers.find(f=>f.level==='account')?.incarnation!==before,beforeReset);
   await page.evaluate(()=>probe.crash());
   await page.getByRole('alert').filter({hasText:'插件视图出错'}).waitFor();
   assert.equal(await page.evaluate(()=>probe.scopes()[0].failures),1);

@@ -61,19 +61,15 @@ export async function resourceCommand(operation: ResourceOperation, operationId?
 /** Static mode keeps local storage. Server mode never falls back to a local
  * authoritative write when the domain command is offline or rejected. */
 export async function recordMediaDuration(courseId: string, duration: number) {
-  if (!cloud.enabled) { await db.videos.update(courseId, { duration }); return; }
   await recordCourseFact({ kind: 'recordMediaDuration', courseId, duration });
 }
 export async function recordPlayback(courseId: string, position: number, finished?: boolean) {
-  if (!cloud.enabled) { await db.videos.update(courseId, { lastPosition: position, ...(finished === undefined ? {} : { finished: finished ? 1 : 0 }) }); return; }
   await recordCourseFact({ kind: 'recordPlayback', courseId, position, ...(finished === undefined ? {} : { finished }) });
 }
 export async function recordReadingPosition(courseId: string, unit: number) {
-  if (!cloud.enabled) { await db.videos.update(courseId, { lastUnit: unit }); return; }
   await recordCourseFact({ kind: 'recordReadingPosition', courseId, unit });
 }
 export async function setReadingView(courseId: string, view: 'raw' | 'blocks') {
-  if (!cloud.enabled) { await db.videos.update(courseId, { htmlView: view }); return; }
   await recordCourseFact({ kind: 'setReadingView', courseId, view });
 }
 async function recordCourseFact(operation: Extract<ResourceOperation, { kind: 'recordMediaDuration' | 'recordPlayback' | 'recordReadingPosition' | 'setReadingView' }>) {

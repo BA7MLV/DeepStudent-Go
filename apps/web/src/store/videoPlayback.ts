@@ -1,6 +1,4 @@
 import { apiUrl } from '../api/base';
-import { cloud } from '../cloud/state';
-import { getVideoFile } from './fileStore';
 
 export interface VideoPlaybackSource {
   src: string;
@@ -22,20 +20,11 @@ function accessError(status: number): VideoPlaybackError {
 /** Only probe headers. The native media provider owns buffering, seeking and cancellation. */
 export async function getVideoPlaybackSource(id: string, signal: AbortSignal): Promise<VideoPlaybackSource | null> {
   signal.throwIfAborted();
-  if (cloud.enabled) {
-    const src = apiUrl(`/api/v1/resources/courses/${encodeURIComponent(id)}`);
-    const response = await fetch(src, { method: 'HEAD', credentials: 'include', cache: 'no-cache', signal });
-    if (response.status === 404) return null;
-    if (!response.ok) throw accessError(response.status);
-    return { src, crossOrigin: 'use-credentials', release: () => {} };
-  }
-  // Offline files are already local. Token-only background workers retain their
-  // authenticated Blob path; never put their bearer token into a media URL.
-  const blob = await getVideoFile(id);
-  signal.throwIfAborted();
-  if (!blob) return null;
-  const src = URL.createObjectURL(blob);
-  return { src, release: () => URL.revokeObjectURL(src) };
+  const src = apiUrl(`/api/v1/resources/courses/${encodeURIComponent(id)}`);
+  const response = await fetch(src, { method: 'HEAD', credentials: 'include', cache: 'no-cache', signal });
+  if (response.status === 404) return null;
+  if (!response.ok) throw accessError(response.status);
+  return { src, crossOrigin: 'use-credentials', release: () => {} };
 }
 
 /** Native media errors hide HTTP status; a header-only probe gives an actionable reason. */

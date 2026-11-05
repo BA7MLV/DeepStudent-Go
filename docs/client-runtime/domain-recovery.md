@@ -1,5 +1,9 @@
 # 领域日志、上传与执行器恢复
 
+当前规范入口：[当前架构](../architecture.md)。本文的旧执行器协议仅作 [历史记录](archive/index.md)；当前按需历史恢复见 [历史恢复边界](history-recovery.md)。
+
+> 本文保留此前迁移阶段的协议和证据；涉及 Worker/执行器写库的段落已经退役。最新边界、历史档案恢复和本轮实际测试见 [single-source-of-truth.md](./single-source-of-truth.md)，任务执行见 [server-task-execution.md](../server-task-execution.md)。
+
 ## 普通历史的生产连接
 
 `apps/web/src/client/session.ts::followServerSession` → account Runtime 的 `session(id)` → core `SessionModel` → generated `watchSessionJournal` → Host/domain。生产 `store/chatHistory` 保留原分页入口，接收到的是基线后累计全部row事实，不再反复覆盖40行窗口。Zustand执行器/持久队列由独立adapter拥有，不把发送副作用交给history。

@@ -1,4 +1,4 @@
-import type { VideoRow } from '../store/db';
+import { db, type VideoRow } from '../store/db';
 import { boardPath } from '@wangke/contracts/board';
 import { pluginPath } from '@wangke/contracts/plugins';
 import { useSettings } from '../store/settings';
@@ -41,9 +41,12 @@ function remember(document: SystemDocument) {
 }
 
 export async function readSystemDocument(path: string): Promise<SystemDocument> {
-  if (!cloud.enabled && path === AGENTS_PATH) return { path, name: 'AGENTS.md', content: useSettings.getState().agentInstructions, revision: 0, updatedAt: null };
+  const database = db, owner = cloud.userId;
+  const guard = () => { if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
   if (path === AGENTS_PATH || path.startsWith(`${SKILLS_PATH}/`)) await (await import('../cloud/sync')).flushCloud();
-  return remember(await systemRequest<SystemDocument>(`/system/file?path=${encodeURIComponent(path)}`));
+  guard();
+  const document = await systemRequest<SystemDocument>(`/system/file?path=${encodeURIComponent(path)}`);
+  guard(); return remember(document);
 }
 
 export async function listSystemMemory(offset = 0, query = ''): Promise<SystemDirectory> {
@@ -51,9 +54,12 @@ export async function listSystemMemory(offset = 0, query = ''): Promise<SystemDi
 }
 
 export async function listSystemDirectory(path: string, offset = 0, query = ''): Promise<SystemDirectory> {
-  if (!cloud.enabled) return { files: [], nextOffset: null };
+  const database = db, owner = cloud.userId;
   if (path === SKILLS_PATH || path.startsWith(`${SKILLS_PATH}/`)) await (await import('../cloud/sync')).flushCloud();
-  return systemRequest<SystemDirectory>(`/system/files?path=${encodeURIComponent(path)}&offset=${offset}&query=${encodeURIComponent(query)}`);
+  if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
+  const directory = await systemRequest<SystemDirectory>(`/system/files?path=${encodeURIComponent(path)}&offset=${offset}&query=${encodeURIComponent(query)}`);
+  if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
+  return directory;
 }
 
 export async function loadSystemMaterialFile(id: string): Promise<Blob | undefined> {
@@ -80,41 +86,38 @@ export function getSystemMaterial(id: string): VideoRow | undefined {
 }
 
 export async function saveSystemMarkdown(id: string, text: string, expected?: string, create = false, expectedRevision?: number): Promise<boolean> {
+  const database = db, owner = cloud.userId;
+  const guard = () => { if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
   const path = systemMaterialPath(id);
   if (!path) return false;
-  if (cloud.enabled) {
+  {
     const { flushCloud } = await import('../cloud/sync');
-    await flushCloud();
+    guard(); await flushCloud(); guard();
     let current: SystemDocument;
     try { current = await readSystemDocument(path); }
     catch (error) {
       if (!create || !(error instanceof ServerApiError) || error.status !== 404 || !memoryName(path) && !boardPath(path) && !pluginPath(path)) throw error;
       current = { path, name: path.split('/').at(-1)!, content: '', revision: 0, updatedAt: null };
     }
+    guard();
     if (create && current.revision !== 0) throw new Error('文件已存在，请先读取，再按原文修改。');
     if (expected !== undefined && current.content !== expected) throw new Error('文件已在其他页面更新，请重新读取后再修改。');
     if (expectedRevision !== undefined && current.revision !== expectedRevision) throw new Error('文件已在其他页面更新，请重新读取后再修改。');
     let saved: SystemDocument;
     const args = systemSaveArguments(path, text, current.content, current.revision);
     try {
-      saved = remember(await systemRequest<SystemDocument>('/system/file', { method: 'POST', body: JSON.stringify(args) }));
+      saved = await systemRequest<SystemDocument>('/system/file', { method: 'POST', body: JSON.stringify(args) });
+      guard(); saved = remember(saved);
     } catch (e) {
       if (e instanceof ServerApiError && e.status === 409) throw new Error('文件已在其他页面更新，请重新读取后再修改。');
       if (e instanceof ServerApiError && e.code === 'memory_source_changed') throw new Error('记忆的来源已变化，请在 Bot 记忆管理中核实后更新。');
       throw e;
     }
-    await flushCloud();
+    await flushCloud(); guard();
     if (path === AGENTS_PATH) {
       const { applySystemAgentInstructions } = await import('../cloud/preferences');
-      await applySystemAgentInstructions(saved.content);
+      guard(); await applySystemAgentInstructions(saved.content, database);
     }
     return true;
   }
-  if (id !== AGENT_INSTRUCTIONS_FILE_ID) throw new Error('请登录后读取或编辑 Bot 记忆。');
-  const settings = useSettings.getState();
-  if (expected !== undefined && settings.agentInstructions !== expected) {
-    throw new Error('文件已在其他页面更新，请重新读取后再修改。');
-  }
-  settings.update({ agentInstructions: text });
-  return true;
 }

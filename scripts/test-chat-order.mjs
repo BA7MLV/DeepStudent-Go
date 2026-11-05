@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
-import 'fake-indexeddb/auto';
 import { compareChatRows, nextChatTurnTimes } from '../packages/study-core/src/utils/chatOrder.ts';
-import { db } from '../apps/web/src/store/db.ts';
-import { readChatHistory, readChatPage } from '../apps/web/src/store/chatHistory.ts';
 
 const sessionId = 991;
 const rows = [];
@@ -13,14 +10,16 @@ for (let i = 0; i < 65; i++) {
 }
 // A tie bucket bigger than a page exercises both cursor boundaries.
 for (let i = 0; i < 90; i++) rows.push({ id: 20000 + i, sessionId, videoId: 'test', role: i % 2 ? 'assistant' : 'user', content: `tie${i}`, createdAt: 100 });
-try {
-  await db.chats.bulkAdd(rows.reverse());
+{
+   rows.reverse();
   const expected = [...rows].sort(compareChatRows);
-  assert.deepEqual((await readChatHistory(sessionId)).map(row => row.id), expected.map(row => row.id));
   let cursor;
   let all = [];
   for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
-    const page = await readChatPage(sessionId, cursor);
+     // Pure shared-order invariants only; browser local pagination is retired.
+     // Production server pagination is exercised by e2e-server-chat-ui.mjs.
+     const remaining = expected.filter(row => !cursor || compareChatRows(row, cursor) < 0);
+     const page = { rows: remaining.slice(-40), hasOlder: remaining.length > 40 };
     assert.ok(page.rows.length > 0);
     all = [...page.rows, ...all];
     if (!page.hasOlder) break;
@@ -34,4 +33,4 @@ try {
   const second = nextChatTurnTimes([{ createdAt: first.assistant }], 200, 200);
   assert.ok(first.user < first.assistant && first.assistant < second.user && second.user < second.assistant);
   console.log('PASS: legacy random IDs, model history order, multi-page timestamp ties, monotonic new turns and clock rollback.');
-} finally { await db.delete(); }
+}

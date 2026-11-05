@@ -1,67 +1,19 @@
-/**
- * 阅读材料的识别与解析流水线。
- *
- * 解析 = 抽文本单元 → 归一化分块 → 落 `materialBlocks`。**不含向量化**
- * （那一步是 `pipelines/embedMaterial.ts`，需要 API Key，与解析解耦：
-  没有 Key 也能正常阅读，只是问答检索不可用）。
- *
- * 分块那半段搬去了 `./reindex.ts`：这个文件静态 import 了 pdfjs，而编辑落盘那条链路
- * （md-editor/save.ts）不能为了一篇 md 把 pdf 阅读器拖进来 —— 理由见 reindex.ts 开头。
- * 跟着搬过去的那三个类型在这里原样再导出，对外 API 一个字没变。
- */
-
 import { db } from '../store/db';
-import { getMaterialFile } from '../store/fileStore';
-import type { RawUnit } from './chunk.ts';
-import { isDocxFile, looksLikeLegacyDoc, readDocxUnits } from './docx.ts';
-import { extractMdUnits, isMarkdownFile, readMdText } from './md.ts';
-import { extractHtmlUnits, isHtmlFile, readHtmlText } from './html.ts';
-import { extractPdfUnits, openPdf } from './pdf.ts';
-import {
-  reindexMaterial,
-  type MaterialFormat,
-  type MaterialParseProgress,
-  type MaterialParseResult,
-} from './reindex.ts';
+import { isDocxFile } from './docx';
+import { isMarkdownFile } from './md';
+import { isHtmlFile } from './html';
+import type { MaterialFormat } from './reindex';
 
-// 对外 API 保持原样：这三个类型与 unitKindOf 的声明搬去了 reindex.ts，
-// 调用点（pipelines/materialJob.ts 等）不必跟着改一行。
-export type { MaterialFormat, MaterialParseProgress, MaterialParseResult } from './reindex.ts';
-export { unitKindOf } from './reindex.ts';
+export type { MaterialFormat, MaterialParseProgress, MaterialParseResult } from './reindex';
+export { unitKindOf } from './reindex';
 
 const MATERIAL_EXTS = new Set(['pdf', 'docx', 'md', 'markdown', 'html', 'htm']);
-/** 旧版 .doc（OLE 复合文档）：明确不支持，但要在导入前就拦住并给出可操作的提示 */
-const LEGACY_DOC_EXTS = new Set(['doc']);
-
-function extOf(name: string): string {
-  return name.split('.').pop()?.toLowerCase() ?? '';
-}
-
-/**
- * 是不是可读的材料。
- *
- * 注意：**`doc` 也返回 true**，但导入流程要单独识别并拒绝 —— 见 `isLegacyDocFile`。
- * 这里把它当「材料」是为了让调用方能区分「这是文档类文件」与「这是个视频」，
- * 从而给出「请另存为 .docx」而不是「不支持的视频格式」这种驴唇不对马嘴的报错。
- */
+const extOf = (name: string) => name.split('.').pop()?.toLowerCase() ?? '';
 export function isMaterialFile(file: { name: string; type?: string }): boolean {
-  const ext = extOf(file.name);
-  if (MATERIAL_EXTS.has(ext) || LEGACY_DOC_EXTS.has(ext)) return true;
-  const t = file.type ?? '';
-  return (
-    t === 'application/pdf' ||
-    isDocxFile({ name: file.name, type: t }) ||
-    isMarkdownFile({ name: file.name, type: t }) ||
-    isHtmlFile({ name: file.name, type: t }) ||
-    t === 'application/msword'
-  );
+  return MATERIAL_EXTS.has(extOf(file.name)) || isLegacyDocFile(file) || file.type === 'application/pdf' ||
+    isDocxFile(file) || isMarkdownFile(file) || isHtmlFile(file) || file.type === 'application/msword';
 }
-
-export function isLegacyDocFile(file: { name: string; type?: string }): boolean {
-  return LEGACY_DOC_EXTS.has(extOf(file.name));
-}
-
-/** 从文件名/类型推断格式；`.doc` 会抛错（调用方应先拦） */
+export function isLegacyDocFile(file: { name: string; type?: string }): boolean { return extOf(file.name) === 'doc'; }
 export function detectMaterialFormat(file: { name: string; type?: string }): MaterialFormat {
   if (file.type === 'application/pdf' || extOf(file.name) === 'pdf') return 'pdf';
   if (isDocxFile(file)) return 'docx';
@@ -69,61 +21,7 @@ export function detectMaterialFormat(file: { name: string; type?: string }): Mat
   if (isHtmlFile(file)) return 'html';
   throw new Error(`无法识别的材料格式：${file.name}`);
 }
-
-/**
- * 解析材料并落库。
- *
- * 幂等：会先清掉这份材料已存的块，因此「重新解析」是安全的。
- * 没有可检索正文时也会正常返回，`scanned` / `empty` 带出来供 UI 与任务层给话术。
- */
-export async function parseMaterial(
-  materialId: string,
-  format: MaterialFormat,
-  onProgress?: (p: MaterialParseProgress) => void,
-): Promise<MaterialParseResult> {
-  onProgress?.({ phase: 'read', done: 0, total: 1, message: '读取材料文件…' });
-  const blob = await getMaterialFile(materialId);
-  if (!blob) throw new Error('材料文件不存在（可能已被删除）');
-
-  let units: RawUnit[];
-  /** 文档声明的单元总数（PDF 页数 / Word 段落数）。PDF 用它而不是「非空页数」：
-   *  阅读器能翻到空白页，库页标签写「120 页」也该是文件的真实页数。 */
-  let declaredUnits: number | null = null;
-  if (format === 'pdf') {
-    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
-    if (looksLikeLegacyDoc(head)) {
-      throw new Error('这是旧版 .doc 格式，暂不支持。请在 Word / WPS 里「另存为 .docx」后重新导入。');
-    }
-    const url = URL.createObjectURL(blob);
-    try {
-      const doc = await openPdf(url);
-      try {
-        declaredUnits = doc.numPages;
-        units = await extractPdfUnits(doc, ({ page, total }) =>
-          onProgress?.({ phase: 'extract', done: page, total, message: `解析第 ${page}/${total} 页` }),
-        );
-      } finally {
-        await doc.destroy();
-      }
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  } else if (format === 'md') {
-    onProgress?.({ phase: 'extract', done: 0, total: 1, message: '解析 Markdown…' });
-    units = extractMdUnits(await readMdText(blob));
-  } else if (format === 'html') {
-    onProgress?.({ phase: 'extract', done: 0, total: 1, message: '解析 HTML…' });
-    units = extractHtmlUnits(await readHtmlText(blob));
-  } else {
-    onProgress?.({ phase: 'extract', done: 0, total: 1, message: '解析 Word 正文…' });
-    units = await readDocxUnits(blob);
-  }
-
-  // 抽完单元就交给 reindexMaterial 重建块：解析与编辑落盘共用同一份判定（见 reindex.ts）
-  return reindexMaterial(materialId, format, units, declaredUnits);
-}
-
-/** 读某份材料已存好的块（阅读器与检索共用） */
+/** Read-only confirmed projection; parsing/index writes are server tasks. */
 export async function loadMaterialBlocks(materialId: string) {
   return db.materialBlocks.where('materialId').equals(materialId).sortBy('idx');
 }

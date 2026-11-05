@@ -1,5 +1,5 @@
 import { Ajv, type ValidateFunction } from 'ajv';
-import { PluginRegistry, type PluginDispose } from '@wangke/contracts/plugin-registry';
+import { Context } from '@deepseek-ai/cordis';
 import type { PluginCapability, PluginInstance, PluginPackage } from '@wangke/contracts/plugins';
 import { PLUGINS_TOOL, PLUGIN_LAYOUT_PATH, PLUGIN_SURFACES } from '@wangke/contracts/plugins';
 import type { DatabaseStore } from '../storage/database.js';
@@ -15,6 +15,7 @@ import path from 'node:path';
 import type { BoardTask } from '@wangke/contracts/board';
 
 export interface PluginActionContext { owner: string; plugin: PluginPackage; instance: PluginInstance; projectId?: string; checkActive(): void }
+type PluginDispose = () => Promise<void>;
 export interface PluginActionHandler {
   id: string; capability: PluginCapability; schema: Record<string, unknown>;
   trustedOnly?: boolean;
@@ -30,16 +31,17 @@ const snapshotWrite = object({ data: {}, expected: { type: 'string', maxLength: 
 /** HTTP, Chat and Bot use this boundary. Only trusted host handlers compile schemas. */
 export class PluginService {
   readonly files: PluginFiles;
-  readonly registry = new PluginRegistry();
+  readonly context = new Context();
   private readonly schemas = new Ajv({ strict: true, ownProperties: true, allErrors: false, addUsedSchema: false });
   private readonly actions = new Map<string, { handler: PluginActionHandler; validate: ValidateFunction; incarnation: symbol }>();
-  private readonly effects: PluginDispose[] = [];
   private readonly validateTool = this.schemas.compile<Record<string, any>>(PLUGINS_TOOL.function.parameters);
   private readonly learningCleanup: () => Promise<void>;
   private registeringProvider?: string;
+  private registeringEffects?: PluginDispose[];
   private readonly providers = new Map<string, PluginPackage>();
   private readonly knownProviders = new Map<string, PluginPackage>();
-  private readonly accounts = new Map<string, { signature: string; registry: PluginRegistry; dispose: PluginDispose[] }>();
+  private readonly accounts = new Map<string, { signature: string; context: Context; dispose: PluginDispose }>();
+  private readonly releasing = new Set<Promise<void>>();
   constructor(readonly store: DatabaseStore, bots?: BotApplicationService, runner?: CloudTaskRunner, readonly learningOptions: { filesDir: string; resources?: ResourceFiles } = { filesDir: process.env.FILES_DIR ?? path.resolve(process.env.DATA_DIR ?? 'data', 'files') }) {
     this.files = new PluginFiles(store, learningOptions.resources?.projects, learningOptions.filesDir);
     this.files.nativeAvailable = id => this.providers.has(id);
@@ -57,7 +59,7 @@ export class PluginService {
       try { return c.instance.scope.kind === 'material' ? id === c.instance.scope.id : this.files.materialProject(c.owner, id) === c.instance.scope.id; } catch { return false; }
     };
     const scopedTask = (c: PluginActionContext, id: unknown) => { const task = tasks.get(c.owner, id); if (!taskAllowed(task, c)) throw new Error('plugin_task_denied'); return task; };
-    this.effects.push(this.registry.register({ id: 'storage', setup: ctx => ctx.provide('storage', { version: 1, value: this.files }) }));
+    this.context.provide('storage', this.files);
     for (const kind of ['state', 'schedules'] as const) {
       this.register({ id: `${kind}.read`, capability: kind, access: 'read', schema: object({}), run: (_, c) => this.files.readState(c.owner, c.plugin.id, c.instance.id, kind) });
       this.register({ id: `${kind}.write`, capability: kind, access: 'write', atomic: 'sqlite', schema: snapshotWrite, run: (a, c) => this.files.writeState(c.owner, c.plugin.id, c.instance.id, kind, a.data, a.expected, a.revision) });
@@ -86,50 +88,70 @@ export class PluginService {
     handler = { ...handler, provider: handler.provider ?? this.registeringProvider };
     if (this.actions.has(handler.id) || !/^[a-z][a-z0-9_.-]{0,99}$/.test(handler.id)) throw new Error('plugin_action_conflict');
     const validate = this.schemas.compile(handler.schema);
-    const off = this.registry.register({ id: `action-${handler.id}`, requires: { storage: 1 }, setup: ctx => {
-      ctx.provide(`action.${handler.id}`, { version: 1, value: handler });
-      this.actions.set(handler.id, { handler, validate, incarnation: Symbol(handler.id) });
-      ctx.effect(() => this.actions.delete(handler.id));
-    } });
-    this.effects.push(off); return off;
+    const service = this;
+    const off = this.context.effect(function* () {
+      yield service.context.provide(`action.${handler.id}`, handler);
+      service.actions.set(handler.id, { handler, validate, incarnation: Symbol(handler.id) });
+      yield () => { service.actions.delete(handler.id); };
+    }, `plugin action ${handler.id}`);
+    this.registeringEffects?.push(off);
+    return off;
   }
   registerProvider(pkg: PluginPackage, setup: () => void): PluginDispose {
     if (this.providers.has(pkg.id)) throw new Error('plugin_provider_conflict');
-    const before = this.effects.length;
-    this.providers.set(pkg.id, pkg); this.knownProviders.set(pkg.id, pkg); this.registeringProvider = pkg.id;
-    try { setup(); } catch (error) { for (const off of this.effects.splice(before).reverse()) off(); this.providers.delete(pkg.id); throw error; } finally { this.registeringProvider = undefined; }
-    const owned = this.effects.splice(before);
-    let disposed = false;
-    const off = () => { if (disposed) return; disposed = true; for (const dispose of owned.splice(0).reverse()) dispose(); this.providers.delete(pkg.id); this.releaseAccounts(); };
-    this.effects.push(off); return off;
+    this.knownProviders.set(pkg.id, pkg);
+    const service = this;
+    // The public registration boundary is synchronous. Cordis v4 plugin bodies
+    // start at a microtask checkpoint, whereas effect bodies run immediately.
+    // Use its effect scope (including rollback and async teardown), not a second
+    // activation engine or a promise hidden behind synchronous authorization.
+    return this.context.effect(function* () {
+      service.providers.set(pkg.id, pkg);
+      const owned: PluginDispose[] = [];
+      service.registeringProvider = pkg.id;
+      service.registeringEffects = owned;
+      try { setup(); }
+      finally {
+        service.registeringProvider = undefined; service.registeringEffects = undefined;
+        yield* owned;
+        // Revoke before potentially async service disposers run.
+        yield () => { service.providers.delete(pkg.id); service.releaseAccounts(); };
+      }
+    }, `trusted plugin ${pkg.id}`);
   }
-  private releaseAccounts() { for (const account of this.accounts.values()) for (const off of account.dispose.reverse()) off(); this.accounts.clear(); }
+  private trackRelease(promise: Promise<void>) {
+    this.releasing.add(promise);
+    void promise.finally(() => this.releasing.delete(promise));
+  }
+  private releaseAccounts() { for (const account of this.accounts.values()) this.trackRelease(Promise.resolve(account.dispose())); this.accounts.clear(); }
   private account(owner: string, packages = this.files.catalog(owner)) {
     const signature = JSON.stringify(packages.map(p => [p.id, p.source, p.revision, p.manifest?.enabled, p.error]));
     const previous = this.accounts.get(owner);
-    if (previous?.signature === signature) return previous.registry;
-    if (previous) for (const off of previous.dispose.reverse()) off();
-    const registry = new PluginRegistry(), dispose: PluginDispose[] = [];
-    dispose.push(registry.register({ id: 'host-learning-data', setup: ctx => ctx.provide('host.learning-data', { version: 1, value: { store: this.store, files: this.files } }) }));
+    if (previous?.signature === signature) return previous.context;
+    if (previous) this.trackRelease(Promise.resolve(previous.dispose()));
+    const context = new Context();
+    const service = this;
     // These are account-scoped activation handles, not global native code unloading.
-    for (const pkg of packages.filter(p => !p.error && p.manifest?.enabled)) {
-      dispose.push(registry.register({ id: pkg.id, requires: { ...pkg.manifest!.requires, ...Object.fromEntries(Object.entries(pkg.manifest!.services ?? {}).map(([id, version]) => [`host.${id}`, version])) }, setup: ctx => {
-        if (pkg.source === 'builtin' && !this.providers.has(pkg.id)) throw new Error('plugin_provider_unavailable');
-        ctx.provide(pkg.id, { version: Number.parseInt(pkg.manifest!.version, 10), value: pkg });
-        if (pkg.source === 'builtin') for (const { handler } of this.actions.values()) if (handler.provider === pkg.id) ctx.provide(`action.${handler.id}`, { version: 1, value: handler });
-      } }));
-    }
-    this.accounts.set(owner, { signature, registry, dispose }); return registry;
+    const dispose = this.context.effect(function* () {
+      yield context.provide('host.learning-data', { store: service.store, files: service.files });
+      for (const pkg of packages.filter(p => !p.error && p.manifest?.enabled)) {
+        if (pkg.source === 'builtin' && !service.providers.has(pkg.id)) continue;
+        // The catalog has already checked minimum package and host versions.
+        yield context.provide(pkg.id, pkg);
+        if (pkg.source === 'builtin') for (const { handler } of service.actions.values()) if (handler.provider === pkg.id) yield context.provide(`action.${handler.id}`, handler);
+      }
+    }, `plugin account ${owner}`);
+    this.accounts.set(owner, { signature, context, dispose }); return context;
   }
   private allowed(owner: string, plugin: PluginPackage & { manifest: NonNullable<PluginPackage['manifest']> }, handler: PluginActionHandler, registry = this.account(owner)) {
-    if (!registry.status(plugin.id)?.active) throw new Error('plugin_provider_unavailable');
+    if (!registry.get(plugin.id)) throw new Error('plugin_provider_unavailable');
     if (!plugin.manifest.capabilities.includes(handler.capability)) throw new Error('plugin_capability_denied');
     const sdk = ['state', 'tasks', 'schedules'].includes(handler.capability);
     if (!sdk && !Object.values(plugin.manifest.actions ?? {}).some(a => a.service === handler.id)) throw new Error('plugin_method_undeclared');
     if (handler.capability === 'learning' && !plugin.manifest.services?.['learning-data']) throw new Error('plugin_service_dependency_undeclared');
     if (handler.trustedOnly && plugin.source !== 'builtin') throw new Error('plugin_trusted_view_required');
     if (handler.provider) {
-      const provider = registry.get<PluginPackage>(handler.provider);
+      const provider = registry.get(handler.provider) as PluginPackage | undefined;
       if (!provider || provider.source !== 'builtin' || !registry.get(`action.${handler.id}`)) throw new Error('plugin_provider_unavailable');
       if (!(plugin.source === 'builtin' && plugin.id === handler.provider) && !plugin.manifest.requires?.[handler.provider]) throw new Error('plugin_dependency_undeclared');
     }
@@ -139,7 +161,7 @@ export class PluginService {
     const packages = owner ? plugin ? [plugin] : this.files.catalog(owner) : [];
     return this.availableDefinitions(owner, packages, registry);
   }
-  private availableDefinitions(owner: string | undefined, packages: PluginPackage[], registry: PluginRegistry | undefined) {
+  private availableDefinitions(owner: string | undefined, packages: PluginPackage[], registry: Context | undefined) {
     return [...this.actions.values()].filter(({ handler }) => {
       if (!owner) return true;
       return packages.some(p => { if (p.error || !p.manifest?.enabled) return false; try { this.allowed(owner, p as PluginPackage & { manifest: NonNullable<PluginPackage['manifest']> }, handler, registry); return true; } catch { return false; } });
@@ -148,7 +170,7 @@ export class PluginService {
   resolve(owner: string, pluginId: string, instanceId: string, method: string) {
     const { plugin, instance } = this.files.instance(owner, pluginId, instanceId);
     const entry = this.actions.get(method);
-    if (!entry || !this.registry.get(`action.${method}`)) throw new Error('plugin_method_unavailable');
+    if (!entry || !this.context.get(`action.${method}`)) throw new Error('plugin_method_unavailable');
     this.allowed(owner, plugin, entry.handler);
     return { ...entry, plugin, instance };
   }
@@ -214,5 +236,5 @@ export class PluginService {
     if (args.operation === 'invoke') return this.invokeNamed(owner, args.pluginId, args.instanceId, args.revision, args.actionId, args.args ?? {}, checkActive);
     throw new Error('invalid_plugin_operation');
   }
-  async close() { await this.learningCleanup(); this.releaseAccounts(); for (const off of this.effects.splice(0).reverse()) off(); }
+  async close() { await this.learningCleanup(); this.releaseAccounts(); await this.context.fiber.dispose(); await Promise.all([...this.releasing]); }
 }

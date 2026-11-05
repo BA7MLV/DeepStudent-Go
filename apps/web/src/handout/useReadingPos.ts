@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react';
-import { db } from '../store/db';
+import { saveHandoutReading } from '../client/learning';
 import { applyHandoutReadPos, captureHandoutReadPos, type HandoutReadPos } from './readingPos';
 
 /**
@@ -82,7 +82,7 @@ export function useHandoutReadingPos({ enabled, handoutId, readPos, scrollRef, d
       if (!next) return;
       if (last && last.anchor === next.anchor && Math.abs(last.offset - next.offset) < WRITE_IDLE_PX) return;
       last = next;
-      void db.handouts.update(id, { readPos: next });
+      void saveHandoutReading(id, next).catch(() => { /* Durable command remains available in recovery. */ });
     };
 
     const onScroll = () => {

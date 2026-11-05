@@ -62,6 +62,9 @@ function files(directory) {
   if (!fs.existsSync(directory)) return [];
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     if (ignored.has(entry.name)) return [];
+    // Vite briefly writes then unlinks its bundled config beside the source.
+    // It is generated tooling output and can disappear during this traversal.
+    if (/^vite\.config\.[cm]?[jt]s\.timestamp-\d+-[a-f0-9]+\.mjs$/.test(entry.name)) return [];
     const file = path.join(directory, entry.name);
     return entry.isDirectory() ? files(file) : [file];
   });
@@ -71,11 +74,27 @@ function files(directory) {
 export function inspectSource(filename, text, options = {}, root = repository) {
   const relative = posix(path.relative(root, filename));
   const sourceOwner = owner(relative);
+  // Native-Node verification is tooling, not a distributable shared runtime.
+  // Keep this exception exact; package source and other loaders stay audited.
+  const nativeDistTest = relative === 'packages/study-core/scripts/check-dist.mjs';
   const injectedPluginView = /^apps\/web\/src\/plugins\/learning\/(?:Flashcards|Practice|Review|MaterialTools)View\.tsx$/.test(relative);
   const pluginSource = relative.startsWith('apps/web/src/plugins/');
   const pluginView = pluginSource && relative.endsWith('.tsx');
   const errors = [];
   const source = ts.createSourceFile(filename, text, ts.ScriptTarget.Latest, true);
+  // Projection write capability is private to the two authoritative reducers.
+  // Renaming an import still leaves its source identifier in this AST.
+  const projectionReducers = new Set(['apps/web/src/cloud/cache.ts', 'apps/web/src/cloud/sync.ts', 'apps/web/src/cloud/preferences.ts']);
+  function inspectProjectionAuthority(node) {
+    if (sourceOwner === 'web' && ts.isIdentifier(node) && node.text === 'markCloudApply' && !projectionReducers.has(relative)) {
+      errors.push(`${relative}: only authoritative projection reducers may unlock cloud cache writes`);
+    }
+    if (['web', 'client-core', 'remote-host'].includes(sourceOwner) && ts.isIdentifier(node) && ['commitRecords', 'clientLearningEdits'].includes(node.text)) {
+      errors.push(`${relative}: retired implicit record mutation bridge; use a durable domain command`);
+    }
+    ts.forEachChild(node, inspectProjectionAuthority);
+  }
+  inspectProjectionAuthority(source);
   // Persistent cloud execution must never regain a browser carrier. These are
   // retired entrypoints, not the local PDF/extraction/PWA Web Workers.
   if (sourceOwner === 'web' && /cloud\.(?:worker|workerToken|taskId|permissionId|acceptedPlugins)\b|BrowserWorkerHost|createExecutorRuntime|[?&]cloud-worker\b/.test(text)) errors.push(`${relative}: retired browser executor authority`);
@@ -108,6 +127,12 @@ export function inspectSource(filename, text, options = {}, root = repository) {
   }
   function reference(node, specifier) {
     const clean = specifier.replace(/[?#].*$/, '');
+    if (sourceOwner === 'web' && /(?:^|\/)chat-local-execution(?:\.[cm]?[jt]s)?$/.test(clean)) {
+      fail(node, 'retired static chat execution; use server task commands and projections');
+    }
+    if (sourceOwner === 'contracts' && /^@deepseek-ai\/cordis(?:\/|$)/.test(clean)) {
+      fail(node, 'contracts must keep manifest dependency resolution pure; plugin lifecycle belongs to the host');
+    }
     const typeOnly = ts.isImportDeclaration(node) && (node.importClause?.isTypeOnly
       || !node.importClause?.name && node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)
         && node.importClause.namedBindings.elements.every(element => element.isTypeOnly))
@@ -140,7 +165,7 @@ export function inspectSource(filename, text, options = {}, root = repository) {
       : clean.startsWith('@wangke/contracts') ? 'contracts'
         : clean.startsWith('@wangke/api') ? 'api' : clean.startsWith('@wangke/web') ? 'web' : undefined;
     if (packageOwner && !allowed(sourceOwner, packageOwner)) fail(node, `forbidden package edge: ${specifier}`);
-    if (['study-core', 'contracts', 'client-core', 'remote-artifacts'].includes(sourceOwner) && /^(?:node:|react(?:\/|$)|zustand(?:\/|$)|dexie$|better-sqlite3$|fastify$)/.test(clean)) {
+    if (['study-core', 'contracts', 'client-core', 'remote-artifacts'].includes(sourceOwner) && !(nativeDistTest && clean.startsWith('node:')) && /^(?:node:|react(?:\/|$)|zustand(?:\/|$)|dexie$|better-sqlite3$|fastify$)/.test(clean)) {
       fail(node, `environment-specific shared dependency: ${specifier}`);
     }
   }
@@ -166,7 +191,10 @@ export function inspectSource(filename, text, options = {}, root = repository) {
       const values = literals(value);
       if (values) for (const specifier of values) reference(node, specifier);
       else if (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === 'require')) {
-        fail(node, 'non-literal module loading requires an explicit audited adapter');
+        // This test enumerates the checked-in package export manifest in Node.
+        const manifestExportProbe = nativeDistTest && node.expression.kind === ts.SyntaxKind.ImportKeyword
+          && value?.getText(source) === '`${pkg.name}/${entry.slice(2)}`';
+        if (!manifestExportProbe) fail(node, 'non-literal module loading requires an explicit audited adapter');
       }
     } else if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'URL') {
       const value = node.arguments?.[0];

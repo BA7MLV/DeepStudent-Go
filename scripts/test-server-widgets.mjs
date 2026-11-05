@@ -69,7 +69,7 @@ try {
     const source = '<section><button>点击</button></section><script>throw new Error("must not execute on server")</script>';
     script = [body => {
       const tools = body.tools.map(tool => tool.function?.name ?? tool.name);
-      assert.deepEqual(tools, ['board', 'plugins', 'read', 'show_widget'], 'empty libraries register visualization, shared board resources, system-file reads and unified plugin discovery');
+      assert.deepEqual(tools, ['ask_user', 'board', 'edit', 'models_discover', 'plugins', 'read', 'show_widget', 'task_delegate'], 'empty libraries register the exact native interaction/resource/visualization/delegation tools; course search tools remain absent');
       return { calls: [widgetCall(`work-${i}`, source)] };
     }, body => {
       const row = answer(sid);

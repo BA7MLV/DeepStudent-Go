@@ -1,5 +1,5 @@
 import { boardSlug, type BoardPlugin } from './board.js';
-import { PluginRegistry } from './plugin-registry.js';
+import { availablePluginPackages, pluginMajor } from './plugin-dependencies.js';
 
 export const PLUGINS_PATH = '/system/plugins';
 export const PLUGIN_DATA_PATH = '/system/plugin-data';
@@ -153,21 +153,14 @@ export function resolvePluginDependencies(packages: PluginPackage[]): PluginPack
     const missing = Object.entries(p.manifest?.services ?? {}).filter(([id, version]) => (PLUGIN_HOST_SERVICES[id] ?? 0) < version).map(([id]) => `host.${id}`);
     return !p.error && p.manifest?.enabled && missing.length ? { ...p, error: 'plugin_service_dependency_unavailable', dependencies: { required: missing, optional: [] } } : p;
   });
-  const registry = new PluginRegistry(), disposers: Array<() => void> = [];
+  const available = availablePluginPackages(packages);
   const candidates = packages.filter(p => !p.error && p.manifest?.enabled);
-  const major = (p: PluginPackage) => Number(/^([1-9]\d*)(?:\.|$)/.exec(p.manifest!.version)?.[1] ?? 0);
-  try {
-    for (const p of candidates) disposers.push(registry.register({
-      id: p.id, requires: p.manifest!.requires,
-      setup: ctx => { const version = major(p); if (Number.isSafeInteger(version) && version > 0) ctx.provide(p.id, { version, value: p }); },
-    }));
-    return packages.map(p => {
-      if (!candidates.includes(p)) return p;
-      const unavailable = (deps?: Record<string, number>) => Object.entries(deps ?? {}).filter(([id, v]) => {
-        const dependency = registry.get<PluginPackage>(id); return !dependency || major(dependency) < v;
-      }).map(([id]) => id);
-      const required = unavailable(p.manifest!.requires), optional = unavailable(p.manifest!.optional);
-      return { ...p, ...(required.length ? { error: 'plugin_dependency_unavailable' } : {}), ...(required.length || optional.length ? { dependencies: { required, optional } } : {}) };
-    });
-  } finally { for (const off of disposers.reverse()) off(); }
+  return packages.map(p => {
+    if (!candidates.includes(p)) return p;
+    const unavailable = (deps?: Record<string, number>) => Object.entries(deps ?? {}).filter(([id, v]) => {
+      const dependency = available.get(id); return !dependency || pluginMajor(dependency) < v;
+    }).map(([id]) => id);
+    const required = unavailable(p.manifest!.requires), optional = unavailable(p.manifest!.optional);
+    return { ...p, ...(required.length ? { error: 'plugin_dependency_unavailable' } : {}), ...(required.length || optional.length ? { dependencies: { required, optional } } : {}) };
+  });
 }

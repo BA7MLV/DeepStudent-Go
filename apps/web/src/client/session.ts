@@ -1,6 +1,7 @@
 import type { ChatRow } from '../store/db';
 import { cloud } from '../cloud/state';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
+import { accountLifecycle } from './account-lifecycle';
 
 /** Browser adapter: transport lifetime belongs to the account Runtime; this
  * translates the wire row envelope, not conversation ordering or deduplication. */
@@ -9,9 +10,10 @@ export function followServerSession(id: number, callbacks: {
   failed(error: string): void;
 }) {
   const owner = cloud.userId;
+  const lifetime = accountLifecycle.current();
   let stopped = false, release: (() => void) | undefined, off: (() => void) | undefined;
   void serverRuntime(owner).then(runtime => {
-    if (stopped || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) return;
+    if (stopped || owner !== cloud.userId || lifetime && !lifetime.current() || !isCurrentServerRuntime(runtime)) return;
     const model = runtime.session(id);
     let pending = false, busy = false;
     const current = () => !stopped && owner === cloud.userId && isCurrentServerRuntime(runtime) && !runtime.signal.aborted;
@@ -39,6 +41,6 @@ export function followServerSession(id: number, callbacks: {
         .finally(() => { busy = false; if (pending && current()) refresh(); else pending = false; });
     };
     off = model.subscribe(refresh); release = model.acquire(); refresh();
-  }).catch(error => { if (!stopped && owner === cloud.userId) callbacks.failed(error instanceof Error ? error.message : String(error)); });
+  }).catch(error => { if (!stopped && owner === cloud.userId && (!lifetime || lifetime.current())) callbacks.failed(error instanceof Error ? error.message : String(error)); });
   return () => { stopped = true; off?.(); release?.(); };
 }

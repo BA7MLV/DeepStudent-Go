@@ -39,6 +39,8 @@ import { awaitTaskAnswer } from './task-interactions.js';
 import { editNodeDocument, readNodeDocument, readRawCourse } from './node-documents.js';
 import { mediaProcess, inheritedInput } from './media-process.js';
 import { serverCover, serverHandout, serverTranscribe } from './media-tasks.js';
+import { persistHandout } from './handout-edit.js';
+import { effectiveCompressionRows, executeContextCompression } from './context-compression.js';
 import { serverQuestionExtraction } from './question-extraction.js';
 import { DELEGATION_TOOLS } from '../src/agent/delegation-tools.js';
 import { delegationTool, TaskWaitSuspended } from './delegation.js';
@@ -724,7 +726,8 @@ async function modelHistory(history: Record<string, any>[], session: Record<stri
   const checkpoint = session.contextCheckpoint;
   let index = checkpoint ? history.findIndex(r => r.id === checkpoint.fromId && r.content === checkpoint.source) : 0;
   if (index > 0 && checkpoint?.prefixHash && await historyFingerprint(history.slice(0, index) as Array<{ content: string }>) !== checkpoint.prefixHash) index = 0;
-  const rows = history.slice(Math.max(0, index));
+  const afterCheckpoint = new Set(history.slice(Math.max(0, index)));
+  const rows = effectiveCompressionRows(history, session.contextOmissions).filter(row => afterCheckpoint.has(row));
   const messages = rows.map(row => replayTrace(row as { content: string }) ?? [{ role: row.role, content: String(row.content ?? '') } as ChatMessage]);
   const costs = messages.map(messageTokens);
   let total = costs.reduce((a, b) => a + b, 0), cut = 0;
@@ -734,7 +737,7 @@ async function modelHistory(history: Record<string, any>[], session: Record<stri
     if (next === rows.length) break;
     while (cut < next) total -= costs[cut++];
   }
-  return { messages: messages.slice(cut).flat(), ...(cut > 0 ? { checkpoint: { fromId: rows[cut].id, source: rows[cut].content, prefixHash: await historyFingerprint(history.slice(0, Math.max(0, index) + cut) as Array<{ content: string }>) } } : {}) };
+  return { messages: messages.slice(cut).flat(), ...(cut > 0 ? { checkpoint: { fromId: rows[cut].id, source: rows[cut].content, prefixHash: await historyFingerprint(history.slice(0, history.indexOf(rows[cut])) as Array<{ content: string }>) } } : {}) };
 }
 
 function addConversationMutations(
@@ -1033,6 +1036,7 @@ async function generatePluginPractice(context: TaskContext) {
 
 export async function executeNodeTask(context: TaskContext): Promise<unknown> {
   context.checkActive();
+  if (context.task.kind === 'chat' && context.task.input.action === 'compressContext') return executeContextCompression(context);
   if (context.task.kind === 'chat') return chat(context);
   if (context.task.kind === 'qa' && context.task.input.pluginExtraction === true) return serverQuestionExtraction(context);
   if (context.task.kind === 'qa') return qa(context);
@@ -1043,6 +1047,7 @@ export async function executeNodeTask(context: TaskContext): Promise<unknown> {
   if (context.task.kind === 'cover') return serverCover(context);
   if (context.task.kind === 'transcribe') return serverTranscribe(context);
   if (context.task.kind === 'modelOnce' && context.task.input.pluginPractice === true) return generatePluginPractice(context);
+  if (context.task.kind === 'handoutEdit' && context.task.input.action === 'persist') return persistHandout(context);
   const target = targetFor(context);
   const fetcher = modelFetch(context);
   const input = context.task.input;

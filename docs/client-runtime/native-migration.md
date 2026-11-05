@@ -1,5 +1,7 @@
 # Apple/native Bot Remote migration
 
+历史迁移与当时验收记录，非当前规范；当前入口：[当前架构](../architecture.md)，[历史导航](archive/index.md)。
+
 2026-11-04；范围仅 `apps/apple/**`、`apps/ios/**` 与本文。未修改 Host、公共契约、生成物、Web、root manifests/lock 或主计划。
 
 主线后续集成：Host已按真实token类别分流，只有workerTokens中注册的token进入Worker域，普通account Bearer走现有账户校验；`runtime-identities-shbzL3`真实HTTP/WS及撤销/隔离矩阵通过。下文兼容缺口与待删路径是A交付时记录，不代表当前仍存在。主线已删服务器events/stream、Web events/parser，并迁移test-api/test-bot-sync/chat-shell；XCTest及真机限制未变。

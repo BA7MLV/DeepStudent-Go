@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { db, useCloudDatabase } from '../store/db';
-import { markCloudApply, type OutboxRow } from './cache';
+import { markCloudApply } from './cache';
 import { cloud, cloudRequest } from './state';
 import { CLOUD_TABLES, type CloudRecord, type CloudConfig } from '@wangke/contracts/cloud';
 import { useSettings } from '../store/settings';
@@ -9,17 +9,37 @@ import { apiUrl } from '../api/base';
 import { cloudTransaction, isLostCloudTransaction } from './transactions';
 import { reasoningProviderOf } from '@wangke/study-core/model/reasoning';
 import Dexie from 'dexie';
-import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
+import { serverRuntime, isCurrentServerRuntime, disposeServerRuntime } from '../client/bootstrap';
 import type { RuntimeRecordsPage } from '@wangke/contracts/client-runtime';
 import { migrateResourceOutbox } from '../client/resources';
+import { drainLearning, type LearningCommandRow } from '../client/learning';
+import { accountLifetime, type AccountLifetime } from '../client/account-lifecycle';
 
-export const useCloudSync = create<{ pending: number; error: string; syncedAt: number; recordsRevision: number }>()(() => ({ pending: 0, error: '', syncedAt: 0, recordsRevision: 0 }));
+export const useCloudSync = create<{ pending: number; error: string; syncedAt: number; recordsRevision: number;
+  queued: number; uncertain: number; conflicts: number; oldestPendingAt: number; cursor: number; highWater: number; rebuildReason: string;
+}>()(() => ({ pending: 0, error: '', syncedAt: 0, recordsRevision: 0,
+  queued: 0, uncertain: 0, conflicts: 0, oldestPendingAt: 0, cursor: 0, highWater: 0, rebuildReason: '' }));
 let stopChanges: (() => void) | undefined;
 let retryRecords: (() => void) | undefined;
 let flight: Promise<boolean> | undefined;
+let repeatFlight = false;
+let fullPullRequested = false;
 let syncPhase: { name: string; since: number } = { name: 'idle', since: Date.now() };
 const phase = (name: string) => { syncPhase = { name, since: Date.now() }; };
-export const cloudSyncDiagnostics = () => ({ phase: syncPhase.name, phaseAgeMs: Date.now() - syncPhase.since, flight: !!flight });
+export const cloudSyncDiagnostics = () => {
+  const { pending, queued, uncertain, conflicts, oldestPendingAt, cursor, highWater, rebuildReason } = useCloudSync.getState();
+  return { phase: syncPhase.name, phaseAgeMs: Date.now() - syncPhase.since, flight: !!flight,
+    pending, queued, uncertain, conflicts, oldestPendingAgeMs: oldestPendingAt ? Date.now() - oldestPendingAt : 0,
+    cursor, highWater, revisionDistance: Math.max(0, highWater - cursor), rebuildReason };
+};
+async function publishCommandDiagnostics(database = db) {
+  const lifetime = accountLifetime(cloud.userId);
+  const rows = await database.table<LearningCommandRow>('_learningCommands').toArray();
+  if (database !== db || !lifetime.current()) return;
+  useCloudSync.setState({ pending: rows.length, queued: rows.filter(row => row.state === 'queued').length,
+    uncertain: rows.filter(row => row.state === 'uncertain').length, conflicts: rows.filter(row => row.state === 'conflict').length,
+    oldestPendingAt: rows.length ? Math.min(...rows.map(row => row.createdAt)) : 0 });
+}
 const fileCache = new Map<string, Blob>();
 let configSignature = '';
 let configCheckedAt = 0;
@@ -58,56 +78,49 @@ function decisionPatch(config: CloudConfig) {
   };
 }
 
-async function uploadBlob(blob: Blob): Promise<{ $file: string; type: string }> {
-  const hash = await blobHash(blob);
-  const cached = await db.table('_cloudBlobs').get(hash);
-  if (cached) return { $file: cached.id, type: blob.type };
-  const response = await fetch(apiUrl('/api/v1/files'), { method: 'POST', credentials: 'include', headers: {
-    'content-type': 'application/octet-stream', 'x-file-name': 'cache-blob', 'x-file-mime': blob.type || 'application/octet-stream',
-  }, body: blob });
-  if (!response.ok) throw new Error(`文件同步失败（${response.status}）`);
-  const file = await response.json();
-  await db.table('_cloudBlobs').put({ hash, id: file.id });
-  return { $file: file.id, type: blob.type };
-}
 async function blobHash(blob: Blob) {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
 }
-async function encode(value: any): Promise<any> {
-  if (value instanceof Blob) return uploadBlob(value);
-  if (Array.isArray(value)) return Promise.all(value.map(encode));
-  if (value && typeof value === 'object') return Object.fromEntries(await Promise.all(Object.entries(value).filter(([,v]) => v !== undefined).map(async ([k,v]) => [k, await encode(v)])));
-  return value;
-}
-async function decode(value: any): Promise<any> {
+async function decode(value: any, database: typeof db, lifetime: AccountLifetime): Promise<any> {
+  lifetime.assertCurrent();
+  if (database !== db) throw new Error('client_account_changed');
   if (value && typeof value.$file === 'string') {
     const cached = fileCache.get(value.$file);
     if (cached) return cached;
-    const response = await fetch(apiUrl(`/api/v1/files/${encodeURIComponent(value.$file)}`), { credentials: 'include' });
+    const response = await fetch(apiUrl(`/api/v1/files/${encodeURIComponent(value.$file)}`), { credentials: 'include', signal: lifetime.signal });
     if (!response.ok) throw new Error(`无法同步文件（${response.status}）`);
     const blob = new Blob([await response.blob()], { type: value.type });
-    await db.table('_cloudBlobs').put({ hash: await blobHash(blob), id: value.$file, origin: 'download' });
+    const hash = await blobHash(blob);
+    lifetime.assertCurrent();
+    if (database !== db) throw new Error('client_account_changed');
+    await database.transaction('rw', database.table('_cloudBlobs'), async () => {
+      lifetime.assertCurrent();
+      await database.table('_cloudBlobs').put({ hash, id: value.$file, origin: 'download' });
+      lifetime.assertCurrent();
+    });
+    lifetime.assertCurrent();
     // Bounded cache; IndexedDB remains the durable cache after decoding.
     if (fileCache.size >= 50) fileCache.delete(fileCache.keys().next().value!);
     fileCache.set(value.$file, blob);
     return blob;
   }
-  if (Array.isArray(value)) return Promise.all(value.map(decode));
-  if (value && typeof value === 'object') return Object.fromEntries(await Promise.all(Object.entries(value).map(async ([k,v]) => [k, await decode(v)])));
+  if (Array.isArray(value)) return Promise.all(value.map(item => decode(item, database, lifetime)));
+  if (value && typeof value === 'object') return Object.fromEntries(await Promise.all(Object.entries(value).map(async ([k,v]) => [k, await decode(v, database, lifetime)])));
   return value;
 }
 
-async function applyRecordsPage(page: RuntimeRecordsPage, signal?: AbortSignal) {
-  const database = db;
+async function applyRecordsPage(page: RuntimeRecordsPage, signal: AbortSignal | undefined, database: typeof db, lifetime: AccountLifetime) {
+  lifetime.assertCurrent();
+  if (database !== db) throw new Error('client_account_changed');
+  const owner = cloud.userId;
   const decoded: CloudRecord[] = [];
-  for (const record of page.records) decoded.push({ ...record, value: await decode(record.value) });
+  for (const record of page.records) decoded.push({ ...record, value: await decode(record.value, database, lifetime) });
   signal?.throwIfAborted();
   return cloudTransaction(database, database.tables, async () => {
     markCloudApply();
+    lifetime.assertCurrent();
     signal?.throwIfAborted();
-    // Never overwrite an unacknowledged UI transaction, even if it was created
-    // while decoding file references. The durable cursor remains unchanged.
-    if (await database.table('_cloudOutbox').count()) return false;
+    if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
     const cursor = (await database.table('_cloudMeta').get('cursor'))?.value ?? 0;
     if (page.cursor <= cursor) return true;
     for (const record of decoded) {
@@ -124,65 +137,143 @@ async function applyRecordsPage(page: RuntimeRecordsPage, signal?: AbortSignal) 
       await database.table('_cloudMeta').put({ id: metaId, value: record.revision });
     }
     await database.table('_cloudMeta').put({ id: 'cursor', value: page.cursor });
+    await retireConfirmedCommands(database);
+    lifetime.assertCurrent();
     return true;
   });
 }
 
-async function syncCycle(pull = true) {
+async function retireConfirmedCommands(database = db) {
+  for (const command of await database.table<LearningCommandRow>('_learningCommands').toArray()) {
+    if (command.state !== 'confirmed' || !command.receipt) continue;
+    let present = true;
+    for (const version of command.receipt.versions) {
+      const known = (await database.table('_cloudMeta').get(`revision:${version.table}:${JSON.stringify(version.key)}`))?.value ?? 0;
+      if (known < version.revision) present = false;
+    }
+    if (present) {
+      await database.table('_cloudMeta').put({ id: `learning-completed:${command.operationId}`, value: { receipt: command.receipt, inputDigest: command.inputDigest, confirmedAt: Date.now() } });
+      await database.table('_learningCommands').delete(command.sequence!);
+    }
+  }
+}
+
+/** Build separately while the previous committed view remains readable, then
+ * publish all business rows/revisions/cursor in one IDB commit. Journals survive. */
+async function rebuildRecords(database: typeof db, runtime: Awaited<ReturnType<typeof serverRuntime>>, reason: string, lifetime: AccountLifetime) {
+  const owner = cloud.userId;
+  const guard = () => { lifetime.assertCurrent(); if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed'); };
+  const stage = database.table('_projectionStage');
+  guard(); useCloudSync.setState({ rebuildReason: reason });
+  await database.transaction('rw', stage, async () => { guard(); await stage.clear(); guard(); });
+  let cursor = 0, epoch = '', highWater = 0;
+  for (;;) {
+    const page = await runtime.recordsPage(cursor); guard();
+    if (epoch && epoch !== page.epoch) throw new Error('records_generation_changed');
+    epoch = page.epoch;
+    highWater = page.highWater;
+    const records: { id: string; record: CloudRecord }[] = [];
+    for (const record of page.records) records.push({ id: `${record.table}:${JSON.stringify(record.key)}`, record: { ...record, value: await decode(record.value, database, lifetime) } });
+    guard();
+    await database.transaction('rw', stage, async () => { guard(); await stage.bulkPut(records); guard(); });
+    cursor = page.cursor;
+    if (!page.more) break;
+  }
+  await cloudTransaction(database, database.tables, async () => {
+    guard(); markCloudApply();
+    for (const name of Object.keys(CLOUD_TABLES)) if (name !== 'preferences') await database.table(name).clear();
+    const metadata = database.table('_cloudMeta');
+    await metadata.where('id').startsWith('revision:').delete();
+    for (const { record } of await stage.toArray()) {
+      if (record.table === 'preferences') continue;
+      if (record.value !== null) await database.table(record.table).put(record.value);
+      await metadata.put({ id: `revision:${record.table}:${JSON.stringify(record.key)}`, value: record.revision });
+    }
+    await metadata.bulkPut([{ id: 'cursor', value: cursor }, { id: 'records-epoch', value: epoch }]);
+    await stage.clear(); await retireConfirmedCommands(database);
+    guard();
+  });
+  guard(); useCloudSync.setState({ cursor, highWater });
+}
+
+async function syncCycle(pull: boolean, lifetime: AccountLifetime) {
+  lifetime.assertCurrent();
   phase('cycle:begin');
   const database = db;
+  const owner = cloud.userId;
+  const runtime = await serverRuntime(owner);
+  const guard = () => { lifetime.assertCurrent(); if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed'); };
+  guard();
   if (Date.now() - configCheckedAt > 15000) {
-    const config = await cloudRequest<CloudConfig>('/config');
+    const config = await cloudRequest<CloudConfig>('/config', { signal: lifetime.signal });
+    guard();
     configCheckedAt = Date.now();
     if (JSON.stringify(config) !== configSignature) applyCloudConfig(config);
   }
   let changed = false;
-  const outbox = database.table<OutboxRow>('_cloudOutbox');
-  // One original transaction per POST; acknowledged operations are removed only after commit.
-  for (;;) {
-    const first = await outbox.orderBy('sequence').first();
-    if (!first) break;
-    const rows = await outbox.where('transaction').equals(first.transaction).toArray();
-    useCloudSync.setState({ pending: await outbox.count() });
-    const mutations = [];
-    phase('cycle:encode-outbox');
-    for (const row of rows) mutations.push({ id: row.id, table: row.table, key: row.key, permissionId: row.permissionId,
-      baseRevision: (await database.table('_cloudMeta').get(`revision:${row.table}:${JSON.stringify(row.key)}`))?.value,
-      before: await encode(row.before), after: await encode(row.after) });
-    phase('cycle:commit-records');
-    const result = await (await serverRuntime(cloud.userId)).commitRecords({ operationId: first.transaction, mutations });
-    phase('cycle:commit-cache');
-    await cloudTransaction(database, [outbox, database.table('_cloudMeta')], async () => {
-      await outbox.bulkDelete(rows.map(r => r.sequence!));
-      await database.table('_cloudMeta').bulkPut(result.versions.map(r => ({ id: `revision:${r.table}:${JSON.stringify(r.key)}`, value: r.revision })));
-    });
-  }
-  if (!pull) { useCloudSync.setState({ pending: await outbox.count(), error: '', syncedAt: Date.now() }); return; }
+  await drainLearning();
+  guard();
+  const commands = database.table('_learningCommands');
+  if (!pull) { const pending = await commands.count(); guard(); useCloudSync.setState({ pending }); return; }
   let cursor = (await database.table('_cloudMeta').get('cursor'))?.value ?? 0;
   for (;;) {
     phase('cycle:read-page');
-    const page = await (await serverRuntime(cloud.userId)).recordsPage(cursor);
+    const page = await runtime.recordsPage(cursor);
+    guard();
+    if (page.reset || (await database.table('_cloudMeta').get('records-epoch'))?.value !== page.epoch) {
+      await rebuildRecords(database, runtime, page.reset ? 'future-cursor' : 'server-generation', lifetime); changed = true; break;
+    }
     if (page.records.length) changed = true;
     phase('cycle:apply-page');
-    const applied = await applyRecordsPage(page);
+    guard();
+    const applied = await applyRecordsPage(page, undefined, database, lifetime);
+    guard();
     if (!applied) return;
     cursor = page.cursor;
+    useCloudSync.setState({ cursor, highWater: page.highWater });
     if (!page.more) break;
   }
-  useCloudSync.setState({ pending: await outbox.count(), error: '', syncedAt: Date.now() });
+  await cloudTransaction(database, [commands, database.table('_cloudMeta')], async () => { guard(); await retireConfirmedCommands(database); guard(); });
+  const pending = await commands.count(); guard();
+  useCloudSync.setState({ pending, error: '', syncedAt: Date.now() });
+  await publishCommandDiagnostics(database);
+  guard();
   if (changed) useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1 }));
   if (changed) { phase('cycle:load-preferences'); await loadPreferences(); }
 }
 
 export function flushCloud(background = false): Promise<void> {
   if (!cloud.enabled) return Promise.resolve();
-  if (flight) return flight.then(async completed => {
+  const lifetime = accountLifetime(cloud.userId);
+  if (flight) {
+    repeatFlight = true;
+    fullPullRequested ||= !background;
+    return flight.then(async completed => {
+    lifetime.assertCurrent();
     // An explicit caller joining a skipped background attempt must still pull
     // a baseline, even when there are no local edits to push.
-    if (!background && (!completed || await db.table('_cloudOutbox').count())) await flushCloud();
-  });
-  if (!flight) flight = (async () => {
-    const drain = async () => { phase('drain:preferences'); await flushPreferences(); do { await syncCycle(!background); } while (await db.table('_cloudOutbox').count()); };
+    if (!background && !completed) await flushCloud();
+    });
+  }
+  if (!flight) {
+    repeatFlight = false;
+    fullPullRequested = !background;
+    const database = db;
+    const owner = cloud.userId;
+    const attempt = (async () => {
+    const drain = async () => {
+      do {
+      lifetime.assertCurrent();
+      repeatFlight = false;
+      phase('drain:preferences');
+      // A preference conflict is local to its draft, never a global feed gate.
+      await flushPreferences().catch(() => {});
+      if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
+       await syncCycle(fullPullRequested, lifetime);
+      if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
+      lifetime.assertCurrent();
+      } while (repeatFlight);
+    };
     phase('lock:waiting');
     if (navigator.locks) return navigator.locks.request(`cloud-sync:${cloud.userId}`, { ifAvailable: background }, async lock => {
       // Periodic cache maintenance must not build a queue ahead of a new tab's
@@ -195,107 +286,126 @@ export function flushCloud(background = false): Promise<void> {
     return true;
   })().catch(error => {
     const detail = (error as { detail?: { table?: string; key?: unknown } }).detail;
-    useCloudSync.setState({ error: (error as Error).message === 'sync_conflict'
+    if (lifetime.current() && database === db && owner === cloud.userId) useCloudSync.setState({ error: (error as Error).message === 'sync_conflict'
       ? `同步冲突：${detail?.table}/${String(detail?.key)}。本机修改已保留，请在云端管理中处理。`
       : isLostCloudTransaction(error)
         ? '浏览器本地数据库事务异常，同步尚未完成。请关闭其他同站点标签页后刷新重试，不要清除网站数据。'
         : (error as Error).message });
     throw error;
-  }).finally(() => { flight = undefined; phase('idle'); });
-  return flight.then(() => { if (!background) retryRecords?.(); });
+  }).finally(() => { if (flight === attempt) { flight = undefined; phase('idle'); } });
+    flight = attempt;
+  }
+  return flight.then(() => { lifetime.assertCurrent(); if (!background) retryRecords?.(); });
 }
 
 export async function resolveCloudConflict() {
-  if (navigator.locks) return navigator.locks.request(`cloud-sync:${cloud.userId}`, resolveConflictLocked);
-  return resolveConflictLocked();
+  const lifetime = accountLifetime(cloud.userId), database = db;
+  const resolve = () => resolveConflictLocked(database, lifetime);
+  if (navigator.locks) return navigator.locks.request(`cloud-sync:${lifetime.account}`, resolve);
+  return resolve();
 }
-async function resolveConflictLocked() {
-  const rows = await db.table<OutboxRow>('_cloudOutbox').orderBy('sequence').toArray();
+async function resolveConflictLocked(database: typeof db, lifetime: AccountLifetime) {
+  lifetime.assertCurrent();
+  const rows = await database.table('_learningCommands').toArray();
   if (!rows.length) return;
-  const encoded = [];
-  for (const row of rows) encoded.push({ ...row, before: await encode(row.before), after: await encode(row.after) });
+  const encoded = await (await import('./recovery-export')).encodeRecoveryValue(rows);
+  lifetime.assertCurrent();
+  if (database !== db) throw new Error('client_account_changed');
   const url = URL.createObjectURL(new Blob([JSON.stringify(encoded, null, 2)], { type: 'application/json' }));
   const a = document.createElement('a'); a.href = url; a.download = `wangke-conflict-${Date.now()}.json`; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
-  const records: CloudRecord[] = [];
-  for (const row of rows) {
-    const result = await cloudRequest<{ value: Record<string, unknown> | null }>(`/record?table=${encodeURIComponent(row.table)}&key=${encodeURIComponent(JSON.stringify(row.key))}`);
-    records.push({ table: row.table, key: row.key, value: await decode(result.value), revision: 0 });
-  }
-  await db.transaction('rw', db.tables, async () => {
-    if (await db.table('_cloudOutbox').count() !== rows.length) throw new Error('下载期间有新的修改，请停止编辑后重试处理冲突');
-    markCloudApply();
-    for (const record of records) {
-      if (record.value) await db.table(record.table).put(record.value);
-      else await db.table(record.table).delete(record.key);
-    }
-    await db.table('_cloudOutbox').bulkDelete(rows.map(r => r.sequence!));
-  });
-  await syncCycle();
-  retryRecords?.();
 }
 
 export async function startCloud(owner: string) {
+  disposeServerRuntime();
+  flight = undefined;
+  fileCache.clear();
   cloud.enabled = true; cloud.userId = owner;
+  useCloudSync.setState(useCloudSync.getInitialState());
   useCloudDatabase(owner);
-  await db.open();
-  await migrateResourceOutbox(); await migratePreferenceOutbox();
+  const lifetime = accountLifetime(owner);
+  lifetime.own(() => {
+    stopPreferences();
+    stopChanges?.(); stopChanges = undefined;
+    retryRecords = undefined; flight = undefined;
+    repeatFlight = false; fullPullRequested = false;
+    fileCache.clear(); configSignature = ''; configCheckedAt = 0;
+  });
+  const databaseAtStart = db;
+  const guard = () => { lifetime.assertCurrent(); if (databaseAtStart !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
+  await databaseAtStart.open(); guard();
+  await migrateResourceOutbox(); guard(); await migratePreferenceOutbox(); guard();
   useSettings.persist.setOptions({ name: `wangke-cloud-settings-${owner}` });
   // 登录前的语言不随模型配置重置；有账号语言偏好时，后续 loadPreferences 再覆盖。
   const uiLanguage = useSettings.getState().uiLanguage;
   useSettings.setState({ ...useSettings.getInitialState(), uiLanguage });
-  const config = await cloudRequest<CloudConfig>('/config');
+  const config = await cloudRequest<CloudConfig>('/config', { signal: lifetime.signal });
+  guard();
   applyCloudConfig(config);
   try { await flushCloud(); }
   catch (error) {
     // Existing local edits must remain reachable through conflict recovery after reload.
-    if (!(await db.table('_cloudOutbox').count())) throw error;
+    guard();
+    if (!(await databaseAtStart.table('_learningCommands').count())) throw error;
   }
+  guard();
   await startPreferences();
-  stopChanges?.();
+  guard();
   const database = db;
   let closed = false;
+  let lastLearningWake = 0;
   let follow: { dispose(): void; restart(): void } | undefined;
   // Dexie's committed mutation notification crosses tabs; no polling of either
   // IndexedDB or HTTP. Reads alone never generate another wakeup.
   const changed = (parts: Record<string, unknown>) => {
-    if (closed || !Object.keys(parts).some(key => key.startsWith(`idb://${database.name}/`))) return;
-    void database.table('_cloudOutbox').count().then(count => {
+    if (closed || !lifetime.current() || !Object.keys(parts).some(key => key.startsWith(`idb://${database.name}/`))) return;
+    void database.table<LearningCommandRow>('_learningCommands').orderBy('sequence').last().then(row => {
       // An actual committed edit is a durable write, not idle maintenance. It
       // waits once for the lock (coalesced by flight), otherwise a skipped wake
       // could strand the only local edit forever after removing the timer.
-      if (!closed && count) void flushCloud().catch(() => {});
-    });
+      if (!closed && lifetime.current() && row?.state === 'queued' && row.sequence! > lastLearningWake) {
+        lastLearningWake = row.sequence!;
+        void flushCloud().catch(() => {});
+      }
+    }).catch(() => { /* A disposed database cannot wake another generation. */ });
   };
   Dexie.on('storagemutated', changed);
-  const online = () => { void flushCloud().then(() => follow?.restart()).catch(() => {}); };
+  const online = () => { if (lifetime.current()) void flushCloud().then(() => { if (lifetime.current()) follow?.restart(); }).catch(() => {}); };
   window.addEventListener('online', online);
   stopChanges = () => { closed = true; follow?.dispose(); retryRecords = undefined; Dexie.on('storagemutated').unsubscribe(changed); window.removeEventListener('online', online); };
   {
     const runtime = await serverRuntime(owner);
-    if (closed) return;
+    guard(); if (closed) return;
     follow = runtime.followRecords({
       cursor: async () => (await database.table('_cloudMeta').get('cursor'))?.value ?? 0,
       apply: async (page, signal) => {
         const apply = async () => {
-          if (closed || !isCurrentServerRuntime(runtime)) return;
+          guard();
+          if (closed || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
           signal.throwIfAborted();
-          if (!await applyRecordsPage(page, signal)) throw new Error('records_pending_local_transaction');
-          if (page.records.length) {
-            useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1 }));
-            await loadPreferences();
-          }
+           const rebuilding = page.reset || (await database.table('_cloudMeta').get('records-epoch'))?.value !== page.epoch;
+            if (rebuilding) await rebuildRecords(database, runtime, page.reset ? 'future-cursor' : 'server-generation', lifetime);
+           else await applyRecordsPage(page, signal, database, lifetime);
+            guard(); signal.throwIfAborted();
+            if (rebuilding || page.records.length) {
+             useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1 }));
+             await loadPreferences();
+           }
+            const pending = await database.table('_learningCommands').count();
+            if (closed || database !== db || !isCurrentServerRuntime(runtime)) return;
+            useCloudSync.setState({ pending, syncedAt: Date.now() });
+            await publishCommandDiagnostics(database);
         };
         // Drain local transactions first. Applying under the same lock closes
         // the multi-tab push/remote-echo race without stealing a writer's lock.
-        if (await database.table('_cloudOutbox').count()) await flushCloud(true);
         if (navigator.locks) await navigator.locks.request(`cloud-sync:${owner}`, apply);
         else await apply();
       },
-      failed: error => { if (!closed) useCloudSync.setState({ error: error instanceof Error ? error.message : String(error) }); },
+      failed: error => { if (!closed && lifetime.current()) useCloudSync.setState({ error: error instanceof Error ? error.message : String(error) }); },
     });
     retryRecords = follow.restart;
     const { reconcileTaskAdmissions } = await import('./tasks');
+    guard();
     // Admission uncertainty has its own persisted command UI. Do not overwrite
     // a records conflict with a transient command warning that survives retry.
     await reconcileTaskAdmissions();
@@ -303,8 +413,7 @@ export async function startCloud(owner: string) {
 }
 
 export function stopCloud() {
-  stopPreferences();
-  void import('../client/bootstrap').then(module => module.disposeServerRuntime());
+  disposeServerRuntime();
   stopChanges?.(); stopChanges = undefined; fileCache.clear();
   // Re-enter through the auth gate on a fresh JS realm: no parked conversations or model
   // settings from a previous identity remain visible after logout/session expiry.
@@ -313,8 +422,8 @@ export function stopCloud() {
 
 /** Discard this browser's cloud cache after a server-side account reset. */
 export async function clearCloudLocalData() {
-  stopPreferences();
-  (await import('../client/bootstrap')).disposeServerRuntime();
+  const database = db;
+  disposeServerRuntime();
   stopChanges?.(); stopChanges = undefined;
   fileCache.clear();
   flight = undefined;
@@ -327,5 +436,14 @@ export async function clearCloudLocalData() {
   if (owner) localStorage.removeItem(`wangke-cloud-settings-${owner}`);
   useSettings.setState(useSettings.getInitialState());
   await useSettings.persist.clearStorage();
-  await db.delete();
+  // Only confirmed projections are disposable. Keep command journals, drafts,
+  // upload bytes and recovery evidence even after a server-side account reset.
+  if (database !== db) throw new Error('client_account_changed');
+  await cloudTransaction(database, database.tables, async () => {
+    markCloudApply();
+    for (const name of Object.keys(CLOUD_TABLES)) await database.table(name).clear();
+    await database.table('_projectionStage').clear();
+    await database.table('_cloudMeta').where('id').startsWith('revision:').delete();
+    await database.table('_cloudMeta').bulkDelete(['cursor', 'records-epoch']);
+  });
 }

@@ -108,8 +108,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
     const pin = Object.entries(next).filter(([, v]) => v === 'pin').map(([k]) => Number(k));
     const drop = Object.entries(next).filter(([, v]) => v === 'drop').map(([k]) => Number(k));
     const { cloud } = await import('../cloud/state');
-    if (cloud.enabled) await (await import('../client/resources')).resourceCommand({ kind: 'setCourseSkills', courseId: videoId, pin, drop });
-    else await db.videos.update(videoId, { skillOverride: { pin, drop } });
+    await (await import('../client/resources')).resourceCommand({ kind: 'setCourseSkills', courseId: videoId, pin, drop });
   };
 
   // 渲染 DOCX 预览（skeleton-reveal：脉冲占位 → cross-fade + cross-blur 到内容）

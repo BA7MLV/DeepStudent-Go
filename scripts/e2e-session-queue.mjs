@@ -9,6 +9,7 @@ Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');
 const { CloudRecords } = await import('../apps/api/src/cloud/records.ts');
+const { CloudConfiguration } = await import('../apps/api/src/cloud/config.ts');
 const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
 let browser, web, store;
 const evidence = { assertions: [], requests: [], errors: [] };
@@ -27,7 +28,7 @@ import { serverRuntime, disposeServerRuntime } from '/src/client/bootstrap.ts';
 import { db } from '/src/store/db.ts';
 await startCloud(window.owner);
 await useCourseChat.getState().bootstrap();
-await useCourseChat.getState().loadSession(Number(new URL(location.href).searchParams.get('session') || 900001));
+if (!useCourseChat.getState().queued.length) await useCourseChat.getState().loadSession(Number(new URL(location.href).searchParams.get('session') || 900001));
 window.probe = {
  state: () => useCourseChat.getState(),
  enqueue: async (text, files = []) => { useCourseChat.getState().enqueue(text, files, [42]); await flushChatQueue(); return useCourseChat.getState().queued.at(-1); },
@@ -42,6 +43,8 @@ window.probe = {
  nonchat: operationId => submitCloudTask('modelOnce','fixture:model',{text:'nonchat original'},operationId),
  retireRuntime: async () => { disposeServerRuntime(); await serverRuntime(window.owner); },
  direct: text => useCourseChat.getState().send(text),
+ newDraft: () => useCourseChat.getState().createSession(),
+ rows: () => db.chats.toArray(),
  continue: () => { const message = useCourseChat.getState().messages.find(item => item.rowId === 910001); if (!message) throw new Error('continuation fixture missing'); return useCourseChat.getState().retryMessage(message.key); },
  meta: () => db.table('_cloudMeta').toArray(),
  file: id => db.files.get(id),
@@ -53,18 +56,15 @@ const activity = document.createElement('main'); activity.id = 'activity'; docum
 document.body.dataset.ready = 'yes';`;
   const localFixture = `
 import { useCourseChat, flushChatQueue } from '/src/store/courseChat.ts';
-import { useSettings } from '/src/store/settings.ts';
 import { db } from '/src/store/db.ts';
-useSettings.getState().update({ providers: [{id:'fixture',name:'fixture',baseUrl:'https://queue-model.invalid/v1',apiKey:'fixture',serves:['chat'],catalogId:'siliconflow-cn'}],llmModel:{providerId:'fixture',model:'fixture'},contextWindow:32768,agentRounds:4 });
 window.modelCalls = 0;
 const nativeFetch = window.fetch.bind(window);
 window.fetch = async (url, init) => {
  if (!String(url).includes('/chat/completions')) return nativeFetch(url,init);
  window.modelCalls++;
- return new Response('data: '+JSON.stringify({choices:[{delta:{content:'local fixture answer'}}]})+'\\n\\ndata: [DONE]\\n\\n',{headers:{'content-type':'text/event-stream'}});
+ throw new Error('browser_model_execution_forbidden');
 };
-if (!await db.chatSessions.get(900001)) await db.chatSessions.put({id:900001,videoId:'__library_assistant__',title:'Local fixture',createdAt:1});
-await useCourseChat.getState().bootstrap(); if (!useCourseChat.getState().queued.length) await useCourseChat.getState().loadSession(900001);
+await useCourseChat.getState().bootstrap();
 window.probe = { state: () => useCourseChat.getState(), newDraft: () => useCourseChat.getState().createSession(), enqueue: async (text, files = []) => { useCourseChat.getState().enqueue(text, files); await flushChatQueue(); return useCourseChat.getState().queued.at(-1); }, send: id => useCourseChat.getState().sendQueuedNow(id), rows: () => db.chats.toArray(),
   putFile: id => db.files.put({ id, blob: new Blob(['fixture']) }), file: id => db.files.get(id),
   edit: async (id, text) => { useCourseChat.getState().updateQueued(id, text); await flushChatQueue(); },
@@ -91,6 +91,8 @@ document.body.dataset.ready = 'yes';`;
   const login = await context.request.post(`${origin}/api/v1/auth/password/login`, { data: { password: 'queue-password-123' } });
   const owner = (await login.json()).user.id;
   store = new DatabaseStore(path.join(directory,'db.sqlite'),path.join(directory,'files/system-files'));
+  const configuration = new CloudConfiguration(store, directory);
+  configuration.save(owner, { ...configuration.get(owner), providers: [{ id: 'fixture', name: 'Queue fixture (worker disabled)', protocol: 'openai-chat', apiKey: 'fixture-only', baseUrl: 'https://never-called.invalid/v1', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture' } });
   new CloudRecords(store).apply(owner, [{ id: 'queue-session', table: 'chatSessions', key: 900001, before: null, after: { id: 900001, videoId: '__library_assistant__', title: 'Queue fixture', createdAt: 1 } }]);
   await context.addInitScript(owner => { window.owner = owner; if (location.pathname === '/__queue-isolation') window.__WANGKE_CONFIG__ = {apiBaseUrl:'https://different-server.invalid'}; }, owner);
   const observe = page => {
@@ -111,7 +113,7 @@ document.body.dataset.ready = 'yes';`;
   await page.evaluate(id => probe.remove(id),trailing.id);
   assert.equal(count(pending.operationId),0);
   await page.evaluate(id => probe.send(id),pending.id);
-  assert.equal(count(pending.operationId),1);
+  assert.equal(count(pending.operationId),1, JSON.stringify(await page.evaluate(() => ({ error: probe.state().historyError, queued: probe.state().queued, messages: probe.state().messages }))));
   assert.equal(JSON.parse(store.db.prepare('SELECT input FROM cloud_tasks WHERE nonce=?').get(pending.operationId).input).text,'edited before reload');
   evidence.assertions.push('enqueue/edit → real reload → restore → production send, original operation and skills');
 
@@ -283,8 +285,7 @@ document.body.dataset.ready = 'yes';`;
   evidence.assertions.push('production retryMessage continuation → missing response → reload → real Activity original row/action recovery, one submit/one task');
   await ready(page);
 
-  // Local blobs belong to the Local adapter. Server attachments use authenticated
-  // file IDs, never an unauthorized write into its files projection.
+  // Offline drafts retain raw local blobs, but have no local model executor.
   const localRefs = await context.newPage(); observe(localRefs);
   await localRefs.goto(`${origin}/__local-queue`); await localRefs.locator('body[data-ready="yes"]').waitFor({timeout:60000});
   await localRefs.evaluate(() => probe.putFile('shared-queue-file'));
@@ -322,25 +323,20 @@ document.body.dataset.ready = 'yes';`;
   assert.equal(count(isolated.operationId),0);
   evidence.assertions.push('account switch cannot read/dispatch old queue; delayed accepted callback cannot mutate new account, accepted task is not cancelled');
 
-  const local = await context.newPage(); observe(local);
-  await local.goto(`${origin}/__local-queue`); await local.locator('body[data-ready="yes"]').waitFor({timeout:60000});
-  const localItem = await local.evaluate(() => probe.enqueue('static local after reload'));
-  await local.reload(); await local.locator('body[data-ready="yes"]').waitFor({timeout:60000});
-  assert.equal(await local.evaluate(() => probe.state().queued[0].operationId),localItem.operationId);
-  await local.evaluate(id => probe.send(id),localItem.id);
-  assert.equal(await local.evaluate(() => window.modelCalls),1);
-  assert.equal(await local.evaluate(async () => (await probe.rows()).filter(row => row.role === 'user' && row.content === 'static local after reload').length),1);
-  assert.ok(await local.evaluate(() => probe.state().messages.some(message => message.content === 'local fixture answer')));
-  evidence.assertions.push('pure static Local adapter restores real IndexedDB queue and runs real Agent loop once against free scripted model');
-  await local.evaluate(() => probe.newDraft());
-  const draftItem = await local.evaluate(() => probe.enqueue('durable lazy draft queue'));
-  await local.reload(); await local.locator('body[data-ready="yes"]').waitFor({timeout:60000});
-  assert.equal(await local.evaluate(() => probe.state().activeId),null,'pending lazy draft is restored without inventing a session');
-  assert.equal(await local.evaluate(() => probe.state().queued[0].operationId),draftItem.operationId);
-  await local.evaluate(id => probe.send(id),draftItem.id);
-  assert.notEqual(await local.evaluate(() => probe.state().activeId),900001);
-  assert.equal(await local.evaluate(async () => (await probe.rows()).filter(row => row.role === 'user' && row.content === 'durable lazy draft queue').length),1);
-  evidence.assertions.push('draft queue reload preserves identity; first dispatch atomically creates/rekeys its lazy session');
+  // Retired: the old paid-model-free *browser Agent loop* assertion. Its
+  // replacement proves durable lazy drafts submit one server command and do not
+  // fabricate local user/assistant history while the worker is disabled.
+  const draftPage = await context.newPage(); observe(draftPage); await ready(draftPage);
+  await draftPage.evaluate(() => probe.newDraft());
+  const draftItem = await draftPage.evaluate(() => probe.enqueue('durable lazy draft queue'));
+  await draftPage.reload(); await draftPage.locator('body[data-ready="yes"]').waitFor({timeout:60000});
+  assert.equal(await draftPage.evaluate(() => probe.state().activeId),null,'pending lazy draft is restored without inventing a session');
+  assert.equal(await draftPage.evaluate(() => probe.state().queued[0].operationId),draftItem.operationId);
+  await draftPage.evaluate(id => probe.send(id),draftItem.id);
+  assert.notEqual(await draftPage.evaluate(() => probe.state().activeId),900001);
+  assert.equal(count(draftItem.operationId),1);
+  assert.equal(await draftPage.evaluate(async () => (await probe.rows()).filter(row => row.content === 'durable lazy draft queue').length),0,'only the server worker may append history');
+  evidence.assertions.push('server lazy draft reload preserves identity; first dispatch creates/rekeys session, submits once, and never writes local chat history');
   assert.deepEqual(evidence.errors,[]);
   fs.writeFileSync(path.join(directory,'evidence.json'),JSON.stringify(evidence,null,2));
   console.log(`PASS production courseChat + IndexedDB + typed admission + two tabs. Evidence: ${directory}`);

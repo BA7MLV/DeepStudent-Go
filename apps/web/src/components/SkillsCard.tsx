@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { learningId, saveSkillPackage, learningEdit, submitLearning } from '../client/learning';
 import { Button, Chip, Drawer, EmptyState, Input, Switch, TextArea, TextField } from '@heroui/react';
 import { Field, SectionCard, Sym, confirmDialog, toast } from '../ui';
 import { useIsMobile } from '../utils/useMobile';
@@ -90,7 +91,7 @@ export default function SkillsCard() {
   }, []);
 
   const toggle = async (skill: SkillRow, enabled: boolean) => {
-    await db.skills.update(skill.id!, { enabled: enabled ? 1 : 0 });
+    await submitLearning([learningEdit({ kind: 'skillDefinition', expected: skill, value: { ...skill, enabled: enabled ? 1 : 0 } } as any)], [`skill:${skill.id}`]);
     void reload();
   };
 
@@ -128,20 +129,11 @@ export default function SkillsCard() {
     const row = { name, description: draft.description.trim(), body, mcpRequired: draft.mcpRequired, updatedAt: Date.now() };
     setSaving(true);
     try {
-      await db.transaction('rw', [db.skills, db.skillRefs], async () => {
-        let skillId: number;
-        if (draft.id != null && !draft.builtin) {
-          skillId = draft.id;
-          await db.skills.update(skillId, row);
-          await db.skillRefs.where('skillId').equals(skillId).delete();
-        } else {
-          // 编辑内置技能时，正文与支持文件一起保存为副本。
-          skillId = await db.skills.add({ ...row, enabled: 1, builtin: 0 });
-        }
-        if (draft.refs.length) {
-          await db.skillRefs.bulkAdd(draft.refs.map(({ path, body }) => ({ skillId, path, body })));
-        }
-      });
+      {
+        const { refs: _refs, builtin, ...baseline } = JSON.parse(draftBaseline) as Draft & { enabled?: 0 | 1; updatedAt: number };
+        const expected = baseline.id != null && !builtin ? { ...baseline, builtin: 0 as const, enabled: baseline.enabled ?? 1 } : null;
+        await saveSkillPackage(expected, { ...expected, ...row, id: expected?.id ?? learningId(), enabled: expected?.enabled ?? 1, builtin: 0 }, draft.refs);
+      }
       setDraft(null);
       setShowLegacy(false);
       toast.success('已保存');
@@ -165,21 +157,19 @@ export default function SkillsCard() {
   };
 
   const removeSkill = async (skill: SkillRow) => {
-    await db.transaction('rw', [db.skills, db.skillRefs], async () => {
-      await db.skillRefs.where('skillId').equals(skill.id!).delete();
-      await db.skills.delete(skill.id!);
-    });
+    await saveSkillPackage(skill, null, []);
     void reload();
   };
 
   const resetBuiltin = async (skill: SkillRow) => {
     const src = [...BUILTIN_SKILLS, ...LEGACY_HANDOUT_SKILLS].find((s) => s.name === skill.name);
     if (!src) return;
-    await db.skills.update(skill.id!, {
+    const patch = {
       description: src.description,
       body: src.body,
       updatedAt: Date.now(),
-    });
+    };
+    await submitLearning([learningEdit({ kind: 'skillDefinition', expected: skill, value: { ...skill, ...patch } } as any)], [`skill:${skill.id}`]);
     toast.success('已重置为内置版本');
     void reload();
   };
@@ -407,7 +397,11 @@ function SkillItem({
         onChange={onToggle}
         data-testid="skill-toggle"
         aria-label={`启用「${skill.name}」`}
-      />
+      >
+        <Switch.Content>
+          <Switch.Control><Switch.Thumb /></Switch.Control>
+        </Switch.Content>
+      </Switch>
       <Button className="shrink-0" variant="tertiary" data-testid="skill-edit" onPress={onEdit}>
         <Sym name="edit" />
         {skill.builtin ? '查看' : '编辑'}

@@ -15,6 +15,12 @@ import { errorKey, initialStep, previousStep, SETUP_STEPS, STEP_FIGURE, stepForE
 import './onboarding/onboarding.css';
 
 const App = lazy(() => import('../App'));
+const LocalHistoryExport = lazy(() => import('./LocalHistoryExport').catch(() => ({ default: LocalHistoryUnavailable })));
+
+function LocalHistoryUnavailable() {
+  const { t } = useTranslation('common');
+  return <p role="alert">{t('localHistory.loadFailed')}</p>;
+}
 
 const TITLE = {
   welcome: 'onboarding.welcomeTitle',
@@ -50,6 +56,7 @@ export default function CloudGate({ initialized, authenticated, hasPasskey = fal
   const [error, setError] = useState(initialError);
   const [attempt, setAttempt] = useState(0);
   const [created, setCreated] = useState(initialized);
+  const [showLocalHistory, setShowLocalHistory] = useState(false);
   const secretFile = useRef<HTMLInputElement>(null);
 
   // 欢迎页一出现就开始拉图形 chunk，下一步不用等。
@@ -192,6 +199,12 @@ export default function CloudGate({ initialized, authenticated, hasPasskey = fal
                   {step === 'login' && hasPasskey ? <Button className="ob__secondary" variant="ghost" size="lg" isDisabled={busy} onPress={() => void signIn(true)}>{t('onboarding.passkey')}</Button> : null}
                 </div>
               </form>}
+            <Button type="button" variant="ghost" data-testid="open-local-history" aria-expanded={showLocalHistory} aria-controls="gate-local-history" onPress={() => setShowLocalHistory(value => !value)}>
+              {t(showLocalHistory ? 'localHistory.close' : 'localHistory.open')}
+            </Button>
+            {showLocalHistory && <div id="gate-local-history">
+              <Suspense fallback={<p role="status">{t('localHistory.loading')}</p>}><LocalHistoryExport /></Suspense>
+            </div>}
           </div>
         </div>
         {index > 0 && <footer className="ob__footer">

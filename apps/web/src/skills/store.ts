@@ -1,11 +1,9 @@
-import { db, type SkillRow } from '../store/db';
-import { BUILTIN_SKILLS, LEGACY_HANDOUT_SKILLS } from './builtin';
+import { db } from '../store/db';
 import { COURSE_HANDOUT_SKILL, isLegacyHandoutSkill } from './catalog';
 import { intersectSkillMetaIds } from './scope';
 import { parseSkillMarkdown } from './types';
 import { parseSkillZip, type ParsedSkillPackage } from './zip';
-import { cloud } from '../cloud/state';
-import { markCloudApply } from '../cloud/cache';
+import { learningId, saveSkillPackage } from '../client/learning';
 
 /** 注入提示词的 skill 正文总预算（字符） */
 const SKILL_BLOCK_BUDGET = 6000;
@@ -37,12 +35,6 @@ export interface SkillMeta {
  */
 let builtinInflight: Promise<void> | null = null;
 
-function cloudBuiltinId(name: string): number {
-  let hash = 2166136261;
-  for (const char of name) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
-  // Reserved range above the random 52-bit IDs used for ordinary rows.
-  return 2 ** 52 + (hash >>> 0);
-}
 
 /** 首次启动写入 + 版本升级：内置 skill 在 UI 中只读（编辑存为副本、可重置），
  *  因此按名 upsert——同名内置行直接升级为最新内容，用户副本不受影响；references 同步落库。 */
@@ -56,50 +48,7 @@ export function ensureBuiltinSkills(): Promise<void> {
 async function doEnsureBuiltinSkills(): Promise<void> {
   // In account mode the server materializes builtins once and projects the live
   // package files. Re-upserting bundled text here would undo library/Shell edits.
-  if (cloud.enabled) {
-    await (await import('../cloud/sync')).flushCloud();
-    return;
-  }
-  const now = Date.now();
-  // 整体放进一个 rw 事务：IndexedDB 会把同库的 rw 事务串行化，
-  // 于是「查—插」不会被另一个并发调用穿插（上面的闸门管同页并发，这层管跨调用/跨标签页）。
-  await db.transaction('rw', [db.skills, db.skillRefs], async () => {
-    for (const s of [...LEGACY_HANDOUT_SKILLS, ...BUILTIN_SKILLS]) {
-      let row = await db.skills.filter((r) => r.name === s.name && !!r.builtin).first();
-      if (row?.id != null) {
-        if (row.body !== s.body || row.description !== s.description) {
-          await db.skills.update(row.id, {
-            description: s.description,
-            body: s.body,
-            updatedAt: now,
-          });
-        }
-      } else {
-        const id = (await db.skills.add({
-          ...(cloud.enabled ? { id: cloudBuiltinId(s.name) } : {}),
-          name: s.name,
-          description: s.description,
-          body: s.body,
-          enabled: 1,
-          builtin: 1,
-          updatedAt: cloud.enabled ? 0 : now,
-        })) as number;
-        row = { id } as SkillRow;
-      }
-      for (const r of s.refs ?? []) {
-        const exist = await db.skillRefs
-          .where('skillId')
-          .equals(row.id!)
-          .filter((x) => x.path === r.path)
-          .first();
-        if (exist?.id != null) {
-          if (exist.body !== r.body) await db.skillRefs.update(exist.id, { body: r.body });
-        } else {
-          await db.skillRefs.add({ ...(cloud.enabled ? { id: cloudBuiltinId(`${s.name}/${r.path}`) } : {}), skillId: row.id!, path: r.path, body: r.body });
-        }
-      }
-    }
-  });
+  await (await import('../cloud/sync')).flushCloud();
 }
 
 /** Level 1：对话与旧 IR 流水线各自发现适用规范，失败兜底也不会混入另一套协议。 */
@@ -161,18 +110,6 @@ export async function importSkillFile(file: File): Promise<{ name: string; refCo
     if (!pkg.skill.body) throw new Error('正文为空');
   }
 
-  const skillId = await db.transaction('rw', [db.skills, db.skillRefs], async () => {
-    const id = (await db.skills.add({
-      ...pkg.skill,
-      enabled: 1,
-      builtin: 0,
-      updatedAt: Date.now(),
-    })) as number;
-    if (pkg.refs.length > 0) {
-      await db.skillRefs.bulkAdd(pkg.refs.map((r) => ({ skillId: id, path: r.path, body: r.body })));
-    }
-    return id;
-  });
-  void skillId;
+  await saveSkillPackage(null, { ...pkg.skill, id: learningId(), enabled: 1, builtin: 0, updatedAt: Date.now() }, pkg.refs);
   return { name: pkg.skill.name, refCount: pkg.refs.length };
 }

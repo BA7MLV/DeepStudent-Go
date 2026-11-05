@@ -1,5 +1,7 @@
 # videos / folders 写入口盘点
 
+历史盘点，非当前规范；当前入口：[当前架构](../architecture.md)，[历史导航](archive/index.md)。
+
 > 本地P4/P5已关闭，最终归档见 [final-acceptance.md](./final-acceptance.md)；具体门槛见[p4-p5-review.md](./p4-p5-review.md)。完整旧schema/嵌套保全、显式courseFiles映射、实际Blob恢复UI与producer矩阵已通过；下方保留历史记录。Worker continue/retry用任务限定reset替代直接IDB删除，browser-chat命令领取改为executor专有typed stream。QA/artifactEdit公开入口19场景、三交互执行中崩溃reconciliation及完整业务/插件/性能统一冻结均通过。明确领域恢复策略见domain-recovery.md，外部未验单列。
 
 2026-11-04 源码盘点；区分资源身份/文件效果、学习派生结果与静态存储。不把任意records传输改名当作领域化。搜索范围 `apps/web/src` 的videos/folders写、courseFiles引用和生产路由分流；未清除任何旧资料或outbox。

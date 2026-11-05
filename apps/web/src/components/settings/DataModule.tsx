@@ -1,10 +1,6 @@
 import { Suspense, lazy } from 'react';
 import { Spinner } from '@heroui/react';
-import StorageCard from '../StorageCard';
-import MigrationCard from '../MigrationCard';
-import ArchivedSessionsCard from './ArchivedSessionsCard';
 import { buildInfoLabel } from '../../utils/buildInfo';
-import { cloud } from '../../cloud/state';
 
 const CloudDataSettings = lazy(() => import('../../cloud/DataSettings'));
 
@@ -20,17 +16,9 @@ const CloudDataSettings = lazy(() => import('../../cloud/DataSettings'));
 export default function DataModule() {
   return (
     <>
-      {cloud.enabled ? (
-        <Suspense fallback={<div className="grid min-h-40 place-items-center text-muted"><Spinner size="sm" color="current" /></div>}>
-          <CloudDataSettings />
-        </Suspense>
-      ) : (
-        <>
-          <StorageCard />
-          <MigrationCard />
-          <ArchivedSessionsCard />
-        </>
-      )}
+      <Suspense fallback={<div className="grid min-h-40 place-items-center text-muted"><Spinner size="sm" color="current" /></div>}>
+        <CloudDataSettings />
+      </Suspense>
 
       {/* 构建信息：排障用（PWA 后台更新后判断当前跑的是哪个构建），见 docs/plans/2026-09-18-build-info-design.md */}
       <div className="my-1 text-center text-xs text-muted" data-testid="build-info">

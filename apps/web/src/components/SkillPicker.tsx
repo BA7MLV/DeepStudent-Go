@@ -199,7 +199,7 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
                     </div>
                   </section>)}
               </div>
-              {open && !explicit && onMcpChange && cloud.enabled ? <McpScope value={mcpValue} onChange={onMcpChange} /> : null}
+              {open && !explicit && onMcpChange ? <McpScope value={mcpValue} onChange={onMcpChange} /> : null}
             </Modal.Body>
 
             <Modal.Footer className="skill-picker__footer">

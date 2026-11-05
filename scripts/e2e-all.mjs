@@ -41,6 +41,12 @@ mkdirSync(CACHE_DIR, { recursive: true });
 // video:   优先注入的测试视频
 // skip:     非空的跳过原因（整脚本跳过）
 const META = {
+  'e2e-server-only-boot': { service: 'none', antd: false, timeout: 180 },
+  'e2e-history-recovery-demand': { service: 'none', antd: false, timeout: 180 },
+  'e2e-server-only-app': { service: 'none', antd: false, timeout: 180, tsx: true },
+  'e2e-server-chat-ui': { service: 'none', antd: false, timeout: 180, tsx: true },
+  'e2e-account-lifecycle': { service: 'none', antd: false, timeout: 180, tsx: true },
+  'e2e-worker-products': { service: 'none', antd: false, timeout: 360 },
   // ── 纯 Node（无服务）──
   'render-handout-fixture': { service: 'none', antd: false, timeout: 120 },
   'test-anki-cards': { service: 'none', antd: false, timeout: 120 },
@@ -178,7 +184,7 @@ const META = {
   'e2e-html-answer': { service: 'dev', antd: false, timeout: 180, base: true },
   'e2e-chat-html-sequence': { service: 'dev', antd: false, timeout: 180, base: true },
   'e2e-artifact-edit': { service: 'dev', antd: false, timeout: 180, base: true },
-  'e2e-widget-protocol': { service: 'dev', antd: false, timeout: 180, base: true },
+  'e2e-widget-protocol': { service: 'none', antd: false, timeout: 180, tsx: true },
   'e2e-code-toolbar': { service: 'dev', antd: false, timeout: 180, base: true },
   'test-ask-visual': { service: 'none', antd: false, timeout: 120 },
   'e2e-ask-visual': { service: 'dev', antd: false, timeout: 180, base: true },

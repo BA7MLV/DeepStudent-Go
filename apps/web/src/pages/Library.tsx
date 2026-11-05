@@ -41,7 +41,6 @@ import { AGENT_INSTRUCTIONS_ROUTE, listSystemDirectory, systemMaterialId, system
 import type { SystemDirectory } from '@wangke/contracts/system';
 import { db, type FolderRow, type VideoRow } from '../store/db';
 import { useLibraryRevision } from '../pipelines/folderPlan';
-import { deleteMaterialFile, deleteVideoFile, saveMaterialFile, saveVideoFile } from '../store/fileStore';
 import { acquireWakeLock, releaseWakeLock } from '../utils/wakeLock';
 import { formatSize } from '../utils/format';
 import { probeDuration } from '../utils/mediaDuration';
@@ -75,7 +74,6 @@ import { uuid } from '../utils/uuid';
 import './library.css';
 import { folderAncestors, validFolderDrop, moveLibraryItems, undoLibraryMove } from '../materials/libraryFolders';
 import { useProjectLibrary } from '../projects/useProjectLibrary';
-import { cloud } from '../cloud/state';
 import ResourceLibrary from './ResourceLibrary';
 import { FOLDER_COLORS, FolderIcon } from '../components/FolderIcon';
 import { AgentInstructionsIcon } from '../components/AgentInstructionsIcon';
@@ -246,7 +244,7 @@ export default function Library() {
   const systemFile = file === 'AGENTS.md' || file === '/system/AGENTS.md' || file === '/system/mcp.json' || /^\/system\/(memory|skills|board)\//.test(file);
   // Old arbitrary ?file= values must not expose the static table editor in
   // server mode. System links retain their existing reader redirects.
-  if (cloud.enabled && (search.has('folder') || (!systemFolder && !systemFile))) return <>
+  if (search.has('folder') || (!systemFolder && !systemFile)) return <>
     <ResourceLibrary onImport={folderId => setImporting({ folderId })} />
     {importing && <LegacyLibrary importing={{ ...importing, onClose: () => setImporting(null) }} />}
   </>;
@@ -301,7 +299,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const [systemError, setSystemError] = useState('');
   useEffect(() => {
     if (!inSystemFolder) return;
-    if (cloud.enabled) {
+    {
       let stopped = false, off: (() => void) | undefined;
       setSystemLoading(true);
       void import('../client/resources').then(({ followDocument }) => {
@@ -312,20 +310,6 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       });
       return () => { stopped = true; off?.(); };
     }
-    let active = true;
-    let requestId = 0;
-    const refresh = () => {
-      const id = ++requestId;
-      setSystemLoading(true);
-      void listSystemDirectory(systemPath, systemOffset, searchText.trim()).then(page => {
-        if (active && id === requestId) { setSystemPage(page); setSystemError(''); }
-      }).catch(error => { if (active && id === requestId) setSystemError(error instanceof Error ? error.message : '读取系统文件失败'); })
-        .finally(() => { if (active && id === requestId) setSystemLoading(false); });
-    };
-    const debounce = setTimeout(refresh, 200);
-    window.addEventListener('focus', refresh);
-    window.addEventListener('system-files-changed', refresh);
-    return () => { active = false; clearTimeout(debounce); window.removeEventListener('focus', refresh); window.removeEventListener('system-files-changed', refresh); };
   }, [inSystemFolder, systemPath, systemOffset, searchText]);
   useEffect(() => { setSystemOffset(0); }, [searchText, folderKey]);
   useEffect(() => {
@@ -649,54 +633,12 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     void alertDialog({ headline, description: text, copyText: text });
   };
 
-  /**
-   * 导入阅读材料（PDF / Word / Markdown / HTML）。
-   *
-   * 与视频导入的差别：
-   * - **不做容器探测**（没有时长可探，`duration` 恒为 0）；
-   * - 文件进 OPFS 的 `materials/` 目录（与视频分开放，便于各自清理）；
-   * - 写盘成功即视为导入完成，**解析与建索引丢到后台 job** —— 三百页 PDF 要几十秒，
-   *   卡在导入队列里会让「导入 5 个文件」变成一次要等好几分钟。
-   */
-  const importMaterial = async (file: File, key: string) => {
-    if (isLegacyDocFile(file)) {
-      throw new Error('这是旧版 .doc 格式，暂不支持。请在 Word / WPS 里「另存为 .docx」后重新导入。');
-    }
-    const format = detectMaterialFormat(file);
-    patchTask(key, { status: 'writing', percent: 0 });
-    const id = uuid();
-    await saveMaterialFile(id, file, (ratio) => patchTask(key, { percent: Math.round(ratio * 100) }));
-    await db.videos.put({
-      id,
-      folderId: importing ? importing.folderId : currentFolder?.folder?.id,
-      name: file.name.replace(/\.[^.]+$/, ''),
-      size: file.size,
-      mimeType: file.type || MATERIAL_MIME[format],
-      duration: 0,
-      createdAt: Date.now(),
-      status: 'new',
-      kind: 'material',
-      materialFormat: format,
-      coverState: 'pending',
-    });
-    // 封面与解析各走各的队列：PDF 的封面要渲染首页，Word 的会直接标成完成
-    // （没有可渲染的首页，保留文档图标占位），两种都不阻塞导入后的解析。
-    enqueueCover(id);
-    await reload();
-    setTasks((prev) => prev.filter((t) => t.key !== key));
-    toast.success(`已导入《${file.name}》，正在解析…`);
-    // 不 await：解析在后台跑（进度在列表行的 job 区域可见），用户可以继续导入下一个
-    void startMaterialJob(id, format).catch((e) => {
-      toast.error(`解析《${file.name}》失败：${formatCaughtError(e)}`);
-      showError(`解析《${file.name}》失败`, formatCaughtError(e));
-    });
-  };
-
   const importOne = async (file: File, key: string, subtitles?: SubtitleBundle, biliSource?: BiliVideoSource) => {
     // 大视频拷入 OPFS 要数分钟，持 Wake Lock 防熄屏后 tab 被挂起中断导入
     await acquireWakeLock();
     try {
-      if (cloud.enabled) {
+      if (isLegacyDocFile(file)) throw new Error('这是旧版 .doc 格式，请另存为 .docx 后导入。');
+      {
         const { readResourceFolder, uploadResource, resourceCommand, readResources, recordMediaDuration } = await import('../client/resources');
         patchTask(key, { status: 'writing', percent: 0 });
         const directory = await readResourceFolder(importing?.folderId);
@@ -724,45 +666,6 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         toast.success(`已导入《${file.name}》`);
         return;
       }
-      if (isMaterialFile(file)) {
-        await importMaterial(file, key);
-        return;
-      }
-      const id = uuid();
-      patchTask(key, { status: 'writing', percent: 0 });
-      // 探测时长与写入文件互不依赖。旧实现先 probe、再 save，
-      // 在 iPadOS 上会把两个慢步骤串起来；并行后总耗时取较慢的一项。
-      const durationPromise = probeDuration(file);
-      const savePromise = saveVideoFile(id, file, (ratio) =>
-        patchTask(key, { percent: Math.round(ratio * 100) }),
-      );
-      const [duration] = await Promise.all([durationPromise, savePromise]);
-      await db.videos.put({
-        id,
-        folderId: importing ? importing.folderId : currentFolder?.folder?.id,
-        name: file.name.replace(/\.[^.]+$/, ''),
-        size: file.size,
-        mimeType: file.type || 'video/mp4',
-        ...(biliSource ? { biliSource } : {}),
-        duration,
-        createdAt: Date.now(),
-        status: 'new',
-        coverState: 'pending',
-      });
-      // 封面入库即入队（不 await）：它是派生资源，晚一两秒出现没关系，
-      // 但绝不该再像以前那样「只有跑过讲义的视频才有」——详见 pipelines/cover.ts
-      enqueueCover(id);
-      // B 站自带字幕：主语言写 segments、全部语言写 subtitleTracks，并直接置为已转写
-      if (subtitles) await saveImportedSubtitles(id, subtitles);
-      if (!subtitles?.primary?.cues.length) startTranscription(id);
-      await reload();
-      // 视频已经出现在下方列表，队列只留还在进行 / 失败的项
-      setTasks((prev) => prev.filter((t) => t.key !== key));
-      toast.success(
-        subtitles?.primary
-          ? `已导入《${file.name}》· 自带字幕 ${subtitles.primary.cues.length} 条`
-          : `已导入《${file.name}》，字幕将在浏览器中自动生成，请保持页面打开`,
-      );
     } catch (e) {
       const text = formatCaughtError(e);
       patchTask(key, { status: 'error', error: text });
@@ -894,7 +797,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     if (selected.length > 10 || totalSec > 6 * 3600) {
       const ok = await confirmDialog({
         headline: `确认下载 ${selected.length} ${biliTarget.kind === 'season' ? '集' : '个分 P'}？`,
-        description: `合计约 ${formatTotalDuration(totalSec)}，会逐个写入${cloud.enabled ? '当前资源文件夹' : '本机存储'}（可随时在任务列表里看到进度）`,
+        description: `合计约 ${formatTotalDuration(totalSec)}，会逐个写入当前资源文件夹（可随时在任务列表里看到进度）`,
         confirmText: '开始下载',
       });
       if (!ok) return;
@@ -999,7 +902,12 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       return;
     }
     if (name !== renaming.name) {
-      await db.videos.update(renaming.id, { name });
+      const { readResourceFolder, resourceCommand } = await import('../client/resources');
+      const directory = await readResourceFolder(renaming.folderId);
+      const entry = directory.entries.find(entry => entry.courseId === renaming.id);
+      if (!entry?.revision) throw new Error('资料已变化，请刷新后重试。');
+      const parent = entry.path.split('/').slice(0, -1).join('/');
+      await resourceCommand({ kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId: entry.projectId, target: parent ? `${parent}/${name}` : name, revision: entry.revision });
       toast.success('标题已修改');
     }
     setRenaming(null);
@@ -1011,50 +919,13 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     // 记录都没了，后台还在转它就没意义了（队列里也要摘掉，否则会给已删除的视频写段）
     cancelTranscription(row.id);
     useJobStore.getState().drop(row.id);
-    await db.transaction(
-      'rw',
-      [
-        db.videos,
-        db.segments,
-        db.subtitleTracks,
-        db.frames,
-        db.handouts,
-        db.chats,
-        db.chatSessions,
-        // v9：材料的文本块。不一起清会留下孤儿数据占空间
-        // （向量表已随稠密检索移除，见 2026-09-23-context-engineering-design.md §1.6）
-        db.materialBlocks,
-        db.materialInk,
-        // v10：封面（主键就是 videoId）
-        db.covers,
-        // v12：评论区
-        db.comments,
-        // 弹幕与卡片：一直是漏的（本次一并补上）。
-        // 它们和评论一样都是「按字幕生成的派生物」，留着只是占空间 —— 而且视频没了之后
-        // 永远没有入口再看到，与 e2e-covers 守的「删除不残留」是同一条原则。
-        db.danmakus,
-        db.cards,
-      ],
-      async () => {
-        await db.videos.delete(row.id);
-        await db.segments.where('videoId').equals(row.id).delete();
-        await db.subtitleTracks.where('videoId').equals(row.id).delete();
-        await db.frames.where('videoId').equals(row.id).delete();
-        await db.handouts.where('videoId').equals(row.id).delete();
-        await db.chats.where('videoId').equals(row.id).delete();
-        await db.chatSessions.where('videoId').equals(row.id).delete();
-        await db.materialBlocks.where('materialId').equals(row.id).delete();
-        await db.materialInk.where('materialId').equals(row.id).delete();
-        await db.covers.delete(row.id);
-        await db.comments.where('videoId').equals(row.id).delete();
-        await db.danmakus.where('videoId').equals(row.id).delete();
-        await db.cards.where('videoId').equals(row.id).delete();
-      },
-    );
+    const { readResourceFolder, resourceCommand } = await import('../client/resources');
+    const directory = await readResourceFolder(row.folderId);
+    const entry = directory.entries.find(entry => entry.courseId === row.id);
+    if (!entry?.revision) throw new Error('资料已变化，请刷新后重试。');
+    await resourceCommand({ kind: 'remove', projectId: entry.projectId, path: entry.path, revision: entry.revision });
+    await (await import('../cloud/sync')).flushCloud();
     invalidateCoverUrl(row.id);
-    // 材料在 materials/ 目录下，用视频的删除函数会清不掉（OPFS 里两份文件各自独立）
-    if (row.kind === 'material') await deleteMaterialFile(row.id);
-    else await deleteVideoFile(row.id);
     toast.success('已删除');
     await reload();
   };
@@ -1103,7 +974,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
    */
   const togglePin = async (v: VideoRow) => {
     const next = v.pinned === 1 ? 0 : 1;
-    await db.videos.update(v.id, { pinned: next });
+    await (await import('../client/resources')).resourceCommand({ kind: 'setCoursePinned', courseId: v.id, pinned: next === 1 });
     toast.success(next === 1 ? `已置顶《${v.name}》` : `已取消置顶《${v.name}》`);
     await reload();
   };
@@ -1123,10 +994,24 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       return;
     }
     if (folderModal.mode === 'create') {
-      await db.folders.add({ name, createdAt: Date.now(), parentId: currentFolder?.folder?.id });
+      const { readResourceFolder, resourceCommand } = await import('../client/resources');
+      if (currentFolder?.folder?.id != null) {
+        const directory = await readResourceFolder(currentFolder.folder.id);
+        await resourceCommand({ kind: 'createDirectory', projectId: directory.project?.id ?? directory.rootId, path: directory.path ? `${directory.path}/${name}` : name });
+      } else await resourceCommand({ kind: 'createFolder', name });
       toast.success(`已创建文件夹「${name}」`);
     } else if (name !== folderModal.folder.name) {
-      await db.folders.update(folderModal.folder.id!, { name });
+      const { readResourceFolder, resourceCommand } = await import('../client/resources');
+      const directory = await readResourceFolder(folderModal.folder.id!);
+      if (!directory.project) throw new Error('目录已不存在');
+      if (!directory.path) await resourceCommand({ kind: 'renameFolder', projectId: directory.project.id, name });
+      else {
+        const parent = await readResourceFolder(folderModal.folder.parentId);
+        const entry = parent.entries.find(entry => entry.folderId === folderModal.folder.id);
+        if (!entry?.revision) throw new Error('目录已变化，请刷新后重试');
+        const prefix = entry.path.split('/').slice(0, -1).join('/');
+        await resourceCommand({ kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId: entry.projectId, target: prefix ? `${prefix}/${name}` : name, revision: entry.revision });
+      }
       toast.success('文件夹已重命名');
     }
     setFolderModal(null);
@@ -1135,20 +1020,18 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
 
   /** 删除文件夹：组内视频移回未分类，视频本体与内容不动 */
   const handleDeleteFolder = async (folder: FolderRow) => {
-    await db.transaction('rw', [db.folders, db.videos], async () => {
-      await db.videos
-        .filter((v) => v.folderId === folder.id)
-        .modify((v) => {
-          if (folder.parentId == null) delete v.folderId;
-          else v.folderId = folder.parentId;
-        });
-      await db.folders.filter((row) => row.parentId === folder.id).modify((row) => {
-        if (folder.parentId == null) delete row.parentId;
-        else row.parentId = folder.parentId;
-      });
-      await db.folders.delete(folder.id!);
-    });
-    toast.success('文件夹已删除，内容已移回上级目录');
+    const { readResourceFolder, resourceCommand } = await import('../client/resources');
+    const directory = await readResourceFolder(folder.id);
+    if (!directory.project) throw new Error('目录已不存在');
+    if (!directory.path) await resourceCommand({ kind: 'trash', projectId: directory.project.id });
+    else {
+      const parent = await readResourceFolder(folder.parentId);
+      const entry = parent.entries.find(entry => entry.folderId === folder.id);
+      if (!entry?.revision) throw new Error('目录已变化，请刷新后重试');
+      await resourceCommand({ kind: 'remove', projectId: entry.projectId, path: entry.path, revision: entry.revision });
+    }
+    await (await import('../cloud/sync')).flushCloud();
+    toast.success('文件夹已移除');
     await reload();
   };
 
@@ -1156,7 +1039,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     const row = document.querySelector<HTMLElement>(`[data-group-key="folder:${CSS.escape(String(folder.id))}"]`);
     void popconfirm({
       headline: `删除文件夹「${folder.name}」？`,
-      description: '其中的资料和子文件夹会移回上级目录，但文件夹本身无法恢复。',
+      description: '此操作会移除文件夹及其中内容，请确认后继续。',
       confirmText: '删除',
       danger: true,
       testId: 'folder-delete-popconfirm',
@@ -1436,7 +1319,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const createFolderInMove = async () => {
     const name = moveNewName.trim();
     if (!name) return;
-    const id = (await db.folders.add({ name, createdAt: Date.now() })) as number;
+    const project = await (await import('../client/resources')).resourceCommand({ kind: 'createFolder', name }) as unknown as { folderId: number };
+    const id = project.folderId;
     setMoveNewName('');
     setMoveTarget(String(id));
     await reload();
@@ -1636,7 +1520,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
           <div className="drop-zone__title text-sm font-medium text-foreground">导入课程与资料</div>
           {/* 格式与存储位置留在正文；系统选择器和空间管理细节收进说明。 */}
           <div className="drop-zone__hint mt-0.5 flex items-center gap-1 text-xs leading-relaxed text-muted max-[640px]:justify-center">
-            <span>拖入视频、PDF、Word、Markdown、HTML，{cloud.enabled ? '保存到服务端真实文件夹' : '只存本机'}</span>
+            <span>拖入视频、PDF、Word、Markdown、HTML，保存到服务端真实文件夹</span>
             {/* HelpTip 内部已经 stopPropagation —— 这里整块是可点击的投放区，
                 不拦住会顺手弹出文件选择器。 */}
             <HelpTip headline="导入说明" label="导入说明" testId="import-help">
@@ -1645,7 +1529,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                 存在 iCloud 里的文件，请先在「文件」App 中下载到本机。
               </p>
               <p>
-                {cloud.enabled ? '文件上传到当前资源文件夹，界面与获授权的 Bot 使用同一份文件。' : '视频只保存在本机浏览器存储中，不会上传到任何服务器。导入完成后，可以在「文件」App 中删除原视频来释放空间。'}
+                文件上传到当前资源文件夹，界面与获授权的 Bot 使用同一份文件。
               </p>
             </HelpTip>
           </div>
@@ -1809,7 +1693,9 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     if (!color || folderId == null) return;
                     void (async () => {
                       try {
-                        await db.folders.update(folderId, { color });
+                        const { readResourceFolder, resourceCommand } = await import('../client/resources');
+                        const directory = await readResourceFolder(folderId);
+                        await resourceCommand({ kind: 'folderColor', projectId: directory.project?.id ?? directory.rootId, path: directory.path, color });
                         await reload();
                       } catch (error) {
                         toast.error(`修改文件夹颜色失败：${formatCaughtError(error)}`);

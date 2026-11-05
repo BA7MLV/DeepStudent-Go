@@ -263,8 +263,9 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
         input: b.input as Record<string, import('@wangke/contracts/client-runtime').RuntimeJson> });
       return reply.code(previous ? 200 : 201).send(task);
     } catch (error) {
-      if (error instanceof Error && error.message === 'task_nonce_conflict') return fail(reply, 409, error.message);
-      if (error instanceof Error && error.message === 'session_not_found') return fail(reply, 404, error.message);
+      if (error instanceof Error && ['task_nonce_conflict', 'handout_edit_conflict', 'context_compression_conflict'].includes(error.message)) return fail(reply, 409, error.message);
+      if (error instanceof Error && ['session_not_found', 'handout_not_found'].includes(error.message)) return fail(reply, 404, error.message);
+      if (error instanceof Error && ['invalid_handout_persist', 'invalid_context_compression', 'invalid_context_compression_expected', 'context_compression_history_too_large'].includes(error.message)) return fail(reply, 400, error.message);
       return fail(reply, 403, 'plugin_unavailable');
     }
   });

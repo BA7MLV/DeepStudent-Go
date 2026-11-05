@@ -13,7 +13,7 @@ import { BotApplicationService } from '../apps/api/src/agent/service.ts';
 import { BotRunner } from '../apps/api/src/agent/runner.ts';
 import { ToolRegistry } from '../apps/api/src/agent/tools/registry.ts';
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-notebook-'));
+const root = fs.mkdtempSync(path.join(process.env.TMPDIR ?? os.tmpdir(), 'wangke-notebook-'));
 let store = new DatabaseStore(path.join(root, 'db.sqlite'));
 let runner;
 try {
@@ -21,10 +21,14 @@ try {
   for (const id of [owner, other]) store.db.prepare('INSERT INTO users VALUES(?,?,?)').run(id, id, at);
   const config = new CloudConfiguration(store, path.join(root, 'config'));
   config.save(owner, { ...config.get(owner, true), providers: [{ id: 'offline', name: 'Offline', baseUrl: 'https://offline.invalid/v1', protocol: 'openai-chat', apiKey: 'test', serves: ['chat'] }], llmModel: { providerId: 'offline', model: 'test' }, policy: { ...config.get(owner).policy, read: 'allow', write: 'allow', maxSteps: 30 } });
-  const service = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  // Freeze through production admission, but do not start execution until the
+  // direct tool/file durability assertions have finished (including DB reopen).
+  const admission = new BotRunner(store, { configuration: config });
+  const service = new BotApplicationService(store, { enqueue() {}, cancel() {}, freezeModel: (...args) => admission.freezeModel(...args) });
   const thread = service.create(owner, 'bot', 'Notebook');
   const message = service.send(owner, thread.id, { clientNonce: 'notebook', content: '记下今天的学习过程，并整理成笔记。' });
   const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id).id;
+  assert.deepEqual(JSON.parse(store.db.prepare('SELECT model_snapshot FROM runs WHERE id=?').get(run).model_snapshot).candidates, [{ providerId: 'offline', model: 'test' }]);
   const tools = new StudyTools(store, config, path.join(root, 'files'));
   const registry = new ToolRegistry();
   for (const definition of tools.definitions()) registry.register(definition, ['read', 'grep'].includes(definition.function.name) ? 'read' : 'uncertain');
@@ -136,7 +140,8 @@ try {
   assert.equal(store.db.prepare('SELECT COUNT(*) n FROM bot_memory_jobs WHERE enabled=1').get().n, 0, 'no automatic journaling is enabled');
 
   runtimeConfig.save(owner, { ...runtimeConfig.get(owner, true), policy: { ...runtimeConfig.get(owner).policy, write: 'ask' } });
-  const approvalService = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  const approvalAdmission = new BotRunner(store, { configuration: runtimeConfig });
+  const approvalService = new BotApplicationService(store, { enqueue() {}, cancel() {}, freezeModel: (...args) => approvalAdmission.freezeModel(...args) });
   const requested = approvalService.send(owner, thread.id, { clientNonce: 'approval', content: '继续写日记。' });
   const approvalRun = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(requested.id).id;
   const before = recovered.read(owner, diary);

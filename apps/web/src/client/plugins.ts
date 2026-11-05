@@ -1,11 +1,17 @@
 import type { RuntimeJson, RuntimeRead } from '@wangke/contracts/client-runtime';
 import { cloud } from '../cloud/state';
+import { accountLifetime } from './account-lifecycle';
 
 async function pluginRuntime(account: string, current = () => true) {
+  if (!cloud.enabled || !account) throw new Error('client_unauthenticated');
+  const lifetime = accountLifetime(account);
   const { serverRuntime, isCurrentServerRuntime } = await import('./bootstrap');
+  lifetime.assertCurrent();
   if (!current()) throw new Error('plugin_observation_cancelled');
   if (cloud.userId !== account) throw new Error('plugin_session_changed');
-  return { runtime: await serverRuntime(account), isCurrentServerRuntime };
+  const runtime = await serverRuntime(account);
+  lifetime.assertCurrent();
+  return { runtime, isCurrentServerRuntime, lifetime };
 }
 
 export type PluginIdentity = { pluginId: string; instanceId: string; revision?: number };
@@ -20,8 +26,9 @@ const query = (identity: PluginIdentity, method: string, args: Record<string, un
 
 /** Unary calls use declared Host metadata, never method-name heuristics. */
 export async function callPlugin(identity: PluginIdentity, method: string, args: Record<string, unknown> = {}) {
-  const { runtime, isCurrentServerRuntime } = await pluginRuntime(cloud.userId);
+  const { runtime, isCurrentServerRuntime, lifetime } = await pluginRuntime(cloud.userId);
   const catalog = runtime.catalog().getSnapshot().data ?? (await runtime.read({ kind: 'catalog' })).value;
+  lifetime.assertCurrent();
   const services = (catalog as { services: { id: string; access: 'read' | 'write' }[] }).services;
   const definition = services.find(service => service.id === method);
   if (!definition) throw new Error('plugin_method_unavailable');
@@ -53,8 +60,11 @@ function observeRequest(request: Extract<RuntimeRead, { kind: 'plugin' | 'plugin
   listener: (value: unknown) => void, failed: (error: Error) => void) {
   let active = true;
   let off: (() => void) | undefined, release: (() => void) | undefined;
-  void pluginRuntime(cloud.userId, () => active).then(({ runtime, isCurrentServerRuntime }) => {
+  let detach: (() => void) | undefined;
+  const stop = () => { if (!active) return; active = false; detach?.(); off?.(); release?.(); };
+  void pluginRuntime(cloud.userId, () => active).then(({ runtime, isCurrentServerRuntime, lifetime }) => {
     if (!active || !isCurrentServerRuntime(runtime)) return;
+    detach = lifetime.own(stop);
     const model = runtime.plugin(request);
     let previous: RuntimeJson | undefined;
     const update = () => {
@@ -67,5 +77,5 @@ function observeRequest(request: Extract<RuntimeRead, { kind: 'plugin' | 'plugin
     };
     off = model.subscribe(update); release = model.acquire(); update();
   }).catch(error => { if (active) failed(error instanceof Error ? error : new Error(String(error))); });
-  return () => { if (!active) return; active = false; off?.(); release?.(); };
+  return stop;
 }

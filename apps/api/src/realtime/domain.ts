@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { inspectInteraction } from './interaction-recovery.js';
+import { assembleRuntimeDomains, type RuntimeChange } from './runtime-domains.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SavePluginLayout, SystemDocument } from '@wangke/contracts/system';
@@ -23,7 +23,7 @@ import type { SessionJournalRequest, SessionJournalFrame, RuntimeSessionRow } fr
 import type { RuntimeTaskSubmit, RuntimeTask } from '@wangke/contracts/client-runtime';
 import type { RuntimeTaskAdmission } from '@wangke/contracts/client-runtime';
 import type { PreferencesCommand, PreferencesProjection } from '@wangke/contracts/client-runtime';
-import { applyPreferences, preferencesProjection } from './preferences.js';
+import { applyPreferences } from './preferences.js';
 import type { RuntimeFileIntent, RuntimeFileIntentsFrame } from '@wangke/contracts/client-runtime';
 import type { FileIntent } from '../storage/system-files.js';
 import { SystemMaterials } from '../storage/system-materials.js';
@@ -35,7 +35,7 @@ import type { DelegationCommand } from '@wangke/contracts/client-runtime';
 
 import type {} from './errors.js';
 
-interface Change { revision: number; owner_id: string; domain: string; entity: string }
+type Change = RuntimeChange;
 interface Observer { owner: string; request: RuntimeRead; wake(): void }
 const canonical = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -61,11 +61,15 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   private retainedAt = 0;
   private readonly fileWatcher?: fs.FSWatcher;
   private fileWake?: ReturnType<typeof setTimeout>;
+  private readonly domains: ReturnType<typeof assembleRuntimeDomains>;
   constructor(private readonly store: DatabaseStore, private readonly plugins: PluginService,
     private readonly submit?: (owner: string, request: RuntimeTaskSubmit) => unknown,
     private readonly prepareRecords?: (owner: string) => void,
     private readonly resources?: ResourceFiles,
-    private readonly configuration?: CloudConfiguration) {
+     private readonly configuration?: CloudConfiguration) {
+    this.domains = assembleRuntimeDomains({ store, plugins, resources, canonical,
+      recordsPage: (owner, after) => this.recordsPage(owner, after),
+      sessionProjection: (owner, request) => this.sessionProjection(owner, request) });
     this.cursor = this.revision();
     this.timer = setInterval(() => this.pump(), 100);
     this.timer.unref();
@@ -100,28 +104,7 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   private revision() { return (this.store.db.prepare('SELECT COALESCE(MAX(revision),0) AS n FROM client_changes').get() as { n: number }).n; }
   private matches(request: RuntimeRead, change: Change): boolean {
-    const catalog = ['projects', 'resource_trash', 'resource_files', 'resource_folders'].includes(change.domain)
-      || change.domain === 'cloud_records' && change.entity.startsWith('videos:')
-      || change.domain === 'system_file_entries' && !change.entity.startsWith('/system/plugin-data/') && !/\/(state|schedules)\.json$/.test(change.entity);
-    if (request.kind === 'catalog') return catalog;
-    if (request.kind === 'permissions') return change.domain === 'cloud_permissions';
-    if (request.kind === 'resources') return ['resources', 'projects', 'resource_files', 'resource_folders', 'resource_trash', 'cloud_records'].includes(change.domain);
-    if (request.kind === 'courseDocument') return ['resources', 'projects', 'resource_files', 'resource_trash', 'cloud_records'].includes(change.domain);
-    if (request.kind === 'systemDocument' || request.kind === 'systemDirectory') return change.domain === 'system_file_entries' || change.domain === 'systemDocument' || change.domain === 'cloud_records';
-    if (request.kind === 'resourceTrash') return change.domain === 'resource_trash' || change.domain === 'projects';
-    if (request.kind === 'preferences') return change.domain === 'cloud_records' && change.entity.startsWith('preferences:') || change.domain === 'system_file_entries' && change.entity === '/system/AGENTS.md';
-    if (request.kind === 'executorRecovery') return change.domain === 'cloud_tasks' || change.domain === 'cloud_records';
-    if (request.kind === 'task') return change.domain === 'cloud_tasks' && change.entity === request.taskId;
-    if (request.kind === 'tasks') return ['cloud_tasks', 'cloud_records', 'threads', 'agent_profiles'].includes(change.domain);
-    if (request.kind === 'records') return change.domain === 'cloud_records';
-    if (request.kind === 'fileIntents') return change.domain === 'system_file_entries';
-    if (request.kind === 'session') return change.domain === 'cloud_records' || change.domain === 'cloud_tasks';
-    if (catalog) return true; // Revocation invalidates all affected consumers, not their accepted tasks.
-    if (request.kind === 'plugin' && (request.method === 'state.read' || request.method === 'schedules.read')) {
-      return change.domain === 'system_file_entries' && change.entity === this.plugins.files.statePath(change.owner_id, request.pluginId, request.instanceId, request.method === 'state.read' ? 'state' : 'schedules');
-    }
-    return ['cloud_records', 'cloud_tasks', 'runs', 'run_steps', 'messages', 'threads', 'system_file_entries', 'plugin_learning_tasks',
-      'plugin_learning_receipts', 'plugin_practice_snapshots', 'plugin_practice_submissions'].includes(change.domain);
+    return this.domains.matches(request, change);
   }
   private pump() {
     try {
@@ -150,67 +133,8 @@ export class ClientRuntimeDomain implements RuntimeDomain {
       // Capture before reading: a concurrent async result may only cause a redundant
       // replacement, never skip a committed change. watch attaches before this call.
       const revision = this.revision();
-      const validations: Array<() => void> = [];
-      const pluginRead = async (pluginId: string, instanceId: string, expectedRevision: number, method: string, args: Record<string, RuntimeJson>) => {
-        const entry = this.plugins.resolve(owner, pluginId, instanceId, method);
-        if (entry.handler.access !== 'read') throw new RemoteError('client/forbidden', 'Only declared queries may be observed', {});
-        const result = await this.plugins.invoke(owner, pluginId, instanceId, expectedRevision, method, args);
-        // An async read does not retain a revoked provider/activation. Re-resolve
-        // after awaiting, including registration incarnation, before any payload leaves.
-        const validate = () => {
-          const current = this.plugins.resolve(owner, pluginId, instanceId, method);
-          if (current.incarnation !== entry.incarnation || current.plugin.revision !== expectedRevision || canonical(current.instance) !== canonical(entry.instance)) throw new Error('plugin_changed');
-        };
-        validate();
-        validations.push(validate);
-        return result;
-      };
-      let value: unknown;
-      if (request.kind === 'catalog') value = { plugins: this.plugins.files.catalog(owner), layout: this.plugins.files.layout(owner), scopes: this.plugins.files.scopeCatalog(owner), services: this.plugins.definitions(owner) };
-      else if (request.kind === 'preferences') value = preferencesProjection(this.store, owner);
-      else if (request.kind === 'permissions') value = { permissions: this.store.db.prepare('SELECT id,task_id AS taskId,capability,arguments,status,created_at AS createdAt FROM cloud_permissions WHERE owner_id=? ORDER BY created_at DESC LIMIT 100').all(owner) };
-      else if (request.kind === 'systemDocument') value = new SystemMaterials(this.store).read(owner, request.path);
-      else if (request.kind === 'systemDirectory') value = new SystemMaterials(this.store).list(owner, request.path, request.offset, request.query);
-      else if (request.kind === 'courseDocument') {
-        if (!this.resources) throw new Error('resource_domain_unavailable');
-        const mapped = this.resources.course(owner, request.courseId);
-        value = this.resources.projects.files.read(mapped.project_id, mapped.path);
-      }
-      else if (request.kind === 'resources') {
-        if (!this.resources) throw new Error('resource_domain_unavailable');
-        value = JSON.parse(JSON.stringify(request.folderId === undefined ? this.resources.list(owner, request.projectId, request.path, request.archived) : this.resources.listFolder(owner, request.folderId)));
-      }
-      else if (request.kind === 'resourceTrash') {
-        if (!this.resources) throw new Error('resource_domain_unavailable');
-        value = { projects: this.resources.trashList(owner) };
-      }
-      else if (request.kind === 'interactionRecovery') value = inspectInteraction(this.store, owner, request.taskId, request.sequence);
-      else if (request.kind === 'executorRecovery') {
-        if (request.operationIds.length > 20000 || request.operationIds.some(id => !id || id.length > 200)) throw new Error('invalid_recovery_operations');
-        const task = request.taskId ? this.store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId) : undefined;
-        value = { task: task ? taskDto(task) : null, operations: request.operationIds.map(id => ({ id, committed: !!this.store.db.prepare('SELECT 1 FROM cloud_operations WHERE owner_id=? AND id=?').get(owner, id) })) };
-      }
-      else if (request.kind === 'tasks') value = { tasks: listOwnerTasks(this.store, owner) };
-      else if (request.kind === 'records') value = await this.recordsPage(owner, request.after);
-      else if (request.kind === 'fileIntents') value = { intents: this.store.db.prepare("SELECT id,path,created_at AS createdAt FROM system_file_intents WHERE owner_id=? AND status='conflict' ORDER BY created_at,id LIMIT 100").all(owner) };
-      else if (request.kind === 'session') value = this.sessionProjection(owner, request);
-      else if (request.kind === 'task') {
-        const row = this.store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId);
-        if (!row) throw new Error('task_not_found');
-        value = taskDto(row);
-      } else if (request.kind === 'pluginQueries') {
-        if (!request.queries.length || request.queries.length > 8 || new Set(request.queries.map(q => q.key)).size !== request.queries.length || request.queries.some(q => !/^[a-zA-Z0-9_-]{1,40}$/.test(q.key))) throw new Error('invalid_plugin_queries');
-        const entries = await Promise.all(request.queries.map(async query => {
-          return [query.key, await pluginRead(request.pluginId, request.instanceId, request.revision, query.method, query.args)] as const;
-        }));
-        value = Object.fromEntries(entries);
-      } else {
-        value = await pluginRead(request.pluginId, request.instanceId, request.revision, request.method, request.args);
-      }
+      const value = await this.domains.read(owner, request);
       // Domains may return optional undefined members; wire JSON omits them exactly as HTTP did.
-      // Composite queries can finish at different times; recheck every provider
-      // together so an early result cannot outlive its registration while awaiting another.
-      for (const validate of validations) validate();
       return TYPERT_REMOTE.methods['clientRuntime/read'].result.create().parse({ type: 'snapshot', revision, value: JSON.parse(JSON.stringify(value)) });
     } catch (error) { throw this.failure(error); }
   }
@@ -427,8 +351,11 @@ export class ClientRuntimeDomain implements RuntimeDomain {
     if (!Number.isSafeInteger(after) || after < 0) throw new RemoteError('gateway/bad-request', 'Invalid records cursor', {});
     this.prepareRecords?.(owner);
     const records = new CloudRecords(this.store).list(owner, after);
-    return TYPERT_REMOTE.methods['clientRuntime/recordsPage'].result.create().parse({ records, cursor: records.at(-1)?.revision ?? after, more: records.length === 200 });
+    const highWater = (this.store.db.prepare("SELECT seq FROM sqlite_sequence WHERE name='cloud_records'").get() as { seq: number } | undefined)?.seq ?? 0;
+    return TYPERT_REMOTE.methods['clientRuntime/recordsPage'].result.create().parse({ records, cursor: records.at(-1)?.revision ?? Math.min(after, highWater), more: records.length === 200,
+      epoch: this.recordsEpoch, highWater, reset: after > highWater });
   }
+  private readonly recordsEpoch = crypto.randomUUID();
   async submitTask(owner: string, request: RuntimeTaskSubmit): Promise<RuntimeTask> {
     if (!this.submit) throw new Error('task_admission_unavailable');
     try { return TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(this.submit(owner, request)); }

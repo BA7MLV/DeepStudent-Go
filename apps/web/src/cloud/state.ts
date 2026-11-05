@@ -4,7 +4,6 @@ export const cloud = {
   enabled: false,
   userId: '',
 };
-export const remoteTasks = () => cloud.enabled;
 
 export async function cloudRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase();
@@ -53,15 +52,4 @@ async function waitForCloudRetry(retryAfter: string | null | undefined, attempt:
     timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve(); }, delay);
     signal?.addEventListener('abort', abort, { once: true });
   });
-}
-
-export async function requestToolPermission(capability: 'read' | 'write' | 'remove' | 'shell', args: unknown): Promise<string | undefined> {
-  // Static tools run locally; cloud user commands authorize at their server
-  // domain boundary. Persistent cloud tool execution never enters this helper.
-  return undefined;
-}
-
-export async function withToolPermission<T>(capability: 'read' | 'write' | 'remove', args: unknown, execute: () => Promise<T>): Promise<T> {
-  await requestToolPermission(capability, args);
-  return execute();
 }

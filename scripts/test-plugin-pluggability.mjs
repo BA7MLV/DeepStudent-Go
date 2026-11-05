@@ -82,7 +82,14 @@ try {
     await lifecycle(pkg.id, pkg.source, 'enabled');
     const restored = invoke(pkg, method);
     if (before.content) { assert.equal(restored.path, before.path); assert.deepEqual(JSON.parse(restored.content), JSON.parse(before.content)); }
-    else assert.deepEqual(restored, before);
+    else {
+      // Review projections carry the real observation clock; lifecycle must
+      // preserve content, not freeze time between independent reads.
+      const { asOf: oldClock, ...oldValue } = before;
+      const { asOf: newClock, ...newValue } = restored;
+      assert.deepEqual(newValue, oldValue);
+      if (oldClock !== undefined) assert.ok(newClock >= oldClock);
+    }
     assert.deepEqual(JSON.parse(service.files.layout(owner).content).placements.filter(p => p.pluginId === pkg.id), placements);
   }
   const flashcards = service.files.plugin(owner, 'flashcards'), tools = service.files.plugin(owner, 'material-tools');
@@ -154,12 +161,14 @@ try {
   nativeLayout.instances.push({ id: 'fixture-instance', pluginId: native.id, scope: { kind: 'account' } });
   service.files.save(owner, nativeDoc.path, JSON.stringify(nativeLayout), nativeDoc.content, nativeDoc.revision);
   assert.equal(invoke(native, 'fixture.ping', {}, owner, 'fixture-instance'), 1);
-  off(); off(); assert.equal(service.registry.get('action.fixture.ping'), undefined);
+   const releasing = off();
+   assert.throws(() => invoke(native, 'fixture.ping', {}, owner, 'fixture-instance'), /unavailable/, 'authorization revokes before async teardown settles');
+   await releasing; await off(); assert.equal(service.context.get('action.fixture.ping'), undefined);
   assert.equal(service.files.catalog(owner).find(p => p.id === native.id).error, 'plugin_provider_unavailable');
   assert.throws(() => invoke(native, 'fixture.ping', {}, owner, 'fixture-instance'), /unavailable/);
   const offAgain = service.registerProvider(native, setup);
   assert.equal(invoke(native, 'fixture.ping', {}, owner, 'fixture-instance'), 2);
-  assert.equal(setups, 2); offAgain();
+   assert.equal(setups, 2); await offAgain();
   assert.equal(pluginTool(service).capability({ operation: 'lifecycle' }), 'write');
   await assert.rejects(() => executePluginsTool({ owner, pluginService: service, configuration: { taskPolicy: () => ({ read: 'allow', write: 'deny' }) }, task: { id: 'native' }, checkActive() {} }, { operation: 'lifecycle', pluginId: 'flashcards', status: 'uninstalled' }), /policy_denied/);
   // Persisted quiz submission is delivered even after both providers are removed.

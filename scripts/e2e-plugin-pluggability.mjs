@@ -30,7 +30,9 @@ try {
   store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
   const files = new PluginFiles(store), records = new CloudRecords(store);
   const material = { id: 'unplug-video', name: '插拔验收视频', kind: 'video', duration: 60, createdAt: Date.now(), status: 'transcribed' };
-  records.apply(owner, [{ id: crypto.randomUUID(), table: 'videos', key: material.id, before: null, after: material }, { id: crypto.randomUUID(), table: 'cards', key: 987, before: null, after: { id: 987, videoId: material.id, time: 1, q: '停用后仍保留的历史卡片', a: '原权威记录不删除', status: 1, createdAt: Date.now() } }]);
+  records.apply(owner, [{ id: crypto.randomUUID(), table: 'videos', key: material.id, before: null, after: material },
+    { id: crypto.randomUUID(), table: 'cards', key: 987, before: null, after: { id: 987, videoId: material.id, time: 1, q: '停用后仍保留的历史卡片', a: '原权威记录不删除', status: 1, createdAt: Date.now() } },
+    { id: crypto.randomUUID(), table: 'segments', key: 987, before: null, after: { id: 987, videoId: material.id, idx: 0, start: 0, end: 10, text: '已有真实字幕', status: 1 } }]);
   for (const relative of ['views/main.html', 'manifest.json']) files.save(owner, `/system/plugins/cards-reader/${relative}`, fs.readFileSync(path.resolve('docs/plugins/templates/cards-reader', relative), 'utf8'), '', 0);
   const before = files.layout(owner), layout = JSON.parse(before.content);
   for (const id of ['flashcards', 'practice', 'review', 'material-tools', 'cards-reader']) {
@@ -47,7 +49,7 @@ try {
   const replacement = page.getByTestId('board-plugin-cards-reader').frameLocator('iframe[title="替代卡片列表"]');
   await replacement.getByText('停用后仍保留的历史卡片', { exact: false }).waitFor();
   const reader = await context.newPage(); await reader.goto(`${origin}/#/board`); await reader.getByTestId('board-plugin-todo').waitFor();
-  await reader.evaluate(async material => { const { db } = await import('/src/store/db.ts'); await db.videos.put(material); await db.cards.put({ id: 987, videoId: material.id, time: 1, q: '停用后仍保留的历史卡片', a: '原权威记录不删除', status: 1, createdAt: Date.now() }); await db.segments.put({ id: 987, videoId: material.id, idx: 0, start: 0, end: 10, text: '已有真实字幕', status: 1 }); }, material);
+  await reader.evaluate(async () => { await (await import('/src/cloud/sync.ts')).flushCloud(); });
   await reader.goto(`${origin}/#/player/${material.id}`); await reader.getByTestId('panel-tab-cards').waitFor({ state: 'attached' });
   const toggle = reader.getByTestId('study-assistant-toggle'); if (await toggle.isVisible()) await toggle.click();
   await reader.getByTestId('panel-tab-cards').click(); await reader.getByTestId('cards-generate').waitFor();
@@ -111,26 +113,30 @@ try {
     assert.equal(files.catalog(owner).find(p => p.id === id).installation, 'enabled');
     assert.ok(JSON.parse(files.layout(owner).content).instances.some(instance => instance.id === `legacy-${id}`), 'original instance survives UI uninstall/reinstall');
   }
-  // Local internal configuration remains persistent and never bypasses flags.
-  await page.evaluate(async () => { const { cloud } = await import('/src/cloud/state.ts'); cloud.enabled = false; await (await import('/src/plugins/catalog.ts')).refreshPlugins(); });
-  // A real local-mode Board mounts without the old cloud polling effect. Merely
-  // mutating the module flag leaves that effect alive until a later rerender.
-  await page.goto(`${origin}/#/chat`); await page.getByTestId('course-chat-page').waitFor();
-  await page.goto(`${origin}/#/board`);
+  // Server lifecycle remains authoritative after reload; browser flags cannot
+  // substitute a local catalog or a worker execution permit.
   await openManager();
-  await changePlugin(page, 'flashcards', '停用插件', { local: true });
+  await changePlugin(page, 'flashcards', '停用插件');
   assert.equal(await page.evaluate(async () => { try { await (await import('/src/pipelines/cards.ts')).runCards('unplug-video', () => {}); return 'bypass'; } catch (e) { return e.message; } }), 'plugin_unavailable');
-  await changePlugin(page, 'flashcards', '卸载（保留数据）', { local: true });
-  assert.equal(await page.evaluate(async () => (await import('/src/plugins/availability.ts')).localPluginPackages(JSON.parse((await import('/src/plugins/availability.ts')).localPluginLayout().content)).find(p => p.id === 'flashcards').installation), 'uninstalled');
-  await page.screenshot({ path: path.join(output, 'local-uninstalled.png'), fullPage: true });
-  await changePlugin(page, 'flashcards', '重新安装并恢复', { local: true });
+  await changePlugin(page, 'flashcards', '卸载（保留数据）');
+  await page.reload(); await openManager();
+  assert.equal(await page.evaluate(async () => (await (await import('/src/client/plugin-renderer-commands.ts')).readRendererPluginCatalog()).plugins.find(p => p.id === 'flashcards').installation), 'uninstalled');
+  await page.screenshot({ path: path.join(output, 'server-uninstalled.png'), fullPage: true });
+  await changePlugin(page, 'flashcards', '重新安装并恢复');
+  await changePlugin(page, 'flashcards', '停用插件');
   const workerResult = await page.evaluate(async () => {
-    const { cloud } = await import('/src/cloud/state.ts'); const { assertPluginAvailable, saveLocalPluginLayout, localPluginLayout } = await import('/src/plugins/availability.ts');
-    const doc = localPluginLayout(), layout = JSON.parse(doc.content); layout.installations['builtin:flashcards'] = 'disabled'; saveLocalPluginLayout(JSON.stringify(layout), doc.content, doc.revision);
-    cloud.worker = true; cloud.acceptedPlugins = ['flashcards']; await assertPluginAvailable('flashcards'); cloud.acceptedPlugins = [];
-    try { await assertPluginAvailable('flashcards'); return 'bypass'; } catch(e) { cloud.worker = false; return e.message; }
-  }); assert.equal(workerResult, 'plugin_unavailable', 'only accepted worker permits survive disabling');
-  await page.evaluate(async () => { const { cloud } = await import('/src/cloud/state.ts'); cloud.enabled = true; await (await import('/src/plugins/catalog.ts')).refreshPlugins(); });
+    const { cloud } = await import('/src/cloud/state.ts'); const { assertPluginAvailable } = await import('/src/plugins/availability.ts');
+    cloud.worker = true; cloud.acceptedPlugins = ['flashcards'];
+    try { await assertPluginAvailable('flashcards'); return 'bypass'; } catch(e) { return e.message; }
+    finally { delete cloud.worker; delete cloud.acceptedPlugins; }
+  }); assert.equal(workerResult, 'plugin_unavailable', 'browser worker flags cannot bypass server plugin availability');
+  const offlineResult = await page.evaluate(async () => {
+    const { cloud } = await import('/src/cloud/state.ts'); const { assertPluginAvailable } = await import('/src/plugins/availability.ts');
+    cloud.enabled = false;
+    try { await assertPluginAvailable('flashcards'); return 'bypass'; } catch(e) { return e.message; }
+    finally { cloud.enabled = true; }
+  }); assert.equal(offlineResult, 'client_unauthenticated', 'disabled server mode cannot fall back to local plugins');
+  await changePlugin(page, 'flashcards', '重新安装并恢复');
   await openManager();
    for (const width of [1440, 390, 360]) {
      await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 });
@@ -143,7 +149,7 @@ try {
       await page.screenshot({ path: path.join(output, `create-mode-${width}-${theme}.png`), fullPage: true });
     }
   }
-  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM cloud_tasks WHERE kind='cards'").get().n, 0, 'disabled legacy and local card attempts created no task; automatic cover backfill is unrelated');
-  console.log(`Pluggability browser passed: all eight default packages and sandbox alternative through real tools with reload/restoration, dependency removal, old reader readonly history/export, raw pipeline and local/worker gates, 3 widths × 3 themes. Screenshots: ${output}`);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM cloud_tasks WHERE kind='cards'").get().n, 0, 'disabled card attempts created no task; automatic cover backfill is unrelated');
+  console.log(`Pluggability browser passed: all eight default packages and sandbox alternative through server tools with reload/restoration, dependency removal, readonly history/export, raw pipeline and forged-worker/offline gates, 3 widths × 3 themes. Screenshots: ${output}`);
 } catch (error) { if (page) { await page.screenshot({ path: path.join(output, 'failure.png'), fullPage: true }); console.error(await page.locator('body').innerText()); } throw error; }
 finally { await browser?.close(); await web?.close(); store?.close(); await app.close(); fs.rmSync(directory, { recursive: true, force: true }); }

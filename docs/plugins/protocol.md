@@ -17,7 +17,7 @@
 
 项目学习动作仅列出和操作项目内资料；任务、Bot thread 选择及持久调度同样检查范围，归档/回收站后调度停止派发。上下文 revision 包含项目/资料，内置视图切换时重建，旧动作仍绑定原实例与资源。
 
-实例 ID 与挂载 ID 不同：复用实例共享状态；新实例隔离。挂载级草稿通过 `plugin.draft` 保存于当前标签页 sessionStorage，退出账户清除。移除挂载不删除实例；实例原插件/范围不可悄然重绑定。
+实例 ID 与挂载 ID 不同：复用实例共享状态；新实例隔离。挂载级草稿通过 `plugin.draft` 按账户与挂载身份保存于当前标签页 sessionStorage，账户失效撤销访问但不删除原稿。移除挂载不删除实例；实例原插件/范围不可悄然重绑定。
 
 ## v1 兼容
 
@@ -71,24 +71,24 @@ const draft = await plugin.draft.read();
 
 所有写入复用 SystemFiles 的 SQLite 意图日志、原文比较、原子替换及崩溃重放；内容哈希修订不是递增计数。服务声明绝不是授权；未知方法拒绝，不回退为任意资源调用。
 
-## 注册器
+## 依赖解析与宿主生命周期
 
-`packages/contracts/src/plugin-registry.ts` 不依赖浏览器。注册返回幂等 disposer；provide 拒绝重复名/非法版本；requires 按最低接口版本解析，缺失时可恢复；卸载依赖释放下游 effects，重新提供后重挂。optional 通过 get 读取，不阻止启动。任务持久性不绑定 provider disposer。
+`packages/contracts/src/plugin-dependencies.ts` 只做 manifest 的纯固定点依赖解析，不注册服务或释放副作用。原 `PluginRegistry` 及其模块导出已删除。API 的 `PluginService` 使用锁定 Cordis 4 的 `Context.effect/provide` 托管受信动作、provider 和账户句柄；同步授权入口通过同步 effect 注册，不把异步 plugin 初始化藏在权限检查后。账户目录变化或 provider 撤销会释放旧句柄，后续解析重新验证授权。任务持久性不绑定 provider disposer。
 
-包 manifest 的 `requires / optional` 以**包 ID → 最低已发布主版本号**描述依赖（例如 `{"counter":1}`）；这与宿主代码注册器的服务接口版本分别管理。目录发现会在来源冲突消解后，用注册器解析启用包依赖：缺失、停用、版本不足或循环 required 依赖产生 `plugin_dependency_unavailable`，附 `dependencies.required`；optional 缺失只报告 `dependencies.optional`，不阻塞。恢复 provider 后下次目录快照自动恢复动作和挂载。依赖不会授予被依赖包的权限，也不会允许动态包执行服务端代码。非数字/0.x 版本不能满足要求最低 1 的已发布依赖。
+包 manifest 的 `requires / optional` 以**包 ID → 最低已发布主版本号**描述依赖（例如 `{"counter":1}`）；与宿主服务接口版本分别管理。目录发现会在来源冲突消解后纯解析启用包依赖：缺失、停用、版本不足或循环 required 依赖产生 `plugin_dependency_unavailable`，附 `dependencies.required`；optional 缺失只报告 `dependencies.optional`，不阻塞。恢复 provider 后下次目录快照自动恢复动作和挂载。依赖不会授予被依赖包的权限，也不会允许动态包执行服务端代码。非数字/0.x 版本不能满足要求最低 1 的已发布依赖。
 
 ## 已交付学习领域适配
 
 - `flashcards`：生成使用原 native cards 执行器、默认 Gateway；解析资料使用 materialBlocks，视频使用 segments。读写仍是原 `cards` CloudRecords。已存在卡片需显式 replaceRevision；生成提交前再次 CAS，保护期间的审核与修改。
 - `practice`：AI 练习复用 modelOnce 的受信任务关联分支；输出答案强制标为 ai。原题从实际 Markdown 读取，保存原 `chats.quiz` 历史快照，保留题库 path/offset/revision。Markdown 原资料含 quiz 块时直接使用 `/material`；否则读取 `questions.md`，原资料的无效 quiz 块不能被另一个题库掩盖。自定义输入继续使用 QuestionInput 隔离 iframe，不下发答案键。
 - `review`：读取原 wrongbook Markdown/FSRS 与卡片审核记录；开始复习保存原 chats 快照，再提交时沿用原 questionId，不能新建一套复习清单。首次作答与主观自评分开，已提交答案不能覆盖；AI/missing 不入分数或错题本。
-- `material-tools`：`handout / comments / danmaku / transcribe / material / cover` 命名动作映射到原 Cloud 任务。宿主从可信资料解析 format、videoId、执行位置，不接受任意 input/owner/path；nonce 同时绑定实例、动作和原参数。Markdown/Word 解析、文字资料讲义及评论/弹幕使用原 native 执行器；视频讲义、转写、PDF 解析、封面仍需浏览器。任务来源持久记录在同一关联表，状态不冒充所有产物已成功生成。
+- `material-tools`：`handout / comments / danmaku / transcribe / material / cover` 命名动作映射到服务端任务。宿主从可信资料解析 format、videoId、执行位置，不接受任意 input/owner/path；nonce 同时绑定实例、动作和原参数。媒体读取、转写、解析及模型生成均由服务端执行。任务来源持久记录在同一关联表，状态不冒充所有产物已成功生成。
 
-原 Web 流水线的远程分支通过 `plugins/legacy-actions.ts` 复用命名动作，CAS 创建/复用资料实例，等待**同一任务**，不二次提交。封面的 force 默认值及用户手选封面保护保留。cards 重新生成显式确认并提交 replaceRevision。本地/浏览器 worker 分支仍是原执行器，但分别通过本地安装配置与服务端已受理快照准入，不能静默绕过停用；详见可插拔契约。
+Web 流水线通过 `plugins/legacy-actions.ts` 复用命名动作，CAS 创建/复用资料实例，等待**同一任务**，不二次提交。封面的 force 默认值及用户手选封面保护保留。cards 重新生成显式确认并提交 replaceRevision。浏览器本地模型/任务执行分支已退役；连接失败不绕过服务端准入或插件停用。
 
-旧阅读问答的“出题考我 / 提取原题为题库 / 开始做原题 / 错题与复习清单”在云端模式通过 `useMaterialPluginView` 打开注册视图，CAS 复用资料实例；不导航、不发送提示词，也不清空原聊天草稿。停用或更新时撤销旧弹窗。离线模式保留原出题/原题提示词入口。
+阅读问答的“出题考我 / 提取原题为题库 / 开始做原题 / 错题与复习清单”通过 `useMaterialPluginView` 打开注册视图，CAS 复用资料实例；不导航、不发送提示词，也不清空原聊天草稿。停用或更新时撤销旧弹窗。
 
-`practice.extract`（命名动作 `extract`）只接受 materialId/clientNonce，由宿主建立绑定资料的原 QA 会话和持久任务，nonce 重放返回同一任务，不允许并发重复提取。执行明确为 **browser**：复用原 QA 的技能、read/edit、图片工具和精确编辑/CAS，不把 native QA 的只读能力冒称为可提取保存。浏览器离线时排队，重新在线后按原 lease 机制执行；模型轮次的完整覆盖由原技能报告，不保证全文已提取。原工具授权继续生效，动态 HTML 包无此 trusted-only 能力。
+`practice.extract`（命名动作 `extract`）只接受 materialId/clientNonce，由宿主建立绑定资料的原 QA 会话和持久任务，nonce 重放返回同一任务，不允许并发重复提取。执行为 **node**：服务端读取归属明确的原资料与图片，通过资源 CAS 保存题库，并以持久检查点核对产物。浏览器关闭不停止已受理任务；模型轮次的完整覆盖由任务报告，不保证全文已提取。原工具授权继续生效，动态 HTML 包无此 trusted-only 能力。
 
 题库收据由服务端启动恢复/定时投递：工具持久检查点确认实际成功 edit、权威 Markdown 相对发起时已变化、题库解析及资料来源校验通过，才保存 path/revision/count/sessionId 等引用。仅 completed 或模型声称成功不算产物；错误通过 learning.results.deliveryError 查询。count 是当前题库总数，不是本次新增数；已保存部分可打开题库，不能等同全文覆盖。投递不重写题库、不复制题目、不改已有作答快照。
 

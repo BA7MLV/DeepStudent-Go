@@ -14,9 +14,9 @@ import {
   type Table,
 } from 'docx';
 import { unzipSync, zipSync } from 'fflate';
-import { fmtTime } from '../utils/vtt';
-import type { Block } from './ir';
-import { renderSectionBlocks, type HandoutImages } from './render';
+import { fmtTime } from '../utils/vtt.js';
+import type { Block } from './ir.js';
+import { renderSectionBlocks, type HandoutImages } from './render.js';
 import {
   FIRSTLINE_CHARS_XML,
   FIRSTLINE_PLACEHOLDER,
@@ -26,7 +26,7 @@ import {
   PAGE_SETUP,
   SIZE,
   h1Num,
-} from './styles';
+} from './styles.js';
 
 export interface HandoutSection {
   heading: string;

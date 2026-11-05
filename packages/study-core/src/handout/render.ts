@@ -11,7 +11,7 @@ import {
   VerticalAlign,
   WidthType,
 } from 'docx';
-import type { Block } from './ir';
+import type { Block } from './ir.js';
 import {
   CONTENT_WIDTH_DXA,
   FIGURE_MAX_WIDTH,
@@ -20,7 +20,7 @@ import {
   LINE_EXACT_28,
   SIZE,
   h2Num,
-} from './styles';
+} from './styles.js';
 
 export type HandoutImages = Map<number, { data: Uint8Array; width: number; height: number; caption: string }>;
 

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 
 const core = fs.readFileSync('packages/client-core/src/session-queue.ts','utf8');
 const store = fs.readFileSync('apps/web/src/store/courseChat.ts','utf8');
-const local = fs.readFileSync('apps/web/src/client/chat-local-execution.ts','utf8');
+assert.equal(fs.existsSync('apps/web/src/client/chat-local-execution.ts'), false, 'retired browser model carrier must not return');
 const server = fs.readFileSync('apps/web/src/client/chat-server-execution.ts','utf8');
 const queue = fs.readFileSync('apps/web/src/client/chat-queue.ts','utf8');
 const tasks = fs.readFileSync('apps/web/src/cloud/tasks.ts','utf8');
@@ -12,7 +12,10 @@ assert.equal(forbiddenCore.test(core),false,'queue/execution policy is independe
 const forbiddenStore = /import[^;]*(?:runAgentLoop|createResourceExecutor|libraryResourceTools|prepareSessionHistory|activateSkills|submitCloudTask)[^;]*;/;
 assert.equal(forbiddenStore.test(store),false,'UI store may not construct Agent tools/context or submit transport tasks directly');
 assert.equal(forbiddenStore.test("import { runAgentLoop } from '../harness/agent';"),true,'negative boundary fixture must fail');
-assert.equal(/import[^;]*(?:cloud\/state|cloud\/tasks|bootstrap|zustand|react)[^;]*;/.test(local),false,'Local carrier has no server mode selection or UI store dependency');
+assert.equal(/remoteTasks\(|\.local\(|prepareLocalChat|runLocalChat|continueInterrupted/.test(store + queue), false, 'ordinary chat has no local execution branch or dead mode switch');
+const panel = fs.readFileSync('apps/web/src/components/ChatPanel.tsx', 'utf8');
+assert.equal(/remoteTasks\(|cloud.enabled|runAgentLoop|chatOnce\(|db\.chats\.(add|put|update)\(/.test(panel), false, 'course panel commands never execute models or own history locally');
+assert.ok(panel.includes('modelSelection: taskModelChoice(sessionId)'), 'course panel forwards task-level model selection');
 assert.equal(/import[^;]*(?:chat-local|harness\/agent|harness\/resources)[^;]*;/.test(server),false,'Server failure cannot import or fall back to Local execution');
 assert.ok(queue.includes('task-command:${operationId}'),'queue must reuse canonical task command journal');
 assert.equal(/\bfetch\s*\(/.test(queue+server),false,'typed admission/submit adapters only, no independent HTTP protocol');

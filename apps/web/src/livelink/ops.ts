@@ -32,6 +32,7 @@
  */
 
 import { db } from '../store/db.ts';
+import { addStudyTime, reviewCard } from '../client/learning';
 import { round1 } from '../utils/studyLog.ts';
 
 /** P2 的四个 op 名。与 protocol.ts 的帧字段是同一份清单，改一处必须改两处。 */
@@ -81,15 +82,9 @@ export async function applyPosition(videoId: string, position: number, finished:
   // 永远算成 NaN。宁可不写、回 bad-args 让来宾看见，也不写一行坏数据。
   if (!videoId) return { ok: false, reason: 'bad-args' };
   if (!Number.isFinite(position) || position < 0) return { ok: false, reason: 'bad-args' };
-  const { cloud } = await import('../cloud/state');
-  if (cloud.enabled) {
-    if (!await db.videos.get(videoId)) return { ok: false, reason: 'not-found' };
-    const { resourceCommand } = await import('../client/resources');
-    await resourceCommand({ kind: 'recordPlayback', courseId: videoId, position, ...(finished ? { finished: true } : {}) }, operationId);
-    return { ok: true, rowId: videoId };
-  }
-  const hit = await db.videos.update(videoId, finished ? { lastPosition: position, finished: 1 } : { lastPosition: position });
-  if (hit === 0) return { ok: false, reason: 'not-found' };
+  if (!await db.videos.get(videoId)) return { ok: false, reason: 'not-found' };
+  const { resourceCommand } = await import('../client/resources');
+  await resourceCommand({ kind: 'recordPlayback', courseId: videoId, position, ...(finished ? { finished: true } : {}) }, operationId);
   return { ok: true, rowId: videoId };
 }
 
@@ -114,12 +109,7 @@ export async function applyStudyAdd(
   if (!DATE_KEY_RE.test(date)) return { ok: false, reason: 'bad-args' };
   if (!Number.isFinite(seconds) || seconds < 0) return { ok: false, reason: 'bad-args' };
   if (dedup.has(opId)) return { ok: true, rowId: date };
-  const now = Date.now();
-  await db.transaction('rw', db.studyDays, async () => {
-    const row = await db.studyDays.get(date);
-    if (row) await db.studyDays.update(date, { seconds: round1(row.seconds + seconds), updatedAt: now });
-    else await db.studyDays.put({ date, seconds: round1(seconds), updatedAt: now });
-  });
+  await addStudyTime([[date, round1(seconds)]], `study-${opId}`);
   dedup.add(opId);
   return { ok: true, rowId: date };
 }
@@ -145,7 +135,7 @@ export async function applyCardDecide(
   if (status !== 0 && status !== 1 && status !== 2) return { ok: false, reason: 'bad-args' };
   const row = await db.cards.get(cardId);
   if (!row || row.videoId !== videoId) return { ok: false, reason: 'gone' };
-  await db.cards.update(cardId, { status });
+  await reviewCard(cardId, status, row.status);
   return { ok: true, rowId: cardId };
 }
 

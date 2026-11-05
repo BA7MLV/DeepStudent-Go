@@ -16,8 +16,8 @@
 // 字幕直链形如 http://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/xxx.json?auth_key=...
 // 该 auth_key 有效期很短（实测 70s 仍可下），所以拿到就立刻拉，不要缓存 URL。
 
-import type { Cue } from '../utils/vtt';
-import { decodeFields, encodeMessage, fieldBytes, fieldVarint, getBytes, getBytesFirst, getNumber, getString, utf8 } from './wire';
+import type { Cue } from '../utils/vtt.js';
+import { decodeFields, encodeMessage, fieldBytes, fieldVarint, getBytes, getBytesFirst, getNumber, getString, utf8 } from './wire.js';
 
 export const DM_VIEW_URL = 'https://app.biliapi.net/bilibili.community.service.dm.v1.DM/DmView';
 const SPMID = 'main.ugc-video-detail.0.0';

@@ -3,6 +3,22 @@ import path from 'node:path';
 import { allowed, inspectSource, inspectDocker } from './check-boundaries.mjs';
 
 const root = process.cwd();
+const distTest = path.resolve('packages/study-core/scripts/check-dist.mjs');
+assert.equal(inspectSource(distTest, "import { test } from 'node:test'; await import(`${pkg.name}/${entry.slice(2)}`);").length, 0);
+for (const source of ["import x from '../../../apps/api/src/server';", 'await import(arbitraryPath);', "import React from 'react';"]) {
+  assert.ok(inspectSource(distTest, source).length, source);
+}
+for (const source of [
+  "import { markCloudApply as unlock } from './cloud/cache'; unlock();",
+  'runtime.commitRecords(request);',
+  'clientLearningEdits(rows);',
+]) assert.ok(inspectSource(path.resolve('apps/web/src/probe.ts'), source).length, source);
+assert.equal(inspectSource(path.resolve('apps/web/src/cloud/sync.ts'), "import { markCloudApply } from './cache'; markCloudApply();").length, 0);
+for (const source of [
+  "import { runLocalChat as execute } from './client/chat-local-execution';",
+  "await import('./client/chat-local-execution.ts');",
+]) assert.ok(inspectSource(path.resolve('apps/web/src/probe.ts'), source).length, source);
+assert.ok(inspectSource(path.resolve('packages/contracts/src/probe.ts'), "import { Context } from '@deepseek-ai/cordis';").length);
 const file = path.resolve('apps/api/runtime/probe.ts');
 for (const source of [
   "import type { X } from '../../../src/store/settings';",

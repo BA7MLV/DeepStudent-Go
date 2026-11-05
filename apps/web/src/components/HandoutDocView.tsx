@@ -35,7 +35,8 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
   const [aiTarget, setAiTarget] = useState<Target | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiDraft, setAiDraft] = useState<{ key: string; block: Block } | null>(null);
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const editingBaseline = useRef(handout);
   const savingRef = useRef(0);
   /** 滚动容器（位置记忆的坐标系）与文档内容（观察高度变化用） */
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -45,6 +46,8 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
 
   // 初始化 / 切换到另一份讲义时重载（编辑落盘 update 同一行，id 不变，不会触发重置）
   useEffect(() => {
+    if (editingBaseline.current.id === handout.id && (savingRef.current || saveState === 'error')) return;
+    editingBaseline.current = handout;
     try {
       const outline = JSON.parse(handout.outlineJson) as { summary?: string };
       const sections = JSON.parse(handout.sectionsJson ?? '[]') as HandoutSection[];
@@ -57,6 +60,18 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
     setAiTarget(null);
     setAiDraft(null);
   }, [handout.id, handout.outlineJson, handout.sectionsJson]);
+
+  useEffect(() => {
+    const database = db;
+    let active = true;
+    void database.table('_cloudMeta').get(`handout-edit-draft:${handout.id}`).then(draft => {
+      if (!active || database !== db || !draft?.value.original) return;
+      editingBaseline.current = draft.value.original;
+      setDoc({ sections: draft.value.sections, summary: draft.value.summary });
+      setSaveState('error');
+    }).catch(() => { /* The draft remains durable; normal reader errors are separate. */ });
+    return () => { active = false; };
+  }, [handout.id]);
 
   useEffect(() => {
     void db.videos.get(handout.videoId).then((v) => setVideoName(v?.name ?? ''));
@@ -115,11 +130,11 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
     setDoc(next);
     savingRef.current += 1;
     setSaveState('saving');
-    persistHandoutEdit(handout.id!, next.sections, next.summary)
-      .catch((e) => toast.error(`讲义保存失败：${e instanceof Error ? e.message : String(e)}`))
+    persistHandoutEdit(editingBaseline.current, next.sections, next.summary)
+      .then(() => { if (savingRef.current === 1) setSaveState('saved'); })
+      .catch((e) => { setSaveState('error'); toast.error(`讲义尚未保存到服务器，草稿已保留：${e instanceof Error ? e.message : String(e)}`); })
       .finally(() => {
         savingRef.current -= 1;
-        if (savingRef.current === 0) setSaveState('saved');
       });
   };
 
@@ -276,7 +291,7 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
     >
       <div className="hd-doc" ref={docRef}>
         <div className="hd-save-state">
-          {saveState === 'saving' ? '正在保存修改…' : saveState === 'saved' ? '修改已保存' : ' '}
+          {saveState === 'saving' ? '正在保存修改…' : saveState === 'saved' ? '修改已保存到服务器' : saveState === 'error' ? '修改尚未保存到服务器，本地草稿已保留；请核对后重新打开编辑。' : ' '}
         </div>
         <div className="hd-title">{handout.title}</div>
         <div className="hd-meta">

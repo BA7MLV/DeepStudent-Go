@@ -67,6 +67,7 @@
  */
 
 import { db } from '../store/db';
+import { appendConversationSession } from '../store/conversationProducts';
 import { getCourseFile, readCourseFileRange } from '../store/fileStore';
 import {
   PROTOCOL_VERSION,
@@ -729,7 +730,7 @@ export class HostCore {
     const list = await db.chatSessions.where('videoId').equals(row.id).sortBy('createdAt');
     const last = list[list.length - 1];
     if (last?.id != null) return last.id;
-    return (await db.chatSessions.add({ videoId: row.id, title: '来宾会话', createdAt: Date.now() })) as number;
+    return appendConversationSession({ videoId: row.id, title: '来宾会话', createdAt: Date.now() });
   }
 
   /** 停掉某台设备发起的所有在跑轮次（bye / 主线断开时） */

@@ -1,5 +1,9 @@
 # 状态归属与迁移清单
 
+当前规范入口：[当前架构](../architecture.md)。本表保留历史归属盘点，见 [归档导航](archive/index.md)。
+
+> 历史盘点：下表包含已退役的 Browser Worker/executorRuntime，不是当前写入规范。当前任务权威见 [服务器任务执行](../server-task-execution.md)，当前领域命令、只读投影及本轮验收见 [云端唯一真相源](./single-source-of-truth.md)。
+
 本文是源码盘点，不是全部已迁移的声明。
 
 | 域 | 现有权威/写入口 | 客户端投影与视图 | 目标/当前进度 |

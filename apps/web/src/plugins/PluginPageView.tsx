@@ -16,7 +16,7 @@ export function PluginPageView({ useCatalog }: { useCatalog: <T>(select: (value:
   const { i18n } = useTranslation('common');
   const layout = data ? readLayout(data) : undefined;
   const instance = layout?.instances.find(i => i.id === instanceId);
-  const plugin = !data?.local && !data?.scopes?.unavailableInstances.includes(instanceId ?? '') ? data?.plugins.find(p => p.id === instance?.pluginId && !p.error && p.manifest?.enabled) : undefined;
+  const plugin = !data?.scopes?.unavailableInstances.includes(instanceId ?? '') ? data?.plugins.find(p => p.id === instance?.pluginId && !p.error && p.manifest?.enabled) : undefined;
   const requested = search.get('view');
   const viewId = requested ?? Object.entries(plugin?.manifest?.views ?? {}).find(([, view]) => view.surfaces.includes('app.page'))?.[0];
   const savedPlacement = layout?.placements.find(p => p.id === search.get('placement') && p.instanceId === instanceId && p.viewId === viewId && p.surface === 'app.page');

@@ -1,6 +1,7 @@
 import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
 import type { CloudTask } from '@wangke/contracts/cloud';
-import { cloud, remoteTasks } from '../cloud/state';
+import { cloud } from '../cloud/state';
+import { accountLifecycle } from './account-lifecycle';
 import { db } from '../store/db';
 import { submitCloudTask, cancelResourceTasks, commandChatTask } from '../cloud/tasks';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
@@ -8,8 +9,8 @@ import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
 /** Server carrier only. There is deliberately no Local import or fallback on a
  * transport/auth/admission failure. Receipts reuse the existing task journal. */
 export function createServerChatExecution() {
-  const account = cloud.userId, database = db;
-  const current = () => remoteTasks() && cloud.userId === account && database === db;
+  const account = cloud.userId, database = db, lifetime = accountLifecycle.current();
+  const current = () => cloud.userId === account && database === db && (!lifetime || lifetime.current());
   const check = () => { if (!current()) throw new Error('client_account_changed'); };
   return {
     current,

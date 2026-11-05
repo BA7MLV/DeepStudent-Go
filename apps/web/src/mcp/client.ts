@@ -1,4 +1,4 @@
-import { cloud, cloudRequest } from '../cloud/state';
+import { cloudRequest } from '../cloud/state';
 import type { McpCallResult, McpCatalog, McpContext, McpServer, McpServerInput, McpTool } from '@wangke/contracts/mcp';
 import { mcpToolDefinition } from '@wangke/contracts/mcp';
 import type { ToolDef } from '../api/siliconflow';
@@ -16,11 +16,9 @@ export const deleteMcpServer = async (id: string, revision?: string) => {
 export const testMcpServer = (id: string) => cloudRequest<{ tools: McpTool[]; durationMs: number }>(`/mcp/${id}/test`, { method: 'POST' });
 
 export async function loadMcpTools(context: McpContext, signal?: AbortSignal) {
-  const catalog: McpCatalog = cloud.enabled
-    ? await cloudRequest('/mcp/catalog', { method: 'POST', body: JSON.stringify(context), signal })
-    : { tools: [], warnings: [] };
+  const catalog: McpCatalog = await cloudRequest('/mcp/catalog', { method: 'POST', body: JSON.stringify(context), signal });
   const byName = new Map(catalog.tools.map(tool => [tool.name, tool]));
-  if (cloud.enabled && context.sessionId !== undefined) {
+  if (context.sessionId !== undefined) {
     const [{ db }, { loadSessionSkillMeta }] = await Promise.all([import('../store/db'), import('../skills/store')]);
     const session = await db.chatSessions.get(context.sessionId);
     const skills = await loadSessionSkillMeta(session?.skillIds);

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { appendConversationSession, removeConversationMessage, reviseConversationSession } from '../store/conversationProducts';
+import { deleteServerSession, forkServerSession, removeConversationMessages } from '../client/conversations';
 import { useTranslation } from 'react-i18next';
 import { Button, Dropdown, ListBox, Select, TextArea, Tooltip } from '@heroui/react';
 import { useImeEnter } from '../utils/imeEnter';
@@ -8,28 +10,20 @@ import { parseMaterialImageHref } from '../materials/imageRefs';
 import { Markdown as XMarkdown } from './markdown/Markdown';
 import { systemMaterialPath } from '../materials/systemFiles';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import { db, type ChatImage, type ChatSessionRow, type ChatToolCall, type QuizState, type SegmentRow } from '../store/db';
-import { decisionConfigOf, getSettings, targetOrNull, useSettings, visionTargetOrNull } from '../store/settings';
-import { runAgentLoop, noAnswerNotice, type AgentStopInfo } from '../harness/agent';
-import { resolveMaxRounds } from '../harness/loopGuard';
-import { mdEditorOpen } from '../harness/tools';
-import { courseResourceTools, createResourceExecutor } from '../harness/resources';
+import { db, type ChatImage, type ChatSessionRow, type ChatToolCall, type QuizState } from '../store/db';
+import { useSettings } from '../store/settings';
+import { estimateTokens } from '../harness/context';
 import { PROMPTS } from '../harness/prompts';
-import { estimateTokens, subtitleWindow } from '../harness/context';
-import { EMPTY_COMPRESSION, prepareSessionHistory, retainedContext, useContextCompressionStore } from '../store/contextCompression';
+import { EMPTY_COMPRESSION, retainedContext, useContextCompressionStore } from '../store/contextCompression';
 import ContextUsageButton from './ContextUsageButton';
 import ComposerExpand, { useComposerSize } from './ComposerExpand';
 import { useContextCompression } from './useContextCompression';
-import { loadSessionSkillMeta, skillMetaBlock } from '../skills/store';
-import { activateSkills, assertSkillBudget, assertSkillRequestBudget, explicitSkillIds, recordSkillActivation } from '../skills/activation';
-import { modelTrace, replayTrace, reconcileSkillMessages } from '@wangke/study-core/model/transcript';
+import { explicitSkillIds } from '../skills/activation';
 import { handoutDraft, prepareHandoutPrompt } from '../skills/handout';
 import { captureFrame, resolveVideoEl, type Snapshot } from '../media/snapshot';
-import { isVisionModel } from '../api/modelCaps';
-import { chatOnce, textOf, type ChatMessage, type ContentPart, type ThinkingLevel } from '../api/siliconflow';
+import { type ThinkingLevel } from '../api/siliconflow';
 import { fmtTime } from '../utils/vtt';
 import { linkifyFrames, linkifyTimestamps, linkifyUnits } from '../utils/linkify';
-import { ToolTraceLedger, toolHint } from '../utils/toolTrace';
 import { fmtUnitRef, type UnitKind } from '../materials/units.ts';
 import type { MaterialReaderHandle } from '../materials/types';
 import { useSelectionAsk, formatCitation, EXPLAIN_PROMPT, MAX_REFS, type Citation } from '../store/selectionAsk';
@@ -60,10 +54,10 @@ import { framePatch } from '../utils/framePatch';
 import { MarkdownCode, MarkdownPre } from './mermaid/markdown';
 import { MarkdownTable } from './MdTable';
 import { MarkdownStreamingProvider } from './markdown/streaming';
-import ModelPicker from './ModelPicker';
+import TaskModelPicker from './TaskModelPicker';
 import SkillPicker from './SkillPicker';
 import QuizCard from './QuizCard';
-import { canUpdateQuizPick, quizHistoryContent, type QuizPick } from '../harness/quiz';
+import { canUpdateQuizPick, type QuizPick } from '../harness/quiz';
 import WidgetMessage from './WidgetMessage';
 import StreamingHtmlPreview from './StreamingHtmlPreview';
 import { ArtifactEditProvider } from './ArtifactEditor';
@@ -71,11 +65,11 @@ import AssistantContent from './AssistantContent';
 import ChatScreenshots from './ChatScreenshots';
 import { useResolvedDark } from '../ui/theme';
 import type { WidgetPayload } from '../harness/widgetRuntime';
-import { persistAssistantSnapshot } from '../store/assistantSnapshot';
-import { widgetReference } from '../harness/widgetLayout';
-import { nextVisualRound, readPartialWidgetArguments } from '../utils/streamingHtml';
-import { cloud } from '../cloud/state';
 import { useCloudActivity } from '../cloud/activityStore';
+import { cloud } from '../cloud/state';
+import { taskModelChoice, taskModelKey, useTaskModel } from '../store/taskModel';
+import { accountLifecycle } from '../client/account-lifecycle';
+import { editMessage } from '../client/learning';
 import { useMaterialPluginView } from '../plugins/useMaterialPluginView';
 import { usePluginAvailable } from '../plugins/catalog';
 import { isPluginAvailable, assertPluginAvailable } from '../plugins/availability';
@@ -470,7 +464,6 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
  * 渲染；「有没有在跑」看 `loading` 就够）。**只能有一个**：问答面板与课程助手同屏时
  * 各自的 send 都会写它，但生成中用户看不到另一个面板的停止键。
  */
-let inflightAbort: AbortController | null = null;
 
 export default function ChatPanel({
   videoId,
@@ -499,6 +492,16 @@ export default function ChatPanel({
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const localRequest = useRef(false);
+  const inflightAbort = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const clear = () => {
+      inflightAbort.current?.abort(); inflightAbort.current = null; localRequest.current = false;
+      setMsgs([]); setSessions([]); setActiveId(null); setLoadedSessionId(null); setLoading(false);
+      setInput(''); setShots([]); setRefs([]); refsRef.current = [];
+    };
+    const off = accountLifecycle.onDisposed(clear);
+    return () => { off(); inflightAbort.current?.abort(); };
+  }, []);
   const [indexReady, setIndexReady] = useState(false);
   /** 缺少可检索正文时的说明，不阻止聊天或截图提问。 */
   const [indexNote, setIndexNote] = useState<string | null>(null);
@@ -550,7 +553,7 @@ export default function ChatPanel({
   const effort = useSettings((s) => s.thinkingEffort);
   const ctxWin = useSettings((s) => s.contextWindow);
   const agentInstructions = useSettings((s) => s.agentInstructions);
-  const compressionEnabled = useSettings((s) => s.jev.contextCompression && !!decisionConfigOf(s).apiKey.trim());
+  const compressionEnabled = useSettings((s) => s.jev.contextCompression && !!s.decisionModel.model && s.providers.some(provider => provider.id === s.decisionModel.providerId));
   const contextPlan = useContextCompressionStore((s) => activeId == null ? EMPTY_COMPRESSION : s.sessions[activeId] ?? EMPTY_COMPRESSION);
   /**
    * 思考能力分两层，工具行上给什么控件就看这两层：
@@ -570,16 +573,20 @@ export default function ChatPanel({
   deletionState.current = { loading, activeId };
   const { deleteMessage, deleting } = useMessageDeletion(listRef, activeId, async (key) => {
     const message = msgs.find((item) => item.key === key);
+    const database = db, lifetime = accountLifecycle.current();
+    const current = () => database === db && (!lifetime || lifetime.current()) && deletionState.current.activeId === activeId;
     if (deletionState.current.loading || deletionState.current.activeId !== activeId
       || activeId == null || !message || message.streaming || message.rowId == null) return false;
-    const deleted = await db.transaction('rw', db.chats, async () => {
-      const row = await db.chats.get(message.rowId!);
+    const remove = async () => {
+      const row = await database.chats.get(message.rowId!);
+      if (!current()) return false;
       if (!row || row.sessionId !== activeId) return false;
-      await db.chats.delete(message.rowId!);
+      await removeConversationMessage(message.rowId!);
       return true;
-    });
+    };
+    const deleted = await remove();
     if (!deleted) return false;
-    if (deletionState.current.activeId === activeId) {
+    if (current()) {
       setMsgs((current) => current.filter((item) => item.key !== key));
     }
     return true;
@@ -606,19 +613,20 @@ export default function ChatPanel({
   );
 
   /** 题卡作答：更新消息状态；已落库的同步回写 IndexedDB */
-  const handleAnswer = (key: string, qi: number, oi: QuizPick) => {
+  const handleAnswer = async (key: string, qi: number, oi: QuizPick) => {
     // Revealing an explanation is a reading interaction, not new model output.
     pauseFollowing();
-    setMsgs((prev) =>
-      prev.map((m) => {
-        if (m.key !== key || !m.quiz || !canUpdateQuizPick(m.quiz.data.questions[qi], m.quiz.picks[qi], oi)) return m;
-        const picks = [...m.quiz.picks];
-        picks[qi] = oi;
-        const quiz = { ...m.quiz, picks };
-        if (m.rowId != null) void db.chats.update(m.rowId, { quiz });
-        return { ...m, quiz };
-      }),
-    );
+    const message = msgs.find(item => item.key === key), database = db, lifetime = accountLifecycle.current();
+    if (!message?.quiz || message.rowId == null || !canUpdateQuizPick(message.quiz.data.questions[qi], message.quiz.picks[qi], oi)) return;
+    const picks = [...message.quiz.picks]; picks[qi] = oi;
+    const quiz = { ...message.quiz, picks };
+    try {
+      const row = await database.chats.get(message.rowId);
+      if (database !== db || lifetime && !lifetime.current()) return;
+      if (!row || JSON.stringify(row.quiz) !== JSON.stringify(message.quiz)) throw new Error('题卡已变化，请重新打开当前版本');
+      await editMessage(row, { ...row, quiz });
+      if (database === db && (!lifetime || lifetime.current())) setMsgs(prev => prev.map(item => item.key === key ? { ...item, quiz } : item));
+    } catch (error) { if (database === db && (!lifetime || lifetime.current())) toast.error(error instanceof Error ? error.message : '作答保存失败'); }
   };
 
   /** 自定义链接渲染：#seek-N 跳播放器、#unit-N 跳材料对应页/段，其余外链新窗口打开 */
@@ -729,7 +737,7 @@ export default function ChatPanel({
       let list = await db.chatSessions.where('videoId').equals(videoId).sortBy('createdAt');
       if (list.length === 0) {
         const now = Date.now();
-        const id = (await db.chatSessions.add({ videoId, title: '新会话', createdAt: now })) as number;
+        const id = await appendConversationSession({ videoId, title: '新会话', createdAt: now });
         list = [{ id, videoId, title: '新会话', createdAt: now }];
       }
       if (cancelled) return;
@@ -982,21 +990,17 @@ export default function ChatPanel({
    */
   const updateMcpServerIds = async (next: string[] | undefined) => {
     if (activeId == null) return;
-    await db.chatSessions.where('id').equals(activeId).modify(row => {
+    await reviseConversationSession(activeId, row => {
       if (next === undefined) delete row.mcpServerIds;
       else row.mcpServerIds = next;
     });
-    const { cloud } = await import('../cloud/state');
-    if (cloud.enabled) await (await import('../cloud/sync')).flushCloud();
+    await (await import('../cloud/sync')).flushCloud();
     if (historySession.current === activeId) setMcpServerIds(next);
   };
   const updateSkillIds = (next: number[] | undefined) => {
     if (activeId == null) return;
     setSkillIds(next);
-    void db.chatSessions
-      .where('id')
-      .equals(activeId)
-      .modify((row) => {
+    void reviseConversationSession(activeId, (row) => {
         // 「不限定」= 字段不存在，而不是「字段值为 undefined」—— 后者经过结构化克隆后
         // 到底留下 undefined 还是 null 依赖实现，删掉字段最干净、读回来必然 undefined。
         if (next === undefined) delete row.skillIds;
@@ -1024,7 +1028,7 @@ export default function ChatPanel({
   /** 新开会话 */
   const createSession = async () => {
     const now = Date.now();
-    const id = (await db.chatSessions.add({ videoId, title: '新会话', createdAt: now })) as number;
+    const id = await appendConversationSession({ videoId, title: '新会话', createdAt: now });
     setSessions((prev) => [...prev, { id, videoId, title: '新会话', createdAt: now }]);
     setActiveId(id);
   };
@@ -1032,14 +1036,11 @@ export default function ChatPanel({
   /** 删除当前会话（删光后自动补一个空会话） */
   const deleteSession = async () => {
     if (activeId == null) return;
-    await db.transaction('rw', [db.chats, db.chatSessions], async () => {
-      await db.chats.where('sessionId').equals(activeId).delete();
-      await db.chatSessions.delete(activeId);
-    });
+    await deleteServerSession(activeId, await readChatHistory(activeId));
     const rest = sessions.filter((s) => s.id !== activeId);
     if (rest.length === 0) {
       const now = Date.now();
-      const id = (await db.chatSessions.add({ videoId, title: '新会话', createdAt: now })) as number;
+      const id = await appendConversationSession({ videoId, title: '新会话', createdAt: now });
       setSessions([{ id, videoId, title: '新会话', createdAt: now }]);
       setActiveId(id);
     } else {
@@ -1065,7 +1066,6 @@ export default function ChatPanel({
       return;
     }
     const sessionId = activeId;
-    const settings = getSettings();
     /**
      * 框选截图与视频截图共用同一条多模态通道：把引用里的裁图折进 shots，
      * 下面的「多模态直读 / 视觉模型描述 / 不支持则拦截」三级降级链就**一行都不用改**。
@@ -1080,16 +1080,9 @@ export default function ChatPanel({
     const shotTag = (s: Snapshot) =>
       isMaterial ? `[选区@${fmtUnitRef(materialKind!, s.ts)}]` : `[截图@${fmtTime(s.ts)}]`;
 
-    // 文本模型与视觉模型可能分属不同供应商，各查各的能力数据源
-    const chatTarget = targetOrNull(settings, settings.llmModel);
-    const visionTarget = visionTargetOrNull(settings);
-    const llmSeesImages = chatTarget ? isVisionModel(chatTarget.catalogId, chatTarget.model, chatTarget.capabilities) : false;
-
-    // 降级链 tier 3 前置检查：模型无图能力且未配视觉模型时直接拦截，不清空输入与截图，保留草稿
-    if (curShots.length > 0 && !llmSeesImages && !visionTarget) {
-      toast.error('当前模型不支持图片，请在设置中配置视觉模型或切换多模态模型');
-      return;
-    }
+    // Screenshot capability and any vision-model preparation belong to the server.
+    const database = db, owner = cloud.userId, lifetime = accountLifecycle.current();
+    const current = () => database === db && owner === cloud.userId && (!lifetime || lifetime.current()) && historySession.current === sessionId;
 
     setInput('');
     setShots([]);
@@ -1100,55 +1093,16 @@ export default function ChatPanel({
 
     const userKey = nextKey();
     const aiKey = nextKey();
-    const isFirstMsg = msgs.length === 0;
     let answer = '';
     let reasoning = '';
-    /**
-     * 思考用时的首末时刻（毫秒时间戳，0 = 还没开始/还没记上）。
-     *
-     * 取**首个 → 末个**思考 token 而不是「请求发出 → 请求结束」：agent 循环里思维会
-     * 中断去调工具（检索字幕、出题…），那几秒不是思考，拿整个请求时长当思考用时
-     * 会把工具调用也算进去 —— 「已思考用时 24 秒」里可能有 20 秒在等接口。
-     */
-    let reasoningFrom = 0;
-    let reasoningTo = 0;
-    /**
-     * 最后一轮旁白 + 最后一次工具提示。
-     *
-      * `onRoundStart` 会清空检索旁白（保留已交付的可视内容），轮次用尽时模型可能一个字都不说
-     * （不给 tools 时它仍会返回「空正文 + tool_calls」）。存一份是为了让兜底文案能说清
-     * 「它干了什么、你想做什么」，而不是只留一句「（未获得回答）」。见 harness/agent.ts。
-     */
-    let lastNarration = '';
-    let lastHint = '';
-    /**
-     * 这一轮的工具链。与 `lastHint` 的分工：hint 是**当前那一步**（会被下一个 delta 清掉），
-     * 工具链是**流水账**（谁调了、拿到了什么、花了多久），落库后还能回看。
-     */
-    const toolTrace = new ToolTraceLedger();
     const selectedSkills = explicitSkillIds(suppliedSkills ?? turnSkillIds);
-    const toolCalls = toolTrace.calls;
-    /** 实际跑过的轮数（`onRoundStart` 记的）：兜底文案只能印真实值，不能拿设置里的上限顶 */
-    let roundsRan = 0;
-    /**
-     * 护栏停下的情况。用数组而不是 `let`：赋值在回调里，TS 在读它的地方仍会当成
-     * `null`（`x?.granted` 会报「property does not exist on never」），数组下标不做这种收窄。
-     */
-    const stopped: AgentStopInfo[] = [];
-    let widgetPreview: { html: string } | undefined;
     let widgetState: WidgetPayload | undefined;
-    let quizState: QuizState | undefined;
     const widgets: WidgetPayload[] = [];
-    let widgetRowId: number | undefined;
-    let serverOwned = false;
-    let rawTurn: ChatMessage[] = [];
-    let pendingModelText = '';
-    const traceFor = (content: string) => modelTrace(content, [...rawTurn,
-      ...(pendingModelText ? [{ role: 'assistant' as const, content: pendingModelText }] : [])]);
     const abort = new AbortController();
-    inflightAbort = abort;
-    const updates = framePatch<ChatMsg>((patch) =>
-      setMsgs((prev) => prev.map((m) => (m.key === aiKey ? { ...m, ...patch } : m))));
+    inflightAbort.current = abort;
+    const updates = framePatch<ChatMsg>((patch) => {
+      if (current()) setMsgs((prev) => prev.map((m) => (m.key === aiKey ? { ...m, ...patch } : m)));
+    });
     const patchAi = updates.write;
 
     try {
@@ -1182,16 +1136,14 @@ export default function ChatPanel({
         { key: aiKey, role: 'ai', content: '', streaming: true, processStartedAt: Date.now() },
       ]);
 
-      const { remoteTasks } = await import('../cloud/state');
-      if (remoteTasks()) {
-        serverOwned = true;
         const { runQa } = await import('../harness/qaRunner');
         const result = await runQa({ videoId, sessionId, text: (quoteBlock ? `${quoteBlock}\n\n` : '') + q,
           displayText: displayContent, chatImages: userImages, videoName, skillIds, explicitSkillIds: selectedSkills,
+          modelSelection: taskModelChoice(sessionId),
           materialKind, materialFormat, refsCount: curRefs.length, shotCount: curShots.length,
           images: curShots.flatMap(s => [{ type: 'text' as const, text: shotTag(s) }, { type: 'image_url' as const, image_url: { url: s.dataUrl } }]),
         }, { signal: abort.signal,
-          onPersist: rowId => { widgetRowId = rowId; patchAi({ rowId }); },
+          onPersist: rowId => patchAi({ rowId }),
           onWidgetPreview: preview => patchAi({ widgetPreview: preview }),
           onTools: tools => patchAi({ tools, hint: tools.at(-1)?.status === 'running' ? tools.at(-1)?.name : undefined }),
           onDelta: text => { answer += text; updates.stream({ content: answer, processPhase: 'answering' }); },
@@ -1202,360 +1154,8 @@ export default function ChatPanel({
           },
         });
         patchAi({ ...result, streaming: false, hint: undefined, widgetPreview: undefined });
-        setTurnSkillIds([]);
-        return;
-      }
-      const activated = await activateSkills(selectedSkills, skillIds, sessionId);
-      recordSkillActivation(activated, toolTrace);
-      patchAi({ tools: [...toolCalls] });
-      // 用户消息立即落库：tier 2 描述可能耗时数秒，避免期间关页丢失已上屏消息
-      const userRowId = await db.chats.add({
-        videoId,
-        explicitSkillIds: selectedSkills,
-        sessionId,
-        role: 'user',
-        content: displayContent,
-        createdAt,
-        ...(userImages.length > 0 ? { images: userImages } : {}),
-      });
-      setMsgs((prev) => prev.map((m) => m.key === userKey ? { ...m, rowId: userRowId } : m));
-
-      // 首条提问自动作为会话标题（纯截图提问用时间戳标记兜底）
-      if (isFirstMsg) {
-        const t = q || marker;
-        const title = t.length > 18 ? `${t.slice(0, 18)}…` : t;
-        await db.chatSessions.update(sessionId, { title });
-        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)));
-      }
-
-      // 截图来源处的上下文。
-      // 视频：该时刻前后的**字幕窗口**（多时刻按段去重合并）；
-      // 材料：该页/段的**原文**（替代字幕，作用一样 —— 让视觉模型认图时带着上下文，
-      //      否则它容易把画面里的小字认错）。
-      // 先于看图描述计算：tier 2 的视觉模型也要带着这份上下文认图。
-      const shotWindows = new Map<number, string>();
-      let subBlock = '';
-      if (curShots.length > 0) {
-        if (isMaterial) {
-          for (const s of curShots) {
-            const rows = await db.materialBlocks
-              .where('materialId')
-              .equals(videoId)
-              .filter((r) => r.unit === s.ts)
-              .toArray();
-            shotWindows.set(s.ts, rows.map((r) => r.text).join('\n'));
-          }
-        } else {
-          const segs = await db.segments
-            .where('videoId')
-            .equals(videoId)
-            .filter((r) => r.status === 1 && !!r.text)
-            .sortBy('idx');
-          const byIdx = new Map<number, SegmentRow>();
-          for (const s of curShots) {
-            const win = subtitleWindow(segs, s.ts);
-            shotWindows.set(s.ts, win.map((seg) => `[${fmtTime(seg.start)}] ${seg.text}`).join('\n'));
-            for (const seg of win) byIdx.set(seg.idx, seg);
-          }
-          subBlock = [...byIdx.values()]
-            .sort((a, b) => a.idx - b.idx)
-            .map((seg) => `[${fmtTime(seg.start)}] ${seg.text}`)
-            .join('\n');
-        }
-      }
-
-      // 截图进上下文的降级链：tier 1 多模态模型直接看图；tier 2 视觉模型先描述成文字。
-      // 材料的措辞与视频分开：材料是「框选出来的区域」，且没有字幕可作背景。
-      const shotLead =
-        curShots.length === 0
-          ? ''
-          : llmSeesImages
-            ? isMaterial
-              ? `本轮附带 ${curShots.length} 张选区截图：正文中 [选区@第N${materialKind === 'para' ? '段' : '页'}] 标记后紧跟的就是该处框出来的画面。截图是最高优先级证据，请先按画面实际内容作答，材料文字只作背景；两者冲突时以截图为准。`
-              : `本轮附带 ${curShots.length} 张截图：正文中 [截图@mm:ss] 标记后紧跟的就是该时刻的画面。截图是最高优先级证据，请先按画面实际内容作答，字幕只作背景；两者冲突时以截图为准。`
-            : isMaterial
-              ? `本轮提问附带了 ${curShots.length} 张选区截图，下面「[选区@第N${materialKind === 'para' ? '段' : '页'}] 画面：…」是视觉模型对每张图的逐字转述，忠实于画面、为最高优先级证据；与材料文字冲突时以画面为准。`
-              : `本轮提问附带了 ${curShots.length} 张截图，下面「[截图@mm:ss] 画面：…」是视觉模型对每张图的逐字转述，忠实于画面、为最高优先级证据；与字幕冲突时以画面为准。`;
-      let imageParts: ContentPart[] | null = null;
-      let descBlock = '';
-      let descFailed = false;
-      if (curShots.length > 0) {
-        if (llmSeesImages) {
-          // 每张图前插入位置文本，模型才能把画面归属到对应的标记
-          imageParts = curShots.flatMap(
-            (s): ContentPart[] => [
-              { type: 'text', text: shotTag(s) },
-              { type: 'image_url', image_url: { url: s.dataUrl } },
-            ],
-          );
-        } else if (visionTarget) {
-          // 前置检查已保证走到这里 visionTarget 非空；描述提示词带上该处上下文，并声明以画面为准。
-          // 视觉模型可能配在另一家供应商，所以用 visionTarget（自带那家的端点），不是 settings。
-          const results = await Promise.allSettled(
-            curShots.map((s) =>
-              chatOnce(visionTarget, {
-                messages: [
-                  {
-                    role: 'user',
-                    content: [
-                      { type: 'image_url', image_url: { url: s.dataUrl } },
-                      { type: 'text', text: PROMPTS.shotDescribe(q, shotWindows.get(s.ts)) },
-                    ],
-                  },
-                ],
-                max_tokens: 512,
-                signal: abort.signal,
-              }),
-            ),
-          );
-          descFailed = results.some((r) => r.status === 'rejected');
-          descBlock = results
-            .map((r, i) => {
-              const at = shotTag(curShots[i]);
-              return r.status === 'fulfilled'
-                ? `${at} 画面：${textOf(r.value)}`
-                : `${at}（画面描述失败，仅参考位置与${isMaterial ? '材料原文' : '字幕'}）`;
-            })
-            .join('\n');
-        }
-      }
-
-      // 构造上下文：system + 按 token 预算截取的历史 + 当前问题
-      // Level 1：技能元数据清单进系统提示词，agent 按需用 use_skill 加载正文。
-      // 走 loadSessionSkillMeta：会话限定了范围时，清单只列范围内的技能（未限定则等价于全量）。
-      // ⚠️ 这里与下方 executeTool 的 allowedSkillIds 必须传同一个 skillIds —— 清单收窄与
-      // 工具放行是同一件事的两面，只改一处会造成「看不到却能调通」或「看得到却被拒」的错配。
-      const skillMetas = await loadSessionSkillMeta(skillIds);
-      // 每次发送前刷新帧元数据（讲义可能在本面板挂载后生成）：有帧才注册 list_frames 工具并注入引用规则
-      // 材料没有画面可引用，直接跳过这次查询
-      const meta = isMaterial ? [] : await loadFramesMeta();
-      const hasFrames = meta.length > 0;
-      /**
-       * 这份材料此刻能不能被直接改：**格式是 md，且编辑面确实开着**。
-       *
-       * 第二个条件依赖「用户此刻点开了编辑」——注册一个当下不可用的工具只会诱发无效调用
-       * （模型会先调一次、拿到「没有打开编辑面」、再白烧一轮），与 list_frames 只在有抽帧时
-       * 注册是同一个思路：按课程**实际具备的能力**给工具。
-       * 代价是中途关掉编辑会退化：那一轮仍会调它、回执会引导用户重新点开「编辑」。
-       *
-       * 在 send 里算而不是在组件体里：编辑面是模块级注册表，用户点「编辑」不会让本组件重渲染，
-       * 挂在组件体里算出来的值会一直是旧的那次（false）。
-       *
-       * ⚠️ `&&` 短路不是可有可无的写法优化：mdEditorOpen 会动态 import md-editor/bridge，
-       * 那条链上挂着 CodeMirror。让它只在**确实可能是 md 材料**时才走，
-       * 视频课与 PDF / Word / HTML 材料就完全不会去碰那个 chunk（理由见 harness/tools.ts 里那段）。
-       */
-      const canEditMd = materialFormat === 'md' && (await mdEditorOpen(videoId));
-      const skillBlock = skillMetas.length > 0 ? skillMetaBlock(skillMetas) : undefined;
-      // ⚠️ 工具与提示词必须用**同一个** canEditMd：只注册工具不给提示词，模型多半想不到去用它；
-      // 只给提示词不给工具，它会写一段「我已修改」而其实什么都没发生 —— 比不给更糟。
-      const systemPrompt = isMaterial
-        ? PROMPTS.qaSystemMaterial(videoName, materialKind!, skillBlock, curShots.length, curRefs.length, canEditMd, settings.agentInstructions)
-        : PROMPTS.qaSystem(videoName, skillBlock, hasFrames, curShots.length, curRefs.length, settings.agentInstructions);
-      const history = await readChatHistory(sessionId);
-      // 末条即刚落库的当前问题，按降级链路组装（历史保持纯文本，截图不重复发送）
-      // descBlock 已含 [截图@...] 标记，不再重复裸 marker 前缀
-      // ⚠️ 引用块要同时进两处：displayContent（上屏 + 落库，用户回看历史时能看到自己引了什么）
-      // 和 currentText（真正发给模型的那条）。漏掉后者的话，模型只能看到一个「这段」而不知道指什么。
-      const currentText =
-        (quoteBlock ? `${quoteBlock}\n\n` : '') +
-        (shotLead ? `${shotLead}\n` : '') +
-        q +
-        (descBlock ? `\n${descBlock}` : '') +
-        (subBlock ? `\n截图时刻前后字幕：\n${subBlock}` : '');
-      const budget =
-        settings.contextWindow -
-        estimateTokens(systemPrompt) -
-        activated.messages.reduce((total, message) => total + estimateTokens(String(message.content)), 0) -
-        estimateTokens(currentText) -
-        (imageParts ? curShots.length * 1200 : 0) - // 多模态图片每张约 1.2k tokens
-        4096; // 输出预留
-      assertSkillBudget(budget, activated);
-      setTurnSkillIds([]);
-      const recent = await prepareSessionHistory(sessionId, history.slice(0, -1).map((row) => ({ ...row, originalContent: row.content, content: quizHistoryContent(row) })), Math.max(2000, budget), currentText, decisionConfigOf(settings), {
-        signal: abort.signal,
-        onStart: () => patchAi({ hint: 'Jev 正在筛选历史上下文…' }),
-        onCompressed: (turns) => patchAi({ hint: `已省略 ${turns} 个旧轮次，原始记录保留` }),
-      });
-      let messages: ChatMessage[] = [
-        { role: 'system', content: systemPrompt },
-        ...recent.flatMap(r => replayTrace(r) ?? [{ role: r.role, content: r.content }]),
-        ...activated.messages,
-      ];
-      if (imageParts) {
-        messages.push({
-          role: 'user',
-          content: [...imageParts, { type: 'text', text: currentText }],
-        });
-      } else {
-        messages.push({ role: 'user', content: currentText });
-      }
-
-      messages = reconcileSkillMessages(messages, skillMetas);
-      await db.chats.update(userRowId, { modelTrace: modelTrace(displayContent, [...activated.messages, messages.at(-1)!]) });
-      assertSkillRequestBudget(settings.contextWindow, messages, activated);
-      const baseLength = messages.length;
-      // present_quiz 校验通过后回调：题卡数据上屏（初始全部未作答）
-      // Keep every validated visual; the returned references place them in the explanation.
-      const executeTool = createResourceExecutor({
-        sessionId,
-        signal: abort.signal,
-        courseId: videoId,
-        editable: canEditMd,
-        hasFrames,
-        allowedSkillIds: skillIds,
-        // 材料：kind 决定走 search_material；视频：undefined 走 search_transcript
-        kind: materialKind,
-        onQuiz: (data) => {
-          quizState = { data, picks: data.questions.map(() => -1) };
-          patchAi({ quiz: quizState });
-        },
-        onWidget: async (w) => {
-          if (widgets.some(widget => widget.id === w.id)) return;
-          const content = w.ref ? `${answer}${answer && !answer.endsWith('\n\n') ? '\n\n' : ''}${widgetReference(w.ref)}\n\n` : answer;
-          widgetRowId = await persistAssistantSnapshot({
-            videoId, sessionId, role: 'assistant', createdAt: Date.now(), content,
-            reasoning: reasoning || undefined, widget: w, widgets: [...widgets, w],
-            interrupted: true, interruptReason: '作品已保存，后续回答尚未完成',
-          }, widgetRowId);
-          answer = content;
-          widgetState = w;
-          widgets.push(w);
-          // 工具校验完成后切换到最终的隔离 iframe。清掉预览，避免同一张
-          // 图短暂出现两份；中间帧从未执行过模型提供的脚本。
-          widgetPreview = undefined;
-          patchAi({ rowId: widgetRowId, content, widget: w, widgets: [...widgets], widgetPreview: undefined, hint: undefined });
-        },
-      });
-      /**
-       * 本轮工具集：只给**当下真的能用**的能力。
-       * 材料没有字幕、没有画面（工具集本身就少两样），md 且编辑面开着才多一个 edit_markdown。
-       */
-      const tools = courseResourceTools(canEditMd, await isPluginAvailable('practice'));
-      await runAgentLoop(
-        messages,
-        tools,
-        executeTool,
-        {
-          mcpSessionId: sessionId,
-          onTranscript: out => { rawTurn = out.slice(baseLength); pendingModelText = ''; },
-          // Portable intent; the shared adapter handles unsupported/off levels.
-          thinkingEffort: thinkingLevel,
-          onReasoningDelta: (t) => {
-            reasoning += t;
-            const now = Date.now();
-            const first = !reasoningFrom;
-            if (first) reasoningFrom = now;
-            reasoningTo = now;
-            // 起点随首个 token 一起上屏：思考中那行「已用时 x 秒」按它算，
-            // 落库用不到（历史用终值 reasoningMs），所以不写进 ChatRow
-            updates.stream({ reasoning, processPhase: 'thinking', ...(first ? { reasoningStartedAt: now } : {}) });
-          },
-          onToolCallDelta: (call) => {
-            updates.stream({ processPhase: 'preparing' });
-            // show_widget 的 code 是一个 JSON 字符串，不能直接把参数片段
-            // 当 HTML。只在 format 已明确为 html 后，解码已经完整的
-            // JSON 字符串前缀，再交给静态安全预览组件。
-            if (call.name !== 'show_widget') return;
-            const partial = readPartialWidgetArguments(call.arguments);
-            if (partial.format !== 'html' || !partial.code) return;
-            const html = partial.code.slice(0, 60_000);
-            widgetPreview = { html };
-            updates.stream({ widgetPreview, hint: '正在生成交互图形…' });
-          },
-          onDelta: (text) => {
-            pendingModelText += text;
-            answer += text;
-            updates.stream({ content: answer, hint: undefined, processPhase: 'answering' });
-          },
-          onRoundStart: () => {
-            pendingModelText = '';
-            // 只清检索旁白；已交付的 HTML / 图卡及后续讲解继续保留。
-            if (answer.trim()) lastNarration = answer.trim();
-            answer = nextVisualRound(answer, widgets.length > 0);
-            roundsRan++;
-            widgetPreview = undefined;
-            patchAi({ content: answer, hint: undefined, widgetPreview: undefined, processPhase: 'preparing' });
-          },
-          onToolStart: (name, argsJson, callId) => {
-            /**
-             * 状态行与工具链**同时**更新，但两者不是一回事：
-             * 状态行（hint）是那个一闪而过的「正在检索：傅里叶」，工具链是留得住的流水账。
-             *
-             * 这段原先是一串 `if (name === 'search_transcript') …`，与课程助手那边的
-             * `toolHint()` 各写一份、还各漏了几个工具 —— 现在两边共用 `utils/toolTrace.ts`。
-             */
-            const hint = toolHint(name, argsJson);
-            lastHint = hint;
-            toolTrace.start(callId, name, argsJson, reasoning.length);
-            patchAi({ hint: toolTrace.hint, tools: [...toolCalls], processPhase: 'tool' });
-          },
-          onToolEnd: (name, result, callId) => {
-            toolTrace.finish(callId, result);
-            patchAi({ tools: [...toolCalls], processPhase: toolTrace.running ? 'tool' : 'preparing', hint: toolTrace.hint });
-            // 参数校验 / 安全预检的软失败也不能把半成品留在最终回答里；
-            // 模型下一轮会根据工具回执重试。
-            if (name === 'show_widget') {
-              widgetPreview = undefined;
-              patchAi({ widgetPreview: undefined });
-            }
-          },
-          onStop: (info) => {
-            stopped.push(info);
-          },
-          signal: abort.signal,
-        },
-        // 检索轮次上限来自设置（默认 6，选「不限」则为 Infinity；另有循环检测与 token 预算兜着）
-        resolveMaxRounds(settings.agentRounds),
-      );
-      if (stopped.at(-1)?.reason === 'error') throw new Error('模型或网关没有正常结束这一轮回答');
-      const finalAnswer = answer.trim();
-      /** 思考耗时：一帧都没来过就别记 0（那会让「已思考用时 0.0 秒」看着像 bug） */
-      const reasoningMs = reasoningFrom ? reasoningTo - reasoningFrom : undefined;
-      if (finalAnswer || quizState || widgetState) {
-        patchAi({ streaming: false, hint: undefined, reasoningMs, widgetPreview: undefined });
-        const rowId = (await persistAssistantSnapshot({
-          videoId,
-          sessionId,
-          role: 'assistant',
-          content: finalAnswer,
-          modelTrace: traceFor(finalAnswer),
-          createdAt: Date.now(),
-          reasoning: reasoning || undefined,
-          reasoningMs,
-          ...(toolCalls.length > 0 ? { tools: toolCalls } : {}),
-          ...(quizState ? { quiz: quizState } : {}),
-          ...(widgetState ? { widget: widgetState } : {}),
-          ...(widgets.length ? { widgets } : {}),
-        }, widgetRowId)) as number;
-        patchAi({ rowId });
-      } else {
-        // 空回答兜底，避免留下永久空气泡。**要说清是哪道闸停下的**：只写「（未获得回答）」的话，
-        // 用户看到的就是「点了没反应」，既不知道它查了多少轮，也不知道自己该做什么。
-        const closeOut = stopped[stopped.length - 1];
-        patchAi({
-          streaming: false,
-          hint: undefined,
-          reasoningMs,
-          widgetPreview: undefined,
-          content: noAnswerNotice({
-            // 没有 closeOut 只可能是「循环正常结束却一个字没说」——那正是 `empty` 这条闸管的事，
-            // 猜成 `rounds` 会印出「已到轮次上限」这种从未发生过的原因（实测文案：0 次工具调用）
-            reason: closeOut?.reason ?? 'empty',
-            rounds: closeOut?.rounds ?? roundsRan,
-            ...(closeOut?.detail ? { detail: closeOut.detail } : {}),
-            requestedTools: closeOut?.requestedTools ?? [],
-            narration: lastNarration,
-            hint: lastHint,
-          }),
-        });
-      }
-      // tier 2 有截图描述失败时，回答完成后一次性提示
-      if (descFailed) {
-        toast.warning('部分截图描述失败，回答仅参考了时间戳与字幕');
-      }
+        if (current()) { setTurnSkillIds([]); useTaskModel.getState().set(taskModelKey(sessionId)); }
     } catch (e) {
-      if (serverOwned) {
         // Server progress already owns the durable row. Never create a second
         // local assistant when a remote task fails before the next sync poll.
         const reason = e instanceof Error ? e.message : String(e);
@@ -1564,82 +1164,10 @@ export default function ChatPanel({
           content: abort.signal.aborted ? `${answer}\n\n_（已停止生成）_` : useful ? answer : `回答失败：${reason}`,
           error: !useful && !abort.signal.aborted, interrupted: useful && !abort.signal.aborted,
           interruptReason: abort.signal.aborted ? undefined : reason });
-        return;
-      }
-      // 用户按了停止：不是错误。保留已流出的内容，只补一句「已停止」，并且**落库**
-      // （否则刷新就没了，「停止」等于白生成一轮）
-      if (abort.signal.aborted) {
-        const partial = answer.trim() || lastNarration.trim();
-        const content = partial ? `${partial}\n\n_（已停止生成）_` : '_（已停止生成）_';
-        // 停在思考中途也要计时：那正是用户最想知道的「它已经想了多久」
-        const reasoningMs = reasoningFrom ? Date.now() - reasoningFrom : undefined;
-        widgetPreview = undefined;
-        patchAi({ streaming: false, hint: undefined, content, reasoningMs, widgetPreview: undefined });
-        // 立刻恢复可输入：下面还要落一次库，等它落完才解锁的话，用户按完停止还得干等
-        setLoading(false);
-        const rowId = (await persistAssistantSnapshot({
-          videoId,
-          sessionId,
-          role: 'assistant',
-          content,
-          createdAt: Date.now(),
-          modelTrace: traceFor(content),
-          reasoning: reasoning || undefined,
-          reasoningMs,
-          ...(toolCalls.length > 0 ? { tools: toolCalls } : {}),
-          ...(widgetState ? { widget: widgetState } : {}),
-          ...(widgets.length ? { widgets } : {}),
-        }, widgetRowId)) as number;
-        patchAi({ rowId });
-      } else {
-        const errMsg = e instanceof Error ? e.message : String(e);
-        const partial = answer.trim() ? answer : '';
-        if (partial || widgetState || quizState) {
-          // Persist useful work even without a widget. Keep the failure reason
-          // outside the body, so future requests replay only the model's text.
-          const reasoningMs = reasoningFrom ? Date.now() - reasoningFrom : undefined;
-          patchAi({
-            streaming: false,
-            hint: undefined,
-            widgetPreview: undefined,
-            reasoningMs,
-            content: partial,
-            interrupted: true,
-            interruptReason: errMsg,
-          });
-          setLoading(false);
-          const rowId = (await persistAssistantSnapshot({
-            videoId,
-            sessionId,
-            role: 'assistant',
-            content: partial,
-            createdAt: Date.now(),
-            modelTrace: traceFor(partial),
-            reasoning: reasoning || undefined,
-            reasoningMs,
-            ...(toolCalls.length > 0 ? { tools: toolCalls } : {}),
-            ...(widgetState ? { widget: widgetState } : {}),
-            ...(widgets.length ? { widgets } : {}),
-            ...(quizState ? { quiz: quizState } : {}),
-            interrupted: true,
-            interruptReason: errMsg,
-          }, widgetRowId)) as number;
-          patchAi({ rowId });
-        } else {
-          patchAi({
-            streaming: false,
-            hint: undefined,
-            error: true,
-            widgetPreview: undefined,
-            reasoningMs: reasoningFrom ? Date.now() - reasoningFrom : undefined,
-            content: `回答失败：${errMsg}`,
-          });
-        }
-      }
     } finally {
-      if (inflightAbort === abort) inflightAbort = null;
-      localRequest.current = false;
-      setLoading(false);
+      updates.flush();
+      if (inflightAbort.current === abort) inflightAbort.current = null;
+      if (current()) { localRequest.current = false; setLoading(false); }
     }
   };
 
@@ -1663,7 +1191,7 @@ export default function ChatPanel({
       const previous = msgs[idx - 1];
       if (!previous || previous.role !== 'user' || previous.rowId == null) return;
       const original = await db.chats.get(previous.rowId);
-      await db.chats.delete(previous.rowId);
+      await removeConversationMessages([previous.rowId]);
       setMsgs((prev) => prev.filter((m) => m.key !== message.key && m.key !== previous.key));
       await send(previous.content, undefined, original?.explicitSkillIds ?? turnSkillIds);
       return;
@@ -1676,9 +1204,7 @@ export default function ChatPanel({
     if (message.role === 'user') {
       if (msgs[idx + 1]?.role !== 'ai' || idx !== msgs.length - 2) return;
       const tail = rows.slice(rowIdx);
-      await db.transaction('rw', db.chats, async () => {
-        for (const row of tail) if (row.id != null) await db.chats.delete(row.id);
-      });
+      await removeConversationMessages(tail.flatMap(row => row.id != null ? [row.id] : []));
       setMsgs((prev) => prev.slice(0, idx));
       await send(message.content, undefined, rows[rowIdx].explicitSkillIds ?? []);
       return;
@@ -1694,10 +1220,7 @@ export default function ChatPanel({
     }
     if (userIdx < 0) return;
     const userRow = rows[userIdx];
-    await db.transaction('rw', db.chats, async () => {
-      if (message.rowId != null) await db.chats.delete(message.rowId);
-      await db.chats.delete(userRow.id!);
-    });
+    await removeConversationMessages([...(message.rowId != null ? [message.rowId] : []), userRow.id!]);
     setMsgs((prev) => prev.filter((m) => m.key !== message.key && m.rowId !== userRow.id));
     await send(userRow.content, undefined, userRow.explicitSkillIds ?? []);
   };
@@ -1713,21 +1236,7 @@ export default function ChatPanel({
     const kept = rows.slice(0, cut + 1);
     if (kept.length === 0) return;
     const now = Date.now();
-    const newId = await db.transaction('rw', [db.chatSessions, db.chats], async () => {
-      const sid = (await db.chatSessions.add({
-        videoId,
-        title: `${source.title} · 分支`,
-        createdAt: now,
-        ...(source.skillIds !== undefined ? { skillIds: [...source.skillIds] } : {}),
-        ...(source.mcpServerIds !== undefined ? { mcpServerIds: [...source.mcpServerIds] } : {}),
-      })) as number;
-      for (const row of kept) {
-        // Interaction snapshots belong to the original message; a fork starts from defaults.
-        const { id: _id, sessionId: _sessionId, widgetState: _widgetState, widgetStates: _widgetStates, ...rest } = row;
-        await db.chats.add({ ...rest, videoId, sessionId: sid });
-      }
-      return sid;
-    });
+    const newId = await forkServerSession(source, kept);
     setSessions((prev) => [...prev, {
       id: newId,
       videoId,
@@ -1742,10 +1251,8 @@ export default function ChatPanel({
 
   /** 停止生成：断掉当前的 LLM 请求与 agent 循环（已流出的内容保留） */
   const stopGenerating = () => {
-    inflightAbort?.abort();
-    void import('../cloud/state').then(async ({ remoteTasks }) => {
-      if (remoteTasks() && activeId != null) await (await import('../cloud/tasks')).cancelResourceTasks(`session:${activeId}`);
-    }).catch(error => toast.error((error as Error).message));
+    inflightAbort.current?.abort();
+    if (activeId != null) void import('../cloud/tasks').then(tasks => tasks.cancelResourceTasks(`session:${activeId}`)).catch(error => toast.error((error as Error).message));
   };
 
   // 会话下拉：selectedKey 是字符串（HeroUI 的 Key），会话 id 是数字 —— 回传时转回数字。
@@ -1860,7 +1367,7 @@ export default function ChatPanel({
         {msgs.length === 0 && (activeId == null || loadedSessionId === activeId) && (
           <PanelPlaceholder testId="chat-empty">针对课程内容提问，回答中的时间戳可点击跳转</PanelPlaceholder>
         )}
-        {msgs.length > 0 && loadedSessionId === activeId && <div className="chat-panel-history" aria-live="polite">
+        {msgs.length > 0 && loadedSessionId === activeId && <div className="chat-panel-history" data-chat-session-id={activeId} aria-live="polite">
           {hasOlder && <button type="button" disabled={loadingOlder} onClick={() => void loadOlder()}>
             {loadingOlder ? chatText('chat.loadingEarlier') : historyError ? chatText('chat.historyLoadFailed') : chatText('chat.loadEarlier')}
           </button>}
@@ -2096,7 +1603,7 @@ export default function ChatPanel({
             </Button>
             <Dropdown.Popover placement="top start">
               <div className="px-2 py-1">
-                <ModelPicker slot="chat" field="llmModel" variant="chip" showThinking thinkingDepthDisabled={loading} onClose={() => setAddOpen(false)} />
+                <TaskModelPicker sessionId={activeId} />
               </div>
               <Dropdown.Menu aria-label="添加到学习问答"
                 disabledKeys={[
@@ -2109,11 +1616,11 @@ export default function ChatPanel({
                 ]}
                 onAction={(key) => {
                   if (key === 'shot') addShot();
-                  else if (key === 'quiz' && cloud.enabled) openLearningPlugin('practice');
+                  else if (key === 'quiz') openLearningPlugin('practice');
                   else if (key === 'quiz') void assertPluginAvailable('practice').then(() => send('根据课程内容出 3 道单选题考考我，选项要有干扰性')).catch(e => toast.error(e.message));
-                  else if (key === 'question-bank' && cloud.enabled) openLearningPlugin('practice');
+                  else if (key === 'question-bank') openLearningPlugin('practice');
                   else if (key === 'question-bank') void send('请按「原题题库」技能，逐页提取这份资料的原题，保留题号、题干、选项和原图引用，核对原文答案及解析，并用 edit 保存到 /courses/current/questions.md。已有题库就读最新版后继续，不覆盖用户修改。缺答案和无法辨读的题明确标注；预算不足先保存已完成部分并说明尚未覆盖范围，不要重新编题。保存后给我题库链接，并展示第一批原题供我直接作答和批改。');
-                  else if (key === 'bank-practice' && cloud.enabled) openLearningPlugin('practice');
+                  else if (key === 'bank-practice') openLearningPlugin('practice');
                   else if (key === 'bank-practice') void send(`请从题库最新版开始做原题。${materialFormat === 'md' ? '先 read 当前 Markdown 原文：若它本身含原题 quiz 数据块，使用 /courses/current/material，否则使用 /courses/current/questions.md。' : '题库路径为 /courses/current/questions.md。'}调用 present_quiz 的 path 参数，每批最多 5 题，不要改写或提前透露答案。若题库尚不存在，请说明并引导先提取原题。`);
                   else if (key === 'review') openLearningPlugin('review');
                   else if (key === 'handout') void addHandout();
@@ -2123,7 +1630,7 @@ export default function ChatPanel({
                 <Dropdown.Item id="quiz" textValue="出题考我" data-testid="quiz-btn"><Sym name="quiz" />出题考我</Dropdown.Item>
                 {isMaterial && <Dropdown.Item id="question-bank" textValue="提取原题为题库" data-testid="question-bank-extract"><Sym name="description" />提取原题为题库</Dropdown.Item>}
                 {isMaterial && <Dropdown.Item id="bank-practice" textValue="开始做原题" data-testid="question-bank-practice"><Sym name="quiz" />开始做原题</Dropdown.Item>}
-                {cloud.enabled && <Dropdown.Item id="review" textValue="错题与复习清单" data-testid="question-bank-review"><Sym name="checklist" />错题与复习清单</Dropdown.Item>}
+                {<Dropdown.Item id="review" textValue="错题与复习清单" data-testid="question-bank-review"><Sym name="checklist" />错题与复习清单</Dropdown.Item>}
                 <Dropdown.Item id="handout" textValue="生成讲义" data-testid="handout-prompt"><Sym name="description" />生成讲义</Dropdown.Item>
                 <Dropdown.Item id="skills" textValue={settingsText('skillPicker.title')}><Sym name="extension" />{settingsText('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
               </Dropdown.Menu>

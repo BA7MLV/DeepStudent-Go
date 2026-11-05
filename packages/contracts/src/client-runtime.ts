@@ -78,7 +78,7 @@ export interface RuntimeRecord {
   value: { [key: string]: RuntimeJson } | null;
   revision: number;
 }
-export interface RuntimeRecordsPage { records: RuntimeRecord[]; cursor: number; more: boolean }
+export interface RuntimeRecordsPage { records: RuntimeRecord[]; cursor: number; more: boolean; epoch: string; highWater: number; reset: boolean }
 export interface RuntimeRecordMutation {
   id: string;
   table: string;
@@ -102,7 +102,7 @@ export interface LearningCard { id: number; videoId: string; q: string; a: strin
 export interface LearningComment { id: number; videoId: string; time: number; author: string; role: 'ask' | 'answer' | 'note'; text: string; parentId?: number; createdAt: number }
 export interface LearningDanmaku { id: number; videoId: string; time: number; text: string }
 export interface LearningCourseState { status?: 'new' | 'transcribing' | 'transcribed' | 'error'; transcriptionPaused?: boolean; unitCount?: number; scanned?: 1; empty?: 1; coverState?: 'pending' | 'done' | 'skipped'; dominantColor?: string }
-export interface LearningSession { id: number; videoId: string; title: string; createdAt: number; contextCourseIds?: string[]; projectFolderId?: number; skillIds?: number[]; pinnedSkillIds?: number[]; mcpServerIds?: string[]; pinned?: boolean; archived?: boolean; promptCacheKey?: string; contextCheckpoint?: { fromId: number; source: string; prefixHash?: string }; contextOmissions?: [number, string][] }
+export interface LearningSession { id: number; videoId: string; title: string; createdAt: number; contextCourseIds?: string[]; projectFolderId?: number; skillIds?: number[]; pinnedSkillIds?: number[]; mcpServerIds?: string[]; pinned?: boolean; archived?: boolean; promptCacheKey?: string; contextCheckpoint?: { fromId: number; source: string; prefixHash?: string }; contextOmissions?: [number, string][]; defaultModel?: import('./cloud.js').TaskModelSelection | null }
 export interface LearningMessage { id: number; taskId?: string; videoId: string; sessionId: number; role: 'user' | 'assistant'; content: string; createdAt: number; modelTrace?: RuntimeJson; modelRequests?: RuntimeJson[]; explicitSkillIds?: number[]; images?: RuntimeJson[]; attachments?: RuntimeJson[]; reasoning?: string; reasoningMs?: number; tools?: RuntimeJson[]; responseSegments?: RuntimeJson[]; quiz?: RuntimeJson; ask?: RuntimeJson; folderPlan?: RuntimeJson; resume?: RuntimeJson; interrupted?: boolean; interruptReason?: string; widget?: RuntimeJson; widgets?: RuntimeJson[]; legacyHtmlWorks?: RuntimeJson[]; widgetState?: RuntimeJson; widgetStates?: RuntimeJson }
 /** Closed product schemas: no table selector, resource identity/file/folder
  * writes, account preferences, or permit-based escape into arbitrary records. */
@@ -131,6 +131,7 @@ export type ClientLearningEdit = (
   | { kind: 'reviewCard'; courseId: string; cardId: number; expected: 0 | 1 | 2; status: 0 | 1 | 2 }
   | { kind: 'handoutReading'; courseId: string; handoutId: number; position: { anchor: string; offset: number } }
   | { kind: 'studyTime'; date: string; seconds: number; updatedAt: number }
+  | { kind: 'clearStudyTime'; expected: { date: string; seconds: number; updatedAt: number }[] }
 ) & { mutationId: string; baseRevision?: number };
 export interface ClientLearningCommand { operationId: string; edits: ClientLearningEdit[] }
 export interface ExecutorResourceCommand {

@@ -1,5 +1,11 @@
 {
   "appTitle": "DeepStudent Go",
+  "localHistory": {
+    "open": "导出本机历史原稿",
+    "close": "收起本机历史导出",
+    "loading": "正在加载本机导出工具…",
+    "loadFailed": "本机导出工具未能加载。请恢复站点连接后刷新重试；原稿未改变。"
+  },
   "settings": "设置",
   "board": {
     "title": "看板",

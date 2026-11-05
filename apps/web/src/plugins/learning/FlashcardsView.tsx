@@ -43,7 +43,9 @@ function MaterialCards({ materialId, call, snapshot }: { materialId: string; cal
     finally { setBusy(false); }
   };
   const update = async (id: number, status: number) => {
-    try { await call('cards.update', { materialId, id, status }); setError(''); }
+    const card = snapshot?.cards.find(card => card.id === id);
+    if (!card) return;
+    try { await call('cards.update', { materialId, id, expected: card.status, status }); setError(''); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   const running = snapshot?.tasks.some(t => ['queued', 'running', 'waiting_user'].includes(t.status));

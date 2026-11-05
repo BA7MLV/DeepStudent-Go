@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { waitForProbe } from './fixtures/wait-for-probe.mjs';
 
 const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/sync-locks-');
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
@@ -17,13 +18,14 @@ try {
   const fixture = `
 import { startCloud, flushCloud } from '/src/cloud/sync.ts';
 import { db } from '/src/store/db.ts';
+import { queueLearning, learningEdit } from '/src/client/learning.ts';
 await startCloud(window.fixtureOwner);
 window.probe = { results: {}, flush(name, background = false) {
   void flushCloud(background).then(() => this.results[name] = 'done', error => this.results[name] = error.message);
- }, async edit() { await db.studyDays.put({ date: '2026-11-03', seconds: 60 }); },
- pending: () => db.table('_cloudOutbox').count(),
+ }, async edit() { await queueLearning([learningEdit({kind:'studyTime',date:'2026-11-03',seconds:60,updatedAt:Date.now()})], ['study:2026-11-03']); },
+ pending: () => db.table('_learningCommands').count(),
   value: () => db.studyDays.get('2026-11-03'),
-   async write(seconds) { await db.studyDays.put({ date: '2026-11-03', seconds }); return db.table('_cloudOutbox').toArray(); } };
+   async write(seconds) { await queueLearning([learningEdit({kind:'studyTime',date:'2026-11-03',seconds,updatedAt:Date.now()})], ['study:2026-11-03']); return db.table('_learningCommands').toArray(); } };
 document.body.dataset.ready = 'true';`;
   web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'),
     plugins: [{ name: 'production-sync-lock-fixture',
@@ -50,7 +52,7 @@ document.body.dataset.ready = 'true';`;
   page.on('request', request => {
     const pathname = new URL(request.url()).pathname;
     if (pathname === '/api/clientRuntime/recordsPage') requests.push('pull');
-    if (pathname === '/api/clientRuntime/commitRecords') requests.push('commit');
+    if (pathname === '/api/clientRuntime/editLearning') requests.push('commit');
     if (pathname === '/api/v1/cloud/records') requests.push(`legacy:${request.method()}`);
   });
   await page.goto(`${origin}/__sync`);
@@ -78,7 +80,7 @@ document.body.dataset.ready = 'true';`;
   assert.equal(await page.evaluate(() => probe.pending()), pending, 'skipping never acknowledges or removes edits');
   assert.deepEqual(requests, [], 'no sync network work without the lock');
   await page.evaluate(() => { probe.flush('skipped', true); probe.flush('explicit'); });
-  await page.waitForFunction(async () => (await navigator.locks.query()).pending.length === 1);
+   await waitForProbe(page, async () => (await navigator.locks.query()).pending.length === 1);
   assert.equal(await page.evaluate(() => probe.results.explicit), undefined, 'explicit flush waits for ownership');
   await holder.evaluate(() => window.release());
   await page.waitForFunction(() => probe.results.explicit === 'done');
@@ -96,22 +98,22 @@ document.body.dataset.ready = 'true';`;
   await holder.waitForFunction(() => window.held);
   requests.length = 0;
   await page.evaluate(() => { probe.flush('emptyBackground', true); probe.flush('emptyExplicit'); });
-  await page.waitForFunction(async () => (await navigator.locks.query()).pending.length === 1);
+   await waitForProbe(page, async () => (await navigator.locks.query()).pending.length === 1);
   assert.equal(await page.evaluate(() => probe.results.emptyExplicit), undefined);
   await holder.evaluate(() => window.release());
   await page.waitForFunction(() => probe.results.emptyExplicit === 'done');
   assert.ok(requests.includes('pull'), 'no-outbox explicit flush cannot mistake a skipped attempt for a baseline');
   // Ordinary edits must drain from committed IndexedDB notifications without
   // a caller remembering flushCloud or a periodic timer.
-   const editOutbox = await page.evaluate(() => probe.write(120));
+   const editOutbox = await page.evaluate(() => probe.write(60));
   assert.ok(editOutbox.length, 'committed edit must create its durable outbox before wakeup');
-   await page.waitForFunction(async () => (await probe.value())?.seconds === 120 && await probe.pending() === 0);
+   await waitForProbe(page, async () => (await probe.value())?.seconds === 120 && (await probe.pending()) === 0);
   try {
     const records = new CloudRecords(store);
      assert.equal(records.get(owner, 'studyDays', '2026-11-03').seconds, 120, JSON.stringify({ editOutbox, requests, local: await page.evaluate(() => probe.value()) }));
      const before = records.get(owner, 'studyDays', '2026-11-03');
      records.apply(owner, [{ id: 'external-learning-update', table: 'studyDays', key: '2026-11-03', before, after: { date: '2026-11-03', seconds: 180 } }]);
-     await page.waitForFunction(async () => (await probe.value())?.seconds === 180);
+      await waitForProbe(page, async () => (await probe.value())?.seconds === 180);
   } finally { store.close(); }
   await page.waitForTimeout(500);
   requests.length = 0;

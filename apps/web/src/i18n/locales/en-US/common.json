@@ -1,5 +1,11 @@
 {
   "appTitle": "DeepStudent Go",
+  "localHistory": {
+    "open": "Export local history",
+    "close": "Close local history export",
+    "loading": "Loading local export tools…",
+    "loadFailed": "Local export tools could not load. Reconnect to the site and refresh to retry; your originals are unchanged."
+  },
   "settings": "Settings",
   "board": {
     "title": "Board",

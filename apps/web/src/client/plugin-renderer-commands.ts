@@ -1,18 +1,25 @@
 import type { PluginCatalog } from '../plugins/catalog';
 import { cloud } from '../cloud/state';
 import { callPluginAction } from './plugins';
+import { accountLifetime } from './account-lifecycle';
 
 /** Explicit application command seams, not capabilities handed to plugins. */
 export async function readRendererPluginCatalog(): Promise<PluginCatalog> {
+  if (!cloud.enabled || !cloud.userId) throw new Error('client_unauthenticated');
+  const lifetime = accountLifetime(cloud.userId);
   const { serverRuntime, isCurrentServerRuntime } = await import('./bootstrap');
-  const runtime = await serverRuntime(cloud.userId);
+  lifetime.assertCurrent();
+  const runtime = await serverRuntime(lifetime.account);
   const value = (await runtime.read({ kind: 'catalog' })).value;
   if (!isCurrentServerRuntime(runtime)) throw new Error('plugin_session_changed');
   return value as unknown as PluginCatalog;
 }
 export async function saveRendererPluginLayout(content: string, expected: string, revision: number) {
+  if (!cloud.enabled || !cloud.userId) throw new Error('client_unauthenticated');
+  const lifetime = accountLifetime(cloud.userId);
   const { serverRuntime, isCurrentServerRuntime } = await import('./bootstrap');
-  const runtime = await serverRuntime(cloud.userId);
+  lifetime.assertCurrent();
+  const runtime = await serverRuntime(lifetime.account);
   let value;
   try { value = await runtime.savePluginLayout({ content, expected, revision, operationId: crypto.randomUUID() }); }
   catch (error) {

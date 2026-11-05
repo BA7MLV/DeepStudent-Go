@@ -15,6 +15,8 @@ import { EMPTY_WRONGBOOK, applyAttempt, writeQuestion, parseWrongbook } from '..
 import { readLearningMarkdown } from '../apps/api/src/plugins/learning-files.ts';
 import { ProjectRepository } from '../apps/api/src/projects/repository.ts';
 import { ResourceFiles } from '../apps/api/src/projects/resources.ts';
+import { ClientRuntimeDomain } from '../apps/api/src/realtime/domain.ts';
+import { pluginTool } from '../apps/api/src/plugins/tool.ts';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-learning-'));
 const dbPath = path.join(directory, 'db.sqlite'), systemRoot = path.join(directory, 'system');
@@ -71,9 +73,35 @@ try {
   reconcileLearningResults(store); reconcileLearningResults(store);
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM plugin_learning_receipts WHERE task_id=?').get(started.id).n, 1);
   assert.equal(invoke('cards-account', 'learning.results', { materialId: 'a' }).tasks.length, 0, 'task projections are instance scoped');
-  invoke('cards-a', 'cards.update', { materialId: 'a', id: cards.cards[0].id, status: 1 });
+  invoke('cards-a', 'cards.update', { materialId: 'a', id: cards.cards[0].id, expected: 0, status: 1 });
   assert.equal(records.get(owner, 'cards', cards.cards[0].id).status, 1, 'the existing domain record is updated');
-  assert.throws(() => invoke('cards-a', 'cards.update', { materialId: 'a', id: 11, status: 1 }), /not_found/);
+  assert.throws(() => invoke('cards-a', 'cards.update', { materialId: 'a', id: 11, expected: 0, status: 1 }), /denied/);
+  assert.throws(() => invoke('cards-a', 'cards.update', { materialId: 'a', id: cards.cards[0].id, expected: 0, status: 2 }), /sync_conflict/);
+  assert.throws(() => invoke('cards-a', 'cards.update', { materialId: 'a', id: cards.cards[0].id, status: 2 }), /invalid_plugin_arguments/);
+  // The panel, plugin and Bot must agree about the user's original baseline.
+  const domain = new ClientRuntimeDomain(store, service);
+  try {
+    const cardId = cards.cards[0].id;
+    const edit = { operationId: crypto.randomUUID(), edits: [{ kind: 'reviewCard', courseId: 'a', cardId, expected: 0, status: 2, mutationId: crypto.randomUUID() }] };
+    await assert.rejects(domain.editLearning(owner, edit), error => error.code === 'client/record-conflict');
+    edit.edits[0].expected = 1;
+    const receipt = await domain.editLearning(owner, edit);
+    const bot = pluginTool(service);
+    const args = { operation: 'invoke', pluginId: 'flashcards', instanceId: 'cards-a', revision: 1, actionId: 'update', args: { materialId: 'a', id: cardId, expected: 1, status: 1 } };
+    await assert.rejects(bot.execute(args, { owner, checkActive() {} }), /sync_conflict/);
+    args.args.expected = 2;
+    await bot.execute(args, { owner, checkActive() {} });
+    assert.equal(records.get(owner, 'cards', cardId).status, 1);
+    assert.deepEqual(await domain.editLearning(owner, edit), receipt, 'lost panel reply uses original receipt');
+    assert.equal(records.get(owner, 'cards', cardId).status, 1, 'receipt replay must not undo a later Bot review');
+    await assert.rejects(domain.editLearning(other, { ...edit, operationId: crypto.randomUUID() }), /Domain request failed/);
+    await assert.rejects(domain.editLearning(owner, { ...edit, operationId: crypto.randomUUID(), edits: [{ ...edit.edits[0], courseId: 'b' }] }), /Domain request failed/);
+    const command = { pluginId: 'flashcards', instanceId: 'cards-a', revision: 1, method: 'cards.update', args: { materialId: 'a', id: cardId, expected: 1, status: 2 }, operationId: crypto.randomUUID() };
+    const pluginReceipt = await domain.command(owner, command);
+    await bot.execute(args, { owner, checkActive() {} });
+    assert.deepEqual(await domain.command(owner, command), pluginReceipt, 'lost plugin reply uses original receipt');
+    assert.equal(records.get(owner, 'cards', cardId).status, 1);
+  } finally { domain.close(); }
   assert.throws(() => invoke('cards-a', 'cards.generate', { materialId: 'a', clientNonce: 'overwrite' }), /replace_conflict/);
   assert.throws(() => invoke('cards-a', 'cards.generate', { materialId: 'a', clientNonce: 'stale', replaceRevision: cards.revision }), /replace_conflict/);
   const reviewed = invoke('cards-a', 'cards.list');

@@ -1,7 +1,7 @@
 // B 站字幕的「选哪路当主语言 / 怎么落库」纯逻辑（不碰网络与数据库，便于 Node 单测）。
 
-import type { BiliSubtitleItem } from './dmview';
-import type { Cue } from '../utils/vtt';
+import type { BiliSubtitleItem } from './dmview.js';
+import type { Cue } from '../utils/vtt.js';
 
 /**
  * 语言优先级：越小越优先。

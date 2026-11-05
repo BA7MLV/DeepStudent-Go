@@ -717,7 +717,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
 
   const runActions: MenuAction[] = [
     { key: 'stop', label: t('botHome.stop'), icon: <Sym name="stop" />, disabled: !activeBusy, onAction: () => void stop() },
-    ...(!projectId ? [{ key: 'permissions', label: t('botHome.permissions'), icon: <Sym name="tune" />, onAction: () => openSettings(cloud.enabled ? 'bot' : 'agent') }] : []),
+    ...(!projectId ? [{ key: 'permissions', label: t('botHome.permissions'), icon: <Sym name="tune" />, onAction: () => openSettings('bot') }] : []),
     ...(!projectId ? [{ key: 'mcp', label: ts('mcp.scope'), icon: <Sym name="extension" />, disabled: !active, onAction: () => setMcpOpen(true) }] : []),
   ];
   const threadMenu: MenuAction[] = activeSummary ? [
@@ -810,7 +810,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       onFiles={addFiles}
       onFocus={followEnd}
       onScope={active && !projectId ? () => setMcpOpen(true) : undefined}
-      onSettings={() => projectId ? setSettingsOpen(true) : openSettings(cloud.enabled ? 'bot' : 'agent')}
+      onSettings={() => projectId ? setSettingsOpen(true) : openSettings('bot')}
       attachLabel={t('botHome.attach')}
         accessory={<>
           <TaskModelPicker sessionId={activeId} />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { reviewCard } from '../client/learning';
 import { Button, Tooltip } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { db, type CardRow } from '../store/db';
@@ -89,19 +90,18 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
     const status = keep ? 1 : 2;
     setRows((rs) => rs.map((r) => (r.id === card.id ? { ...r, status: status as 1 | 2 } : r)));
     setHistory((h) => [...h, card.id!]);
-    void assertPluginAvailable('flashcards').then(() => db.cards.update(card.id!, { status })).catch(e => setErrorText(formatCaughtError(e)));
+    void assertPluginAvailable('flashcards').then(() => reviewCard(card.id!, status, card.status)).catch(e => setErrorText(formatCaughtError(e)));
   }, [available]);
 
   const undo = useCallback(() => {
     if (!available) return;
-    setHistory((h) => {
-      const last = h[h.length - 1];
-      if (last == null) return h;
-      setRows((rs) => rs.map((r) => (r.id === last ? { ...r, status: 0 as const } : r)));
-       void assertPluginAvailable('flashcards').then(() => db.cards.update(last, { status: 0 })).catch(e => setErrorText(formatCaughtError(e)));
-      return h.slice(0, -1);
-    });
-  }, [available]);
+    const last = history[history.length - 1];
+    const card = rows.find(row => row.id === last);
+    if (!card) return;
+    setRows(rs => rs.map(row => row.id === last ? { ...row, status: 0 as const } : row));
+    setHistory(h => h.slice(0, -1));
+    void assertPluginAvailable('flashcards').then(() => reviewCard(card.id!, 0, card.status)).catch(e => setErrorText(formatCaughtError(e)));
+  }, [available, history, rows]);
 
   const doGenerate = async () => {
     setErrorText(null);

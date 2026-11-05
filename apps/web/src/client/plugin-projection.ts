@@ -1,8 +1,9 @@
 import type { ModelSnapshot } from '@wangke/client-core';
 import type { RuntimeRead } from '@wangke/contracts/client-runtime';
 import { cloud } from '../cloud/state';
-import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
+import { serverRuntime, isCurrentServerRuntime, onServerRuntimeDisposed } from './bootstrap';
 import type { PluginIdentity, PluginQuery } from './plugins';
+import { accountLifetime } from './account-lifecycle';
 
 export type PluginProjectionHook = (queries: PluginQuery[]) => ModelSnapshot;
 const loading: ModelSnapshot = Object.freeze({ status: 'loading' });
@@ -28,11 +29,13 @@ export function pluginProjectionSource(key: string): Source {
     subscribe(listener) {
       listeners.add(listener);
       if (!stop) {
+        if (!account || account !== cloud.userId) { publish({ status: 'error', error: 'plugin_session_changed' }); return () => { listeners.delete(listener); }; }
+        const lifetime = accountLifetime(account);
         const generation = ++incarnation;
         let off: (() => void) | undefined, release: (() => void) | undefined;
         stop = () => { ++incarnation; off?.(); release?.(); stop = undefined; };
         void serverRuntime(account).then(runtime => {
-          if (generation !== incarnation || !isCurrentServerRuntime(runtime) || account !== cloud.userId) return;
+          if (!lifetime.current() || generation !== incarnation || !isCurrentServerRuntime(runtime) || account !== cloud.userId) return;
           if (identity.revision === undefined) throw new Error('plugin_revision_required');
           const request = { kind: 'pluginQueries', ...identity, revision: identity.revision, queries } as Extract<RuntimeRead, { kind: 'pluginQueries' }>;
           const model = runtime.plugin(request);
@@ -50,4 +53,5 @@ export function pluginProjectionSource(key: string): Source {
   sources.set(key, source);
   return source;
 }
-window.addEventListener('wangke:bot-session-ended', () => { for (const source of sources.values()) source.reset(); sources.clear(); });
+const stopDisposal = onServerRuntimeDisposed(() => { for (const source of sources.values()) source.reset(); sources.clear(); });
+import.meta.hot?.dispose(stopDisposal);

@@ -29,11 +29,12 @@ import './handout-doc.css';
 import './md-table.css';
 import { apiUrl } from './api/base';
 import { consumeBootstrapLink } from './cloud/bootstrapLink';
+import DatabaseNotice from './cloud/DatabaseNotice';
 
 // Consume once, outside React rendering (including StrictMode), before API calls.
 const bootstrapSecret = consumeBootstrapLink(location, history);
 
-// 申请持久化存储，防止浏览器在空间紧张时清除 IndexedDB 中的视频/字幕数据
+// Preserve offline drafts, pending commands and historical source bytes.
 navigator.storage?.persist?.().catch(() => {});
 
 // 首帧之前就把主题挂到 <html> 上，避免深色用户先看到一下白底。
@@ -78,7 +79,7 @@ function Root() {
   React.useEffect(() => {
     applyFontScale(fontScale);
   }, [fontScale]);
-  return <AppLocaleProvider>{bootView}</AppLocaleProvider>;
+  return <AppLocaleProvider><DatabaseNotice />{bootView}</AppLocaleProvider>;
 }
 
 function render() {
@@ -94,20 +95,15 @@ async function boot() {
   try {
     const response = await fetch(apiUrl('/api/v1/cloud/status'), { cache: 'no-store' });
     const status = await response.json().catch(() => null);
-    if (!status?.cloud) {
-      if (response.status >= 500) throw new Error(i18n.t('serverUnavailable'));
-      const { default: App } = await import('./App'); bootView = <App />;
-    } else {
-      const [bootstrap, session] = await Promise.all([serverClient.bootstrapStatus(), serverClient.session()]);
-      if (session.authenticated && session.user) {
-        await startCloud(session.user.id);
-      }
-      window.addEventListener('cloud-session-expired', stopCloud);
-      bootView = <CloudGate initialized={bootstrap.initialized} authenticated={session.authenticated} hasPasskey={bootstrap.hasPasskey} initialSecret={bootstrap.initialized ? '' : bootstrapSecret} />;
-    }
+    if (!response.ok || status?.cloud !== true) throw new Error(i18n.t('serverUnavailable'));
+    const [bootstrap, session] = await Promise.all([serverClient.bootstrapStatus(), serverClient.session()]);
+    if (session.authenticated && session.user) await startCloud(session.user.id);
+    window.addEventListener('cloud-session-expired', stopCloud);
+    bootView = <CloudGate initialized={bootstrap.initialized} authenticated={session.authenticated} hasPasskey={bootstrap.hasPasskey} initialSecret={bootstrap.initialized ? '' : bootstrapSecret} />;
   } catch (error) {
     bootView = <CloudGate initialized authenticated={false} error={(error as Error).message} />;
   }
   render();
 }
+render();
 void boot();

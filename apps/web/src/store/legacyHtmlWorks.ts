@@ -1,4 +1,5 @@
 import { db } from './db';
+import { editMessage } from '../client/learning';
 import { splitAssistantContent } from '../utils/streamingHtml';
 import { artifactFences } from '../utils/artifactEdit';
 import { prepareInteractiveHtml } from '../utils/htmlAnswer';
@@ -14,8 +15,10 @@ function prepare(source: string): WidgetPayload {
  * here; ordinary examples call this only after the reader opens preview. */
 export async function openLegacyHtmlWork(source: string, rowId?: number): Promise<WidgetPayload> {
   if (rowId == null) return prepare(source);
-  return db.transaction('rw', db.chats, async () => {
-    const row = await db.chats.get(rowId);
+  const database = db;
+  const run = async () => {
+    const row = await database.chats.get(rowId);
+    if (database !== db) throw new Error('client_account_changed');
     if (!row || row.role !== 'assistant') throw new Error('原回答已删除，请回到当前会话');
     const sources = new Set(splitAssistantContent(row.content)
       .filter(block => block.kind === 'html' && block.closed).map(block => block.source));
@@ -26,9 +29,11 @@ export async function openLegacyHtmlWork(source: string, rowId?: number): Promis
     const previous = row.legacyHtmlWorks?.find(work => work.source === source);
     if (previous) { validateWidgetPayload(previous.payload); return previous.payload; }
     const payload = prepare(source);
-    await db.chats.update(rowId, { legacyHtmlWorks: [
+    const patch = { legacyHtmlWorks: [
       ...(row.legacyHtmlWorks ?? []).filter(work => sources.has(work.source)), { source, payload },
-    ] });
+    ] };
+    await editMessage(row, { ...row, ...patch });
     return payload;
-  });
+  };
+  return run();
 }

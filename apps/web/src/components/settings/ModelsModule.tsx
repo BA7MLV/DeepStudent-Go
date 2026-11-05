@@ -36,7 +36,7 @@ import { getModelMeta, isModelMetaStale, modelMetaInfo, refreshModelMeta, type M
 import { IconSwap, MotionDisclosure, ms } from '../motion';
 import { confirmDialog, Field, LoadingButton, SectionCard, Sym, toast } from '../../ui';
 import { ALL_SLOTS, refKey, type ModelFieldName } from './shared';
-import JevCard from './JevCard';
+import ContextCompressionCard from './ContextCompressionCard';
 import ModelLibrary from './ModelLibrary';
 import PromptCacheUsage from './PromptCacheUsage';
 import { modelLabel, modelsForSlot, savedModelsOf } from '../../store/modelLibrary';
@@ -1310,7 +1310,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
       </SectionCard>
 
        {!standalone && <PromptCacheUsage serverManaged={serverManaged} />}
-       <JevCard />
+        <ContextCompressionCard />
        </>}
     </>
   );
