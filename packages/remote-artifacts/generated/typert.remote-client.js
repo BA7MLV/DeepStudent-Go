@@ -633,17 +633,22 @@ const _wangke_remote_host_clientRuntime_receipt_parameter_0$schema = () => (_wan
 let _wangke_remote_host_clientRuntime_receipt_result$schema$value
 const _wangke_remote_host_clientRuntime_receipt_result$schema = () => (_wangke_remote_host_clientRuntime_receipt_result$schema$value ??= z.union([z.object({
   'status': z.literal("missing"),
+  'resourceScope': z.union([z.undefined(), z.string()]).optional(),
 }), z.object({
   'status': z.literal("pending"),
+  'resourceScope': z.union([z.undefined(), z.string()]).optional(),
 }), z.object({
   'status': z.literal("uncertain"),
   'code': z.string(),
+  'resourceScope': z.union([z.undefined(), z.string()]).optional(),
 }), z.object({
   'status': z.literal("completed"),
   'value': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema10())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema10()))]),
+  'resourceScope': z.union([z.undefined(), z.string()]).optional(),
 }), z.object({
   'status': z.literal("failed"),
   'code': z.string(),
+  'resourceScope': z.union([z.undefined(), z.string()]).optional(),
 })]))
 let _wangke_remote_host_clientRuntime_recordsPage_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_recordsPage_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_recordsPage_parameter_0$schema$value ??= z.number())
@@ -1108,6 +1113,11 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
   'text': z.string(),
   'expectedRevision': z.union([z.literal(null), z.string()]),
 })]),
+  'scope': z.union([z.undefined(), z.string()]).optional().describe('Persisted database identity: a restored/reset account must not receive an old browser\'s queued destructive operations. Absent on legacy commands.'),
+  'delivery': z.union([z.undefined(), z.object({
+  'stream': z.string(),
+  'sequence': z.number(),
+})]).optional().describe('Monotonic per browser stream, shared by its tabs. Progress is replacement state (not an increment); delayed older updates must not rewind it.'),
 }))
 let _wangke_remote_host_clientRuntime_resourceCommand_result$schema$value
 const _wangke_remote_host_clientRuntime_resourceCommand_result$schema = () => (_wangke_remote_host_clientRuntime_resourceCommand_result$schema$value ??= z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema16())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema16()))]))
@@ -2770,6 +2780,11 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0_strict$schem
   'text': z.string(),
   'expectedRevision': z.union([z.literal(null), z.string()]),
 })]),
+  'scope': z.union([z.undefined(), z.string()]).optional().describe('Persisted database identity: a restored/reset account must not receive an old browser\'s queued destructive operations. Absent on legacy commands.'),
+  'delivery': z.union([z.undefined(), z.strictObject({
+  'stream': z.string(),
+  'sequence': z.number(),
+})]).optional().describe('Monotonic per browser stream, shared by its tabs. Progress is replacement state (not an increment); delayed older updates must not rewind it.'),
 }))
 let _wangke_remote_host_clientRuntime_savePluginLayout_parameter_0_strict$schema$value
 const _wangke_remote_host_clientRuntime_savePluginLayout_parameter_0_strict$schema = () => (_wangke_remote_host_clientRuntime_savePluginLayout_parameter_0_strict$schema$value ??= z.strictObject({

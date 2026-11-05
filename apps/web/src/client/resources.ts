@@ -3,10 +3,11 @@ import type { ProjectDto } from '@wangke/contracts/projects';
 import { db } from '../store/db';
 import { cloud } from '../cloud/state';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
-import { request as binaryRequest } from '../api/serverClient';
+import { enqueueResourceCommand } from './resource-commands';
 import Dexie from 'dexie';
 import type { OutboxRow } from '../cloud/cache';
 import { encodeRecoveryValue } from '../cloud/recovery-export';
+import { serverClient } from '../api/serverClient';
 
 // Inspection authority is local and ephemeral; never serialize a Runtime (or
 // accept an imported JSON export) as permission to archive the live outbox.
@@ -75,7 +76,7 @@ export async function setReadingView(courseId: string, view: 'raw' | 'blocks') {
 async function recordCourseFact(operation: Extract<ResourceOperation, { kind: 'recordMediaDuration' | 'recordPlayback' | 'recordReadingPosition' | 'setReadingView' }>) {
   // The committed records projection owns cache revision/order. Do not replace
   // an entire course with a potentially late command response.
-  await resourceCommand(operation);
+  await enqueueResourceCommand(operation, undefined, undefined, true);
 }
 
 export async function uploadResource(projectId: string, path: string, blob: Blob): Promise<{ path: string; size: number }> {
@@ -86,37 +87,7 @@ export async function uploadResource(projectId: string, path: string, blob: Blob
 }
 
 async function dispatchResourceCommand(operation: ResourceOperation, blob?: Blob, operationId?: string) {
-  const owner = cloud.userId, database = db;
-  // Guest operations retain their identity across reconnects; hash arbitrary
-  // protocol IDs into the bounded command ID alphabet, never create a new write.
-  const stableId = operationId === undefined ? crypto.randomUUID() : Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(operationId))), byte => byte.toString(16).padStart(2, '0')).join('');
-  if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
-  const request: ResourceCommand = { operationId: `resource-${stableId}`, operation };
-  const key = `resource-command:${request.operationId}`;
-  // Retain the exact revision, path, text and operation id before any request.
-  // Unlike SQL preferences, filesystem operations are never auto-replayed.
-  const draft = { request, ...(blob ? { blob } : {}) };
-  await database.table('_cloudMeta').put({ id: key, value: { ...draft, state: 'queued' } });
-  try {
-    const runtime = await serverRuntime(owner);
-    if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
-    await database.table('_cloudMeta').put({ id: key, value: { ...draft, state: 'uncertain' } });
-    let result = await runtime.resourceCommand(request);
-    if (blob && operation.kind === 'upload') {
-      if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
-      result = await binaryRequest(`/projects/${encodeURIComponent(operation.projectId)}/uploads?operationId=${encodeURIComponent(request.operationId)}`,
-        { method: 'POST', body: blob, headers: { 'Content-Type': 'application/octet-stream' } });
-    }
-    if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
-    await database.transaction('rw', database.table('_cloudMeta'), async () => {
-      await database.table('_cloudMeta').put({ id: `resource-completed:${request.operationId}`, value: { ...draft, result, state: 'completed' } });
-      await database.table('_cloudMeta').delete(key);
-    });
-    return result;
-  } catch (error) {
-    if (database === db && owner === cloud.userId) await database.table('_cloudMeta').update(key, { 'value.lastError': String(error) });
-    throw error;
-  }
+  return enqueueResourceCommand(operation, blob, operationId);
 }
 
 export function followResources(projectId: string | undefined, path: string, changed: (directory: ResourceDirectory) => void, failed: (error: unknown) => void) {
@@ -172,6 +143,17 @@ export async function inspectResourceCommand(operationId: string) {
   const trash = (await runtime.read({ kind: 'resourceTrash' })).value;
   const directories: ResourceDirectory[] = [];
   const directoryErrors: { projectId?: string; error: string }[] = [];
+  let document: { text: string; revision?: string } | undefined;
+  if (operation.kind !== 'legacyReview' && 'text' in operation) {
+    try {
+      if (operation.kind === 'saveProjectText') document = await serverClient.projectText(operation.projectId, operation.path);
+      else if ('courseId' in operation) {
+        const value = (await runtime.read({ kind: 'courseDocument', courseId: operation.courseId })).value as { content?: string; text?: string };
+        const text = value.content ?? value.text;
+        if (typeof text === 'string') document = { text };
+      }
+    } catch { /* Missing/inaccessible targets must not hide the retained draft. */ }
+  }
   const inspectDirectory = async (projectId?: string) => {
     try { directories.push(await readResources(projectId)); }
     catch (error) {
@@ -187,7 +169,7 @@ export async function inspectResourceCommand(operationId: string) {
     if (operation.kind === 'move' && operation.targetProjectId !== projectId) await inspectDirectory(operation.targetProjectId);
   }
   if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
-  const detail = { owner, stored, receipt, directories, directoryErrors, trash };
+  const detail = { owner, stored, receipt, directories, directoryErrors, trash, document };
   inspections.set(detail, () => database === db && owner === cloud.userId && isCurrentServerRuntime(runtime));
   return detail;
 }
@@ -196,7 +178,7 @@ export async function archiveResourceCommand(detail: Awaited<ReturnType<typeof i
   const database = db;
   const current = inspections.get(detail);
   if (!current?.()) throw new Error('client_account_changed');
-  await database.transaction('rw', database.table('_cloudMeta'), async () => {
+  const archive = () => database.transaction('rw', database.table('_cloudMeta'), async () => {
     const stored = await database.table('_cloudMeta').get(detail.stored.id);
     if (!current()) throw new Error('client_account_changed');
     if (!stored || JSON.stringify(await Dexie.waitFor(encodeRecoveryValue(stored))) !== JSON.stringify(await Dexie.waitFor(encodeRecoveryValue(detail.stored)))) throw new Error('resource_command_changed');
@@ -205,6 +187,26 @@ export async function archiveResourceCommand(detail: Awaited<ReturnType<typeof i
     await database.table('_cloudMeta').delete(detail.stored.id);
     if (!current()) throw new Error('client_account_changed');
   });
+  // Archival must not race a queued automatic send. It neither cancels an
+  // already-dispatched request nor authorizes another one.
+  if (navigator.locks) await navigator.locks.request(`resource-commands:${detail.owner}`, archive);
+  else await archive();
+}
+
+/** Only an explicit merge from a current inspection may create a successor.
+ * Reusing the failed operation ID would violate its immutable original intent. */
+export async function saveResourceConflict(detail: Awaited<ReturnType<typeof inspectResourceCommand>>, text: string) {
+  const current = inspections.get(detail);
+  if (!current?.()) throw new Error('client_account_changed');
+  if (!detail.document || detail.stored.value.state !== 'conflict') throw new Error('resource_conflict_changed');
+  const operation = detail.stored.value.request.operation as ResourceOperation;
+  let successor: ResourceOperation;
+  if (operation.kind === 'saveProjectText' && detail.document.revision) successor = { ...operation, text, expectedRevision: detail.document.revision };
+  else if (operation.kind === 'saveCourseText' || operation.kind === 'saveMarkdown') successor = { ...operation, text, expected: detail.document.text, ...(operation.kind === 'saveMarkdown' ? { createOnly: false } : {}) };
+  else throw new Error('resource_conflict_not_editable');
+  await resourceCommand(successor);
+  if (!current()) throw new Error('client_account_changed');
+  await archiveResourceCommand(detail);
 }
 
 export async function exportResourceCommand(detail: Awaited<ReturnType<typeof inspectResourceCommand>>) {

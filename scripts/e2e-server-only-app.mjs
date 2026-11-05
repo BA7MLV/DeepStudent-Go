@@ -30,14 +30,29 @@ try {
   page.on('pageerror', error => evidence.errors.push(error.message));
   page.on('response', response => { if (response.status() >= 400 && /\/src\//.test(response.url())) evidence.failedModules.push(response.url()); });
   const historyRequests = [];
-  page.on('request', request => { if (/\/src\/cloud\/(HistoryRecovery|LocalHistoryExport|legacy-migration)\./.test(request.url())) historyRequests.push(request.url()); });
+   page.on('request', request => { if (/\/src\/cloud\/(HistoryRecovery|ResourceRecovery|LocalHistoryExport|legacy-migration)\./.test(request.url())) historyRequests.push(request.url()); });
   await page.goto(origin);
   await page.getByTestId('course-chat-page').waitFor({ timeout: 60000 });
   evidence.routes.push('authenticated main entry / course chat');
-  assert.deepEqual(historyRequests, [], 'normal authenticated boot must not load historical recovery');
+   assert.deepEqual(historyRequests, [], 'normal authenticated boot must not load historical recovery');
+   // Reproduce a browser with many retained resource commands. Normal routes
+   // must neither display their diagnostic controls nor discard/replay them.
+   await page.evaluate(async () => {
+     const { db } = await import('/src/store/db.ts');
+     await db.table('_cloudMeta').bulkPut(Array.from({ length: 39 }, (_, index) => {
+       const operationId = `resource-retained-${index}`;
+       return { id: `resource-command:${operationId}`, value: { state: 'uncertain', request: {
+         operationId, operation: { kind: 'saveProjectText', projectId: 'retained-project', path: `original-${index}.md`, text: `retained draft ${index}`, expectedRevision: null },
+       } } };
+     }));
+   });
+   await page.reload();
+   await page.getByTestId('course-chat-page').waitFor({ timeout: 60000 });
+   assert.equal(await page.getByRole('region', { name: '资源命令恢复', exact: true }).count(), 0);
   await page.evaluate(() => { location.hash = '/library'; });
   await page.getByTestId('resource-list').waitFor({ timeout: 30000 });
-  evidence.routes.push('resource library');
+   evidence.routes.push('resource library');
+   assert.equal(await page.getByRole('button', { name: /核对资源原命令/ }).count(), 0, 'library must not be flooded by recovery commands');
   await page.evaluate(() => { location.hash = '/settings/assistant'; });
   await page.getByRole('dialog').waitFor();
   await page.getByTestId('card-agent-instructions').waitFor();
@@ -47,11 +62,24 @@ try {
   evidence.routes.push('model settings / server compression');
   await page.evaluate(() => { location.hash = '/settings/data'; });
   await page.getByTestId('cloud-history-recovery').waitFor();
-  assert.deepEqual(historyRequests, [], 'opening data settings must not load recovery');
-  await page.getByRole('button', { name: '打开历史恢复', exact: true }).click();
-  await page.getByRole('button', { name: '核对历史收据并恢复可验证时长命令', exact: true }).waitFor();
-  evidence.routes.push('data settings / explicit history recovery');
-  await page.screenshot({ path: path.join(directory, 'authenticated-history.png'), fullPage: true });
+   assert.deepEqual(historyRequests, [], 'opening data settings must not load recovery');
+   const resourceWrites = [];
+   page.on('request', request => { if (/\/api\/clientRuntime\/resourceCommand$/.test(request.url())) resourceWrites.push(request.url()); });
+   await page.getByRole('button', { name: '打开历史恢复', exact: true }).click();
+   await page.getByRole('button', { name: '核对历史收据并恢复可验证时长命令', exact: true }).waitFor();
+   await page.locator('button[data-operation-id="resource-retained-38"]').waitFor();
+   assert.equal(await page.locator('button[data-operation-id]').count(), 39, 'all originals remain accessible in explicit recovery');
+   assert.deepEqual(resourceWrites, [], 'opening recovery must not replay file operations');
+   evidence.routes.push('data settings / explicit history recovery');
+   await page.screenshot({ path: path.join(directory, 'authenticated-history.png'), fullPage: true });
+   await page.getByRole('button', { name: '关闭历史恢复', exact: true }).click();
+   assert.equal(await page.locator('button[data-operation-id]').count(), 0);
+   assert.equal(await page.evaluate(async () => {
+     const { db } = await import('/src/store/db.ts');
+     const rows = await db.table('_cloudMeta').where('id').startsWith('resource-command:').toArray();
+     if (rows.some(row => row.value.request.operation.text !== `retained draft ${row.value.request.operationId.split('-').at(-1)}`)) throw new Error('original draft changed');
+     return rows.length;
+   }), 39, 'closing recovery must retain every original draft');
   assert.deepEqual(evidence.failedModules, []);
   assert.deepEqual(evidence.errors, []);
   console.log(`PASS authenticated full app, lazy routes/settings and demand-only recovery: ${directory}`);

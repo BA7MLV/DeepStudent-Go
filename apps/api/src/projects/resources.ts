@@ -4,6 +4,7 @@ import path from 'node:path';
 import { CloudRecords } from '../cloud/records.js';
 import { ProjectError } from './files.js';
 import { importBotAttachments } from './attachments.js';
+import { safeFileName } from '../cloud/file-names.js';
 import type { ProjectRepository } from './repository.js';
 import type { ResourceDirectory, ResourceEntry } from '@wangke/contracts/resources';
 import { RESOURCE_FOLDER_COLORS, type ResourceFolderColor } from '@wangke/contracts/resources';
@@ -202,7 +203,86 @@ export class ResourceFiles {
       this.remember(owner, course.id, projectId, filename, sourceId, preserveMetadata);
       if (edited) this.put(owner, 'files', course.id, null);
     }
+    this.importChatAttachments(owner);
     importBotAttachments(this.projects, this.filesDir, owner);
+  }
+  /** Accepted chat uploads are library files even if generation later fails.
+   * Draft uploads stay private. Receipts survive moves/deletion and prevent
+   * retries, forks and lazy history scans from resurrecting existing copies. */
+  private importChatAttachments(owner: string) {
+    const sources = this.db.prepare(`
+      SELECT DISTINCT f.id,f.storage_name,f.original_name,f.sha256,refs.session_id
+      FROM (
+        SELECT json_extract(c.value,'$.sessionId') session_id,json_extract(a.value,'$.serverId') file_id
+        FROM cloud_records c,json_each(c.value,'$.attachments') a
+        WHERE c.owner_id=? AND c.table_name='chats' AND json_extract(c.value,'$.role')='user'
+        UNION
+        SELECT json_extract(t.input,'$.sessionId'),json_extract(a.value,'$.serverId')
+        FROM cloud_tasks t,json_each(t.input,'$.attachments') a
+        WHERE t.owner_id=? AND t.kind='chat'
+      ) refs JOIN files f ON f.id=refs.file_id AND f.owner_id=?
+      JOIN cloud_records s ON s.owner_id=f.owner_id AND s.table_name='chatSessions' AND s.record_key=CAST(refs.session_id AS TEXT) AND s.value IS NOT NULL
+      WHERE NOT EXISTS (SELECT 1 FROM chat_resource_attachments r WHERE r.owner_id=f.owner_id AND r.session_id=refs.session_id AND r.file_id=f.id AND r.status='done')
+      ORDER BY refs.session_id,f.created_at,f.id
+    `).all(owner, owner, owner) as { id: string; storage_name: string; original_name: string; sha256: string; session_id: number }[];
+    for (const source of sources) {
+      const original = path.resolve(this.filesDir, source.storage_name);
+      if (path.dirname(original) !== path.resolve(this.filesDir) || !fs.existsSync(original)) continue;
+      let binding = this.db.prepare(`SELECT f.* FROM chat_resource_sessions s LEFT JOIN resource_folders f
+        ON f.owner_id=s.owner_id AND f.folder_id=s.folder_id WHERE s.owner_id=? AND s.session_id=?`).get(owner, source.session_id) as Folder | undefined;
+      // A deleted/moved-to-trash grouping is the user's decision, not a request
+      // to reconstruct it from the retained chat/task history.
+      if (binding && !binding.project_id) continue;
+      if (!binding) {
+        let root = this.db.prepare('SELECT project_id FROM chat_resource_roots WHERE owner_id=?').get(owner) as { project_id: string } | undefined;
+        if (!root) {
+          const names = new Set(this.projects.list(owner).map(item => item.name));
+          let name = '聊天附件', n = 2;
+          while (names.has(name)) name = `聊天附件 (${n++})`;
+          const project = this.projects.create(owner, name);
+          this.db.prepare('INSERT INTO chat_resource_roots VALUES(?,?)').run(owner, project.id);
+          root = { project_id: project.id };
+        }
+        if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(root.project_id, owner)) continue;
+        this.projects.assertIdle(root.project_id);
+        const session = this.records.get(owner, 'chatSessions', source.session_id);
+        const first = this.db.prepare("SELECT json_extract(input,'$.text') text FROM cloud_tasks WHERE owner_id=? AND kind='chat' AND json_extract(input,'$.sessionId')=? ORDER BY created_at LIMIT 1").get(owner, source.session_id) as { text?: string } | undefined;
+        const title = cleanName(String(session?.title && session.title !== '新会话' ? session.title : first?.text || '新会话')).slice(0, 40);
+        const directory = this.unique(root.project_id, '', title);
+        this.projects.files.mkdir(root.project_id, directory);
+        const folderId = this.folderId(owner, root.project_id, directory)!;
+        this.db.prepare('INSERT INTO chat_resource_sessions VALUES(?,?,?)').run(owner, source.session_id, folderId);
+        binding = this.folder(owner, folderId)!;
+      }
+      if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(binding.project_id, owner)) continue;
+      // Do not revive a directory removed outside the app either.
+      try { this.projects.files.list(binding.project_id, binding.path); }
+      catch (error) { if (error instanceof ProjectError && error.status === 404) continue; throw error; }
+      this.projects.writable(owner, binding.project_id); this.projects.assertIdle(binding.project_id);
+      let receipt = this.db.prepare('SELECT project_id,path,status FROM chat_resource_attachments WHERE owner_id=? AND session_id=? AND file_id=?')
+        .get(owner, source.session_id, source.id) as { project_id: string; path: string; status: string } | undefined;
+      const allocate = () => this.unique(binding!.project_id, binding!.path, safeFileName(source.original_name));
+      if (!receipt) {
+        receipt = { project_id: binding.project_id, path: allocate(), status: 'pending' };
+        this.db.prepare("INSERT INTO chat_resource_attachments VALUES(?,?,?,?,?,'pending')").run(owner, source.session_id, source.id, receipt.project_id, receipt.path);
+      }
+      if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(receipt.project_id, owner)) continue;
+      this.projects.writable(owner, receipt.project_id); this.projects.assertIdle(receipt.project_id);
+      const parent = path.posix.dirname(receipt.path);
+      const entry = this.projects.files.list(receipt.project_id, parent === '.' ? '' : parent).find(item => item.path === receipt!.path);
+      let installed = false;
+      if (entry?.kind === 'file') {
+        const file = this.projects.files.open(receipt.project_id, receipt.path);
+        try { installed = crypto.createHash('sha256').update(fs.readFileSync(file.fd)).digest('hex') === source.sha256; }
+        finally { fs.closeSync(file.fd); }
+      }
+      if (entry && !installed) {
+        receipt = { ...receipt, project_id: binding.project_id, path: allocate() };
+        this.db.prepare('UPDATE chat_resource_attachments SET project_id=?,path=? WHERE owner_id=? AND session_id=? AND file_id=?').run(receipt.project_id, receipt.path, owner, source.session_id, source.id);
+      }
+      if (!installed) this.projects.files.copy(receipt.project_id, receipt.path, original);
+      this.db.prepare("UPDATE chat_resource_attachments SET status='done' WHERE owner_id=? AND session_id=? AND file_id=?").run(owner, source.session_id, source.id);
+    }
   }
   private entry(projectId: string, filename: string) {
     const parent = path.posix.dirname(filename) === '.' ? '' : path.posix.dirname(filename);

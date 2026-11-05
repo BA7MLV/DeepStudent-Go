@@ -40,6 +40,7 @@ import { ProjectRepository } from './projects/repository.js';
 import { ProjectError } from './projects/files.js';
 import { registerProjectRoutes } from './projects/routes.js';
 import { ResourceFiles } from './projects/resources.js';
+import { recoverResourceCommands } from './realtime/resources.js';
 import { registerResourceRoutes } from './projects/resource-routes.js';
 import type { SandboxCleanup, SandboxExecutor } from './agent/sandbox.js';
 import { settleWithin } from './lifecycle.js';
@@ -132,6 +133,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   const study = new StudyTools(store, cloudConfig, filesDir, options.fetch);
   const runner = new BotRunner(store, { fetch: options.fetch, sandbox: options.sandbox, sandboxCleanup: options.sandboxCleanup, configuration: cloudConfig, mcp, projects, study, webSearch });
   projects.isActive = id => runner.isProjectActive(id);
+  if (!held) recoverResourceCommands(resources);
   const memoryWorker = new MemoryWorker(store, cloudConfig, options.fetch);
   const botService = new BotApplicationService(store, runner, projects);
   const boardFiles = new BoardFiles(store);
@@ -320,6 +322,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
       const directory = fs.openSync(path.dirname(activationFile!), 'r');
       try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
       held = false;
+      recoverResourceCommands(resources);
       runner.start(); memoryWorker.start(); gateway.start(); boardScheduler.start();
       const address = app.server.address();
       if (process.env.CLOUD_WORKER_DISABLED !== '1' && address && typeof address === 'object') cloudRunner.start(`http://127.0.0.1:${address.port}`);

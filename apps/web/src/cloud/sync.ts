@@ -14,6 +14,7 @@ import type { RuntimeRecordsPage } from '@wangke/contracts/client-runtime';
 import { migrateResourceOutbox } from '../client/resources';
 import { drainLearning, type LearningCommandRow } from '../client/learning';
 import { accountLifetime, type AccountLifetime } from '../client/account-lifecycle';
+import { startResourceCommands } from '../client/resource-commands';
 
 export const useCloudSync = create<{ pending: number; error: string; syncedAt: number; recordsRevision: number;
   queued: number; uncertain: number; conflicts: number; oldestPendingAt: number; cursor: number; highWater: number; rebuildReason: string;
@@ -351,6 +352,7 @@ export async function startCloud(owner: string) {
   guard();
   await startPreferences();
   guard();
+  startResourceCommands();
   const database = db;
   let closed = false;
   let lastLearningWake = 0;

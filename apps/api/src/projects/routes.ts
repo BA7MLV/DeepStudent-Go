@@ -9,6 +9,8 @@ import { ProjectError } from './files.js';
 import { ProjectRepository } from './repository.js';
 import { uploadedImageMime } from '../cloud/image.js';
 import { imageFileName, safeFileName } from '../cloud/file-names.js';
+import { journaledResourceCommand } from '../realtime/resource-workflows.js';
+import type { ResourceCommand } from '@wangke/contracts/resources';
 
 export function registerProjectRoutes(app: FastifyInstance, deps: {
   projects: ProjectRepository;
@@ -18,6 +20,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
   maxFileBytes: number;
 }) {
   const { projects } = deps;
+  const activeUploads = new Set<string>();
   const auth = (request: FastifyRequest, reply: FastifyReply) => {
     if (!['GET', 'HEAD'].includes(request.method) && !deps.checkOrigin(request, reply)) return null;
     return deps.requireAuth(request, reply);
@@ -111,7 +114,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
     const db = projects.store.db;
     const operationId = request.query.operationId;
     if (!operationId || !/^[a-zA-Z0-9_-]{16,100}$/.test(operationId)) throw new ProjectError('resource_upload_admission_required');
-    const receipt = db.prepare('SELECT status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(user.id, operationId) as { status: string; result: string } | undefined;
+    const receipt = db.prepare('SELECT digest,status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(user.id, operationId) as { digest: string; status: string; result: string } | undefined;
     if (!receipt) throw new ProjectError('resource_upload_admission_required');
     const admitted = JSON.parse(receipt.result);
     if (receipt.status === 'completed') {
@@ -119,12 +122,13 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
       request.raw.resume();
       return reply.send(admitted);
     }
+    if (receipt.status === 'failed') throw new ProjectError('resource_upload_rejected', 409);
     const operation = admitted.operation as Extract<import('@wangke/contracts/resources').ResourceOperation, { kind: 'upload' }>;
     if (operation?.kind !== 'upload' || operation.projectId !== request.params.id) throw new ProjectError('resource_upload_scope_denied', 403);
-    // Claim the one admitted transfer before awaiting bytes. An interrupted
-    // transfer is inspectable, never implicitly replayed by a second request.
-    if (admitted.phase !== 'admitted') throw new ProjectError('resource_upload_uncertain', 409);
-    db.prepare('UPDATE client_commands SET result=? WHERE owner_id=? AND operation_id=?').run(JSON.stringify({ operation, phase: 'receiving' }), user.id, operationId);
+    // Receive leases are released on stream failure or process recovery. No
+    // public file changes until validated bytes enter the journaled commit.
+    const uploadKey = `${user.id}:${operationId}`;
+    if (activeUploads.has(uploadKey) || admitted.phase !== 'admitted') throw new ProjectError('resource_upload_in_progress', 409);
     const declared = request.headers['content-length'];
     if (!(request.body instanceof Readable) || (declared !== undefined && (!Number.isSafeInteger(Number(declared)) || Number(declared) > deps.maxFileBytes))) throw new ProjectError('file_too_large_or_invalid', 413);
     // Stage outside all sandbox mounts. Commit only after the stream is complete
@@ -132,6 +136,9 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
     const staging = path.join(path.dirname(projects.files.root), '.project-uploads');
     fs.mkdirSync(staging, { recursive: true, mode: 0o700 });
     const temporary = path.join(staging, crypto.randomUUID());
+    const claimed = db.prepare("UPDATE client_commands SET result=? WHERE owner_id=? AND operation_id=? AND status='pending' AND result=?").run(JSON.stringify({ ...admitted, phase: 'receiving' }), user.id, operationId, receipt.result);
+    if (!claimed.changes) throw new ProjectError('resource_upload_in_progress', 409);
+    activeUploads.add(uploadKey);
     let size = 0;
     const hash = crypto.createHash('sha256');
     try {
@@ -148,14 +155,27 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
       const mime = await uploadedImageMime(temporary, leaf, 'application/octet-stream');
       const filename = requested.slice(0, split) + (mime ? imageFileName(leaf, mime, '图片') : safeFileName(leaf));
       writable(user.id, request.params.id);
-      projects.files.installUpload(request.params.id, filename, temporary);
       const result = { kind: 'resourceUpload', projectId: request.params.id, path: filename, size, sha256: operation.sha256 };
-      projects.store.transaction(() => {
-        db.prepare("UPDATE client_commands SET status='completed',result=? WHERE owner_id=? AND operation_id=?").run(JSON.stringify(result), user.id, operationId);
-        db.prepare("INSERT INTO client_changes(owner_id,domain,entity) VALUES(?,'resources',?)").run(user.id, operationId);
+      journaledResourceCommand({ projects }, user.id,
+        (admitted.command ?? { operationId, operation }) as ResourceCommand, receipt.digest, '', () => {
+        writable(user.id, request.params.id);
+        projects.files.installUpload(request.params.id, filename, temporary);
         audit(user.id, 'resource.upload.committed', request.params.id);
+        return result;
       });
       return reply.code(201).send(result);
-    } finally { fs.rmSync(temporary, { force: true }); }
+    } catch (error) {
+      if (error instanceof ProjectError && ['resource_upload_content_mismatch', 'file_too_large_or_invalid', 'invalid_project_path'].includes(error.code)) {
+        db.prepare("UPDATE client_commands SET status='failed',error=? WHERE owner_id=? AND operation_id=? AND status='pending'").run(error.code, user.id, operationId);
+      }
+      throw error;
+    } finally {
+      activeUploads.delete(uploadKey);
+      const current = db.prepare('SELECT status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(user.id, operationId) as { status: string; result: string };
+      if (current?.status === 'pending' && !db.prepare('SELECT 1 FROM resource_workflows WHERE owner_id=? AND operation_id=?').get(user.id, operationId)) {
+        db.prepare('UPDATE client_commands SET result=? WHERE owner_id=? AND operation_id=?').run(JSON.stringify({ ...admitted, phase: 'admitted' }), user.id, operationId);
+      }
+      fs.rmSync(temporary, { force: true });
+    }
   });
 }

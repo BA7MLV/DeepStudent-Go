@@ -644,7 +644,25 @@ export class DatabaseStore {
          // Schema identity must include the learning result journal before a
          // server/plugin starts; runtime activation must not mutate the schema.
          ensureLearningResults(this);
-         migrateFileIntents(this.db);
+          migrateFileIntents(this.db);
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS chat_resource_roots (
+              owner_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+              project_id TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chat_resource_sessions (
+              owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              session_id INTEGER NOT NULL, folder_id INTEGER NOT NULL,
+              PRIMARY KEY(owner_id,session_id)
+            );
+            CREATE TABLE IF NOT EXISTS chat_resource_attachments (
+              owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+              session_id INTEGER NOT NULL, file_id TEXT NOT NULL,
+              project_id TEXT NOT NULL, path TEXT NOT NULL,
+              status TEXT NOT NULL CHECK(status IN ('pending','done')),
+              PRIMARY KEY(owner_id,session_id,file_id)
+            );
+          `);
       } finally { expected.close(); }
     })();
   }

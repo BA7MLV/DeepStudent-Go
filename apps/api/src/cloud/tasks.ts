@@ -14,7 +14,9 @@ export const TASK_KINDS: CloudTaskKind[] = ['chat', 'qa', 'transcribe', 'handout
 export function taskDto(row: any): CloudTask {
   return { id: row.id, kind: row.kind, resource: row.resource, status: row.status, input: JSON.parse(row.input),
     progress: row.progress ? JSON.parse(row.progress) : null, result: row.result ? JSON.parse(row.result) : null,
-    error: row.error, createdAt: row.created_at, executor: row.executor ?? undefined,
+    // Media tasks now execute in the Node runtime. Persisted historical receipts
+    // must obey the current wire contract too, or one cover breaks watchTasks.
+    error: row.error, createdAt: row.created_at, executor: row.executor === 'media' ? 'node' : row.executor ?? undefined,
     ...(row.model_snapshot ? { frozenModel: JSON.parse(row.model_snapshot) } : {}),
     source: row.parent_run_id ? { kind: 'bot', ...(typeof row.bot_name === 'string' ? { name: row.bot_name } : {}) } : { kind: 'app' },
     ...(typeof row.resource_name === 'string' ? { resourceName: row.resource_name } : {}) };

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { attachmentMessage } from '@wangke/study-core/chat/attachments';
 import { compareChatRows } from '@wangke/study-core/chat-order';
 import { chatOnce, textOf } from '@wangke/study-core/model/client';
 import { messageTokens, replayTrace } from '@wangke/study-core/model/transcript';
@@ -98,11 +99,13 @@ function turnsOf(rows: Row[]): Row[][] {
 function cost(rows: Row[]) {
   return rows.reduce((sum, row) => {
     const trace = replayTrace(row as any);
-    return sum + (trace ? messageTokens(trace) : Math.ceil(row.content.length * 0.7));
+    return sum + (trace ? messageTokens(trace) : row.attachments?.length
+      ? messageTokens([attachmentMessage({ role: row.role, content: row.content, attachments: row.attachments })])
+      : Math.ceil(row.content.length * 0.7));
   }, 0);
 }
 function evidence(row: Row) {
-  const trace = replayTrace(row as any);
+  const trace = replayTrace(row as any) ?? (row.attachments?.length ? [attachmentMessage({ role: row.role, content: row.content, attachments: row.attachments })] : undefined);
   return { role: row.role, content: row.content, ...(trace ? { modelHistory: trace.map(({ role, content, tool_calls, tool_call_id }) => ({ role, content, tool_calls, tool_call_id })) } : {}) };
 }
 function unsafeTurn(turn: Row[]) {

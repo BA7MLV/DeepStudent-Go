@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./chat/attachments": { "types": "./src/chat/attachments.ts", "default": "./dist/chat/attachments.js" },
     "./media/text-cover": { "types": "./src/media/textCover.ts", "default": "./dist/media/textCover.js" },
     "./media/frame-policy": { "types": "./src/media/framePolicy.ts", "default": "./dist/media/framePolicy.js" },
     "./media/vad": { "types": "./src/media/vad.ts", "default": "./dist/media/vad.js" },

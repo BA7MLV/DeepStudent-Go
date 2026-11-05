@@ -53,12 +53,12 @@ export interface RuntimeCommand {
   args: { [key: string]: RuntimeJson };
 }
 /** Missing is not permission to repeat a side effect under a new operation id. */
-export type RuntimeReceipt =
+export type RuntimeReceipt = (
   | { status: 'missing' }
   | { status: 'pending' }
   | { status: 'uncertain'; code: string }
   | { status: 'completed'; value: RuntimeJson }
-  | { status: 'failed'; code: string };
+  | { status: 'failed'; code: string }) & { resourceScope?: string };
 
 export interface RuntimeFileIntent {
   id: string; path: string; content: string | null; expected: string | null; observed: string | null; current: string | null;

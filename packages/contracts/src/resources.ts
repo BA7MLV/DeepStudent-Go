@@ -48,4 +48,12 @@ export type ResourceOperation =
   | { kind: 'organizeCourses'; folders: { name: string; courseIds: string[] }[] }
   | { kind: 'moveLibrarySelection'; placements: { key: string; parent: number | null; target: number | null }[] }
   | { kind: 'saveProjectText'; projectId: string; path: string; text: string; expectedRevision: string | null };
-export interface ResourceCommand { operationId: string; operation: ResourceOperation }
+export interface ResourceCommand {
+  operationId: string; operation: ResourceOperation;
+  /** Persisted database identity: a restored/reset account must not receive an
+   * old browser's queued destructive operations. Absent on legacy commands. */
+  scope?: string;
+  /** Monotonic per browser stream, shared by its tabs. Progress is replacement
+   * state (not an increment); delayed older updates must not rewind it. */
+  delivery?: { stream: string; sequence: number };
+}

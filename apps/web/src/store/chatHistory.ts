@@ -4,6 +4,7 @@ import { cloud } from '../cloud/state';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { accountLifecycle } from '../client/account-lifecycle';
 import { drainLearning, type LearningCommandRow } from '../client/learning';
+import type { RuntimeTask } from '@wangke/contracts/client-runtime';
 
 export async function readChatHistory(sessionId: number) {
   return (await db.chats.where('sessionId').equals(sessionId).toArray()).sort(compareChatRows);
@@ -12,7 +13,7 @@ export async function readChatHistory(sessionId: number) {
 export const CHAT_PAGE_SIZE = 40;
 
 export interface ChatHistoryAdapter {
-  page(sessionId: number, before?: Pick<ChatRow, 'createdAt' | 'id'> & Partial<Pick<ChatRow, 'role'>>): Promise<{ rows: ChatRow[]; hasOlder: boolean }>;
+  page(sessionId: number, before?: Pick<ChatRow, 'createdAt' | 'id'> & Partial<Pick<ChatRow, 'role'>>): Promise<{ rows: ChatRow[]; hasOlder: boolean; tasks?: RuntimeTask[] }>;
 }
 
 export const serverChatHistory: ChatHistoryAdapter = {
@@ -38,7 +39,7 @@ export const serverChatHistory: ChatHistoryAdapter = {
     const page = await runtime.sessionPage(sessionId,
        before?.id == null ? undefined : { id: before.id, createdAt: before.createdAt, role: before.role });
     if (!accountCurrent() || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
-    return { hasOlder: page.hasOlder, rows: page.rows.map(row => row.data as unknown as ChatRow) };
+    return { hasOlder: page.hasOlder, tasks: page.tasks, rows: page.rows.map(row => row.data as unknown as ChatRow) };
   },
 };
 

@@ -10,8 +10,8 @@ import { useCloudActivity } from './activityStore';
 import { usePendingTaskCommands, retryPendingTaskCommand } from './tasks';
 import FileIntentRecovery from './FileIntentRecovery';
 import PreferenceRecovery from './PreferenceRecovery';
-import ResourceRecovery from './ResourceRecovery';
 import LearningRecovery from './LearningRecovery';
+import ResourceSaveNotice from './ResourceSaveNotice';
 
 export default function CloudActivity() {
   const { t } = useTranslation('settings', { keyPrefix: 'recovery' });
@@ -88,8 +88,8 @@ export default function CloudActivity() {
     {!online || error ? <p role="status" className="bg-surface p-3">{t(!online ? 'offline' : 'reconnecting')}{syncedAt ? ` ${t('lastConfirmed', { time: new Date(syncedAt).toLocaleString() })}` : ''}</p> : null}
     <FileIntentRecovery />
     <PreferenceRecovery />
-    <ResourceRecovery />
     <LearningRecovery />
+    <ResourceSaveNotice />
     {error ? <p role="alert" className="bg-surface p-3 text-danger">{error}</p> : null}
     {commands.map(({ command }) => <section key={command.operationId} role="alert" className="bg-surface p-3">
       <p>发送尚未确认。原命令已保留，未自动重复执行。</p>

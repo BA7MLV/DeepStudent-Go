@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { cloud } from './state';
 import { db } from '../store/db';
 import ExecutorRecovery from './ExecutorRecovery';
+import ResourceRecovery from './ResourceRecovery';
 import { preserveLegacyCloudData, reconcileLegacyReceipts } from './legacy-migration';
 
 /** This module is loaded only after the user opens Settings → Data → History.
@@ -44,6 +45,9 @@ export default function HistoryRecovery() {
     <p>核对收据是独立的联网操作。仅原收据缺失、整笔可验证的纯学习时长增量会以原 operationId 转入待提交命令；不会恢复通用 records 写入。</p>
     <button type="button" disabled={!ready || busy} onClick={() => void reconcile()}>{busy ? '正在核对…' : '核对历史收据并恢复可验证时长命令'}</button>
     {message ? <p role="status">{message}</p> : null}
-    {ready ? <ExecutorRecovery key={revision} /> : <p role="status">正在保全本地历史证据…</p>}
+    {ready ? <>
+      <ResourceRecovery />
+      <ExecutorRecovery key={revision} />
+    </> : <p role="status">正在保全本地历史证据…</p>}
   </div>;
 }

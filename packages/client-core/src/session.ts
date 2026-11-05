@@ -81,7 +81,8 @@ export class SessionTimelineModel<Message extends SessionMessage, Row extends Se
       const id = message.rowId ?? message.committedRowId;
       const row = (id == null ? undefined : rows.get(id)) ?? (message.taskId ? byTask.get(`${message.taskId}:${message.role === 'ai' ? 'assistant' : 'user'}`) : undefined);
       if (row) {
-        messages.push({ ...this.convert(row), key: message.key, streaming: false, syncPending: false });
+        const converted = this.convert(row);
+        messages.push({ ...converted, key: message.key, streaming: converted.streaming ?? false, syncPending: false });
         rows.delete(row.id!);
       } else if (message.rowId == null || message.syncPending || message.streaming) messages.push(message);
     }

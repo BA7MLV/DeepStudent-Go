@@ -9,6 +9,7 @@ import { SettingRow } from '../components/settings/controls';
 import ArchivedSessionsCard from '../components/settings/ArchivedSessionsCard';
 import { logoutCloud } from './logout';
 import ServerStorageCard from './ServerStorageCard';
+import { resumeResourceCommands, useResourceCommands } from '../client/resource-commands';
 const HistoryRecovery = lazy(() => import('./HistoryRecovery'));
 const LibraryImportFiles = lazy(() => import('./LibraryImportFiles'));
 
@@ -28,6 +29,8 @@ export default function DataSettings() {
   const sync = useCloudSync();
   const [busy, setBusy] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const resourceIssues = useResourceCommands(state => state.issues);
+  const resourcePending = useResourceCommands(state => state.pending);
   const [passkeys, setPasskeys] = useState<Array<{ id: string; createdAt: string }>>([]);
 
   const loadPasskeys = useCallback(async () => {
@@ -92,6 +95,12 @@ export default function DataSettings() {
   return (
     <>
       <ServerStorageCard />
+      {resourceIssues.length || resourcePending ? <SectionCard title="资料保存状态" testId="resource-save-status">
+        {resourcePending ? <p className="text-sm text-muted">有 {resourcePending} 项资料改动等待确认。系统会在恢复连接后继续处理，不会重复创建文件。</p> : null}
+        {resourceIssues.length ? <p className="text-sm">有 {resourceIssues.length} 项改动尚未完成。原稿保留在此浏览器。</p> : null}
+        <Button size="sm" variant="secondary" onPress={() => setHistoryOpen(true)}>查看保存详情</Button>
+        <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('resources', resumeResourceCommands)}>重新连接并确认</Button>
+      </SectionCard> : null}
       <SectionCard title="历史数据恢复" testId="cloud-history-recovery">
         <p className="text-sm text-muted">旧库仅按需读取，原稿和附件保留在此浏览器。查看与完整导出不要求服务器在线，不会自动重放历史操作。</p>
         <Button size="sm" variant="secondary" onPress={() => setHistoryOpen(value => !value)}>

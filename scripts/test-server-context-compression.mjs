@@ -92,6 +92,18 @@ try {
   assert.ok(store.db.prepare("SELECT COUNT(*) n FROM cloud_audit WHERE owner_id=? AND action LIKE 'model.%'").get(owner).n > 0);
   checks.push('real gateway + SQL CAS persistence + token calculation + no original message writes + latest two turns');
 
+  const attachmentFixture = create();
+  const attachmentRow = { ...attachmentFixture.rows[0], attachments: [{ id: 'legacy-file', name: 'evidence.txt', mimeType: 'text/plain', size: 20, text: 'ATTACHMENT_COMPRESSION_EVIDENCE' }] };
+  write('chats', attachmentRow.id, attachmentRow);
+  let sawAttachment = false;
+  await executeContextCompression(context(attachmentFixture, { beforeResponse: state => {
+    assert.ok(JSON.stringify(state.older_turns).includes('ATTACHMENT_COMPRESSION_EVIDENCE'));
+    sawAttachment = true;
+  } }));
+  assert.ok(sawAttachment, 'legacy attachment evidence must reach the context selector even without a model trace');
+  assert.deepEqual(records.get(owner, 'chats', attachmentRow.id), attachmentRow);
+  checks.push('attachment evidence without a model trace reaches compression selector and raw attachment remains intact');
+
   assert.throws(() => admitContextCompression(records, other, fixture.input), /session_not_found/);
   assert.throws(() => admitContextCompression(records, owner, { ...fixture.input, sessionId: 999999 }), /session_not_found/);
   for (const patch of [{ apiKey: 'forged' }, { owner: other }, { baseUrl: 'https://evil.invalid' }, { budget: -1 }, { force: 'yes' }, { expected: [{ id: 1, content: 'x', role: 'user' }] }, { modelSelection: { modelRef: { providerId: 'selector', model: 'native-selector', apiKey: 'bad' } } }]) assert.throws(() => admitContextCompression(records, owner, { ...fixture.input, ...patch }));

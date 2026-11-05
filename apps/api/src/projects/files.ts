@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ProjectFileDto, ProjectTextDto } from '@wangke/contracts/projects';
+import { ProjectFileJournal } from './file-journal.js';
 
 export class ProjectError extends Error {
   constructor(public code: string, public status = 400) { super(code); }
@@ -16,6 +17,23 @@ const textLimit = 1024 * 1024;
  * checked paths; callers serialize sandbox access on that platform. */
 export class ProjectFiles {
   readonly root: string;
+  private journal?: ProjectFileJournal;
+  withJournal<T>(journal: ProjectFileJournal, run: () => T): T {
+    if (this.journal) throw new Error('resource_journal_nested');
+    this.journal = journal;
+    try { return run(); } finally { this.journal = undefined; }
+  }
+  /** Logical locations are resolved again through pinned, no-follow parents on
+   * recovery; process-local /proc descriptors are never persisted. */
+  journalLocation<T>(id: string, value: string, run: (filename: string) => T): T {
+    this.checkId(id);
+    if (value) return this.parent(id, value, run);
+    return run(path.join(this.root, id));
+  }
+  ownJournalFile(filename: string) { this.workspaceOwner(filename); }
+  private matches(id: string, value: string, expected: string | null, actual: string) {
+    return expected === actual || this.journal?.accepts(id, value, expected, actual);
+  }
   constructor(root: string) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 });
     this.root = fs.realpathSync(root);
@@ -24,6 +42,7 @@ export class ProjectFiles {
   create(id: string) {
     this.checkId(id);
     const directory = path.join(this.root, id);
+    if (this.journal) { this.journal.directoryAt({ id, path: '' }); return; }
     fs.mkdirSync(directory, { mode: 0o700 });
     this.workspaceOwner(directory);
   }
@@ -160,7 +179,11 @@ export class ProjectFiles {
     return this.parent(id, value, file => {
       let stat: fs.Stats | undefined;
       try { stat = this.stat(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      if (stat?.isDirectory() || (stat ? revision(stat) !== expected : expected !== null)) throw new ProjectError('project_file_conflict', 409);
+      if (stat?.isDirectory() || (stat ? !this.matches(id, value, expected, revision(stat)) : expected !== null)) throw new ProjectError('project_file_conflict', 409);
+      if (this.journal) {
+        this.journal.replace({ id, path: value }, temporary => { fs.writeFileSync(temporary, text, { flag: 'wx', mode: 0o600 }); this.workspaceOwner(temporary); });
+        return { path: value, revision: revision(fs.statSync(file)) };
+      }
       const temporary = path.join(path.dirname(file), `.write-${crypto.randomUUID()}`);
       try {
         fs.writeFileSync(temporary, text, { flag: 'wx', mode: 0o600 });
@@ -172,7 +195,10 @@ export class ProjectFiles {
   }
 
   mkdir(id: string, value: string) {
-    this.parent(id, value, file => { fs.mkdirSync(file, { mode: 0o700 }); this.workspaceOwner(file); });
+    this.parent(id, value, file => {
+      if (this.journal) this.journal.directoryAt({ id, path: value });
+      else { fs.mkdirSync(file, { mode: 0o700 }); this.workspaceOwner(file); }
+    });
   }
 
   installUpload(id: string, value: string, temporary: string) {
@@ -180,6 +206,10 @@ export class ProjectFiles {
       try { fs.lstatSync(file); throw new ProjectError('project_file_exists', 409); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       this.workspaceOwner(temporary);
+      if (this.journal) {
+        this.journal.replace({ id, path: value }, target => { fs.copyFileSync(temporary, target, fs.constants.COPYFILE_EXCL); this.workspaceOwner(target); });
+        return;
+      }
       this.installNew(temporary, file);
     });
   }
@@ -195,9 +225,13 @@ export class ProjectFiles {
     return this.parent(id, value, file => {
       let stat: fs.Stats | undefined;
       try { stat = this.stat(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      if (stat?.isDirectory() || (stat ? revision(stat) !== expected : expected !== null)) throw new ProjectError('project_file_conflict', 409);
+      if (stat?.isDirectory() || (stat ? !this.matches(id, value, expected, revision(stat)) : expected !== null)) throw new ProjectError('project_file_conflict', 409);
       const input = fs.lstatSync(source);
       if (!input.isFile() || input.nlink !== 1) throw new ProjectError('project_path_denied', 403);
+      if (this.journal) {
+        this.journal.replace({ id, path: value }, temporary => { fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL); fs.chmodSync(temporary, 0o600); this.workspaceOwner(temporary); });
+        return;
+      }
       const temporary = path.join(path.dirname(file), `.write-${crypto.randomUUID()}`);
       try {
         fs.copyFileSync(source, temporary, fs.constants.COPYFILE_EXCL);
@@ -211,23 +245,28 @@ export class ProjectFiles {
     if (id === targetId && (target === value || target.startsWith(`${value}/`))) throw new ProjectError('invalid_project_path');
     this.parent(id, value, source => this.parent(targetId, target, destination => {
       const stat = this.stat(source);
-      if (revision(stat) !== expected) throw new ProjectError('project_file_conflict', 409);
+      if (!this.matches(id, value, expected, revision(stat))) throw new ProjectError('project_file_conflict', 409);
       try { fs.lstatSync(destination); throw new ProjectError('project_file_exists', 409); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-      fs.renameSync(source, destination);
+      if (this.journal) this.journal.move({ id, path: value }, { id: targetId, path: target });
+      else fs.renameSync(source, destination);
     }));
   }
 
   remove(id: string, value: string, expected: string) {
     this.parent(id, value, file => {
       const stat = this.stat(file);
-      if (typeof expected !== 'string' || revision(stat) !== expected) throw new ProjectError('project_file_conflict', 409);
-      if (stat.isDirectory()) fs.rmdirSync(file); else fs.unlinkSync(file);
+      if (typeof expected !== 'string' || !this.matches(id, value, expected, revision(stat))) throw new ProjectError('project_file_conflict', 409);
+      if (this.journal) {
+        if (stat.isDirectory() && fs.readdirSync(file).length) throw new ProjectError('project_directory_not_empty', 409);
+        this.journal.remove({ id, path: value });
+      } else if (stat.isDirectory()) fs.rmdirSync(file); else fs.unlinkSync(file);
     });
   }
 
   removeWorkspace(id: string, commit: () => void) {
     this.checkId(id);
+    if (this.journal) { this.journal.remove({ id, path: '' }); commit(); return; }
     const source = path.join(this.root, id);
     const staging = path.join(path.dirname(this.root), '.deleted-projects');
     fs.mkdirSync(staging, { recursive: true, mode: 0o700 });

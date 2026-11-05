@@ -1,4 +1,5 @@
 import type { ChatRow } from '../store/db';
+import type { RuntimeTask } from '@wangke/contracts/client-runtime';
 import { cloud } from '../cloud/state';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
 import { accountLifecycle } from './account-lifecycle';
@@ -6,7 +7,7 @@ import { accountLifecycle } from './account-lifecycle';
 /** Browser adapter: transport lifetime belongs to the account Runtime; this
  * translates the wire row envelope, not conversation ordering or deduplication. */
 export function followServerSession(id: number, callbacks: {
-  changed(page: { rows: ChatRow[]; hasOlder: boolean }): Promise<void>;
+  changed(page: { rows: ChatRow[]; hasOlder: boolean; tasks: RuntimeTask[] }): Promise<void>;
   failed(error: string): void;
 }) {
   const owner = cloud.userId;
@@ -35,7 +36,7 @@ export function followServerSession(id: number, callbacks: {
             // keep their existing schema/renderer semantics in the adapter.
             return { ...row.data, id: row.id, sessionId: row.sessionId, createdAt: row.createdAt, role: row.role, content: row.content } as unknown as ChatRow;
           });
-          await callbacks.changed({ rows, hasOlder: projection.hasOlder });
+          await callbacks.changed({ rows, hasOlder: projection.hasOlder, tasks: projection.tasks });
         }
       })().catch(error => { if (current()) callbacks.failed(error instanceof Error ? error.message : String(error)); })
         .finally(() => { busy = false; if (pending && current()) refresh(); else pending = false; });

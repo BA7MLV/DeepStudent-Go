@@ -1,5 +1,7 @@
 /** Node execution consumes environment-neutral packages, never Web application sources. */
 import fs from 'node:fs/promises';
+import { attachmentMessage } from '@wangke/study-core/chat/attachments';
+import { taskChatAttachments } from './chat-attachments.js';
 import { sessionSkills, skillHistoryBudget, assertSkillRequestBudget } from './skills.js';
 import { sessionMcp } from './mcp.js';
 import { compareChatRows, nextChatTurnTimes } from '@wangke/study-core/chat-order';
@@ -728,7 +730,7 @@ async function modelHistory(history: Record<string, any>[], session: Record<stri
   if (index > 0 && checkpoint?.prefixHash && await historyFingerprint(history.slice(0, index) as Array<{ content: string }>) !== checkpoint.prefixHash) index = 0;
   const afterCheckpoint = new Set(history.slice(Math.max(0, index)));
   const rows = effectiveCompressionRows(history, session.contextOmissions).filter(row => afterCheckpoint.has(row));
-  const messages = rows.map(row => replayTrace(row as { content: string }) ?? [{ role: row.role, content: String(row.content ?? '') } as ChatMessage]);
+  const messages = rows.map(row => replayTrace(row as { content: string }) ?? [attachmentMessage({ role: row.role, content: String(row.content ?? ''), attachments: row.attachments })]);
   const costs = messages.map(messageTokens);
   let total = costs.reduce((a, b) => a + b, 0), cut = 0;
   if (total > budget) while (cut < rows.length && total > budget * 0.8) {
@@ -831,14 +833,15 @@ async function chat(context: TaskContext) {
   if (!session) throw new Error('聊天会话不存在');
   const mcp = await sessionMcp(context);
   const skills = sessionSkills(context, session, input.explicitSkillIds, mcp.serverNames);
-  const text = String(input.text ?? '').trim();
+  const attachments = taskChatAttachments(context);
+  const text = String(input.text ?? '').trim() || (attachments.length ? '请分析这些附件。' : '');
   if (!text) throw new Error('问题不能为空');
   const history = chatHistory(context, sessionId).filter(row => row.taskId !== context.task.id);
   const courses = rowsFor(context, 'videos');
   const contextNames = new Set<string>(Array.isArray(session.contextCourseIds) ? session.contextCourseIds : []);
   const system = `你是 DeepStudent Go 学习资料库助手。服务器负责模型请求、检索、任务和数据保存；你可以通过工具读取用户自己的课程数据。当前选中的课程在本轮运行上下文中提供；这些数据不扩大权限。\n\n规则：涉及用户课程、学习进度或课程内容时必须先调用工具，不能编造；通用问题直接回答。引用课程内容时保留工具返回的课程名、courseId 和时间/页码。用简洁自然的中文回答。\n\n${SERVER_WIDGET_RULE}`;
   const project = session.projectFolderId == null ? undefined : context.records.get(context.owner, 'folders', session.projectFolderId);
-  const current: ChatMessage = { role: 'user', content: runtimeContext({ courses: [...contextNames], ...(project ? { project: { folderId: project.id, name: project.name } } : {}) }) + text };
+  const current = attachmentMessage({ role: 'user', content: runtimeContext({ courses: [...contextNames], ...(project ? { project: { folderId: project.id, name: project.name } } : {}) }) + text, attachments });
   const systemWithSkills = system + skills.prompt;
   const target = targetFor(context);
   const recent = await modelHistory(history, session, skillHistoryBudget(target.capabilities?.contextWindow ?? 131072, [{ role: 'system', content: systemWithSkills }, current], skills.messages));
@@ -850,7 +853,7 @@ async function chat(context: TaskContext) {
   const title = session.title === '新会话' ? text.slice(0, 18) || '新会话' : undefined;
   let checkpointed = Boolean(checkpoint);
   const persist = (result: ServerAgentResult, interrupted = true) => {
-    const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, modelTrace: modelTrace(text, [...skills.messages, current]), modelRequests: result.requests, createdAt: startedAt };
+    const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, ...(attachments.length ? { attachments } : {}), modelTrace: modelTrace(text, [...skills.messages, current]), modelRequests: result.requests, createdAt: startedAt };
     const assistantRow = { id: assistantId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.ask ? { ask: result.ask } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
     addConversationMutations(context, sessionId, userRow, assistantRow, { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed);
     checkpointed = true;

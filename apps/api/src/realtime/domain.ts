@@ -11,6 +11,7 @@ import type { RuntimeDomain } from '@wangke/remote-host';
 import type { ResourceFiles } from '../projects/resources.js';
 import type { ResourceCommand } from '@wangke/contracts/resources';
 import { executeResourceCommand } from './resources.js';
+import { recoverResourceWorkflow, resourceScope, resourceFailure, throwResourceFailure } from './resource-workflows.js';
 import type { RuntimeRead, RuntimeSnapshot, RuntimeCommand, RuntimeJson, RuntimeFrame, RuntimeTaskFrame, RuntimeTasksFrame, RuntimeReceipt, BotJournalFrame } from '@wangke/contracts/client-runtime';
 import { diffRuntime } from '@wangke/contracts/runtime-projection';
 import type { DatabaseStore } from '../storage/database.js';
@@ -258,6 +259,11 @@ export class ClientRuntimeDomain implements RuntimeDomain {
     return run;
   }
   async receipt(owner: string, operationId: string): Promise<RuntimeReceipt> {
+    if (this.resources) recoverResourceWorkflow(this.resources, owner, operationId);
+    const receipt = await this.commandReceipt(owner, operationId);
+    return this.resources && operationId.startsWith('resource-') ? { ...receipt, resourceScope: resourceScope(this.resources, owner) } : receipt;
+  }
+  private async commandReceipt(owner: string, operationId: string): Promise<RuntimeReceipt> {
     if (!/^[a-zA-Z0-9_-]{16,100}$/.test(operationId)) throw new RemoteError('gateway/bad-request', 'Invalid operation id', {});
     const row = this.store.db.prepare('SELECT status,result,error FROM client_commands WHERE owner_id=? AND operation_id=?').get(owner, operationId) as { status: string; result: string; error: string } | undefined;
     if (!row) return { status: 'missing' };
@@ -494,7 +500,11 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   async resourceCommand(owner: string, request: ResourceCommand): Promise<RuntimeJson> {
     if (!this.resources) throw new Error('resource_domain_unavailable');
-    return executeResourceCommand(this.resources, owner, request);
+    try { return executeResourceCommand(this.resources, owner, request); }
+    catch (error) {
+      if (error instanceof RemoteError) throw error;
+      throwResourceFailure(resourceFailure(error).code);
+    }
   }
   /** Only synchronous SQL + durable file intents may use this transaction. */
   private async atomicCommand<T>(owner: string, operationId: string, payload: unknown, run: () => T): Promise<T> {

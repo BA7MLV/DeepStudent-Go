@@ -5,20 +5,28 @@ import type { RuntimeJson } from '@wangke/contracts/client-runtime';
 import type { ResourceFiles } from '../projects/resources.js';
 import { CloudRecords } from '../cloud/records.js';
 import { importLibrary } from './library-import.js';
+import { journaledResourceCommand, recoverResourceWorkflow, resourceScope, throwResourceFailure } from './resource-workflows.js';
 import type {} from './errors.js';
 
-/** Filesystem effects are not SQLite atomic. Persist admission before dispatch,
- * then never replay an uncertain outcome, even if the process died mid-handler. */
+/** Durable receipts + write-ahead filesystem recovery, never blind replay of an
+ * old handler without an identity-checked journal. */
 export function executeResourceCommand(resources: ResourceFiles, owner: string, request: ResourceCommand, binding = ''): RuntimeJson {
   const db = resources.projects.store.db;
   if (!/^[a-zA-Z0-9_-]{16,100}$/.test(request.operationId)) throw new RemoteError('gateway/bad-request', 'Invalid resource operation id', {});
+  if (request.scope !== undefined && request.scope !== resourceScope(resources, owner)) throw new RemoteError('client/domain', 'Resource database identity changed', { code: 'resource_scope_changed' });
+  if (request.delivery && (!['recordMediaDuration', 'recordPlayback', 'recordReadingPosition', 'setReadingView'].includes(request.operation.kind) || !/^[a-zA-Z0-9_-]{16,100}$/.test(request.delivery.stream) || !Number.isSafeInteger(request.delivery.sequence) || request.delivery.sequence < 1)) throw new RemoteError('gateway/bad-request', 'Invalid resource delivery sequence', {});
   const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item);
-  const digest = binding + crypto.createHash('sha256').update(canonical({ kind: 'resource', operation: request.operation })).digest('hex');
-  const old = db.prepare('SELECT digest,status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(owner, request.operationId) as { digest: string; status: string; result: string } | undefined;
+  const digest = binding + crypto.createHash('sha256').update(canonical({ kind: 'resource', operation: request.operation, ...(request.delivery ? { delivery: request.delivery } : {}) })).digest('hex');
+  let old = db.prepare('SELECT digest,status,result,error FROM client_commands WHERE owner_id=? AND operation_id=?').get(owner, request.operationId) as { digest: string; status: string; result: string; error: string } | undefined;
   if (old) {
     if (old.digest !== digest) throw new RemoteError('client/conflict', 'Resource operation id reused', {});
-    if (old.status !== 'completed') throw new RemoteError('client/uncertain', 'Resource operation requires inspection; it will not be repeated', {});
-    return JSON.parse(old.result);
+    if (old.status === 'completed') return JSON.parse(old.result);
+    if (old.status === 'pending' && request.operation.kind === 'upload' && JSON.parse(old.result ?? 'null')?.operation?.kind === 'upload') return { operationId: request.operationId, upload: true };
+    recoverResourceWorkflow(resources, owner, request.operationId);
+    old = db.prepare('SELECT digest,status,result,error FROM client_commands WHERE owner_id=? AND operation_id=?').get(owner, request.operationId) as typeof old;
+    if (old!.status === 'completed') return JSON.parse(old!.result);
+    if (old!.status === 'pending') throw new RemoteError('client/uncertain', 'Resource operation is awaiting safe recovery', {});
+    if (old!.error !== 'resource_retryable') throwResourceFailure(old!.error);
   }
   const operation = request.operation;
   if (operation.kind === 'importLibraryBlob') {
@@ -31,7 +39,14 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
   if (operation.kind === 'recordMediaDuration' || operation.kind === 'recordPlayback' || operation.kind === 'recordReadingPosition' || operation.kind === 'setReadingView' || operation.kind === 'setCourseSkills' || operation.kind === 'setCoursePinned' || operation.kind === 'setVideoSource' || operation.kind === 'importSubtitles' || operation.kind === 'pauseTranscription') {
     // Course progress/metadata are SQL domain facts, not filesystem handlers.
     // An old course without a placement is still scoped by authenticated owner.
-    return resources.projects.store.transaction(() => {
+    return db.transaction(() => {
+      const admitted = db.prepare('SELECT digest,status,result,error FROM client_commands WHERE owner_id=? AND operation_id=?').get(owner, request.operationId) as { digest: string; status: string; result: string; error: string } | undefined;
+      if (admitted) {
+        if (admitted.digest !== digest) throw new RemoteError('client/conflict', 'Resource operation id reused', {});
+        if (admitted.status === 'completed') return JSON.parse(admitted.result);
+        if (admitted.status === 'pending') throw new RemoteError('client/uncertain', 'Resource operation is awaiting safe recovery', {});
+        if (admitted.error !== 'resource_retryable') throwResourceFailure(admitted.error);
+      }
       const records = new CloudRecords(resources.projects.store);
       const course = records.get(owner, 'videos', operation.courseId);
       if (!course || course.fileDeleted) throw new RemoteError('client/forbidden', 'Course not available', {});
@@ -77,12 +92,24 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
         if (ids.length > 1000 || new Set(ids).size !== ids.length || ids.some(id => !Number.isSafeInteger(id) || id <= 0 || !records.get(owner, 'skills', id))) throw new RemoteError('gateway/bad-request', 'Invalid course skills', {});
         changes = { skillOverride: { pin: operation.pin, drop: operation.drop } };
       }
+      if (request.delivery) {
+        const { stream, sequence } = request.delivery;
+        // Playback's optional finished flag is a separate replacement field:
+        // a later position-only update must not suppress an earlier completion.
+        changes = Object.fromEntries(Object.entries(changes).filter(([field]) => {
+          const kind = `${operation.kind}:${field}`;
+          const previous = db.prepare('SELECT sequence FROM resource_fact_versions WHERE owner_id=? AND stream=? AND course_id=? AND kind=?').get(owner, stream, operation.courseId, kind) as { sequence: number } | undefined;
+          if (previous && previous.sequence >= sequence) return false;
+          db.prepare('INSERT INTO resource_fact_versions VALUES(?,?,?,?,?) ON CONFLICT(owner_id,stream,course_id,kind) DO UPDATE SET sequence=excluded.sequence').run(owner, stream, operation.courseId, kind, sequence);
+          return true;
+        }));
+      }
       const result = { ...course, ...changes };
-      records.apply(owner, [{ id: `resource-${request.operationId}`, table: 'videos', key: operation.courseId, before: course, after: result }]);
-      db.prepare("INSERT INTO client_commands(owner_id,operation_id,digest,status,result) VALUES(?,?,?,'completed',?)")
+      if (Object.keys(changes).length) records.apply(owner, [{ id: `resource-${request.operationId}`, table: 'videos', key: operation.courseId, before: course, after: result }]);
+      db.prepare("INSERT INTO client_commands(owner_id,operation_id,digest,status,result) VALUES(?,?,?,'completed',?) ON CONFLICT(owner_id,operation_id) DO UPDATE SET status='completed',result=excluded.result,error=NULL")
         .run(owner, request.operationId, digest, JSON.stringify(result));
       return result as RuntimeJson;
-    });
+    }).immediate();
   }
   if ('projectId' in operation && !['restore', 'deleteTrash'].includes(operation.kind)) resources.projects.get(owner, operation.projectId);
   if (operation.kind === 'move') resources.projects.writable(owner, operation.targetProjectId);
@@ -94,13 +121,27 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
      if (!Number.isSafeInteger(operation.size) || operation.size < 0 || !/^[a-f0-9]{64}$/.test(operation.sha256)
        || !operation.path || operation.path.length > 2048 || /[\\\u0000-\u001f\u007f]/.test(operation.path)
        || operation.path.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('invalid_resource_upload');
-     const admission = { operation, phase: 'admitted' };
-     db.prepare("INSERT INTO client_commands(owner_id,operation_id,digest,status,result) VALUES(?,?,?,'pending',?)")
-       .run(owner, request.operationId, digest, JSON.stringify(admission));
-     return { operationId: request.operationId, upload: true };
+      const admission = { operation, phase: 'admitted', resumable: 1, command: request };
+      return db.transaction(() => {
+        const existing = db.prepare('SELECT digest,status,result,error FROM client_commands WHERE owner_id=? AND operation_id=?').get(owner, request.operationId) as { digest: string; status: string; result: string; error: string } | undefined;
+        if (existing) {
+          if (existing.digest !== digest) throw new RemoteError('client/conflict', 'Resource operation id reused', {});
+          if (existing.status === 'completed') return JSON.parse(existing.result);
+          if (existing.status === 'pending') return { operationId: request.operationId, upload: true };
+          if (existing.error !== 'resource_retryable') throwResourceFailure(existing.error);
+        }
+        db.prepare("INSERT INTO client_commands(owner_id,operation_id,digest,status,result) VALUES(?,?,?,'pending',?) ON CONFLICT(owner_id,operation_id) DO UPDATE SET status='pending',result=excluded.result,error=NULL")
+          .run(owner, request.operationId, digest, JSON.stringify(admission));
+        return { operationId: request.operationId, upload: true };
+      }).immediate();
    }
-  db.prepare("INSERT INTO client_commands(owner_id,operation_id,digest,status) VALUES(?,?,?,'pending')").run(owner, request.operationId, digest);
-  try {
+  return journaledResourceCommand(resources, owner, request, digest, binding, () => {
+    // Repeat authorization under the writer lock; preflight happened before
+    // admission and another process may have archived/revoked the target.
+    if ('projectId' in operation && !['restore', 'deleteTrash'].includes(operation.kind)) resources.projects.get(owner, operation.projectId);
+    if (operation.kind === 'saveProjectText' || operation.kind === 'createDirectory') {
+      resources.projects.writable(owner, operation.projectId); resources.projects.assertIdle(operation.projectId);
+    }
     let result: unknown = { ok: true };
     switch (operation.kind) {
       case 'createFolder': {
@@ -124,13 +165,31 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
       case 'saveProjectText': result = resources.projects.files.write(operation.projectId, operation.path, operation.text, operation.expectedRevision); break;
     }
     const value = JSON.parse(JSON.stringify(result ?? null)) as RuntimeJson;
-    resources.projects.store.transaction(() => {
-      db.prepare("UPDATE client_commands SET status='completed',result=? WHERE owner_id=? AND operation_id=?").run(JSON.stringify(value), owner, request.operationId);
-      db.prepare("INSERT INTO client_changes(owner_id,domain,entity) VALUES(?,'resources',?)").run(owner, request.operationId);
-    });
     return value;
-  } catch (error) {
-    db.prepare('UPDATE client_commands SET error=? WHERE owner_id=? AND operation_id=?').run(error instanceof Error ? error.message : 'resource_failed', owner, request.operationId);
-    throw new RemoteError('client/uncertain', 'Resource handler started; inspect original draft, receipt and directory before retrying', {});
+  });
+}
+
+/** Boot recovery is bounded. Only new account commands with a proven rollback
+ * may resume; legacy journals and scoped executor capabilities never replay. */
+export function recoverResourceCommands(resources: ResourceFiles) {
+  const db = resources.projects.store.db;
+  const rows = db.prepare(`SELECT w.owner_id,w.operation_id,w.request,w.binding,w.attempts,c.status,c.error
+    FROM resource_workflows w JOIN client_commands c USING(owner_id,operation_id)
+    ORDER BY w.updated_at LIMIT 1000`).all() as { owner_id: string; operation_id: string; request: string | null; binding: string; attempts: number; status: string; error: string }[];
+  for (const row of rows) {
+    try {
+      recoverResourceWorkflow(resources, row.owner_id, row.operation_id);
+      const receipt = db.prepare('SELECT status,error FROM client_commands WHERE owner_id=? AND operation_id=?').get(row.owner_id, row.operation_id) as { status: string; error: string };
+      if (!row.binding && row.request && row.attempts < 6 && receipt.status === 'failed' && receipt.error === 'resource_retryable') {
+        executeResourceCommand(resources, row.owner_id, JSON.parse(row.request));
+      }
+    } catch { /* Preserve the durable evidence; another request may safely retry. */ }
+  }
+  // No file installation happens until the fully received upload enters its
+  // journaled SQL transaction. A process restart therefore releases abandoned
+  // receive leases, but never changes an unjournaled legacy transfer.
+  for (const row of db.prepare("SELECT owner_id,operation_id,result FROM client_commands WHERE status='pending' AND json_extract(result,'$.phase')='receiving' AND json_extract(result,'$.resumable')=1").all() as { owner_id: string; operation_id: string; result: string }[]) {
+    if (db.prepare('SELECT 1 FROM resource_workflows WHERE owner_id=? AND operation_id=?').get(row.owner_id, row.operation_id)) continue;
+    db.prepare('UPDATE client_commands SET result=? WHERE owner_id=? AND operation_id=?').run(JSON.stringify({ ...JSON.parse(row.result), phase: 'admitted' }), row.owner_id, row.operation_id);
   }
 }

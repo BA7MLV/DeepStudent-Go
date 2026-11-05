@@ -127,7 +127,9 @@ try {
   const projectText = await ctx.remote.clientRuntime.resourceCommand(projectTextCommand);
   assert.equal(projectText.ok, true);
   assert.deepEqual(await ctx.remote.clientRuntime.resourceCommand(projectTextCommand), projectText, 'project text replay uses original receipt');
-  assert.equal((await ctx.remote.clientRuntime.resourceCommand({ ...projectTextCommand, operationId: 'resource-domain-project-conflict', operation: { ...projectTextCommand.operation, text: 'stale competing draft' } })).error.code, 'client/uncertain');
+  const projectConflict = await ctx.remote.clientRuntime.resourceCommand({ ...projectTextCommand, operationId: 'resource-domain-project-conflict', operation: { ...projectTextCommand.operation, text: 'stale competing draft' } });
+  assert.equal(projectConflict.error.code, 'client/domain');
+  assert.equal(projectConflict.error.details.code, 'project_file_conflict', 'a known CAS rejection is not an uncertain filesystem effect');
   const savedProjectText = await fetch(new URL(`/api/v1/projects/${createdResource.value.id}/text?path=contained%2Fdraft.md`, base), { headers: { cookie } });
   assert.equal((await savedProjectText.json()).text, '# Exact project draft\n');
   const indexedDraft = (await ctx.remote.clientRuntime.read({ kind: 'resources', projectId: createdResource.value.id, path: 'contained', archived: true })).value.value.entries.find(entry => entry.name === 'draft.md');
@@ -251,8 +253,8 @@ try {
   assert.equal((await ctx.remote.clientRuntime.receipt('resource-domain-denied-000001')).value.status, 'missing');
   const traversalResource = { operationId: 'resource-domain-traversal-0001', operation: { kind: 'createDirectory', projectId: createdResource.value.id, path: '../escape' } };
   assert.equal((await ctx.remote.clientRuntime.resourceCommand(traversalResource)).ok, false);
-  assert.equal((await ctx.remote.clientRuntime.receipt(traversalResource.operationId)).value.status, 'uncertain');
-  assert.equal((await ctx.remote.clientRuntime.resourceCommand(traversalResource)).error.code, 'client/uncertain', 'uncertain filesystem dispatch is never repeated');
+  assert.equal((await ctx.remote.clientRuntime.receipt(traversalResource.operationId)).value.status, 'failed');
+  assert.equal((await ctx.remote.clientRuntime.resourceCommand(traversalResource)).error.details.code, 'invalid_project_path', 'known validation failures are stable, not manual recovery tasks');
   resourceControl.abort(); await resourceStream.return?.();
   const trashControl = new AbortController();
   const trashStream = ctx.remote.clientRuntime.watch({ kind: 'resourceTrash' }, trashControl.signal)[Symbol.asyncIterator]();

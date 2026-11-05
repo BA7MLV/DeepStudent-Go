@@ -53,6 +53,20 @@ export function migrateClientRuntime(db: Database.Database) {
   ]);
   db.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(34,?)').run(new Date().toISOString());
   }
+  db.exec(`CREATE TABLE IF NOT EXISTS resource_command_scopes (
+    owner_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, scope TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS resource_workflows (
+    owner_id TEXT NOT NULL, operation_id TEXT NOT NULL, request TEXT, binding TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(owner_id,operation_id),
+    FOREIGN KEY(owner_id,operation_id) REFERENCES client_commands(owner_id,operation_id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS resource_fact_versions (
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    stream TEXT NOT NULL, course_id TEXT NOT NULL, kind TEXT NOT NULL, sequence INTEGER NOT NULL,
+    PRIMARY KEY(owner_id,stream,course_id,kind)
+  );`);
   // Also repair the notification closure in already-created schema34 databases.
   installClientNotifications(db, [['cloud_permissions', 'ROW.owner_id', 'ROW.id']]);
   db.exec(`CREATE TABLE IF NOT EXISTS client_journal_floors (

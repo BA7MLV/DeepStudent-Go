@@ -20,3 +20,7 @@ for (const file of Object.keys(result.metafile.inputs)) {
   const relative = path.relative(repository, path.resolve(root, file)).split(path.sep).join('/');
   if (/^(?:src\/|apps\/web\/)/.test(relative)) throw new Error(`Web dependency in API runtime: ${file}`);
 }
+// Match production's native loader; tsx/bundling alone can hide broken ESM
+// imports in external workspace packages and otherwise break every chat task.
+const runtime = await import('../dist/apps/api/runtime/node.mjs');
+if (typeof runtime.executeNodeTask !== 'function') throw new Error('API task runtime did not load');

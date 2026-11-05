@@ -102,6 +102,15 @@ window.probe = {
   },
  resource: resourceCommand,
   resources: readResources,
+   async retainHistoricalResource(operation, binary=false) {
+     // New commands reconcile themselves. Seed an explicit historical review
+     // record to retain coverage of export/archive and stale inspection guards.
+     const rows=await db.table('_cloudMeta').where('id').startsWith('resource-completed:').toArray();
+     const latest=rows.filter(row=>row.value.kind===operation.kind).sort((a,b)=>b.value.confirmedAt-a.value.confirmedAt)[0];
+     if(!latest)throw new Error('missing confirmed resource');
+     if(binary){const bytes=new Uint8Array([0,255,127,42]);operation={...operation,sha256:Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),byte=>byte.toString(16).padStart(2,'0')).join('')};}
+     await db.table('_cloudMeta').put({id:'resource-command:'+latest.value.operationId,value:{state:'review',request:{operationId:latest.value.operationId,operation},...(binary?{blob:new Blob([new Uint8Array([0,255,127,42])],{type:'application/octet-stream'})}:{})}});
+   },
   async rejectStaleResourceInspection() {
     const pending = (await db.table('_cloudMeta').toArray()).find(row=>row.id.startsWith('resource-command:'));
     const detail = await inspectResourceCommand(pending.value.request.operationId);
@@ -266,11 +275,13 @@ document.body.dataset.ready = 'true';`;
     try { await probe.resource({kind:'createFolder',name:'Lost resource response'}); } catch {}
   });
   await page.unroute('**/api/clientRuntime/resourceCommand');
+  assert.equal((await page.evaluate(()=>probe.archive())).filter(row=>row.id.startsWith('resource-command:')).length,0,'lost response confirms automatically');
+  await page.evaluate(()=>probe.retainHistoricalResource({kind:'createFolder',name:'Lost resource response'}));
   await page.reload(); await page.locator('body[data-ready="true"]').waitFor({ timeout: 30000 });
   assert.equal(resourceSends, 1, 'reload never replays a possibly committed filesystem operation');
   await page.evaluate(() => probe.mountResources());
-  await page.getByRole('button', { name: /核对资源原命令/ }).click();
-  await page.getByText('文件操作不会自动重放。请核对原稿、原 revision、收据与当前目录。').waitFor();
+  await page.locator('button[data-operation-id]').click();
+  await page.getByText('未确认的原稿已保留。归档不会重新执行操作，也不会覆盖服务器文件。').waitFor();
   const resourceDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: '导出资源完整原稿' }).click();
   const resourceExport = await resourceDownload; await resourceExport.saveAs(path.join(directory,'resource-recovery-export.json'));
@@ -291,6 +302,7 @@ document.body.dataset.ready = 'true';`;
     try { await probe.resource({kind:'saveProjectText',projectId,path:'original.md',text:'# Retained project text\n',expectedRevision:null}); } catch {}
   }, textProject.id);
   await page.unroute('**/api/clientRuntime/resourceCommand');
+  await page.evaluate(projectId=>probe.retainHistoricalResource({kind:'saveProjectText',projectId,path:'original.md',text:'# Retained project text\n',expectedRevision:null}),textProject.id);
   // The original target is now trashed. Directory inspection may fail, but must
   // not make the durable draft and committed receipt impossible to export.
   await page.evaluate(projectId => probe.resource({kind:'trash',projectId}), textProject.id);
@@ -298,8 +310,8 @@ document.body.dataset.ready = 'true';`;
   assert.equal(textSends, 1);
   assert.deepEqual(await page.evaluate(() => probe.rejectStaleResourceInspection()), {error:'client_account_changed',retained:true}, 'same-account new runtime generation must reject stale archive authority');
   await page.evaluate(() => probe.mountResources());
-  await page.getByRole('button', {name:/核对资源原命令/}).click();
-  await page.getByText('文件操作不会自动重放。请核对原稿、原 revision、收据与当前目录。').waitFor();
+  await page.locator('button[data-operation-id]').click();
+  await page.getByText('未确认的原稿已保留。归档不会重新执行操作，也不会覆盖服务器文件。').waitFor();
   const textDownload = page.waitForEvent('download');
   await page.getByRole('button', {name:'导出资源完整原稿'}).click();
   await (await textDownload).saveAs(path.join(directory,'project-text-recovery.json'));
@@ -311,8 +323,8 @@ document.body.dataset.ready = 'true';`;
   await page.getByRole('button', {name:'确认核对并归档资源原稿（不重放）'}).click();
   await page.waitForFunction(async () => !(await probe.archive()).some(row=>row.id.startsWith('resource-command:')));
   assert.deepEqual(errors, []);
-  // Binary response is lost after actual install+receipt. Reload must retain
-  // the original Blob and inspect, not issue another transfer.
+  // Lost binary responses auto-confirm. Historical review exports still retain
+  // all original bytes without issuing another transfer.
   const uploadProject = await page.evaluate(() => probe.resource({kind:'createFolder',name:'Binary recovery'}));
   let binarySends=0;
   await page.route('**/api/v1/projects/*/uploads?operationId=*', async route => {
@@ -320,10 +332,11 @@ document.body.dataset.ready = 'true';`;
   });
   await page.evaluate(async projectId=>{try{await probe.upload(projectId);}catch{}},uploadProject.id);
   await page.unroute('**/api/v1/projects/*/uploads?operationId=*');
+  await page.evaluate(projectId=>probe.retainHistoricalResource({kind:'upload',projectId,path:'retained-upload.txt',size:4,sha256:'historical',contentType:'application/octet-stream'},true),uploadProject.id);
   await page.reload();await page.locator('body[data-ready="true"]').waitFor({timeout:30000});
   assert.equal(binarySends,1);
   await page.evaluate(()=>probe.mountResources());
-  await page.getByRole('button',{name:/核对资源原命令/}).click();
+  await page.locator('button[data-operation-id]').click();
   const binaryDownload=page.waitForEvent('download');await page.getByRole('button',{name:'导出资源完整原稿'}).click();
   await (await binaryDownload).saveAs(path.join(directory,'binary-resource-recovery.json'));
   const binaryEvidence=JSON.parse(fs.readFileSync(path.join(directory,'binary-resource-recovery.json'),'utf8'));
@@ -334,7 +347,7 @@ document.body.dataset.ready = 'true';`;
   const resourceTransaction=await page.evaluate(()=>probe.seedResourceLegacy());
   assert.equal((await page.evaluate(()=>probe.rows())).length,0);
   await page.reload();await page.locator('body[data-ready="true"]').waitFor({timeout:30000});await page.evaluate(()=>probe.mountResources());
-  await page.getByRole('button',{name:/核对资源原命令/}).click();
+  await page.locator('button[data-operation-id]').click();
   const legacyResourceDownload=page.waitForEvent('download');await page.getByRole('button',{name:'导出资源完整原稿'}).click();
   await (await legacyResourceDownload).saveAs(path.join(directory,'legacy-resource-recovery.json'));
   const legacyResource=JSON.parse(fs.readFileSync(path.join(directory,'legacy-resource-recovery.json'),'utf8'));
