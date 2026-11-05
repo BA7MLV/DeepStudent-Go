@@ -7,6 +7,9 @@ import path from 'node:path';
 const root = path.join(os.tmpdir(), 'opencode');
 fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'board-plugins-'));
+// The product ships no board components; this suite exercises the v1 protocol
+// through the sample packages installed as an explicit seed.
+process.env.BOARD_SEED_DIR = path.resolve('scripts/fixtures/board-plugins');
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/bootstrap-secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

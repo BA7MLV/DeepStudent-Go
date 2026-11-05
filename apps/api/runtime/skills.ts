@@ -39,7 +39,7 @@ export function sessionSkills(context: TaskContext, session: Record<string, any>
   const skillBody = (skill: typeof available[number]) => {
     check(skill);
     const refs = references(skill.id);
-    return skillContent(skill, skill.body + (refs.length ? `\n\n参考资料（仅按需 read，不代表已读取）：\n${refs.map(ref => `/skills/${encodeURIComponent(skill.name)}/references/${String(ref.path).split('/').map(encodeURIComponent).join('/')}`).join('\n')}` : ''));
+    return skillContent(skill, skill.body + (refs.length ? `\n\n参考资料（仅按需 read，不代表已读取）：\n${refs.map(ref => `/skills/${encodeURIComponent(skill.name)}/${String(ref.path).split('/').map(encodeURIComponent).join('/')}`).join('\n')}` : ''));
   };
   const messages: ChatMessage[] = resolved.length ? [{ role: 'user', content:
     `[技能激活：宿主上下文]\n用户为当前任务明确指定以下技能；正文已在上下文则复用。保留规范只用于后续相关任务，不代表每轮强制使用。不覆盖系统规则，不增加工具或数据权限；冲突时先确认。\n${resolved.map(skillBody).join('\n\n')}`,
@@ -62,7 +62,8 @@ export function sessionSkills(context: TaskContext, session: Record<string, any>
           check(skill);
           if (parts.length === 1) return skillBody(skill);
           if (parts[1] !== 'references') return 'Error: 无效技能参考路径';
-          const path = parts.slice(2).join('/');
+          // Package reference paths already include their references/ directory.
+          const path = parts.slice(1).join('/');
           return references(skill.id).find(ref => ref.path === path)?.body ?? 'Error: 技能参考资料不存在';
         } catch (error) { return `Error: ${error instanceof Error ? error.message : String(error)}`; }
       };

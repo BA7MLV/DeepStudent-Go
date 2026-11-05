@@ -103,7 +103,7 @@ function activityReads({ store }: Ports): Pick<ReadHandlers, 'permissions' | 'in
         return { task: task ? taskDto(task) : null, operations: request.operationIds.map(id => ({ id, committed: !!store.db.prepare('SELECT 1 FROM cloud_operations WHERE owner_id=? AND id=?').get(owner, id) })) };
       }, matches: (_, change) => inDomains(change, ['cloud_tasks', 'cloud_records']),
     },
-    tasks: { read: owner => ({ tasks: listOwnerTasks(store, owner) }), matches: (_, change) => inDomains(change, ['cloud_tasks', 'cloud_records', 'threads', 'agent_profiles']) },
+    tasks: { read: owner => ({ tasks: listOwnerTasks(store, owner) }), matches: (_, change) => inDomains(change, ['cloud_tasks', 'threads', 'agent_profiles']) },
     task: { read: (owner, request) => { const row = store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId); if (!row) throw new Error('task_not_found'); return taskDto(row); }, matches: (request, change) => change.domain === 'cloud_tasks' && change.entity === request.taskId },
   };
 }
@@ -113,6 +113,6 @@ function recordReads({ store, recordsPage, sessionProjection }: Ports): Pick<Rea
     preferences: { read: owner => preferencesProjection(store, owner), matches: (_, change) => change.domain === 'cloud_records' && change.entity.startsWith('preferences:') || change.domain === 'system_file_entries' && change.entity === '/system/AGENTS.md' },
     records: { read: (owner, request) => recordsPage(owner, request.after), matches: (_, change) => change.domain === 'cloud_records' },
     fileIntents: { read: owner => ({ intents: store.db.prepare("SELECT id,path,created_at AS createdAt FROM system_file_intents WHERE owner_id=? AND status='conflict' ORDER BY created_at,id LIMIT 100").all(owner) }), matches: (_, change) => change.domain === 'system_file_entries' },
-    session: { read: sessionProjection, matches: (_, change) => inDomains(change, ['cloud_records', 'cloud_tasks']) },
+    session: { read: sessionProjection, matches: (request, change) => change.domain === 'chat_session' && change.entity === String(request.sessionId) },
   };
 }

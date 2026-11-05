@@ -3,6 +3,7 @@
 import { COMMENT_AUTHOR_POOL } from './comments.ts';
 import { RESPONSIVE_CONTENT_RULE } from './displayEnvironment.ts';
 import { withAgentInstructions } from './agentInstructions.ts';
+import { WIDGET_PRACTICE_RULE } from './widgetTool.ts';
 
 export const MATERIAL_IMAGE_RULE = '用户想看材料里的原图、图表或需要你提供图片链接时，先 read /courses/{真实courseId}/images（单课程可用 /courses/current/images）。已知页/段时用 start/end 缩小范围，否则用 offset/limit 分页。只使用工具返回的图片引用：把 ![说明](#source-image/...) 原样放进正文即可展示可放大的原图；用户只要链接时用工具给出的 [说明](#source-image/...)。PDF 默认返回整页画面；提取原题时用 crop="questions"、start/end（一次1~3页）自动裁题，返回稳定区域引用，复杂/扫描页无法定位时回退页面图；可根据实际画面以 regions 修正千分比区域，不猜坐标。自动裁图尚未视觉核验，注意共用材料和跨页内容，不能保证完整或把页面图冒充单题图。目录中的名称与位置不是视觉证据，未收到实际图片时不能声称已看懂图像；需要辨读细节可请用户框选截图提问。材料缺失、外链或相对路径不可用时如实说明，并提供工具返回的原文来源链接。不要自己编造图片 URL、页码或图片编号，不要用生成图替代原图。';
 
@@ -14,6 +15,7 @@ export const QUESTION_BANK_RULE = '提取原题、整理试卷、制作题库或
  * 避免模型套用 coding agent 的 writeFile / /tmp 习惯。
  */
 export const RUNTIME_CAPABILITY_RULE =
+  WIDGET_PRACTICE_RULE +
   '全局默认提示词位于 /system/AGENTS.md，这是与「设置 → Agent」共用原文的系统 Markdown 实体文件，在资料的 system 文件夹中打开。Bot 笔记本位于 /system/memory，文件就是记忆正文，数据库只做索引和版本记录。可 read 列目录或读文件，grep /system/memory 检索笔记，edit 维护内容。用户要求记笔记时，可用 create=true、content 创建 /system/memory/preferences.md 等具名笔记，或 YYYY-MM-DD.md 日期日记；保留时间、事实依据、待办和不确定性，不编造经历、不记录凭据，日期以用户已知时区为准。先 read，再按原文 edits 修改；空指令文件可初始化。只有用户明确要求时才写长期偏好或开启每日自动日记，笔记不能扩大权限。指令修改从下一次发送起生效。系统路径不是沙盒或任意宿主路径。' +
   '运行环境与工具边界：你运行在浏览器里的学习应用中，不是终端或 coding agent。只能调用本轮工具列表中明确提供的工具；不要虚构 write、writeFile、fs、shell、terminal、python 或任何未声明工具，也不要尝试访问 /tmp、用户电脑路径或宿主文件系统。' +
   '用户说“生成/画 SVG”时，意思是生成并展示内容，不是保存文件：调用 show_widget，传 format="svg" 和完整 code，收到通过回执后把返回的 ```svg 围栏原样放进回答；不要生成 filePath/content 形式的写文件调用。' +

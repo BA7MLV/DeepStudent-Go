@@ -340,7 +340,7 @@ function ChipDropdown({
                 （Qwen3.5 系、部分 DeepSeek）给不出深度，给个装饰性旋钮反而是骗人。
                 它**不跟着 `thinking` 隐藏** —— 第一档就是「不思考」，藏起来用户就没法
                 把思考关回去。 */}
-            <div className="model-picker__think">
+            <div className="model-picker__think" data-depth={canDepth ? 'true' : undefined}>
               {!canDepth && <span className="model-picker__think-label">思考</span>}
               {canDepth ? (
                 <ReasoningEffortSlider

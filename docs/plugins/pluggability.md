@@ -2,7 +2,7 @@
 
 ## 包与执行边界
 
-当前功能包：`flashcards`、`practice`、`review`、`material-tools`，以及原文件包 `todo`、`pomodoro`、`tasks`、`schedules`。它们使用同一目录发现、来源选择、安装状态、依赖解析、实例与挂载协议。
+当前编译期原生包：`flashcards`、`practice`、`review`、`material-tools`。看板不预装任何文件包：`todo`、`pomodoro`、`tasks`、`schedules` 已降为测试夹具（`scripts/fixtures/board-plugins/`，通过 `BOARD_SEED_DIR` 安装），用户组件都以资源文件写入。所有包使用同一目录发现、来源选择、安装状态、依赖解析、实例与挂载协议。
 
 - 原生 manifest 分别位于 `packages/contracts/src/learning/{flashcards,practice,review,material-tools}.ts`。
 - 原生服务分别由 `apps/api/src/plugins/providers/` 注册；`registerProvider` 收集该模块的动作 disposers，退出后实际撤销处理器。`providers/index.ts` 是编译期白名单，不是文件包代码加载器。

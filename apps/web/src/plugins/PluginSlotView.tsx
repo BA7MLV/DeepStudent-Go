@@ -8,6 +8,7 @@ import { PluginHost } from './PluginHost';
 import { PluginCreationHint } from './PluginCreationHint';
 import './plugins.css';
 import { pluginProject } from './scope';
+import { useSustained } from '../utils/useSustained';
 
 export interface PluginSlotProps { name: PluginSurface; materialId?: string; projectId?: string; projectFolderId?: number; conversation?: PluginHostContext['conversation']; onlyInstance?: string; manage?: boolean }
 export function PluginSlotView({ name, materialId, projectId: requestedProject, projectFolderId, conversation, onlyInstance, manage = true, useCatalog, serverEnabled }: PluginSlotProps & { serverEnabled: boolean; useCatalog: <T>(select: (value: ReturnType<typeof pluginCatalogSource.getSnapshot>) => T) => T }) {
@@ -20,6 +21,8 @@ export function PluginSlotView({ name, materialId, projectId: requestedProject, 
   const [width, setWidth] = useState(320);
   useEffect(() => { if (!ref.current) return; const observer = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width))); observer.observe(ref.current); return () => observer.disconnect(); }, []);
   const context = useMemo<PluginHostContext>(() => ({ surface: name, revision: JSON.stringify([name, projectId, materialId, conversation, width, i18n.language]), projectId, materialId, conversation, width, locale: i18n.language, theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light', mode: name === 'board.main' ? 'compact' : name === 'app.page' ? 'full' : 'panel' }), [name, projectId, materialId, conversation?.kind, conversation?.id, width, i18n.language]);
+  // Last known components stay usable while the stream reconnects by itself.
+  const reconnecting = useSustained(status === 'reconnecting', 10000);
   if (!serverEnabled) return selectable && manage && data ? <div className="plugin-slot"><PluginCreationHint /></div> : null;
   const layout = data ? parsePluginLayout(JSON.parse(data.layout.content)) : undefined;
   const placements = layout ? resolvePluginPlacements(layout, name, context, data?.scopes?.unavailableInstances).filter(p => !onlyInstance || p.instanceId === onlyInstance) : [];
@@ -27,7 +30,7 @@ export function PluginSlotView({ name, materialId, projectId: requestedProject, 
     {selectable && data && !!data.scopes?.projects.length ? <label>正在查看<select aria-label="项目上下文" value={projectId ?? ''} onChange={e => { const next = new URLSearchParams(search); if (e.target.value) next.set('project', e.target.value); else next.delete('project'); setSearch(next); }}><option value="">所有地方</option>{data.scopes?.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label> : null}
     {manage && data ? <PluginCreationHint /> : null}
     {error ? <p role="alert">{error}</p> : null}
-    {status === 'reconnecting' ? <p role="status">连接中断，正在恢复插件状态…</p> : null}
+    {reconnecting ? <p role="status">连接中断，正在恢复插件状态…</p> : null}
     {!data && !error ? <p aria-busy="true">加载插件…</p> : null}
     <div className="plugin-slot__views">{placements.map(p => {
       const plugin = data?.plugins.find(pkg => pkg.id === p.pluginId && !pkg.error && pkg.manifest?.enabled);

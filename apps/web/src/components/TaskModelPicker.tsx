@@ -8,7 +8,7 @@ import { cloud } from '../cloud/state';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { toast } from '../ui';
 
-export default function TaskModelPicker({ sessionId }: { sessionId: number | string | null }) {
+export default function TaskModelPicker({ sessionId, onClose }: { sessionId: number | string | null; onClose?: () => void }) {
   const key = taskModelKey(sessionId), choice = useTaskModel(s => s.choices[key]), set = useTaskModel(s => s.set);
   const account = useSettings(s => s.llmModel);
   const [sessionDefault, setSessionDefault] = useState<TaskModelSelection | null>(null);
@@ -32,7 +32,7 @@ export default function TaskModelPicker({ sessionId }: { sessionId: number | str
   };
   return <div className="flex flex-wrap items-center gap-1" data-testid="task-model-selection">
     <span className="text-xs">本次模型</span>
-    <ModelPicker slot="chat" field="llmModel" variant="chip" value={choice?.modelRef ?? sessionDefault?.modelRef ?? account} onChange={modelRef => set(key, { modelRef })} />
+    <ModelPicker slot="chat" field="llmModel" variant="chip" showThinking onClose={onClose} value={choice?.modelRef ?? sessionDefault?.modelRef ?? account} onChange={modelRef => set(key, { modelRef })} />
     <button type="button" className="text-xs" onClick={() => set(key)} disabled={!choice}>继承会话默认</button>
     {sessionId != null && choice ? <button type="button" className="text-xs" onClick={() => void saveDefault()}>设为本会话默认</button> : null}
   </div>;

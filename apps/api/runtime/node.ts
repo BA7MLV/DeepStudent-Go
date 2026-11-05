@@ -89,6 +89,7 @@ type ServerToolTrace = {
   result?: string;
   status: 'running' | 'done' | 'error';
   ms?: number;
+  reasoningOffset?: number;
 };
 
 const SEARCH_TRANSCRIPT_TOOL: ToolDef = {
@@ -347,19 +348,25 @@ async function runServerAgent(
   const maxRounds = Math.max(1, Math.min(8, Number(context.configuration.get(context.owner).policy.maxSteps) || 6));
   const stepBudget = new TaskStepBudget(context.store, context.configuration);
   let lastReportAt = 0;
+  let lastReportPhase = '';
   const report = (phase: string, round: number, force = false) => {
     const now = Date.now();
     // Do not turn every model token into a SQLite write.  100 ms is still
     // visibly streaming and keeps the task row from becoming the bottleneck.
-    if (!force && now - lastReportAt < 100) return;
+    // The first answer token must not be swallowed by a just-finished tool or
+    // thinking report; the next token may arrive much later.
+    if (!force && phase === lastReportPhase && now - lastReportAt < 100) return;
     lastReportAt = now;
+    lastReportPhase = phase;
     const transcript = [...out.slice(initialCount), ...(streaming && answer.trim() ? [{ role: 'assistant' as const, content: answer }] : [])];
     const identities = onSnapshot?.({ content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript, requests, widgets: [...widgets], ...(ask ? { ask } : {}) });
     if (identities?.widgets) widgets.splice(0, widgets.length, ...identities.widgets);
     context.report({
-      phase, round, content: clip(content(), 20_000), reasoning: clip(reasoning, 8_000), tools: traceResult(traces),
+      // Progress and the saved answer must describe the same text. Clipping here
+      // made long answers alternate between a full checkpoint and a short prefix.
+      phase, round, content: content(), reasoning, tools: traceResult(traces),
       modelRequests: requests,
-      ...(ask ? { view: { pendingAsk: pendingAsk ? { messageKey: `row:${identities?.rowId}` } : null } } : {}),
+      ...(ask ? { ask, view: { pendingAsk: pendingAsk ? { messageKey: `row:${identities?.rowId}` } : null } } : {}),
       modelTranscript: modelTrace(content(), transcript),
       ...identities,
       widgets, widget: widgets.at(-1), widgetPreview,
@@ -462,7 +469,7 @@ async function runServerAgent(
           continue;
         }
         seen.add(signature);
-        const trace: ServerToolTrace = { name: toolLabel(call.function.name), status: 'running', detail: JSON.stringify(args).slice(0, 300) };
+        const trace: ServerToolTrace = { name: toolLabel(call.function.name), status: 'running', detail: JSON.stringify(args).slice(0, 300), reasoningOffset: reasoning.length };
         traces.push(trace);
         const started = Date.now();
         report('tool', round + 1, true);
@@ -862,7 +869,7 @@ async function chat(context: TaskContext) {
   };
   const result = await runServerAgent(context, target, messages, [...libraryTools(courses.length > 0), ...mcp.tools], mcp.wrap(skills.wrap(libraryExecutor(context, session))), persist, [...skills.traces, ...mcp.traces], mcp.label);
   persist(result, false);
-  return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...widgetFields(result) };
+  return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...(result.ask ? { ask: result.ask } : {}), ...widgetFields(result) };
 }
 
 /** Explicit continuation changes one existing answer, never creates another

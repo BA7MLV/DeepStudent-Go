@@ -108,4 +108,23 @@ export function migrateClientRuntime(db: Database.Database) {
     ['run_steps', '(SELECT t.owner_id FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=ROW.run_id)', 'ROW.run_id'],
     ['messages', '(SELECT owner_id FROM threads WHERE id=ROW.thread_id)', 'ROW.thread_id'],
   ]);
+  // Route by the affected session while OLD is still available. Looking the
+  // row up later loses deletes/tombstones (CloudRecords replaces via DELETE +
+  // INSERT), and task terminal/deletion notifications need the same guarantee.
+  for (const operation of ['INSERT', 'UPDATE', 'DELETE']) {
+    const rows = operation === 'UPDATE' ? ['OLD', 'NEW'] : [operation === 'DELETE' ? 'OLD' : 'NEW'];
+    for (const row of rows) {
+      db.exec(`CREATE TRIGGER IF NOT EXISTS client_session_records_${operation.toLowerCase()}_${row.toLowerCase()}
+        AFTER ${operation} ON cloud_records WHEN ${row}.table_name IN ('chats','chatSessions') BEGIN
+          INSERT INTO client_changes(owner_id,domain,entity)
+          SELECT ${row}.owner_id,'chat_session',CAST(CASE WHEN ${row}.table_name='chatSessions'
+            THEN json_extract(${row}.record_key,'$') ELSE json_extract(${row}.value,'$.sessionId') END AS TEXT)
+          WHERE ${row}.table_name='chatSessions' OR json_type(${row}.value,'$.sessionId')='integer';
+        END`);
+      db.exec(`CREATE TRIGGER IF NOT EXISTS client_session_tasks_${operation.toLowerCase()}_${row.toLowerCase()}
+        AFTER ${operation} ON cloud_tasks WHEN ${row}.kind='chat' AND json_type(${row}.input,'$.sessionId')='integer' BEGIN
+          INSERT INTO client_changes(owner_id,domain,entity) VALUES (${row}.owner_id,'chat_session',CAST(json_extract(${row}.input,'$.sessionId') AS TEXT));
+        END`);
+    }
+  }
 }

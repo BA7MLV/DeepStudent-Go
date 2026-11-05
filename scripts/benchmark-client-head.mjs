@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 // outputs. No source patches, shared node_modules, model calls or live accounts.
 if (process.argv[2] === '--serve') {
   const source = process.argv[3], directory = process.argv[4];
+  process.env.BOARD_SEED_DIR = path.resolve('scripts/fixtures/board-plugins'); // board samples are test fixtures
   Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
   const { buildServer } = await import(pathToFileURL(path.join(source, 'apps/api/dist/apps/api/src/server.js')).href);
   const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });

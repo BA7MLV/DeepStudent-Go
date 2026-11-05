@@ -16,10 +16,38 @@ import { drainLearning, type LearningCommandRow } from '../client/learning';
 import { accountLifetime, type AccountLifetime } from '../client/account-lifecycle';
 import { startResourceCommands } from '../client/resource-commands';
 
+/**
+ * Sync is background maintenance and stays silent. `error` is reserved for
+ * problems the user must act on (record conflict, broken local database).
+ * Network/server hiccups only set `degradedSince` + `detail` while the loops
+ * retry by themselves; the UI surfaces them only once they persist.
+ * `healthySince` is when the connection last became usable (0 while degraded),
+ * so "taking too long" thresholds measure time the client could actually confirm.
+ */
 export const useCloudSync = create<{ pending: number; error: string; syncedAt: number; recordsRevision: number;
+  conversationsRevision: number; degradedSince: number; detail: string; healthySince: number;
   queued: number; uncertain: number; conflicts: number; oldestPendingAt: number; cursor: number; highWater: number; rebuildReason: string;
-}>()(() => ({ pending: 0, error: '', syncedAt: 0, recordsRevision: 0,
+}>()(() => ({ pending: 0, error: '', syncedAt: 0, recordsRevision: 0, conversationsRevision: 0, degradedSince: 0, detail: '', healthySince: Date.now(),
   queued: 0, uncertain: 0, conflicts: 0, oldestPendingAt: 0, cursor: 0, highWater: 0, rebuildReason: '' }));
+function actionableMessage(error: unknown) {
+  const detail = (error as { detail?: { table?: string; key?: unknown } }).detail;
+  if ((error as Error)?.message === 'sync_conflict') return `同步冲突：${detail?.table}/${String(detail?.key)}。本机修改已保留，请在云端管理中处理。`;
+  if (isLostCloudTransaction(error)) return '浏览器本地数据库事务异常，同步尚未完成。请关闭其他同站点标签页后刷新重试，不要清除网站数据。';
+  return '';
+}
+// Which loop raised the current `error`, so the other loop's success does not hide it.
+let errorSource: 'flush' | 'follow' | '' = '';
+function reportSyncFailure(error: unknown, source: 'flush' | 'follow') {
+  if ((error as Error)?.message === 'client_account_changed') return;
+  const actionable = actionableMessage(error), detail = error instanceof Error ? error.message : String(error);
+  if (actionable) { errorSource = source; useCloudSync.setState({ error: actionable, detail }); }
+  else useCloudSync.setState(state => ({ degradedSince: state.degradedSince || Date.now(), detail }));
+}
+function reportSyncHealthy(source: 'flush' | 'follow') {
+  const clearError = source === 'flush' || errorSource === source;
+  if (clearError) errorSource = '';
+  useCloudSync.setState(state => ({ degradedSince: 0, detail: '', ...(clearError && state.error ? { error: '' } : {}) }));
+}
 let stopChanges: (() => void) | undefined;
 let retryRecords: (() => void) | undefined;
 let flight: Promise<boolean> | undefined;
@@ -212,6 +240,7 @@ async function syncCycle(pull: boolean, lifetime: AccountLifetime) {
     if (JSON.stringify(config) !== configSignature) applyCloudConfig(config);
   }
   let changed = false;
+  let conversationsChanged = false;
   await drainLearning();
   guard();
   const commands = database.table('_learningCommands');
@@ -222,9 +251,10 @@ async function syncCycle(pull: boolean, lifetime: AccountLifetime) {
     const page = await runtime.recordsPage(cursor);
     guard();
     if (page.reset || (await database.table('_cloudMeta').get('records-epoch'))?.value !== page.epoch) {
-      await rebuildRecords(database, runtime, page.reset ? 'future-cursor' : 'server-generation', lifetime); changed = true; break;
+      await rebuildRecords(database, runtime, page.reset ? 'future-cursor' : 'server-generation', lifetime); changed = true; conversationsChanged = true; break;
     }
     if (page.records.length) changed = true;
+    conversationsChanged ||= page.records.some(record => record.table === 'chatSessions');
     phase('cycle:apply-page');
     guard();
     const applied = await applyRecordsPage(page, undefined, database, lifetime);
@@ -236,11 +266,11 @@ async function syncCycle(pull: boolean, lifetime: AccountLifetime) {
   }
   await cloudTransaction(database, [commands, database.table('_cloudMeta')], async () => { guard(); await retireConfirmedCommands(database); guard(); });
   const pending = await commands.count(); guard();
-  useCloudSync.setState({ pending, error: '', syncedAt: Date.now() });
+  useCloudSync.setState({ pending, syncedAt: Date.now() });
+  reportSyncHealthy('flush');
   await publishCommandDiagnostics(database);
   guard();
-  if (changed) useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1 }));
-  if (changed) { phase('cycle:load-preferences'); await loadPreferences(); }
+  if (changed) useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1, conversationsRevision: state.conversationsRevision + (conversationsChanged ? 1 : 0) }));
 }
 
 export function flushCloud(background = false): Promise<void> {
@@ -286,12 +316,7 @@ export function flushCloud(background = false): Promise<void> {
     await drain();
     return true;
   })().catch(error => {
-    const detail = (error as { detail?: { table?: string; key?: unknown } }).detail;
-    if (lifetime.current() && database === db && owner === cloud.userId) useCloudSync.setState({ error: (error as Error).message === 'sync_conflict'
-      ? `同步冲突：${detail?.table}/${String(detail?.key)}。本机修改已保留，请在云端管理中处理。`
-      : isLostCloudTransaction(error)
-        ? '浏览器本地数据库事务异常，同步尚未完成。请关闭其他同站点标签页后刷新重试，不要清除网站数据。'
-        : (error as Error).message });
+    if (lifetime.current() && database === db && owner === cloud.userId) reportSyncFailure(error, 'flush');
     throw error;
   }).finally(() => { if (flight === attempt) { flight = undefined; phase('idle'); } });
     flight = attempt;
@@ -322,7 +347,8 @@ export async function startCloud(owner: string) {
   flight = undefined;
   fileCache.clear();
   cloud.enabled = true; cloud.userId = owner;
-  useCloudSync.setState(useCloudSync.getInitialState());
+  useCloudSync.setState({ ...useCloudSync.getInitialState(), healthySince: Date.now() });
+  errorSource = '';
   useCloudDatabase(owner);
   const lifetime = accountLifetime(owner);
   lifetime.own(() => {
@@ -373,8 +399,20 @@ export async function startCloud(owner: string) {
   };
   Dexie.on('storagemutated', changed);
   const online = () => { if (lifetime.current()) void flushCloud().then(() => { if (lifetime.current()) follow?.restart(); }).catch(() => {}); };
+  // Maintain healthySince: 0 while offline/degraded, the recovery time otherwise.
+  const health = () => {
+    if (closed || !lifetime.current()) return;
+    const { degradedSince, healthySince } = useCloudSync.getState(), healthy = navigator.onLine && !degradedSince;
+    if (healthy && !healthySince) useCloudSync.setState({ healthySince: Date.now() });
+    else if (!healthy && healthySince) useCloudSync.setState({ healthySince: 0 });
+  };
+  const offHealth = useCloudSync.subscribe((state, previous) => { if (state.degradedSince !== previous.degradedSince) health(); });
   window.addEventListener('online', online);
-  stopChanges = () => { closed = true; follow?.dispose(); retryRecords = undefined; Dexie.on('storagemutated').unsubscribe(changed); window.removeEventListener('online', online); };
+  window.addEventListener('online', health);
+  window.addEventListener('offline', health);
+  health();
+  stopChanges = () => { closed = true; follow?.dispose(); retryRecords = undefined; Dexie.on('storagemutated').unsubscribe(changed); window.removeEventListener('online', online);
+    window.removeEventListener('online', health); window.removeEventListener('offline', health); offHealth(); };
   {
     const runtime = await serverRuntime(owner);
     guard(); if (closed) return;
@@ -390,12 +428,13 @@ export async function startCloud(owner: string) {
            else await applyRecordsPage(page, signal, database, lifetime);
             guard(); signal.throwIfAborted();
             if (rebuilding || page.records.length) {
-             useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1 }));
-             await loadPreferences();
+              useCloudSync.setState(state => ({ recordsRevision: state.recordsRevision + 1,
+                conversationsRevision: state.conversationsRevision + (rebuilding || page.records.some(record => record.table === 'chatSessions') ? 1 : 0) }));
            }
             const pending = await database.table('_learningCommands').count();
             if (closed || database !== db || !isCurrentServerRuntime(runtime)) return;
             useCloudSync.setState({ pending, syncedAt: Date.now() });
+            reportSyncHealthy('follow');
             await publishCommandDiagnostics(database);
         };
         // Drain local transactions first. Applying under the same lock closes
@@ -403,7 +442,8 @@ export async function startCloud(owner: string) {
         if (navigator.locks) await navigator.locks.request(`cloud-sync:${owner}`, apply);
         else await apply();
       },
-      failed: error => { if (!closed && lifetime.current()) useCloudSync.setState({ error: error instanceof Error ? error.message : String(error) }); },
+      // The follower backs off and resumes by itself; only conflicts need the user.
+      failed: error => { if (!closed && lifetime.current()) reportSyncFailure(error, 'follow'); },
     });
     retryRecords = follow.restart;
     const { reconcileTaskAdmissions } = await import('./tasks');

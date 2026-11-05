@@ -47,7 +47,8 @@ export default function DataSettings() {
   };
 
   const conflict = sync.error.includes('冲突');
-  const syncLabel = conflict ? '有冲突' : sync.error ? '同步失败' : sync.pending ? `${sync.pending} 项待同步` : '已同步';
+  // Settings is where the user asked to look, so degradation is shown as-is here.
+  const syncLabel = conflict ? '有冲突' : sync.error ? '同步失败' : sync.degradedSince ? '连接中断，正在自动重试' : sync.pending ? `${sync.pending} 项待同步` : '已同步';
 
   const importLegacy = () => run('import', async () => {
     if (!await confirmDialog({ headline: '导入此浏览器的旧数据？', description: '仅支持空的云端库，旧数据保留在本机。', confirmText: '导入' })) return;

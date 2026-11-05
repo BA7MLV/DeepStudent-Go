@@ -8,6 +8,8 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/plugin-extraction-ui-'));
+// Board samples are test fixtures; the product seeds no components.
+process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/bootstrap-secret') });
 delete process.env.CLOUD_WORKER_DISABLED;
 const reservation = net.createServer(); await new Promise(r => reservation.listen(0, '127.0.0.1', r)); const port = reservation.address().port; await new Promise(r => reservation.close(r));

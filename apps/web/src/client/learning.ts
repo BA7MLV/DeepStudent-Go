@@ -24,7 +24,7 @@ export const learningId = () => {
 };
 type NewEdit<T = ClientLearningEdit> = T extends ClientLearningEdit ? Omit<T, 'mutationId'> : never;
 export const learningEdit = (value: NewEdit): ClientLearningEdit => ({ ...value, mutationId: crypto.randomUUID() }) as ClientLearningEdit;
-let flight: { database: typeof db; promise: Promise<void>; again: boolean } | undefined;
+const flights = new WeakMap<typeof db, Map<string, { promise: Promise<void>; again: boolean }>>();
 
 /** Exact domain intent is durable before a carrier or receipt request is opened.
  * Pending values stay in this journal, never in committed business tables. */
@@ -66,16 +66,22 @@ export async function queueLearning(edits: ClientLearningEdit[], entities: strin
 /** Conflicts block only subsequent commands touching the same entity. Receipt
  * lookup always precedes replay. SQL-only edits are replay-safe; skill/file
  * intents with an uncertain receipt are not treated as missing. */
-export async function drainLearning() {
+export async function drainLearning(entities?: readonly string[]) {
   const database = db, owner = cloud.userId;
-  if (flight?.database === database) { flight.again = true; return flight.promise; }
+  let group = flights.get(database);
+  if (!group) { group = new Map(); flights.set(database, group); }
+  const key = entities ? [...entities].sort().join('|') : '*';
+  const previous = group.get(key);
+  if (previous) { previous.again = true; return previous.promise; }
+  const entry = { promise: undefined as unknown as Promise<void>, again: false };
   const promise = (async () => {
     const runtime = await serverRuntime(owner);
     const guard = () => { if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed'); };
     const table = database.table<LearningCommandRow>('_learningCommands');
     const update = async (operationId: string, patch: Partial<LearningCommandRow>) => { guard(); await table.where('operationId').equals(operationId).modify(patch); };
     const commands = new DurableCommands<ClientLearningCommand>({
-      list: async () => (await table.orderBy('sequence').toArray()).filter(row => row.state !== 'confirmed') as DurableCommand<ClientLearningCommand>[],
+      list: async () => (await table.orderBy('sequence').toArray()).filter(row => row.state !== 'confirmed'
+        && (!entities || row.entities.some(entity => entities.includes(entity)))) as DurableCommand<ClientLearningCommand>[],
       save: command => update(command.operationId, { state: command.state, error: command.error }),
       remove: async operationId => { guard(); await table.where('operationId').equals(operationId).delete(); },
       acknowledge: (operationId, value) => update(operationId, { state: 'confirmed', receipt: value as RuntimeRecordsReceipt, error: undefined }),
@@ -92,13 +98,13 @@ export async function drainLearning() {
     });
     const run = async () => {
       do {
-        if (flight?.database === database) flight.again = false;
+        entry.again = false;
         await commands.drain();
-      } while (flight?.database === database && flight.again);
+      } while (entry.again);
     };
     if (navigator.locks) await navigator.locks.request(`learning:${owner}`, run); else await run();
-  })().finally(() => { if (flight?.promise === promise) flight = undefined; });
-  flight = { database, promise, again: false };
+  })().finally(() => { if (group.get(key) === entry) group.delete(key); });
+  entry.promise = promise; group.set(key, entry);
   return promise;
 }
 
@@ -123,17 +129,17 @@ async function encodeLearning(value: unknown, database: typeof db, guard: () => 
   return value;
 }
 
-export async function submitLearning(edits: ClientLearningEdit[], entities: string[], id?: string) {
+export async function submitLearning(edits: ClientLearningEdit[], entities: string[], id?: string, waitProjection = true) {
   const database = db, owner = cloud.userId;
   const guard = () => { if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
   const operationId = await queueLearning(edits, entities, id);
   guard();
-  await drainLearning();
+  await drainLearning(waitProjection ? undefined : entities);
   guard();
   const command = await database.table<LearningCommandRow>('_learningCommands').where('operationId').equals(operationId).first();
   guard();
   if (command && command.state !== 'confirmed') throw new Error(command.error ?? '修改已保存在待提交操作中，连接恢复后将继续核对');
-  await (await import('../cloud/sync')).flushCloud();
+  if (waitProjection) await (await import('../cloud/sync')).flushCloud();
 }
 
 export async function editMessage(expected: ChatRow | null, value: ChatRow | null) {

@@ -28,8 +28,8 @@ let script = [];
 const mockFetch = async (url, init) => {
   const body = JSON.parse(init.body);
   assert.ok(script.length, 'unexpected model/network request');
-  const { call, thought = 'Plan' } = script.shift()(body);
-  const text = call ? null : 'Answer';
+  const { call, thought = 'Plan', text: answer = 'Answer' } = script.shift()(body);
+  const text = call ? null : answer;
   const args = JSON.stringify({ action: 'read', path: '/system/board/README.md' });
   if (url.endsWith('/responses')) return Response.json({ status: 'completed', output: [
     { type: 'reasoning', id: 'rs', summary: [{ type: 'summary_text', text: thought }], encrypted_content: 'opaque' },
@@ -90,6 +90,7 @@ try {
       assert.equal(task.result.content, 'Answer');
       assert.equal(task.result.reasoning, 'PlanPlan');
       assert.equal(rows(sessionId).find(row => row.role === 'assistant').reasoning, 'PlanPlan');
+      assert.equal(task.result.tools.at(-1).reasoningOffset, 'Plan'.length, 'tool stays between the two reasoning rounds');
       if (kind === 'chat') {
         const rowId = task.result.rowId;
         const row = records.get(owner, 'chats', rowId);
@@ -103,6 +104,14 @@ try {
     script = [body => { check('low')(body); return {}; }];
     await completed(sessionId, 'chat', { thinkingLevel: 'invalid' });
   }
+  const sessionId = sid++;
+  put('chatSessions', sessionId, { id: sessionId, videoId: '__library_assistant__', title: 'Long stream', createdAt: Date.now() });
+  const text = 'long text '.repeat(2300), thought = 'plan '.repeat(1800);
+  script = [() => ({ text, thought })];
+  const long = await completed(sessionId, 'chat');
+  assert.equal(long.progress.content, text, 'live progress never truncates a long saved answer');
+  assert.equal(long.progress.reasoning, thought, 'live reasoning and history have the same prefix');
+  assert.equal(rows(sessionId).find(row => row.role === 'assistant').content, long.progress.content);
   console.log('PASS: chat + QA + forced final answer + continue, snapshot priority, preference fallback, host-derived Gateway adapter, reasoning persistence (offline)');
 } finally {
   await runner.close();

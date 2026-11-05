@@ -185,6 +185,11 @@
   white-space: nowrap;
 }
 
+.model-picker__think[data-depth='true'] {
+  flex-direction: column;
+  align-items: stretch;
+}
+
 /* 只有开关的模型才需要一句「为什么没有滑块」。压在行下方、小一号、同样弱化 ——
    它解释的是一个**缺失**，不该和标签抢视线，更不该夹在标签与控件中间把行拆成两段。 */
 .model-picker__think-hint {

@@ -6,13 +6,30 @@ import { BOARD_PATH, BOARD_PLUGINS_PATH, boardPath, boardSlug, parseBoardManifes
 import type { SystemDirectory, SystemDocument } from '@wangke/contracts/system';
 import type { DatabaseStore } from '../storage/database.js';
 
-// Upgrade only byte-identical shipped files. Edited or removed packages stay user-owned.
+// Upgrade only byte-identical shipped files. Edited or removed files stay user-owned.
 const DEFAULT_UPGRADES: Record<string, string | string[]> = {
-  'plugins/todo/index.html': '00371c722d1de0f4dac8e2711a19ff4351d1dbd4e0741b5c450fe1134a4fcb74',
-  'plugins/tasks/index.html': ['39544e7622bb98729a02e259c1026ab6f6e769efa4c7d6b0a2371cbb8473d208', 'de9d14b6a4f05ee120b34f4ae71e18f03e878b05db94462dddf8aa003cfbb999'],
-  'plugins/schedules/index.html': '7f2dc74765effd6561072ce861b11616ddeb6ff1589feba1106436530d2f0aa1',
-  'README.md': '28d9509dabb2a031d1a93489c6cb90e714859042de235e0c19bc8da09144c748',
+  'README.md': ['28d9509dabb2a031d1a93489c6cb90e714859042de235e0c19bc8da09144c748', '1997ee533fd93d41db4ccd7c158c91dc54503fa45b983a240f7a1a5d65f1c3ed'],
 };
+
+/**
+ * Everything on the board is a user component. Earlier releases copied four
+ * sample packages into every account; an untouched copy (shipped bytes, empty
+ * data, no extra instances) is removed once. Any edit or saved data keeps it.
+ */
+const RETIRED_SAMPLES: Record<string, { code: Record<string, string[]>; data: Record<string, unknown> }> = {
+  tasks: { code: { 'manifest.json': ['9266af1624061a317b52b008ec5935a67da8eede3482a8ffb29302f1d6ce2032'], 'index.html': ['d5c070bf58c24ef168f5e8ec51b34edc319e530500c9fc1d1c23255fc618793c', 'de9d14b6a4f05ee120b34f4ae71e18f03e878b05db94462dddf8aa003cfbb999', '39544e7622bb98729a02e259c1026ab6f6e769efa4c7d6b0a2371cbb8473d208'] }, data: {} },
+  todo: { code: { 'manifest.json': ['3f45cc0a31599810e801c141a63bcba1749004ff2114b543b61c8338e384af41'], 'index.html': ['913636209b5676b1fcf67a97b74afa9e94e1aac33c099f9ffbc51cf3656d0c5f', '00371c722d1de0f4dac8e2711a19ff4351d1dbd4e0741b5c450fe1134a4fcb74'] }, data: { 'state.json': { items: [] }, 'defaults.json': { items: [] } } },
+  pomodoro: { code: { 'manifest.json': ['a9c4a3c082421e5822cef556e692fe7171971ad37d4f0013c4dac11dd041f19d'], 'index.html': ['59acbaf624fc9b3103f1ca5699e49df3366908c073bc1a68a670163618cdd5d3', '69ac11fbd37b45f1740960d432d868df7042d63afa697a257cd7c9735e036470'] }, data: { 'state.json': { durationSeconds: 1500, remainingSeconds: 1500, endsAt: null }, 'defaults.json': { durationSeconds: 1500, remainingSeconds: 1500, endsAt: null } } },
+  schedules: { code: { 'manifest.json': ['fdd23e1e4592b4f8960771119cc25e992e72b76f0610d6e8ed6074084c9508db'], 'index.html': ['b36385bf30dcfad688918d3f8108350d931ca2d8d6dfff909cf89c0bce0ed59b', '97203872a4842fbf4f6496adde3e8464efac86e1f6595acf5f4b837917ae472b', '7f2dc74765effd6561072ce861b11616ddeb6ff1589feba1106436530d2f0aa1'] }, data: { 'schedules.json': { jobs: [] } } },
+};
+// Registered once per account (never written to disk) so a later byte-identical
+// package the user installs on purpose is not removed again.
+const SAMPLES_RETIRED = `${BOARD_PATH}/samples-retired`;
+const sha256 = (value: string | Buffer) => crypto.createHash('sha256').update(value).digest('hex');
+const sameJson = (text: string, expected: unknown) => { try { return JSON.stringify(JSON.parse(text)) === JSON.stringify(expected); } catch { return false; } };
+
+/** Operators may preinstall packages (and tests use fixtures); the product ships none. */
+const seedDirectory = () => process.env.BOARD_SEED_DIR ? path.resolve(process.env.BOARD_SEED_DIR) : undefined;
 
 // Bundled upgrades are a process/store bootstrap operation, not a catalog read.
 // Cache only a completed, committed bootstrap; live package reads below still
@@ -44,19 +61,7 @@ export class BoardFiles {
     const marker = `${BOARD_PATH}/README.md`;
     const source = fileURLToPath(new URL(import.meta.url.endsWith('/runtime/node.mjs') ? '../board-plugins/' : '../../board-plugins/', import.meta.url));
     if (this.store.systemFiles.entry(owner, marker)) {
-      // Add static instance defaults to still-installed, unedited shipped
-      // packages. Never seed from live state, replace user defaults or recreate
-      // a missing package. This does not touch any instance/user data.
-      const installedRoot = path.join(this.directory(owner), 'plugins');
-      if (fs.lstatSync(installedRoot, { throwIfNoEntry: false })?.isDirectory() && !fs.lstatSync(installedRoot).isSymbolicLink()) for (const id of fs.readdirSync(path.join(source, 'plugins')).filter(boardSlug)) {
-        const installed = path.join(installedRoot, id), bundled = path.join(source, 'plugins', id);
-        const stat = fs.lstatSync(installed, { throwIfNoEntry: false });
-        if (!stat?.isDirectory() || stat.isSymbolicLink() || !fs.existsSync(path.join(bundled, 'defaults.json'))) continue;
-        const entry = path.join(installed, 'index.html'), entryStat = fs.lstatSync(entry, { throwIfNoEntry: false });
-        if (!entryStat?.isFile() || entryStat.isSymbolicLink() || !fs.readFileSync(entry).equals(fs.readFileSync(path.join(bundled, 'index.html')))) continue;
-        const target = `${BOARD_PLUGINS_PATH}/${id}/defaults.json`;
-        if (!fs.existsSync(path.join(installed, 'defaults.json')) && !this.store.systemFiles.entry(owner, target)) this.store.systemFiles.write(owner, target, fs.readFileSync(path.join(bundled, 'defaults.json'), 'utf8'), null);
-      }
+      if (!this.store.systemFiles.entry(owner, SAMPLES_RETIRED)) this.retireSamples(owner);
       for (const [relative, hash] of Object.entries(DEFAULT_UPGRADES)) {
         try {
           let physical = this.directory(owner);
@@ -68,7 +73,7 @@ export class BoardFiles {
           });
           if (!exists) continue;
           const resource = `${BOARD_PATH}/${relative}`, current = this.store.systemFiles.read(owner, resource);
-          if (current !== undefined && (Array.isArray(hash) ? hash : [hash]).includes(crypto.createHash('sha256').update(current).digest('hex'))) {
+          if (current !== undefined && (Array.isArray(hash) ? hash : [hash]).includes(sha256(current))) {
             this.store.systemFiles.write(owner, resource, fs.readFileSync(path.join(source, relative), 'utf8'), current);
           }
         } catch { /* A broken/edited default cannot block unrelated plugins. */ }
@@ -83,8 +88,50 @@ export class BoardFiles {
         else if (entry.isFile() && this.store.systemFiles.read(owner, target) === undefined) this.store.systemFiles.write(owner, target, fs.readFileSync(path.join(folder, entry.name), 'utf8'), null);
       }
     };
-    this.store.transaction(() => { copy(source, BOARD_PATH); this.store.systemFiles.register(owner, marker); });
+    const seed = seedDirectory();
+    this.store.transaction(() => {
+      // Only the README and the developer template; the board starts empty.
+      copy(source, BOARD_PATH);
+      if (seed && fs.existsSync(seed)) copy(seed, BOARD_PLUGINS_PATH);
+      this.store.systemFiles.register(owner, SAMPLES_RETIRED);
+      this.store.systemFiles.register(owner, marker);
+    });
     completed();
+  }
+  /** One-time cleanup for accounts bootstrapped before the board became user-only. */
+  private retireSamples(owner: string) {
+    const root = path.join(this.directory(owner), 'plugins');
+    const rootStat = fs.lstatSync(root, { throwIfNoEntry: false });
+    const removable: { id: string; files: string[] }[] = [];
+    if (rootStat?.isDirectory() && !rootStat.isSymbolicLink()) for (const [id, sample] of Object.entries(RETIRED_SAMPLES)) {
+      try {
+        const folder = path.join(root, id), stat = fs.lstatSync(folder, { throwIfNoEntry: false });
+        if (!stat?.isDirectory() || stat.isSymbolicLink()) continue;
+        // Extra instances keep their data under the unified plugin data root.
+        if (fs.existsSync(path.join(this.store.systemFiles.root, sha256(owner), 'system', 'plugin-data', id))) continue;
+        const names = fs.readdirSync(folder);
+        const pristine = names.every(name => {
+          const resource = `${BOARD_PLUGINS_PATH}/${id}/${name}`;
+          const file = fs.lstatSync(path.join(folder, name));
+          if (!file.isFile() || file.isSymbolicLink()) return false;
+          const content = this.store.systemFiles.read(owner, resource);
+          if (content === undefined) return false;
+          if (sample.code[name]) return sample.code[name].includes(sha256(content));
+          return Object.hasOwn(sample.data, name) && sameJson(content, sample.data[name]);
+        });
+        if (pristine && names.includes('manifest.json')) removable.push({ id, files: names.map(name => `${BOARD_PLUGINS_PATH}/${id}/${name}`) });
+      } catch { /* Anything unreadable is treated as user content. */ }
+    }
+    this.store.transaction(() => {
+      for (const { files } of removable) for (const resource of files) this.store.systemFiles.write(owner, resource, null, this.store.systemFiles.read(owner, resource) ?? null);
+      this.store.systemFiles.register(owner, SAMPLES_RETIRED);
+    });
+    for (const { id, files } of removable) {
+      try {
+        for (const resource of files) { const intent = this.store.systemFiles.entry(owner, resource)?.intent_id; if (intent) this.store.systemFiles.flush({ owner, intentId: intent }); }
+        fs.rmdirSync(path.join(root, id));
+      } catch { /* A concurrent edit wins; the intent stays visible in file recovery. */ }
+    }
   }
   read(owner: string, resource: string): SystemDocument {
     if (!boardPath(resource) || resource === BOARD_PATH) throw new Error('invalid_system_path');

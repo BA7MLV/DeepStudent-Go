@@ -3,22 +3,34 @@ import { liveQuery } from 'dexie';
 import { db } from '../store/db';
 import { cloud } from './state';
 import { inspectPreferenceCommand, resolvePreferenceCommand } from './preferences';
+import { useClock, useHealthyAge } from './quiet';
 
 export default function PreferenceRecovery() {
-  const [ids, setIds] = useState<string[]>([]);
+  const [pending, setPending] = useState<{ id: string; createdAt: number; conflict: boolean }[]>([]);
   const [detail, setDetail] = useState<Awaited<ReturnType<typeof inspectPreferenceCommand>>>();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    const database = db, account = cloud.userId;
+    const database = db, account = cloud.userId, firstSeen = new Map<string, number>();
     const subscription = liveQuery(() => database.table('_cloudMeta').toArray()).subscribe({ next: rows => {
       if (database === db && account === cloud.userId) {
-        setIds(rows.filter(row => row.id.startsWith('preferences-command:')).map(row => row.value.operationId));
+        // Queued/in-flight saves are normal slider interaction, not a recovery
+        // incident. Showing them here makes the entire chat jump on every edit.
+        setPending(rows.filter(row => row.id.startsWith('preferences-command:') && (row.value.state === 'conflict' || row.value.error)).map(row => ({
+          id: row.value.operationId, conflict: row.value.state === 'conflict',
+          // operationId = preferences-<epoch ms>-…; legacy ids age from first sight.
+          createdAt: Number(/^preferences-(\d{13})-/.exec(row.value.operationId)?.[1]) || (firstSeen.get(row.value.operationId) ?? firstSeen.set(row.value.operationId, Date.now()).get(row.value.operationId)!),
+        })));
         setError(rows.find(row => row.id === 'preferences-sync-error')?.value ?? '');
       }
     }, error: error => { if (database === db && account === cloud.userId) setError(String(error)); } });
     return () => subscription.unsubscribe();
   }, []);
+  // An offline/transport error is retried by the next drain; only a conflict or
+  // a failure that outlasts 15s of usable connection needs the user.
+  const now = useClock(pending.length > 0);
+  const age = useHealthyAge();
+  const ids = pending.filter(row => row.conflict || age(row.createdAt, now) >= 15000).map(row => row.id);
   const run = async (id: string, action?: 'retry' | 'discard') => {
     const database = db, account = cloud.userId;
     setBusy(true); setError('');

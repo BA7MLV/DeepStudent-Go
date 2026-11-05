@@ -9,6 +9,7 @@ import type { ArtifactActions } from './ArtifactEditor';
 import WidgetStateSummary from './WidgetStateSummary';
 import { readWidgetHeight, rememberWidgetHeight, widgetRevision, WIDGET_SCROLL_INTENT } from '../harness/widgetReading';
 import './widget-block.css';
+import WidgetStreamFrame from './WidgetStreamFrame';
 import { MAX_WIDGET_DIAGNOSTICS, readWidgetDiagnostic, WIDGET_READY_TIMEOUT_MS, widgetDiagnosticIsError, widgetDiagnosticSummary, widgetRepairInstruction, type WidgetDiagnostic } from '../harness/widgetDiagnostics';
 import { loadWidgetImages, widgetImageReferences } from '../harness/widgetImages';
 import { copyText } from '../utils/clipboard';
@@ -226,11 +227,17 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
     activeRef.current = true;
     if (rowId == null) return () => { activeRef.current = false; };
     let cancelled = false;
+    const controller = new AbortController();
     const timer = setTimeout(() => {
-      if (!cancelled) { cancelled = true; setFailed('准备运行环境超时，请重新运行'); }
+      if (!cancelled) {
+        cancelled = true;
+        controller.abort(new Error('准备运行环境超时，请重新运行'));
+        setFailed('准备运行环境超时，请重新运行');
+      }
     }, WIDGET_READY_TIMEOUT_MS);
     let subscription: { unsubscribe(): void } | undefined;
-    void openWidgetSession(rowId, payload).then(async (binding) => {
+    void openWidgetSession(rowId, payload, { waitForSource: true, signal: controller.signal }).then(async (binding) => {
+      if (cancelled) return;
       const state = await readWidgetState(binding);
       if (cancelled) return;
       clearTimeout(timer);
@@ -248,6 +255,7 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
     return () => {
       cancelled = true;
       activeRef.current = false;
+      controller.abort();
       clearTimeout(timer);
       subscription?.unsubscribe();
     };
@@ -554,16 +562,16 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
     }
   };
 
-  if (!doc && !failed) {
-    return (
-      <div ref={hostRef} style={{ minHeight: height }} className="md-embedded-ui widget-block widget-block--loading" data-testid="widget-loading" role="status">
-        正在准备图形…
-      </div>
-    );
-  }
-
+  // Until the isolated runtime reports ready, show the work's own script-free
+  // first frame (same UI kit/theme) instead of a grey loading box. One root and
+  // one stage for every phase, so the static frame is never remounted.
+  const loading = !doc && !failed;
   return (
-    <div ref={hostRef} className="md-embedded-ui widget-block" data-testid="widget-block" data-h={Math.round(height)}>
+    <div ref={hostRef} style={loading ? { minHeight: height } : undefined}
+      className={`md-embedded-ui widget-block${loading ? ' widget-block--loading' : ''}`}
+      data-testid={loading ? 'widget-loading' : 'widget-block'} role={loading ? 'status' : undefined}
+      aria-busy={!ready && !failed ? true : undefined} data-h={Math.round(height)}>
+      {loading && <span className="sr-only">正在准备图形…</span>}
       {(failed || diagnostics.length > 0) && <div className={failed || diagnostics.some(widgetDiagnosticIsError) ? 'widget-block--error' : 'widget-block--notice'}
         role={failed || diagnostics.some(widgetDiagnosticIsError) ? 'alert' : 'status'} data-testid={failed || diagnostics.some(widgetDiagnosticIsError) ? 'widget-error' : 'widget-notice'}>
         <div className="widget-block__diagnostic-heading">
@@ -579,6 +587,8 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
           <Button size="sm" variant="tertiary" onPress={sourceActions.toggleSource}>{sourceActions.sourceOpen ? '收起 HTML 源码' : '查看 HTML 源码'}</Button>
         </details>
       </div>}
+      <div className="widget-block__stage" data-loading={!ready ? '' : undefined}>
+      {!ready && !failed && <WidgetStreamFrame html={payload.html} dark={dark} minHeight={height} testId="widget-static-preview" />}
       {doc && <iframe
         ref={frameRef}
         className="widget-block__frame"
@@ -590,6 +600,8 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
         style={{ height, visibility: ready ? 'visible' : 'hidden', colorScheme: dark ? 'dark' : 'light', background: 'transparent' }}
         data-testid="widget-frame"
       />}
+      </div>
+      {!loading && <>
       {selection && onPrompt && !disabled && <div className="widget-block__selection">
         <span className="wbw-muted">已选：{selection.text.slice(0, 80)}</span>
         <Button size="sm" variant="tertiary" onPress={() => {
@@ -656,6 +668,7 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
           </Modal.Container>
         </Modal.Backdrop>
       </Modal.Root>}
+      </>}
     </div>
   );
 }

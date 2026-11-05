@@ -1,17 +1,70 @@
 import type { RuntimeTask } from '@wangke/contracts/client-runtime';
 import type { RuntimeSessionProjection, SessionJournalFrame } from '@wangke/contracts/client-runtime';
 
+/** Plain wire/presentation values only; structural sharing keeps unchanged
+ * nested payloads (widgets, tool cards, attachments) stable across checkpoints. */
+export function shareSessionValue<T>(previous: T | undefined, next: T): T {
+  if (Object.is(previous, next)) return next;
+  if (!previous || !next || typeof previous !== 'object' || typeof next !== 'object') return next;
+  if (Array.isArray(previous) !== Array.isArray(next)) return next;
+  if (!Array.isArray(next) && (Object.getPrototypeOf(next) !== Object.prototype || Object.getPrototypeOf(previous) !== Object.prototype)) return next;
+  if (Array.isArray(next) && Array.isArray(previous)) {
+    const identity = (value: any) => value && typeof value === 'object' ? value.key ?? value.id : undefined;
+    const byKey = new Map(previous.filter(value => identity(value) !== undefined).map(value => [identity(value), value]));
+    const values = next.map((value, index) => shareSessionValue(identity(value) === undefined ? previous[index] : byKey.get(identity(value)), value));
+    return (previous.length === values.length && values.every((value, index) => value === previous[index]) ? previous : values) as T;
+  }
+  const keys = Object.keys(next), before = Object.keys(previous);
+  let same = keys.length === before.length;
+  const result: any = Array.isArray(next) ? [] : {};
+  for (const key of keys) {
+    Object.defineProperty(result, key, { value: shareSessionValue(Object.hasOwn(previous, key) ? (previous as any)[key] : undefined, (next as any)[key]), enumerable: true, configurable: true, writable: true });
+    if (!Object.hasOwn(previous, key)) same = false;
+    if (!Object.is(result[key], (previous as any)[key])) same = false;
+  }
+  return same ? previous : result;
+}
+
 /** A cursor belongs to this account Runtime incarnation. Incomplete baselines
  * and rejected event ranges never advance it; reconnect can replay safely. */
 export class SessionJournalModel {
   cursor?: number;
   private value?: RuntimeSessionProjection;
   private baseline?: { cursor: number; value: RuntimeSessionProjection };
+  // One latest request owns pagination metadata. The token is local to this
+  // model/observation, never a wire cursor or permission to cross a baseline.
+  private page?: { deleted: Set<number> };
+  private pageReady = false;
   constructor(private readonly sessionId?: number) {}
-  reconnect() { this.baseline = undefined; }
+  invalidatePages() { this.page = undefined; this.pageReady = false; }
+  beginPage() {
+    if (!this.pageReady || !this.value || this.baseline) return;
+    return this.page = { deleted: new Set<number>() };
+  }
+  endPage(fence: ReturnType<SessionJournalModel['beginPage']>) {
+    if (fence === this.page) this.page = undefined;
+  }
+  prepend(page: RuntimeSessionProjection, fence: ReturnType<SessionJournalModel['beginPage']>) {
+    const ids = new Set<number>();
+    if (this.sessionId !== undefined && page.session.id !== undefined && page.session.id !== this.sessionId) throw new Error('protocol_session_row_identity');
+    for (const row of page.rows) {
+      if (ids.has(row.id) || this.sessionId !== undefined && row.sessionId !== this.sessionId) throw new Error('protocol_session_row_identity');
+      ids.add(row.id);
+    }
+    if (!fence || fence !== this.page || !this.value || this.baseline) return;
+    this.page = undefined;
+    const rows = new Map(page.rows.filter(row => !fence.deleted.has(row.id)).map(row => [row.id, row]));
+    // Existing live facts AND deletes observed since dispatch beat the HTTP
+    // read. Only an accepted page can advance the current pagination frontier.
+    for (const row of this.value.rows) rows.set(row.id, row);
+    this.value = { ...this.value, hasOlder: this.value.hasOlder && page.hasOlder, rows: [...rows.values()].sort((a, b) => a.createdAt - b.createdAt || Number(a.role !== 'user') - Number(b.role !== 'user') || a.id - b.id) };
+    return this.value;
+  }
+  reconnect() { this.invalidatePages(); this.baseline = undefined; }
   apply(frame: SessionJournalFrame): RuntimeSessionProjection | undefined {
-    if (frame.type === 'resync-required') { this.baseline = undefined; return; }
+    if (frame.type === 'resync-required') { this.reconnect(); return; }
     if (frame.type === 'baseline') {
+      this.invalidatePages();
       this.baseline = { cursor: frame.cursor, value: { session: frame.session, tasks: frame.tasks, rows: [], hasOlder: frame.hasOlder } };
       return;
     }
@@ -25,19 +78,27 @@ export class SessionJournalModel {
         }
         this.baseline.value.rows.push(...frame.rows); return;
       }
-      this.value = this.baseline.value;
+      this.value = shareSessionValue(this.value, this.baseline.value);
       this.baseline = undefined;
+      this.pageReady = true;
       return this.value;
     }
     if (!this.value || this.baseline || frame.baseCursor !== this.cursor || frame.cursor !== frame.baseCursor + frame.events.length
-      || frame.events.some((event, index) => event.cursor !== frame.baseCursor + index + 1)) throw new Error('protocol_session_journal_gap');
+      || frame.events.some((event, index) => event.cursor !== frame.baseCursor + index + 1)) {
+      this.invalidatePages();
+      throw new Error('protocol_session_journal_gap');
+    }
     const rows = new Map(this.value.rows.map(row => [row.id, row]));
     for (const event of frame.events) {
       if (event.row && (event.row.id !== event.rowId || this.sessionId !== undefined && event.row.sessionId !== this.sessionId)) throw new Error('protocol_session_row_identity');
-      if (event.row) rows.set(event.rowId, event.row); else rows.delete(event.rowId);
     }
-    this.value = { ...this.value, session: frame.session, tasks: frame.tasks,
-      rows: [...rows.values()].sort((a, b) => a.createdAt - b.createdAt || Number(a.role !== 'user') - Number(b.role !== 'user') || a.id - b.id) };
+    for (const event of frame.events) {
+      if (!event.row) this.page?.deleted.add(event.rowId);
+      if (event.row) rows.set(event.rowId, shareSessionValue(rows.get(event.rowId), event.row)); else rows.delete(event.rowId);
+    }
+    this.value = shareSessionValue(this.value, { ...this.value, session: frame.session, tasks: frame.tasks,
+      rows: [...rows.values()].sort((a, b) => a.createdAt - b.createdAt || Number(a.role !== 'user') - Number(b.role !== 'user') || a.id - b.id) });
+    this.pageReady = true;
     return this.value;
   }
   commit(cursor: number) { this.cursor = cursor; }
@@ -91,10 +152,11 @@ export class SessionTimelineModel<Message extends SessionMessage, Row extends Se
       const index = messages.findIndex(message => (message.createdAt ?? Infinity) - row.createdAt > 0
         || message.createdAt === row.createdAt && (Number(message.role !== 'user') - Number(row.role !== 'user') > 0
           || (message.role === 'user') === (row.role === 'user') && (message.rowId ?? Infinity) > row.id!));
-      messages.splice(index < 0 ? messages.length : index, 0, this.convert(row));
+      const converted = this.convert(row);
+      messages.splice(index < 0 ? messages.length : index, 0, { ...converted, streaming: converted.streaming ?? false, syncPending: false });
     }
-    this.value = messages;
-    return messages;
+    this.value = shareSessionValue(previous, messages);
+    return this.value;
   }
   /** Stable optimistic/task identities also cover continue-in-place turns. */
   progress(previous: Message[], task: RuntimeTask, user: Message | undefined, answer: Message): Message[] {
@@ -104,8 +166,8 @@ export class SessionTimelineModel<Message extends SessionMessage, Row extends Se
       || task.input.action === 'continue' && message.rowId === task.input.rowId);
     if (index < 0) messages.push(answer);
     else messages[index] = { ...messages[index], ...answer, key: messages[index].key };
-    this.value = messages;
-    return messages;
+    this.value = shareSessionValue(previous, messages);
+    return this.value;
   }
   dispose() { this.disposed = true; this.generation++; this.value = []; this.commands.clear(); }
 }

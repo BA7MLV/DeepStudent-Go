@@ -11,7 +11,6 @@ import { projectDisplayName } from '../projects/chatProjects';
 import { MODAL_CONTAINER_CLASS, Sym, toast } from '../ui';
 import { handoutDraft, prepareHandoutPrompt } from '../skills/handout';
 import SkillPicker from './SkillPicker';
-import ModelPicker from './ModelPicker';
 import TaskModelPicker from './TaskModelPicker';
 import './chat-attachments.css';
 import { useTranslation } from 'react-i18next';
@@ -106,7 +105,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
             <Dropdown.Item id="skills" textValue={t('skillPicker.title')}><Sym name="extension" />{t('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
           </Dropdown.Menu>
           <div className="chat-add-menu__model px-2 py-1">
-            <TaskModelPicker sessionId={sessionId} />
+            <TaskModelPicker sessionId={sessionId} onClose={() => setAddOpen(false)} />
           </div>
         </Dropdown.Popover>
       </Dropdown>

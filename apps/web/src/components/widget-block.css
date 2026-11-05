@@ -23,7 +23,12 @@
 .widget-block__selection { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; font-size: .875rem; }
 .widget-block__selection > span { flex: 1 1 12rem; overflow-wrap: anywhere; color: var(--muted); }
 
-.widget-block--loading,
+.widget-block__stage { position: relative; min-width: 0; }
+/* The interactive frame boots behind its static first frame, then takes its place. */
+.widget-block__stage[data-loading] > .widget-block__frame { position: absolute; inset: 0 0 auto; }
+.widget-block--loading > .widget-stream-frame,
+.widget-block__stage > .widget-stream-frame { margin: 0; }
+
 .widget-block--notice,
 .widget-block--error {
   padding: 12px;

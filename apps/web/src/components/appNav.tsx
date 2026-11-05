@@ -5,7 +5,7 @@ import { useBotPanel } from '../store/botPanel';
 import { focusChatComposer } from './chatComposerFocus';
 import { useTranslation } from 'react-i18next';
 import type { PluginCatalog } from '../plugins/catalog';
-import { navigationEntries } from '../plugins/layout';
+import { hasBoardComponents, navigationEntries } from '../plugins/layout';
 
 /**
  * 应用级导航的唯一来源：宽屏常驻左侧栏，窄屏由顶栏汉堡按钮弹成 Drawer
@@ -59,14 +59,16 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
       },
       testId: 'nav-rail-bot',
     },
-    {
-      value: 'tasks',
-      label: t('board.title'),
-      icon: <Sym name="grid_view" />,
-      to: '/board',
-      testId: 'nav-rail-tasks',
-    },
   ];
+  // 看板只是一个挂载位：有用户组件挂在 board.main 上才出现入口。
+  // 当前就在看板页时保留入口，避免高亮项凭空消失。
+  if (hasBoardComponents(catalog) || ['/board', '/tasks'].includes(pathname)) items.push({
+    value: 'tasks',
+    label: t('board.title'),
+    icon: <Sym name="grid_view" />,
+    to: '/board',
+    testId: 'nav-rail-tasks',
+  });
   items.push(...pages.map(p => ({ value: `plugin:${p.entry.id}`, label: p.title, icon: <Sym name="extension" />, to: p.url, testId: `nav-plugin-${p.entry.id}` })));
   return { value, items };
 }

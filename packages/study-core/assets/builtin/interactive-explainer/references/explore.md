@@ -2,25 +2,27 @@
 
 以下片段可作为 show_widget(format="html",code=...) 的起点，不需要 libs。根据题意改变画面与参数，切勿照搬不相关控件。它只展示一个主要变量，input 重绘，change 保存，追问由宿主确认。
 
+标记里已写好默认读数、画布尺寸、绘图框和 a = 1 时的曲线，生成过程中的无脚本预览就是有效首帧；脚本接管后按实际宽度重绘同一批元素。
+
 ```html
 <section id="quadratic-explorer" aria-label="抛物线系数探索">
   <h3>抛物线的开口</h3>
   <div class="wbw-controls">
-    <label class="wbw-field"><span class="wbw-field-header">系数 a <output class="wbw-value"></output></span>
+    <label class="wbw-field"><span class="wbw-field-header">系数 a <output class="wbw-value">1.00</output></span>
       <input aria-label="系数 a" type="range" min="-3" max="3" step="0.25" value="1">
     </label>
     <button type="button" data-wbw-prompt="解释当前系数下抛物线的开口和变化">解释当前情况</button>
   </div>
   <div class="wbw-stage">
-    <svg role="img" aria-label="y 等于 a 乘以 x 的平方，横轴 x，纵轴 y">
+    <svg role="img" viewBox="0 0 320 240" width="320" height="240" aria-label="y 等于 a 乘以 x 的平方，横轴 x，纵轴 y">
       <title>y = ax²</title>
       <desc>横轴 x 与纵轴 y 均为无量纲数值。改变系数，比较曲线在同一坐标范围内的开口。</desc>
-      <rect data-chart-frame fill="none" stroke="var(--wbw-border)"></rect>
+      <rect data-chart-frame x="64" y="32" width="240" height="160" fill="none" stroke="var(--wbw-border)"></rect>
       <g data-grid fill="none" stroke="var(--wbw-border)" stroke-width="1"></g>
       <g data-ticks></g>
-      <path data-curve fill="none" stroke="var(--wbw-series-1)" stroke-width="2"></path>
-      <text class="axis-title" data-axis="x">x（无量纲）</text>
-      <text class="axis-title" data-axis="y">y（无量纲）</text>
+      <path data-curve d="M64 89 Q184 135 304 89" fill="none" stroke="var(--wbw-series-1)" stroke-width="2"></path>
+      <text class="axis-title" data-axis="x" x="184" y="236" text-anchor="middle">x（无量纲）</text>
+      <text class="axis-title" data-axis="y" x="64" y="16">y（无量纲）</text>
     </svg>
   </div>
   <p data-status role="status" aria-live="polite" class="wbw-muted wbw-small"></p>
@@ -84,6 +86,13 @@
 </script>
 ```
 
-## 算法单步的取舍
+## 并排对比两种方案
 
-先用已核实的输入在本地算出步骤，保存 `{input, step}` 到 modelContent。每次「上一步 / 下一步」只更新同一个画面；边界禁用对应按钮。为旧快照校验输入、步骤范围。不要把推导长文、全部 DOM 或所有重算结果存进快照，不自动播放，不在每一步请求模型。材料未给输入时注明使用示例输入。
+比较“参数 A 与参数 B 的差别”时，优先把两条曲线画在**同一坐标范围**的同一画面里，用 series-1 实线 / series-2 虚线和直接标签区分；只有两幅图的量纲或坐标不同才拆成 `.wbw-grid` 的两栏，并让两栏共享刻度范围。
+
+- 控件按方案分组，每组用 fieldset/legend 写明「方案 A」「方案 B」，当前值放标签旁。
+- 画面下方至多一行差值读数（如「同一 x 处 A 比 B 高 3.0」），推导放正文。
+- modelContent 写成 `{"方案 A 系数": 1, "方案 B 系数": 2}`，便于追问时读懂。
+- 对比数据较多时用 `.wbw-table` 语义表格，不另做卡片。
+
+算法逐步执行见 `stepper.md`，随时间演化见 `simulation.md`。

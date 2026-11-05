@@ -18,6 +18,8 @@ import { parseWrongbook } from '../packages/study-core/src/study/wrongbook.ts';
 
 const root = path.join(os.tmpdir(), 'opencode'); fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'plugin-unplug-'));
+// Board samples are test fixtures; the product seeds no components.
+process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'bootstrap-secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const dbPath = path.join(directory, 'db.sqlite'), systemRoot = path.join(directory, 'files/system-files'), filesDir = process.env.FILES_DIR;

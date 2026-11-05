@@ -25,6 +25,7 @@ let generation = 0;
 let detachLifetime: (() => void) | undefined;
 const prefix = 'preferences-command:';
 const inspections = new WeakMap<object, () => boolean>();
+const localIntent = new Map<string, unknown>();
 
 async function preferenceCommands() {
   const owner = cloud.userId, database = db;
@@ -44,6 +45,26 @@ async function preferenceCommands() {
     list: async () => (await database.table('_cloudMeta').toArray()).filter(row => row.id.startsWith(prefix)).map(row => row.value as DurableCommand<PreferencesCommand>).sort((a, b) => a.request.operationId.localeCompare(b.request.operationId)),
     save: command => mutateJournal(() => database.table('_cloudMeta').put({ id: prefix + command.operationId, value: command })),
     remove: operationId => mutateJournal(() => database.table('_cloudMeta').delete(prefix + operationId)),
+    acknowledge: async (operationId, value) => {
+      // Install this command's confirmed values before removing its overlay.
+      // Otherwise another quick edit can still read the pre-ack cache as its CAS
+      // baseline while the preferences subscription is catching up.
+      await database.transaction('rw', database.table('preferences'), database.table('_cloudMeta'), async () => {
+        lifetime.assertCurrent();
+        const command = (await database.table('_cloudMeta').get(prefix + operationId))?.value as DurableCommand<PreferencesCommand> | undefined;
+        const projection = value as PreferencesProjection;
+        markCloudApply();
+        for (const change of command?.request.changes ?? []) {
+          const cached = (await database.table('preferences').get(change.key))?.value ?? null;
+          // A newer server projection may already have arrived. Do not roll it
+          // back with an older receipt recovered after a disconnect.
+          if (JSON.stringify(cached) === JSON.stringify(change.expected))
+            await database.table('preferences').put({ id: change.key, value: projection.values[change.key] ?? null });
+        }
+        await database.table('_cloudMeta').delete(prefix + operationId);
+        lifetime.assertCurrent();
+      });
+    },
   }, { receipt: runtime.receipt, send: runtime.setPreferences, replaySafe: true,
     current: () => lifetime.current() && database === db && cloud.enabled && cloud.userId === owner && isCurrentServerRuntime(runtime) });
   commands = { lifetime, drain };
@@ -58,7 +79,13 @@ async function persistPreferences(rows: { id: typeof keys[number]; value: any }[
   await database.transaction('rw', database.table('preferences'), database.table('_cloudMeta'), async () => {
     lifetime.assertCurrent();
     const changes = [];
-    for (const row of rows) changes.push({ key: row.id, value: row.value, expected: (await database.table('preferences').get(row.id))?.value ?? null });
+    // Queue edits against their predecessor's intended value. Each command
+    // keeps its original CAS; a failed predecessor still blocks the chain.
+    const pending = (await database.table('_cloudMeta').toArray()).filter(row => row.id.startsWith(prefix)).sort((a, b) => a.id.localeCompare(b.id));
+    const expected = new Map<string, RuntimeJson>();
+    for (const command of pending) for (const change of (command.value as DurableCommand<PreferencesCommand>).request.changes) expected.set(change.key, change.value);
+    for (const row of rows) changes.push({ key: row.id, value: row.value,
+      expected: expected.has(row.id) ? expected.get(row.id)! : (await database.table('preferences').get(row.id))?.value ?? null });
     lifetime.assertCurrent();
     await database.table('_cloudMeta').put({ id: prefix + operationId, value: { operationId, request: { operationId, changes }, state: 'queued' } satisfies DurableCommand<PreferencesCommand> });
     lifetime.assertCurrent();
@@ -103,17 +130,25 @@ export async function applySystemAgentInstructions(text: string, database = db) 
 export async function loadPreferences() {
   const database = db, owner = cloud.userId, current = generation;
   const lifetime = accountLifetime(owner);
-  const rows = await database.table('preferences').toArray();
+  const { rows, pending } = await database.transaction('r', database.table('preferences'), database.table('_cloudMeta'), async () => ({
+    rows: await database.table('preferences').toArray(),
+    pending: (await database.table('_cloudMeta').toArray()).filter(row => row.id.startsWith(prefix)).sort((a, b) => a.id.localeCompare(b.id)),
+  }));
   if (!lifetime.current() || database !== db || owner !== cloud.userId || current !== generation) return;
   const values = Object.fromEntries(rows.filter(r => keys.includes(r.id)).map(r => [r.id, r.value]));
   // Pending preference intent is an explicit UI overlay, not committed storage.
-  const pending = (await database.table('_cloudMeta').toArray()).filter(row => row.id.startsWith(prefix)).sort((a, b) => a.id.localeCompare(b.id));
   for (const row of pending) for (const change of (row.value as DurableCommand<PreferencesCommand>).request.changes) values[change.key] = change.value;
+  // Settings edits precede their asynchronous journal transaction. Do not let a
+  // projection in that small window roll a slider back before intent is saved.
+  for (const [key, value] of localIntent) values[key] = value;
   if (!lifetime.current() || database !== db || owner !== cloud.userId || current !== generation) return;
   // 云偏好直接 setState，不经过 Settings.update 的输入校验。
   if (Object.hasOwn(values, 'uiLanguage')) values.uiLanguage = normalizeUiLanguage(values.uiLanguage);
   if (Object.hasOwn(values, 'userName')) values.userName = normalizeUserName(values.userName);
   if (Object.hasOwn(values, 'agentInstructions')) values.agentInstructions = normalizeAgentInstructions(values.agentInstructions);
+  const state = useSettings.getState();
+  for (const key of Object.keys(values)) if (JSON.stringify(values[key]) === JSON.stringify(state[key as keyof Settings])) delete values[key];
+  if (!Object.keys(values).length) return;
   applying = true;
   try { useSettings.setState(values); } finally { applying = false; }
 }
@@ -151,9 +186,11 @@ export async function startPreferences() {
     const changes = keys.filter(key => JSON.stringify(next[key]) !== JSON.stringify(previous[key]));
     if (!changes.length) return;
     const rows = changes.map(id => ({ id, value: next[id as keyof Settings] ?? null }));
+    for (const row of rows) localIntent.set(row.id, row.value);
     writing = writing.catch(() => {}).then(async () => {
       if (database !== db || cloud.userId !== owner || current !== generation) return;
       await persistPreferences(rows, database, lifetime);
+      for (const row of rows) if (localIntent.get(row.id) === row.value) localIntent.delete(row.id);
       void drainPreferences().catch(error => {
         if (current === generation && database === db && cloud.userId === owner && isCurrentServerRuntime(runtime)) void database.table('_cloudMeta').put({ id: 'preferences-sync-error', value: String(error) }).catch(() => {});
       });
@@ -191,6 +228,7 @@ export function stopPreferences() {
   commands?.drain.dispose(); commands = undefined;
   // A hung write for the retired subscription must not block a new account.
   writing = Promise.resolve();
+  localIntent.clear();
 }
 
 export async function inspectPreferenceCommand(operationId: string) {

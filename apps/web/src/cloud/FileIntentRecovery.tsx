@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { RuntimeFileIntent } from '@wangke/contracts/client-runtime';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { cloud } from './state';
+import { useSustained } from './quiet';
 
 /** Recovery is explicit; mounting this UI never retries a filesystem effect. */
 export default function FileIntentRecovery() {
@@ -57,7 +58,9 @@ export default function FileIntentRecovery() {
     } catch (error) { if (current()) setError(`处理尚未确认，请重新核对原收据，不要提交新命令。${String(error)}`); }
     finally { if (current()) setBusy(false); }
   };
-  if (!intents.length && !detail && !error && !streamError) return null;
+  // The stream reconnects by itself; a transient error is not a file conflict.
+  const lastingStreamError = useSustained(!!streamError, 10000);
+  if (!intents.length && !detail && !error && !lastingStreamError) return null;
   return <section className="bg-surface p-3" aria-label="文件意图恢复">
     {intents.map(intent => <p key={intent.id}>文件外部修改冲突：{intent.path} <button type="button" disabled={busy} onClick={() => void inspect(intent.id)}>核对文件意图</button></p>)}
     {detail ? <div>
@@ -77,6 +80,6 @@ export default function FileIntentRecovery() {
       <button type="button" disabled={busy} onClick={() => setDetail(undefined)}>关闭核对</button>
     </div> : null}
     {error ? <p role="alert">{error}</p> : null}
-    {streamError ? <p role="alert">{streamError}</p> : null}
+    {lastingStreamError ? <p role="alert">{streamError}</p> : null}
   </section>;
 }

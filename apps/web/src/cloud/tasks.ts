@@ -7,6 +7,8 @@ import type { CloudTask, CloudTaskKind } from '@wangke/contracts/cloud';
 import { liveQuery } from 'dexie';
 import { create } from 'zustand';
 import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
+import { flushPreferences } from './preferences';
+import { drainLearning, type LearningCommandRow } from '../client/learning';
 
 interface PendingTaskCommand { command: RuntimeTaskSubmit; createdAt: number }
 export const usePendingTaskCommands = create<{ commands: PendingTaskCommand[] }>()(() => ({ commands: [] }));
@@ -15,7 +17,20 @@ const forgetUncertain = (operationId: string) => usePendingTaskCommands.setState
 
 export async function submitCloudTask(kind: CloudTaskKind, resource: string, input: Record<string, unknown>, operationId: string = crypto.randomUUID()): Promise<CloudTask> {
   const account = cloud.userId;
-  await flushCloud();
+  if (kind === 'chat' && typeof input.sessionId === 'number') {
+    // Admission depends on server configuration and this session's metadata,
+    // not on downloading every account record/blob into IndexedDB.
+    await flushPreferences();
+    if (account !== cloud.userId) throw new Error('client_account_changed');
+    const database = db;
+    const pending = () => database.table<LearningCommandRow>('_learningCommands').filter(row => row.state !== 'confirmed' && row.entities.includes(`session:${input.sessionId}`)).toArray();
+    if ((await pending()).length) {
+      if (account !== cloud.userId || database !== db) throw new Error('client_account_changed');
+      await drainLearning([`session:${input.sessionId}`]);
+      const unsettled = await pending();
+      if (unsettled.length) throw new Error(unsettled[0].error ?? 'conversation_session_not_confirmed');
+    }
+  } else await flushCloud();
   if (account !== cloud.userId) throw new Error('client_account_changed');
   const { serverRuntime, isCurrentServerRuntime } = await import('../client/bootstrap');
   if (account !== cloud.userId) throw new Error('client_account_changed');
@@ -204,9 +219,11 @@ export async function cancelResourceTasks(resource: string, kind?: CloudTaskKind
   const { tasks } = await cloudRequest<{ tasks: CloudTask[] }>('/tasks');
   await Promise.all(tasks.filter(t => t.resource === resource && (!kind || t.kind === kind) && ['queued','running','waiting_user'].includes(t.status)).map(t => cloudRequest(`/tasks/${t.id}/cancel`, { method: 'POST' })));
 }
-export async function commandChatTask(sessionId: number | null, action: string, value?: unknown): Promise<boolean> {
+export async function commandChatTask(sessionId: number | null, action: string, value?: unknown, taskId?: string): Promise<boolean> {
+  const owner = cloud.userId;
   const { tasks } = await cloudRequest<{ tasks: CloudTask[] }>('/tasks');
-  const task = tasks.find(t => t.resource === `session:${sessionId}` && ['running','waiting_user'].includes(t.status));
+  if (owner !== cloud.userId) throw new Error('client_account_changed');
+  const task = tasks.find(t => (!taskId || t.id === taskId) && t.resource === `session:${sessionId}` && ['running','waiting_user'].includes(t.status));
   if (!task) return false;
   await cloudRequest(`/tasks/${task.id}/commands`, { method: 'POST', body: JSON.stringify({ action, value, nonce: crypto.randomUUID() }) });
   return true;

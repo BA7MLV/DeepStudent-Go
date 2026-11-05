@@ -9,6 +9,7 @@ Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');
 const { CloudRecords } = await import('../apps/api/src/cloud/records.ts');
+const { CloudConfiguration } = await import('../apps/api/src/cloud/config.ts');
 const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
 let web, browser, store;
 const documentRequests = [];
@@ -51,6 +52,10 @@ document.body.dataset.ready = 'yes';`;
   const owner = (await login.json()).user.id;
   store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
   const records = new CloudRecords(store);
+  // Admission now freezes a server model. A worker-disabled fixture still needs
+  // a valid server-only model configuration; it never executes this transport.
+  const configuration = new CloudConfiguration(store, directory);
+  configuration.save(owner, { ...configuration.get(owner), providers: [{ id: 'fixture', name: 'Offline fixture', protocol: 'openai-chat', baseUrl: 'https://model.invalid/v1', apiKey: 'free-only', serves: ['chat'], catalogId: '' }], llmModel: { providerId: 'fixture', model: 'fixture' } });
   records.apply(owner, [900001, 900002].map(id => ({ id: `session-${id}`, table: 'chatSessions', key: id, before: null, after: { id, title: `Session ${id}`, createdAt: id } })));
   records.apply(owner, Array.from({ length: 65 }, (_, index) => ({ id: `session-row-${index}`, table: 'chats', key: 910000 + index, before: null,
     after: { id: 910000 + index, sessionId: 900001, role: 'assistant', content: `History ${index}`, createdAt: index } })));

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cloud } from './state';
 import { useCloudSync } from './sync';
-import { reflectCloudTasks } from '../store/courseChat';
+import { reflectCloudTasks, refreshConversationIndex } from '../store/courseChat';
 import { useLibraryRevision } from '../pipelines/folderPlan';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { useJobStore } from '../store/jobs';
@@ -12,6 +12,8 @@ import FileIntentRecovery from './FileIntentRecovery';
 import PreferenceRecovery from './PreferenceRecovery';
 import LearningRecovery from './LearningRecovery';
 import ResourceSaveNotice from './ResourceSaveNotice';
+import { useSustained } from './quiet';
+import './activity.css';
 
 export default function CloudActivity() {
   const { t } = useTranslation('settings', { keyPrefix: 'recovery' });
@@ -31,7 +33,7 @@ export default function CloudActivity() {
     const account = cloud.userId;
     let stopped = false, dirty = true, off: (() => void) | undefined, release: (() => void) | undefined;
     let refresh = () => {};
-    const changed = () => { dirty = true; useLibraryRevision.getState().bump(); refresh(); };
+    const changed = () => { dirty = true; useLibraryRevision.getState().bump(); };
     void serverRuntime(account).then(runtime => {
       if (stopped || account !== cloud.userId || !isCurrentServerRuntime(runtime)) return;
       const model = runtime.tasks();
@@ -55,7 +57,7 @@ export default function CloudActivity() {
             // task facts; cache invalidation can replay them without a server poll.
              const changedData = dirty; dirty = false;
             useCloudActivity.setState(state => ({ tasks, unavailable: false, dataRevision: state.dataRevision + (changedData ? 1 : 0) }));
-            await reflectCloudTasks(tasks, changedData);
+            await reflectCloudTasks(tasks);
             if (!current()) return;
             const seen = new Set<string>();
             for (const task of tasks) {
@@ -75,7 +77,10 @@ export default function CloudActivity() {
       release = model.acquire();
       refresh();
     }).catch(() => { if (!stopped) useCloudActivity.setState({ unavailable: true }); });
-    const offCache = useCloudSync.subscribe((state, previous) => { if (state.recordsRevision !== previous.recordsRevision) changed(); });
+    const offCache = useCloudSync.subscribe((state, previous) => {
+      if (state.recordsRevision !== previous.recordsRevision) changed();
+      if (state.conversationsRevision !== previous.conversationsRevision) void refreshConversationIndex();
+    });
     return () => {
       stopped = true;
       off?.(); release?.();
@@ -83,9 +88,18 @@ export default function CloudActivity() {
       useCloudActivity.setState({ tasks: null, unavailable: false });
     };
   }, []);
+  const degraded = useCloudSync(s => s.degradedSince > 0);
+  // Brief disconnects heal silently; only a lasting one is worth a glance.
+  const showOffline = useSustained(!online, 3000);
+  const showReconnecting = useSustained(online && degraded, 10000);
   if (!cloud.enabled) return null;
-  return <>
-    {!online || error ? <p role="status" className="bg-surface p-3">{t(!online ? 'offline' : 'reconnecting')}{syncedAt ? ` ${t('lastConfirmed', { time: new Date(syncedAt).toLocaleString() })}` : ''}</p> : null}
+  // Fixed overlay, never in the page flow: a notice appearing or clearing must
+  // not resize the chat viewport or move the composer under the user's finger.
+  return <div className="cloud-activity" data-testid="cloud-activity">
+    {showOffline || showReconnecting ? <p role="status" className="cloud-activity__status">
+      <span className="cloud-activity__dot" aria-hidden="true" />
+      {t(showOffline ? 'offline' : 'reconnecting')}{syncedAt ? ` ${t('lastConfirmed', { time: new Date(syncedAt).toLocaleString() })}` : ''}
+    </p> : null}
     <FileIntentRecovery />
     <PreferenceRecovery />
     <LearningRecovery />
@@ -100,6 +114,6 @@ export default function CloudActivity() {
           .finally(() => setRetrying(undefined));
       }}>{retrying === command.operationId ? '正在核对…' : '核对收据并使用原命令重试'}</button>
     </section>)}
-    {retryError ? <p role="alert">{retryError}</p> : null}
-  </>;
+    {retryError ? <p role="alert" className="bg-surface p-3">{retryError}</p> : null}
+  </div>;
 }

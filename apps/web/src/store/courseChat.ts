@@ -1,8 +1,8 @@
-import { create } from 'zustand';
+import { createSessionStore } from '../client/session-store';
+import { cloud } from '../cloud/state';
 import { patchConversationSession, reviseConversationSession } from './conversationProducts';
 import { learningEdit, learningId, submitLearning } from '../client/learning';
 import { removeConversationMessages, deleteServerSession, forkServerSession } from '../client/conversations';
-import { syncTaskWidgets } from '../cloud/tasks';
 import type { CloudTask } from '@wangke/contracts/cloud';
 import { useChatNotifications } from './chatNotifications';
 import { readChatPage, readChatHistory } from './chatHistory';
@@ -21,7 +21,7 @@ import type { ChatAttachment } from '../chat/attachments';
 import { ATTACHMENTS_PENDING_ERROR, useChatAttachments } from './chatAttachments';
 import { normalizeCourseContextIds } from '../harness/courseContext';
 import type { ChatProject } from '../projects/chatProjects';
-import { SessionTimelineModel, SessionQueueModel, type SessionQueueItem } from '@wangke/client-core';
+import { SessionQueueModel, type SessionQueueItem } from '@wangke/client-core';
 import { followServerSession } from '../client/session';
 import { browserChatQueue, beginChatDraft } from '../client/chat-queue';
 import { stopServerChat, commandServerChat } from '../client/chat-server-execution';
@@ -60,6 +60,7 @@ export interface PendingPlan {
 export type SendMode = 'queue' | 'steer';
 export type QueuedMessage = SessionQueueItem<ChatAttachment>;
 interface SessionView {
+  tasks: RuntimeTask[];
   messages: CourseChatMessage[]; hasOlder: boolean; loadingOlder: boolean; historyError: string | null;
   loaded: boolean; loading: boolean; queued: QueuedMessage[];
   pendingAsk: PendingAsk | null; pendingPlan: PendingPlan | null; planApplying: boolean;
@@ -90,19 +91,15 @@ export interface CourseChatStore extends SessionView {
   confirmPlan(): Promise<{ ok: boolean; error?: string }>; cancelPlan(): Promise<void>;
 }
 const EMPTY_VIEW: SessionView = {
+  tasks: [],
   messages: [], hasOlder: false, loadingOlder: false, historyError: null, loaded: false, loading: false,
   queued: [], pendingAsk: null, pendingPlan: null, planApplying: false, skillIds: undefined,
   turnSkillIds: [], mcpServerIds: undefined, contextCourses: [], project: null,
 };
 const DRAFT_STATE = { ...EMPTY_VIEW, activeId: null, loaded: true };
-const parked = new Map<number, SessionView>();
 const pendingCloudSubmissions = new Map<string, number>();
-const finishedCloudTasks = new Set<string>();
 const historyLoads = new Map<number, symbol>();
-const serverSessions = new Map<number, () => void>();
-const timelines = new Map<number, SessionTimelineModel<CourseChatMessage, ChatRow>>();
-const sessionTasks = new Map<number, RuntimeTask[]>();
-let cloudReflection = 0;
+const serverSessions = new Map<number, ReturnType<typeof followServerSession>>();
 let accountGeneration = 0;
 let queueBinding: { adapter: ReturnType<typeof browserChatQueue>; model: SessionQueueModel<ChatAttachment> } | undefined;
 
@@ -111,40 +108,34 @@ function captureScope() {
   return () => generation === accountGeneration && database === db && (!owner || owner.current());
 }
 function activeKey() { return useCourseChat.getState().activeId ?? 0; }
-function readView(id: number): SessionView { return id === activeKey() ? useCourseChat.getState() : parked.get(id) ?? EMPTY_VIEW; }
-function writeView(id: number, patch: Partial<SessionView>) {
-  if (id === activeKey()) useCourseChat.setState(patch);
-  else parked.set(id, { ...readView(id), ...patch });
-  const ids = new Set([useCourseChat.getState().activeId, ...parked.keys()]);
+function readView(id: number): SessionView { return useCourseChat.model(id).getSnapshot(); }
+function writeView(id: number, patch: Partial<SessionView>, deferred = false) {
+  useCourseChat.model(id).set(patch, deferred);
+  const ids = new Set(useCourseChat.models.keys());
   const awaitingIds = [...ids].filter((key): key is number => key != null && key !== 0 && !!(readView(key).pendingAsk || readView(key).pendingPlan));
   const before = useCourseChat.getState().awaitingIds;
   if (before.length !== awaitingIds.length || before.some(id => !awaitingIds.includes(id))) useCourseChat.setState({ awaitingIds });
 }
 function parkActive() {
-  const state = useCourseChat.getState();
-  if (state.activeId != null) {
-    const { messages, hasOlder, loadingOlder, historyError, loaded, loading, queued, pendingAsk, pendingPlan,
-      planApplying, skillIds, turnSkillIds, mcpServerIds, contextCourses, project } = state;
-    parked.set(state.activeId, { messages, hasOlder, loadingOlder, historyError, loaded, loading, queued, pendingAsk,
-      pendingPlan, planApplying, skillIds, turnSkillIds, mcpServerIds, contextCourses, project });
-  }
+  // Views already belong to their session model, independent of selection.
 }
 function markRunning(id: number, running: boolean) {
-  useCourseChat.setState(state => ({ runningIds: running ? [...new Set([...state.runningIds, id])] : state.runningIds.filter(key => key !== id) }));
+  if (useCourseChat.getState().runningIds.includes(id) !== running) useCourseChat.setState(state => ({ runningIds: running ? [...state.runningIds, id] : state.runningIds.filter(key => key !== id) }));
 }
 function timeline(id: number) {
-  let model = timelines.get(id);
-  if (!model) { model = new SessionTimelineModel(id, toMessage); timelines.set(id, model); }
-  return model;
+  return useCourseChat.model(id).timeline;
 }
 function followSession(id: number) {
   if (serverSessions.has(id)) return;
-  for (const [other, stop] of serverSessions) if (other !== id && !useCourseChat.getState().runningIds.includes(other)) { stop(); serverSessions.delete(other); }
   const current = captureScope();
   serverSessions.set(id, followServerSession(id, {
-    changed: page => current() ? refreshCloudSession(id, cloudReflection, page) : Promise.resolve(),
+    changed: page => current() ? applySessionPage(id, page) : Promise.resolve(),
     failed: error => { if (current()) writeView(id, { historyError: `消息同步失败：${error}` }); },
   }));
+}
+function releaseIdleSessions() {
+  const state = useCourseChat.getState();
+  for (const [id, stop] of serverSessions) if (id !== state.activeId && !state.runningIds.includes(id) && !readView(id).loading) { stop(); serverSessions.delete(id); }
 }
 function sessionQueue() {
   if (queueBinding?.adapter.current()) return queueBinding.model;
@@ -170,122 +161,103 @@ function sessionQueue() {
 }
 export async function flushChatQueue() { await sessionQueue().flush(); }
 function clearAccountView() {
-  accountGeneration++; cloudReflection++;
+  accountGeneration++;
   for (const stop of serverSessions.values()) stop(); serverSessions.clear();
-  for (const model of timelines.values()) model.dispose(); timelines.clear();
-  parked.clear(); historyLoads.clear(); pendingCloudSubmissions.clear(); finishedCloudTasks.clear(); sessionTasks.clear(); queueBinding = undefined;
+  useCourseChat.clearModels(); historyLoads.clear(); pendingCloudSubmissions.clear(); queueBinding = undefined;
   useCourseChat.setState({ ...DRAFT_STATE, ready: false, loaded: false, sessions: [], archivedSessions: [], runningIds: [], awaitingIds: [], draft: '' });
 }
 accountLifecycle.onDisposed(clearAccountView);
 if (typeof window !== 'undefined') window.addEventListener('wangke:bot-session-ended', clearAccountView);
 
-/** Revalidate all visible rows without losing pagination or optimistic identity. */
-async function refreshCloudSession(id: number, reflection: number, remotePage?: { rows: ChatRow[]; hasOlder: boolean; tasks?: RuntimeTask[] }) {
-  const current = captureScope(), before = readView(id);
-  const ids = before.messages.flatMap(message => message.rowId ?? message.committedRowId ?? []);
-  try {
-    const [page, visible] = await Promise.all([remotePage ?? readChatPage(id), db.chats.bulkGet(ids)]);
-    if (!current() || reflection !== cloudReflection || readView(id).messages !== before.messages) return;
-    if (page.tasks) sessionTasks.set(id, page.tasks.filter(task => task.input.action !== 'compressContext'));
-    const earlier = visible.filter((row): row is ChatRow => !!row && row.sessionId === id && (!remotePage || page.rows.length > 0 && row.createdAt < page.rows[0].createdAt));
-    const messages = timeline(id).reconcile(before.messages, [...earlier, ...page.rows]);
-    const includesEarlier = page.rows.length > 0 && messages.some(message => message.createdAt != null && message.createdAt < page.rows[0].createdAt);
-    const loading = [...pendingCloudSubmissions.values()].includes(id) || !!sessionTasks.get(id)?.some(chatTaskActive);
-    writeView(id, { messages, loaded: true, loading, historyError: null, hasOlder: includesEarlier ? before.hasOlder : page.hasOlder, ...pendingCards(messages) });
-    markRunning(id, loading);
-    if (!loading) sessionQueue().drain(id);
-  } catch (error) {
-    if (current() && reflection === cloudReflection && readView(id).messages === before.messages) writeView(id, { historyError: `消息同步失败：${error instanceof Error ? error.message : String(error)}` });
+// The session stream is the sole live writer. Journal projections include the
+// retained loaded window, so deletion never consults a lagging account cache.
+async function applySessionPage(id: number, page: { rows: ChatRow[]; hasOlder: boolean; tasks?: RuntimeTask[] }) {
+  // Task acceptance can race its terminal journal frame. Keep the latest frame
+  // in the retained remote model and replay it after binding optimistic IDs.
+  if ([...pendingCloudSubmissions.values()].includes(id)) return;
+  const before = readView(id);
+  const tasks = page.tasks?.filter(task => task.input.action !== 'compressContext') ?? before.tasks;
+  useCourseChat.model(id).set({ tasks }, true);
+  let messages = timeline(id).reconcile(before.messages, page.rows);
+  for (const task of tasks) {
+    const progress = task.progress;
+    if (!chatTaskActive(task) || !progress) continue;
+    const existing = messages.find(message => message.taskId === task.id && message.role === 'ai'
+      || task.input.action === 'continue' && message.rowId === task.input.rowId);
+    const widgets = Array.isArray(progress.widgets) ? progress.widgets as unknown as WidgetPayload[] : existing?.widgets;
+    const answer: CourseChatMessage = { ...existing, key: existing?.key ?? `cloud-answer-${task.id}`, role: 'ai', taskId: task.id,
+      content: typeof progress.content === 'string' ? progress.content : existing?.content ?? '',
+      reasoning: typeof progress.reasoning === 'string' ? progress.reasoning : existing?.reasoning,
+      rowId: typeof progress.rowId === 'number' ? progress.rowId : existing?.rowId,
+      tools: Array.isArray(progress.tools) ? progress.tools as unknown as ChatToolCall[] : existing?.tools,
+      ask: (progress.ask as unknown as AskUserState | undefined) ?? existing?.ask,
+      folderPlan: (progress.folderPlan as unknown as FolderPlanState | undefined) ?? existing?.folderPlan,
+      widgets, widget: widgets?.at(-1), widgetPreview: progress.widgetPreview as unknown as { html: string } | undefined,
+      streaming: true, error: false, interrupted: false,
+      processPhase: progress.phase === 'answer' ? 'answering' : progress.phase === 'tool' ? 'tool' : progress.phase === 'thinking' ? 'thinking' : 'preparing',
+      processStartedAt: Date.parse(task.createdAt) || Date.now() };
+    const text = typeof task.input.text === 'string' ? task.input.text.trim() : '';
+    messages = timeline(id).progress(messages, task, text && task.input.action !== 'continue'
+      ? { key: `cloud-user-${task.id}`, role: 'user', content: text, taskId: task.id, syncPending: true, createdAt: Date.parse(task.createdAt) } : undefined, answer);
+  }
+  // Even tasks failing before the first durable row must unlock the composer.
+  messages = messages.map(message => {
+    const task = tasks.find(task => task.id === message.taskId);
+    if (!message.streaming || !task || chatTaskActive(task)) return message;
+    const failed = ['failed', 'interrupted'].includes(task.status);
+    return { ...message, streaming: false, syncPending: false, widgetPreview: undefined,
+      error: failed && !message.content, interrupted: failed && !!message.content,
+      content: failed && !message.content ? `回答失败：${task.error || '未获得回答，请重试'}` : message.content,
+      interruptReason: failed ? task.error ?? undefined : undefined };
+  });
+  const loading = [...pendingCloudSubmissions.values()].includes(id) || tasks.some(chatTaskActive);
+  const cards = pendingCards(messages, id);
+  const deferred = before.loading && loading && cards.pendingAsk === before.pendingAsk && cards.pendingPlan === before.pendingPlan;
+  writeView(id, { messages, loaded: true, loading, historyError: null, hasOlder: page.hasOlder, ...cards }, deferred);
+  markRunning(id, loading);
+  if (!loading) {
+    // An idle snapshot is not permission to replay persisted drafts. Advance
+    // only after an observed task finishes; restored drafts remain explicit.
+    if (before.loading) sessionQueue().drain(id);
+    releaseIdleSessions();
   }
 }
-function pendingCards(messages: CourseChatMessage[]): Pick<SessionView, 'pendingAsk' | 'pendingPlan'> {
+function pendingCards(messages: CourseChatMessage[], id: number): Pick<SessionView, 'pendingAsk' | 'pendingPlan'> {
   const last = messages.at(-1);
+  const previous = readView(id);
   return {
-    pendingAsk: last?.ask && last.ask.picked == null ? { messageKey: last.key, restored: true, resolve: () => {} } : null,
-    pendingPlan: last?.folderPlan && (last.folderPlan.applied ?? 0) === 0 ? { messageKey: last.key, restored: true, resolve: () => {} } : null,
+    pendingAsk: last?.streaming && last.ask && last.ask.picked == null ? previous.pendingAsk?.messageKey === last.key ? previous.pendingAsk : { messageKey: last.key, restored: true, resolve: () => {} } : null,
+    pendingPlan: last?.streaming && last.folderPlan && (last.folderPlan.applied ?? 0) === 0 ? previous.pendingPlan?.messageKey === last.key ? previous.pendingPlan : { messageKey: last.key, restored: true, resolve: () => {} } : null,
   };
 }
 export async function retryChatSync(id: number) {
   const current = captureScope();
-  await (await import('../cloud/sync')).flushCloud();
-  if (current()) await refreshCloudSession(id, cloudReflection);
+  const { serverRuntime } = await import('../client/bootstrap');
+  const runtime = await serverRuntime(cloud.userId);
+  if (current()) runtime.session(id).refresh();
 }
 export function reflectArtifactEdit(row: ChatRow) {
   writeView(row.sessionId, { messages: readView(row.sessionId).messages.map(message => message.rowId === row.id
     ? { ...message, content: row.content, responseSegments: row.responseSegments, widget: row.widget, widgets: row.widgets } : message) });
 }
 export async function reflectCloudTasks(tasks: CloudTask[], dataChanged = false) {
-  const currentScope = captureScope(), reflection = ++cloudReflection;
-  const sessions = await unarchivedSessions();
-  if (!currentScope() || reflection !== cloudReflection) return;
-  for (const id of new Set(tasks.filter(task => task.kind === 'chat' && task.input.action !== 'compressContext').map(task => Number(task.input.sessionId)))) {
-    sessionTasks.set(id, tasks.filter(task => task.kind === 'chat' && task.input.action !== 'compressContext' && Number(task.input.sessionId) === id) as RuntimeTask[]);
-  }
-  const terminal = tasks.filter(task => task.kind === 'chat' && task.input.action !== 'compressContext' && !['queued', 'running', 'waiting_user'].includes(task.status));
-  for (const task of terminal) finishedCloudTasks.add(task.id);
-  const active = tasks.filter(task => task.kind === 'chat' && task.input.action !== 'compressContext' && !finishedCloudTasks.has(task.id) && ['queued', 'running', 'waiting_user'].includes(task.status));
-  const submittingIds = new Set(pendingCloudSubmissions.values());
-  const runningIds = [...new Set([...active.map(task => Number(task.input.sessionId)), ...submittingIds].filter(id => id !== 0))];
-  useCourseChat.setState({ runningIds, sessions });
-  for (const task of active) {
-    const id = Number(task.input.sessionId);
-    followSession(id);
-    if (submittingIds.has(id)) continue;
-    if (!task.progress) { writeView(id, { loading: true }); continue; }
-    if (!await syncTaskWidgets(task.progress) || !currentScope() || reflection !== cloudReflection) continue;
-    const view = readView(id), progress = task.progress as Record<string, unknown>;
-    const text = typeof task.input.text === 'string' ? task.input.text.trim() : '';
-    const widgets = Array.isArray(progress.widgets) ? progress.widgets as WidgetPayload[] : undefined;
-    const phase: ProcessPhase = progress.phase === 'thinking' || progress.phase === 'tool' || progress.phase === 'answer'
-      ? (progress.phase === 'answer' ? 'answering' : progress.phase) : 'preparing';
-    const answer: CourseChatMessage = {
-      key: `cloud-answer-${task.id}`, taskId: task.id, syncPending: true, role: 'ai',
-      content: typeof progress.content === 'string' ? progress.content : '',
-      reasoning: typeof progress.reasoning === 'string' ? progress.reasoning : '',
-      tools: Array.isArray(progress.tools) ? progress.tools as ChatToolCall[] : undefined,
-      widgets, widget: widgets?.at(-1), widgetPreview: progress.widgetPreview as { html: string } | undefined,
-      rowId: typeof progress.rowId === 'number' ? progress.rowId : undefined,
-      ask: progress.ask as AskUserState | undefined, folderPlan: progress.folderPlan as FolderPlanState | undefined,
-      streaming: true, error: false, interrupted: false, processPhase: phase, processStartedAt: Date.parse(task.createdAt) || Date.now(),
-    };
-    const messages = timeline(id).progress(view.messages, task as unknown as import('@wangke/contracts/client-runtime').RuntimeTask,
-      text ? { key: `cloud-user-${task.id}`, taskId: task.id, syncPending: true, role: 'user', content: text, createdAt: Date.parse(task.createdAt) || Date.now() } : undefined, answer);
-    writeView(id, { messages, loaded: true, loading: true, ...pendingCards(messages) });
-  }
-  const refreshIds = new Set<number>();
-  for (const task of terminal) {
-    const id = Number(task.input.sessionId);
-    if (submittingIds.has(id)) continue;
-    const view = readView(id);
-    const result = (task.result ?? task.progress) as { content?: string; reasoning?: string; tools?: ChatToolCall[]; widgets?: WidgetPayload[]; widget?: WidgetPayload; rowId?: number; userRowId?: number } | null;
-    let changed = false;
-    const messages = view.messages.map(message => {
-      if (message.taskId !== task.id && message.key !== `cloud-user-${task.id}` && message.key !== `cloud-answer-${task.id}`) return message;
-      if (!message.streaming && message.role !== 'user') return message;
-      if (message.role === 'user' && (task.status === 'completed'
-        ? result?.userRowId == null || message.committedRowId === result.userRowId || message.rowId === result.userRowId : !message.syncPending)) return message;
-      changed = true;
-      if (message.role === 'user') return { ...message, committedRowId: result?.userRowId ?? message.committedRowId, syncPending: task.status === 'completed' ? message.syncPending : false };
-      const content = result?.content ?? message.content;
-      const useful = !!content.trim() || !!result?.widgets?.length || !!message.widgets?.length || !!result?.widget || !!message.widget;
-      const failed = task.status !== 'completed' && task.status !== 'cancelled';
-      return { ...message, streaming: false, hint: undefined, widgetPreview: undefined,
-        syncPending: task.status === 'completed' ? message.syncPending : false, committedRowId: result?.rowId ?? message.committedRowId,
-        rowId: result?.rowId ?? message.rowId, content: useful ? content : failed ? `回答失败：${task.error || '未获得回答，请重试'}` : content,
-        error: failed && !useful, reasoning: result?.reasoning ?? message.reasoning, tools: result?.tools ?? message.tools,
-        widgets: result?.widgets ?? message.widgets, widget: result?.widget ?? message.widget,
-        interrupted: failed && useful, interruptReason: task.status === 'cancelled' ? undefined : task.error ?? undefined };
-    });
-    if (changed || view.loading && !runningIds.includes(id)) {
-      writeView(id, { messages, loading: runningIds.includes(id), ...pendingCards(messages) }); refreshIds.add(id);
-    }
-  }
-  const ids = new Set([useCourseChat.getState().activeId, ...parked.keys()]);
-  await Promise.all([...ids].filter((id): id is number => id != null && !runningIds.includes(id) && (dataChanged || refreshIds.has(id))).map(id => refreshCloudSession(id, reflection)));
-  if (currentScope() && reflection === cloudReflection) for (const id of ids) if (id != null && !runningIds.includes(id)) sessionQueue().drain(id);
+  // Global activity discovers background sessions, never replays message bodies.
+  const runningIds = [...new Set([...tasks.filter(task => task.kind === 'chat' && task.input.action !== 'compressContext'
+    && ['queued', 'running', 'waiting_user'].includes(task.status)).map(task => Number(task.input.sessionId)), ...pendingCloudSubmissions.values()])].filter(Boolean);
+  const previous = useCourseChat.getState().runningIds;
+  if (previous.length !== runningIds.length || previous.some(id => !runningIds.includes(id))) useCourseChat.setState({ runningIds });
+  for (const id of runningIds) followSession(id);
+  releaseIdleSessions();
 }
 
-export const useCourseChat = create<CourseChatStore>()((set, get) => ({
+export async function refreshConversationIndex() {
+  const current = captureScope(), sessions = await unarchivedSessions();
+  if (!current()) return;
+  const state = useCourseChat.getState();
+  if (JSON.stringify(state.sessions) !== JSON.stringify(sessions)) useCourseChat.setState({ sessions });
+}
+
+export const useCourseChat = createSessionStore<SessionView, CourseChatStore, CourseChatMessage, ChatRow>(EMPTY_VIEW, toMessage, (set, get) => ({
   ...EMPTY_VIEW, ready: false, sessions: [], activeId: null, runningIds: [], awaitingIds: [], draft: '',
   sendMode: 'queue', courseCount: null, archivedSessions: [],
   bootstrap: async () => {
@@ -306,11 +278,12 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (!view.hasOlder || view.loadingOlder || first?.rowId == null || first.createdAt == null) return;
     writeView(id, { loadingOlder: true, historyError: null });
     try {
-      const page = await readChatPage(id, { id: first.rowId, createdAt: first.createdAt, role: first.role === 'ai' ? 'assistant' : 'user' });
-      if (!current() || readView(id).messages[0]?.key !== first.key) return;
-      const latest = readView(id), keys = new Set(latest.messages.map(message => message.rowId));
-      writeView(id, { messages: [...page.rows.filter(row => !keys.has(row.id)).map(toMessage), ...latest.messages], hasOlder: page.hasOlder, loadingOlder: false });
-    } catch { if (current() && readView(id).messages[0]?.key === first.key) writeView(id, { loadingOlder: false, historyError: '历史消息加载失败，点击重试' }); }
+      await readChatPage(id, { id: first.rowId, createdAt: first.createdAt, role: first.role === 'ai' ? 'assistant' : 'user' });
+      if (!current()) return;
+      // Pagination metadata is published only by an accepted journal merge;
+      // a stale HTTP response must not overwrite a newer baseline's hasOlder.
+      writeView(id, { loadingOlder: false });
+    } catch { if (current()) writeView(id, { loadingOlder: false, historyError: '历史消息加载失败，点击重试' }); }
   },
   loadSession: async id => {
     const queue = sessionQueue(), current = captureScope();
@@ -318,12 +291,12 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       followSession(id);
       if (get().activeId === id && get().loaded) return;
       if (get().activeId != null && get().activeId !== id) parkActive();
-      const cached = parked.get(id);
-      if (cached?.loaded) { parked.delete(id); set({ activeId: id, ...cached }); return; }
-      parked.delete(id);
+      const cached = readView(id);
+      if (cached.loaded) { set({ activeId: id }); releaseIdleSessions(); return; }
       const request = Symbol('history-load'); historyLoads.set(id, request);
       set({ activeId: id, ...EMPTY_VIEW });
-      const [session, page] = await Promise.all([db.chatSessions.get(id), readChatPage(id)]);
+      releaseIdleSessions();
+      const session = await db.chatSessions.get(id);
       if (!current()) return;
       const contextIds = session?.contextCourseIds ?? [];
       const [courses, projectFolder] = await Promise.all([
@@ -332,16 +305,15 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
       ]);
       if (!current() || historyLoads.get(id) !== request) return;
       historyLoads.delete(id);
-      if (readView(id).loaded) return;
-      if (page.tasks) sessionTasks.set(id, page.tasks.filter(task => task.input.action !== 'compressContext'));
-      const byId = new Map(courses.map(course => [course.id, course.name])), messages = page.rows.map(toMessage);
-      const loading = !!sessionTasks.get(id)?.some(chatTaskActive);
-      markRunning(id, loading);
-      writeView(id, { ...EMPTY_VIEW, messages, hasOlder: page.hasOlder, loaded: true, loading,
+      const byId = new Map(courses.map(course => [course.id, course.name]));
+      writeView(id, {
         skillIds: session?.skillIds, mcpServerIds: session?.mcpServerIds,
         project: session?.projectFolderId == null ? null : { folderId: session.projectFolderId, name: projectFolder?.name ?? '项目', color: projectFolder?.color },
-        contextCourses: contextIds.filter(cid => byId.has(cid)).map(cid => ({ id: cid, name: byId.get(cid)! })), ...pendingCards(messages) });
-    } finally { if (current()) { await queue.restore(id); if (current()) queue.drain(id); } }
+        contextCourses: contextIds.filter(cid => byId.has(cid)).map(cid => ({ id: cid, name: byId.get(cid)! })) });
+      await serverSessions.get(id)?.ready;
+    } catch (error) {
+      if (current() && get().activeId === id) writeView(id, { historyError: `消息同步失败：${error instanceof Error ? error.message : String(error)}` });
+    } finally { if (current()) await queue.restore(id); }
   },
   createSession: async () => {
     if (get().activeId == null) { await sessionQueue().restore(0); return; }
@@ -355,7 +327,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     if (!current()) return false;
     sessionQueue().clear(id); await sessionQueue().flush();
     void useChatAttachments.getState().discard(id);
-    parked.delete(id); serverSessions.get(id)?.(); serverSessions.delete(id); timelines.get(id)?.dispose(); timelines.delete(id);
+    useCourseChat.models.get(id)?.dispose(); useCourseChat.models.delete(id); serverSessions.get(id)?.(); serverSessions.delete(id);
     useChatNotifications.getState().dismiss(id);
     const sessions = await unarchivedSessions(); if (!current()) return false;
     set({ sessions });
@@ -370,7 +342,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     const current = captureScope(), wasActive = get().activeId === id;
     await patchSession(id, row => { if (archived) row.archived = true; else delete row.archived; });
     if (!current()) return false;
-    if (archived) { parked.delete(id); serverSessions.get(id)?.(); serverSessions.delete(id); useChatNotifications.getState().dismiss(id); void useChatAttachments.getState().discard(id); }
+    if (archived) { serverSessions.get(id)?.(); serverSessions.delete(id); useChatNotifications.getState().dismiss(id); void useChatAttachments.getState().discard(id); }
     const sessions = await unarchivedSessions(); if (!current()) return false;
     set({ sessions });
     if (archived && wasActive) { set(DRAFT_STATE); const next = sessions.at(-1); if (next) await get().loadSession(next.id!); }
@@ -462,7 +434,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         pendingCloudSubmissions.delete(operationId);
         // A very short task can finish before submitTask returns. Reconcile
         // once after releasing the submission guard so its terminal state wins.
-        if (id != null) await refreshCloudSession(id, cloudReflection);
+        if (id != null) serverSessions.get(id)?.refresh();
       }
     }
   },
@@ -507,7 +479,7 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
         if (!current() || !adapter.current()) return;
         writeView(id, { loading: false, messages: readView(id).messages.map(item => item.key === key ? { ...item, streaming: false, interrupted: true, interruptReason: String(error) } : item) });
         markRunning(id, false); await sessionQueue().restore(id).catch(() => {});
-      } finally { if (current()) pendingCloudSubmissions.delete(operationId); }
+      } finally { if (current()) { pendingCloudSubmissions.delete(operationId); serverSessions.get(id)?.refresh(); } }
       return;
     }
     const rows = await readChatHistory(id); if (!current()) return;
@@ -540,7 +512,11 @@ export const useCourseChat = create<CourseChatStore>()((set, get) => ({
     const sessions = await unarchivedSessions(); if (!current()) return null;
     set({ sessions }); await get().loadSession(sid); return sid;
   },
-  answerAsk: async answer => { await commandServerChat(get().activeId, 'answerAsk', answer); },
+  answerAsk: async answer => {
+    const state = get(), message = state.messages.find(item => item.key === state.pendingAsk?.messageKey);
+    if (!message?.taskId || !await commandServerChat(state.activeId, 'answerAsk', answer, message.taskId))
+      throw new Error('本次提问已结束，请刷新后查看当前问题');
+  },
   confirmPlan: async () => {
     const id = get().activeId, current = captureScope(); if (id == null) return { ok: false };
     writeView(id, { planApplying: true });
@@ -557,7 +533,7 @@ async function newSessionRow(skillIds?: number[], contextCourseIds: string[] = [
     ...(skillIds !== undefined ? { skillIds } : {}), ...(mcpServerIds !== undefined ? { mcpServerIds } : {}),
     ...(contextCourseIds.length ? { contextCourseIds } : {}), ...(projectFolderId != null ? { projectFolderId } : {}) };
   await sessionQueue().flush(); if (!current() || !adapter.current()) throw new Error('client_account_changed');
-  await submitLearning([learningEdit({ kind: 'conversationSession', expected: null, value } as any)], [`session:${value.id}`]);
+  await submitLearning([learningEdit({ kind: 'conversationSession', expected: null, value } as any)], [`session:${value.id}`], undefined, false);
   if (!current() || !adapter.current()) throw new Error('client_account_changed');
   await adapter.rekeyDraft(value.id!); return value;
 }
@@ -573,11 +549,17 @@ async function patchSession(id: number, mutate: (row: ChatSessionRow) => void) {
     return { sessions: state.sessions.map(row => row.id === id ? fresh : row).filter(row => !row.archived), archivedSessions: [...archived.values()] };
   });
 }
+const convertedRows = new WeakMap<ChatRow, { task?: RuntimeTask; message: CourseChatMessage }>();
 function toMessage(row: ChatRow): CourseChatMessage {
-  const task = sessionTasks.get(row.sessionId)?.find(task => task.id === row.taskId);
-  return { key: `stored-${row.id}`, rowId: row.id!, taskId: row.taskId, role: row.role === 'assistant' ? 'ai' : 'user',
+  const task = readView(row.sessionId).tasks.find(task => task.id === row.taskId);
+  const cached = convertedRows.get(row);
+  if (cached && cached.task === task) return cached.message;
+  const message: CourseChatMessage = { key: `stored-${row.id}`, rowId: row.id!, taskId: row.taskId, role: row.role === 'assistant' ? 'ai' : 'user',
     content: row.content, ...(row.role === 'assistant' ? chatTaskState(row, task) : {}),
     attachments: row.attachments, createdAt: row.createdAt, reasoning: row.reasoning, responseSegments: row.responseSegments,
     reasoningMs: row.reasoningMs, tools: row.tools,
-    ask: row.ask, folderPlan: row.folderPlan, widget: row.widget, widgets: row.widgets };
+    ask: row.ask, folderPlan: row.folderPlan, widget: row.widget, widgets: row.widgets,
+    ...(task && chatTaskActive(task) && task.progress?.widgetPreview ? { widgetPreview: task.progress.widgetPreview as unknown as { html: string } } : {}) };
+  convertedRows.set(row, { task, message });
+  return message;
 }

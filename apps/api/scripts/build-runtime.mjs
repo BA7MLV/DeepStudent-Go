@@ -4,6 +4,9 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+// Replace, never merge: a file removed from the bundle (e.g. retired sample
+// components) must not survive in dist and be seeded into new accounts.
+fs.rmSync(path.join(root, 'dist/apps/api/board-plugins'), { recursive: true, force: true });
 fs.cpSync(path.join(root, 'board-plugins'), path.join(root, 'dist/apps/api/board-plugins'), { recursive: true });
 const result = await build({
   absWorkingDir: root,

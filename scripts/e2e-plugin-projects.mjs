@@ -7,6 +7,8 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/plugin-project-ui-'));
+// Board samples are test fixtures; the product seeds no components.
+process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/bootstrap-secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });

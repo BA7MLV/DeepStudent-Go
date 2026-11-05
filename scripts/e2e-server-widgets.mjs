@@ -149,7 +149,10 @@ try {
   const partial = page.getByTestId('widget-stream-preview');
   await partial.waitFor({ timeout: 30000 });
   assert.equal(await page.getByTestId('widget-frame').count(), 0, 'partial arguments cannot execute scripts');
-  assert.equal(await partial.locator('script,style,iframe,svg,[onclick]').count(), 0, 'partial preview is sanitized static HTML');
+  // Partial arguments render in a script-disabled sandbox, never the scripted runtime.
+  const partialFrame = partial.getByTestId('widget-stream-frame');
+  assert.equal(await partialFrame.getAttribute('sandbox'), 'allow-same-origin', 'partial preview iframe cannot run scripts');
+  assert.equal(await partialFrame.contentFrame().locator('script,iframe,[onclick]').count(), 0, 'partial preview is sanitized static HTML');
   releaseArgs();
   await works.waitFor({ timeout: 30000 });
   await partial.waitFor({ state: 'detached' });

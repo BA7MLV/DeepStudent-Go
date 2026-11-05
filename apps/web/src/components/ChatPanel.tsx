@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { liveQuery } from 'dexie';
 import { appendConversationSession, removeConversationMessage, reviseConversationSession } from '../store/conversationProducts';
 import { deleteServerSession, forkServerSession, removeConversationMessages } from '../client/conversations';
 import { useTranslation } from 'react-i18next';
@@ -59,7 +60,7 @@ import SkillPicker from './SkillPicker';
 import QuizCard from './QuizCard';
 import { canUpdateQuizPick, type QuizPick } from '../harness/quiz';
 import WidgetMessage from './WidgetMessage';
-import StreamingHtmlPreview from './StreamingHtmlPreview';
+import WidgetStreamFrame from './WidgetStreamFrame';
 import { ArtifactEditProvider } from './ArtifactEditor';
 import AssistantContent from './AssistantContent';
 import ChatScreenshots from './ChatScreenshots';
@@ -875,26 +876,24 @@ export default function ChatPanel({
   useEffect(() => {
     let cancelled = false;
     let previous = '';
-    let lastDataRevision = -1;
-    const refresh = async () => {
+    let requested = 0;
+    const refresh = async (dataChanged = false) => {
       if (localRequest.current) return;
-      const { tasks, dataRevision } = useCloudActivity.getState();
-      if (!tasks) return;
-      const dataChanged = dataRevision !== lastDataRevision;
-      lastDataRevision = dataRevision;
-      const list = await db.chatSessions.where('videoId').equals(videoId).sortBy('createdAt');
-      if (cancelled || localRequest.current) return;
-      setSessions(list);
-      if (activeId == null) return;
-      const task = tasks.find(t => t.kind === 'qa' && t.input.sessionId === activeId);
-      const running = task && ['queued', 'running', 'waiting_user'].includes(task.status);
-      if (!dataChanged && !task) return;
+      const { tasks } = useCloudActivity.getState();
+      const task = tasks?.find(t => t.kind === 'qa' && t.input.sessionId === activeId);
       const signature = JSON.stringify([task?.id, task?.status, task?.progress]);
       if (!dataChanged && signature === previous) return;
-      if (running && !await (await import('../cloud/tasks')).syncTaskWidgets(task.progress)) return;
       previous = signature;
+      const revision = ++requested;
+      const current = () => !cancelled && revision === requested && !localRequest.current;
+      const list = await db.chatSessions.where('videoId').equals(videoId).sortBy('createdAt');
+      if (!current()) return;
+      setSessions(list);
+      if (activeId == null) return;
+      const running = task && ['queued', 'running', 'waiting_user'].includes(task.status);
+      if (running && !await (await import('../cloud/tasks')).syncTaskWidgets(task.progress)) return;
       const page = await readChatPage(activeId);
-      if (cancelled || localRequest.current) return;
+      if (!current()) return;
       const messages: ChatMsg[] = page.rows.filter(row => !running || row.taskId !== task.id || row.role !== 'assistant')
         .map(row => ({ ...row, key: `h-${row.id}`, rowId: row.id, role: row.role === 'user' ? 'user' : 'ai' }));
       if (running) messages.push({ key: `cloud-${task.id}`, taskId: task.id, role: 'ai', content: String(task.progress?.content ?? ''), reasoning: String(task.progress?.reasoning ?? ''),
@@ -914,8 +913,23 @@ export default function ChatPanel({
     };
     const listener = () => { void refresh().catch(() => { if (!cancelled) setHistoryError(true); }); };
     const unsubscribe = useCloudActivity.subscribe(listener);
+    // Track only this material's sessions and the selected session's rows by
+    // their indexed ranges. toArray observes content updates AND deletions;
+    // unrelated studyTime/other-session records do not trigger history reads.
+    let recordsSignature: string | undefined;
+    const records = liveQuery(async () => JSON.stringify([
+      await db.chatSessions.where('videoId').equals(videoId).toArray(),
+      activeId == null ? [] : await db.chats.where('sessionId').equals(activeId).toArray(),
+    ])).subscribe({
+      next: signature => {
+        if (signature === recordsSignature) return;
+        recordsSignature = signature;
+        void refresh(true).catch(() => { if (!cancelled) setHistoryError(true); });
+      },
+      error: () => { if (!cancelled) setHistoryError(true); },
+    });
     listener();
-    return () => { cancelled = true; unsubscribe(); };
+    return () => { cancelled = true; unsubscribe(); records.unsubscribe(); };
   }, [activeId, videoId]);
 
   const loadOlder = useCallback(async () => {
@@ -1029,7 +1043,7 @@ export default function ChatPanel({
   const createSession = async () => {
     const now = Date.now();
     const id = await appendConversationSession({ videoId, title: '新会话', createdAt: now });
-    setSessions((prev) => [...prev, { id, videoId, title: '新会话', createdAt: now }]);
+    setSessions((prev) => [...prev.filter(session => session.id !== id), { id, videoId, title: '新会话', createdAt: now }]);
     setActiveId(id);
   };
 
@@ -1237,7 +1251,7 @@ export default function ChatPanel({
     if (kept.length === 0) return;
     const now = Date.now();
     const newId = await forkServerSession(source, kept);
-    setSessions((prev) => [...prev, {
+    setSessions((prev) => [...prev.filter(session => session.id !== newId), {
       id: newId,
       videoId,
       title: `${source.title} · 分支`,
@@ -1458,7 +1472,7 @@ export default function ChatPanel({
                           />
                         )}
                         {m.widgetPreview && (
-                          <StreamingHtmlPreview html={m.widgetPreview.html} />
+                          <WidgetStreamFrame html={m.widgetPreview.html} dark={widgetDark} status="正在生成交互图形" />
                         )}
                   </div>
                   </ArtifactEditProvider>

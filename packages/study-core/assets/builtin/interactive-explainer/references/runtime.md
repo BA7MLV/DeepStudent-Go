@@ -55,74 +55,36 @@ button.onclick = () => {
 
 宿主没有通用工具调用、读文件或业务写入 API；不要虚构这些能力。
 
-## 题卡反馈（只读 v1）
-
-正式 quiz 可从真实点击调用 `api.submitAnswer(答案)` 请求宿主确认，也可继续在题卡提交；`setAnswerDraft` 只更新草稿，不判分。
-
-`api.answerFeedback` 为 null 或 `{version:1, requestId, status, answer, correctAnswer?, explanation?, grading, authoritative, timestamp}`。requestId 是宿主作答身份，不是 RPC 序号；timestamp 是非负毫秒时间，历史作答无时间为 0。status 为 pending/correct/incorrect/partial/review；grading 为 host/ai/self。仅 host + authoritative:true 的 correct/incorrect/partial 是确定判分。pending/review、AI/self 必须非权威，不改成绩或自动写入错题。
-
-宿主在初始化、ready、提交后、异步更新时同步 `wbw:answer-feedback`；运行时提供只读 getter 与 `wbw:feedbackchange` 事件。同一运行只接收同一 requestId 且 timestamp 严格递增的更新，不允许已完成反馈回退 pending；新题/新尝试需要新的挂载身份。忽略重复、非法或超过 32 KiB/深度 16/8000 节点的反馈；requestId 最多 128 字符、解释最多 16000 字符。iframe 发出的反馈不被宿主接受，运行时也拒绝脚本合成的 MessageEvent。反馈只重绘及更新高度，不写 widgetState，不调用模型。历史结果从宿主保存的 picks 重建，独立预览通过随机 token 的 BroadcastChannel 接收只读反馈，不写入 URL；预览刷新需要原页面仍打开，提交需返回原题卡。旧 HTML 无需迁移，运行时也会展示纯文本反馈。现有客观题判分为全对/错误；partial 仅供支持真实部分评分的宿主使用，HTML 不能自行推断。
-
-```js
-function renderFeedback() {
-  const f = api.answerFeedback;
-  output.textContent = !f ? '尚未提交' : `${f.status} · ${f.authoritative ? '宿主判定' : '待核验/非权威参考'}\n${f.explanation || ''}`;
-}
-renderFeedback();
-window.addEventListener('wbw:feedbackchange', renderFeedback);
-```
-
-使用 textContent，不执行反馈中的 HTML，不自行计算对错。聊天“请求 AI 参考批改”目前没有可靠关联原 iframe 的回填通道，只发送消息并保持待核验，不能声称 AI 已回传。生成 HTML 本身不可信，不能用其自绘结果替代宿主题卡的判定。
-
 ## 正文位置
 
 show_widget 的成功回执包含 `wbw-widget` 围栏，围栏内是宿主给出的引用 ID，不是 HTML。把完整引用原样放在相关文字之间。每次调用保存独立画面、独立快照；后图不覆盖前图。引用只能展示当前消息自身的载荷，不能读取其他消息。旧消息或遗漏引用的载荷在正文末尾兼容显示，不依赖模型完美输出才能保住图形。
 
-## 可视化 ask_user（不是正式 quiz）
+ask_user 与正式题卡的 `presentation`（answerInput、submitAnswer、answerFeedback）见 `host-question.md`；普通交互件不需要读取。
 
-给 ask_user 增加可选 `presentation:{html}`，原 question/options 仍为真相。页面通过 `api.answerInput` 读取 `{answer,submitted,question}`，监听 `wbw:answerchange` 恢复选择；草稿刷新后不保留，已提交答案由宿主恢复。`setAnswerDraft` 同步原生输入，`submitAnswer` 打开宿主原题/答案确认，确认后才交给原等待工具。用户取消确认时 Promise 拒绝；不要用 sendPrompt 假装回答。正式 quiz 也可请求宿主确认提交，判分仍只由宿主完成，详见题卡反馈协议。
+## 生成中的渐进显示
 
-下例作为 presentation.html，要求原问题含 `id:"short"` 与 `id:"deep"`：
+工具参数还在生成时，宿主把已到达的片段放进**不执行脚本**的隔离预览：保留 style、SVG 与语义结构，去掉 script、事件属性和外链，控件不可操作。参数完整并通过校验后，同一位置换成可交互作品，沿用预览高度。
 
-```html
-<section id="study-route">
-  <fieldset class="wbw-options"><legend>选择学习路线</legend>
-    <label class="wbw-choice"><input type="radio" name="route" value="short">快速回顾 · 15 分钟</label>
-    <label class="wbw-choice"><input type="radio" name="route" value="deep">深入练习 · 45 分钟</label>
-  </fieldset>
-  <button type="button">提交所选路线</button><p class="wbw-error" role="alert"></p>
-</section>
-<script>
-(() => {
-  const root = document.querySelector('#study-route'), api = window.__wbw;
-  function answer(chosen) {
-    return {status:'answered',mode:'selection',selectedIds:[chosen.value],selectedLabels:[],text:'',note:''};
-  }
-  function restore() {
-    const input = api.answerInput;
-    root.querySelectorAll('input').forEach(el => {
-      el.checked = input?.answer?.selectedIds?.includes(el.value) ?? false;
-      el.disabled = input?.submitted ?? true;
-    });
-    root.querySelector('button').disabled = input?.submitted ?? true;
-  }
-  root.querySelector('button').onclick = async () => {
-    const chosen = root.querySelector(':checked');
-    const error = root.querySelector('[role="alert"]');
-    if (!chosen) { error.textContent = '请选择路线'; return; }
-    try {
-      await api.submitAnswer(answer(chosen));
-    } catch (reason) { error.textContent = reason.message; }
-  };
-  root.onchange = () => {
-    const chosen = root.querySelector(':checked');
-    if (chosen) api.setAnswerDraft(answer(chosen)).catch(reason => root.querySelector('[role="alert"]').textContent = reason.message);
-  };
-  restore(); window.addEventListener('wbw:answerchange', restore);
-})();
-</script>
-```
+- 顺序写：`<style>` → 结构与静态首帧 → 唯一的 `<script>` 放最后。不要把样式写在脚本后，也不要用脚本生成全部 DOM。
+- 首帧用标记写出：标题、控件及默认值、`<output>` 默认读数、带 viewBox/width/height 的 svg 或 canvas（给出与最终一致的尺寸）、坐标轴和图例。脚本接管后重绘同一元素，避免高度跳动。
+- 数据驱动的大量图元可由脚本生成，但预留区域的尺寸要在标记里确定。
 
-`.wbw-segmented` 可替换 options 外层，保留原生单选键盘行为。对比数据用 `<div class="wbw-table" tabindex="0" role="region" aria-label="路线对比"><table><caption>学习路线对比</caption><thead><tr><th scope="col">路线</th><th scope="col">时间</th></tr></thead><tbody><tr><th scope="row">快速回顾</th><td class="wbw-num">15 分钟</td></tr></tbody></table></div>`。
+## 外观、布局与样式类
 
-状态例子：`<span class="wbw-badge" data-tone="success">已完成</span>`。图例例子：`<div class="wbw-legend"><span><i class="wbw-swatch" aria-hidden="true"></i>方案 A（实线）</span><span><i class="wbw-swatch" style="--series-color:var(--wbw-series-2);border-top-style:dashed" aria-hidden="true"></i>方案 B（虚线）</span></div>`，图上的线型必须与图例一致。
+- 优先用原生 button/input/select 及 .wbw-controls、.wbw-field、.wbw-field-header、.wbw-value、.wbw-primary、.wbw-muted、.wbw-small、.wbw-stage、.wbw-grid，不重复实现按钮、滑块、焦点或键盘行为。
+- 颜色只用 --wbw-foreground、--wbw-muted、--wbw-border、--wbw-surface、--wbw-accent、--wbw-series-1/2/3/4；SVG 可用 currentColor。canvas/Chart.js 先解析 CSS 变量为颜色，并在 wbw:themechange 重绘。字体、字号和圆角由宿主令牌同步，不写第二套调色板；正文用默认字号，次要标注 .wbw-small，字重只用 400/500。单系列只用 series-1，多系列同时用线型或直接标签区分。
+- 透明外层，支持 320px 宽；控件换行，图形按实际容器重绘。以本轮回答内容区宽高比组织画面，主图高度参考 --wbw-available-height；SVG 给 viewBox 保持比例，窄屏减少刻度而不缩字，复杂图拆分或重排。不要用固定大宽度、内层滚动或裁切代替响应式排版。
+- window.__wbw.display 提供 {width,height}（height 是宿主给主图的可用高度，不是 iframe 高度）。监听 wbw:displaychange 或 ResizeObserver 重排；Canvas 适配 devicePixelRatio。不用 100vh 撑高自动测高的 iframe。
+- 图、控件与整个讲解透明无框，不包带底色/阴影的卡片；绘图区只给必要的细中性边界。刻度、单位和重要数值必须可见，y 轴至少留 64px；取值范围来自数据和参考值并留余量。
+- 只提供题意需要的控件，当前值放在标签旁；不自动加重置、筛选、总结卡或设计调参面板（练习揭晓后的「重新练习」除外）。
+- 控件用可见 label，按钮写清动作，图形给 aria-label/title/desc。动态结果 aria-live="polite"，错误 role="alert"；重要操作不依赖 hover。
+- 选项用 fieldset/legend + label.wbw-choice 内的原生 radio/checkbox，外层 .wbw-options 或 .wbw-segmented。对比表用 `<div class="wbw-table" tabindex="0" role="region" aria-label="…">` 包语义 table，数值 .wbw-num。状态 `.wbw-badge` 配 data-tone="success|warning|error" 且必须有文字；错误 .wbw-error 配 role="alert"，字段用 aria-invalid 与 aria-describedby。
+- 图例：`<div class="wbw-legend"><span><i class="wbw-swatch" aria-hidden="true"></i>方案 A（实线）</span><span><i class="wbw-swatch" style="--series-color:var(--wbw-series-2);border-top-style:dashed" aria-hidden="true"></i>方案 B（虚线）</span></div>`，图上线型须与图例一致，不单靠红绿区分。
+
+## 动效
+
+- 不自动播放、不循环。需要观察随时间变化时提供「播放/暂停」与「单步/拖动时间」，由用户启动，播完停在终态。
+- `matchMedia('(prefers-reduced-motion: reduce)')` 为真时，播放直接跳到终态或按单步推进，不做连续动画。
+- 用 requestAnimationFrame 和真实经过时间推进，不用 setInterval；页面隐藏（visibilitychange）或交互件滚出视口（IntersectionObserver）时暂停。
+- 播放中只重绘，不逐帧保存；暂停、结束或调参完成后再 setWidgetState。
+- 单步只更新同一个画面，不堆叠全部步骤；不加装饰性过渡。可运行例子见 `simulation.md`。

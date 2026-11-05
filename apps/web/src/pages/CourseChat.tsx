@@ -1,5 +1,7 @@
 import { Suspense, lazy, memo, useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState, type ClipboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
+import { recordChatRender } from '../client/chat-diagnostics';
 import type { ComponentProps } from '@ant-design/x-markdown';
 import { Markdown as XMarkdown } from '../components/markdown/Markdown';
 import { MaterialImage } from '../components/MaterialImage';
@@ -12,7 +14,7 @@ import {
 } from '@heroui/react';
 import { MarkdownCode, MarkdownPre } from '../components/mermaid/markdown';
 import { MarkdownTable } from '../components/MdTable';
-import StreamingHtmlPreview from '../components/StreamingHtmlPreview';
+import WidgetStreamFrame from '../components/WidgetStreamFrame';
 import ChatAddMenu from '../components/ChatAddMenu';
 import ChatProjectPicker from '../components/ChatProjectPicker';
 import { projectDisplayName } from '../projects/chatProjects';
@@ -73,6 +75,17 @@ const AnswerMarkdown = memo(function AnswerMarkdown({ content, streaming, link }
     streaming={{ hasNextChunk: streaming, tail: streaming ? { component: StreamTailCircle } : false }} />;
 });
 const ANSWER_COMPONENTS = { p: StreamParagraph, code: MarkdownCode, pre: MarkdownPre, table: MarkdownTable };
+
+/** A virtual slot subscribes to its message, never to the streaming array.
+ * Default memo also compares its root-render function, including action closures. */
+const MessageSubscription = memo(function MessageSubscription({ messageKey, index, children }: {
+  messageKey: string; index: number;
+  children: (message: CourseChatMessage, index: number) => React.ReactNode;
+}) {
+  if (import.meta.env.DEV) recordChatRender('MessageSubscription', messageKey);
+  const message = useCourseChat(state => state.messages.find(item => item.key === messageKey));
+  return message ? children(message, index) : null;
+});
 
 // Replay only after a full reload, not when returning from another route.
 let welcomeEntrancePlayed = false;
@@ -489,7 +502,103 @@ function QueueBar({
   );
 }
 
+/** Context estimation is a small independent subscriber, not an input/page
+ * subscription to every streaming character. */
+function CourseChatContextUsage() {
+  if (import.meta.env.DEV) recordChatRender('CourseChatContextUsage');
+  const activeId = useCourseChat(s => s.activeId), messages = useCourseChat(s => s.messages);
+  const draft = useCourseChat(s => s.draft), loading = useCourseChat(s => s.loading), loaded = useCourseChat(s => s.loaded);
+  const skillIds = useCourseChat(s => s.skillIds), contextCourses = useCourseChat(s => s.contextCourses);
+  const pendingAsk = useCourseChat(s => s.pendingAsk), pendingPlan = useCourseChat(s => s.pendingPlan);
+  const ctxWin = useSettings(s => s.contextWindow);
+  const compressionEnabled = useSettings(s => s.jev.contextCompression && !!decisionConfigOf(s).apiKey.trim());
+  const contextPlan = useContextCompressionStore(s => activeId == null ? EMPTY_COMPRESSION : s.sessions[activeId] ?? EMPTY_COMPRESSION);
+  const [skillBlock, setSkillBlock] = useState<string>();
+  useEffect(() => {
+    let cancelled = false;
+    void loadSessionSkillMeta(skillIds).then(metas => { if (!cancelled) setSkillBlock(metas.length ? skillMetaBlock(metas) : undefined); });
+    return () => { cancelled = true; };
+  }, [skillIds]);
+  const breakdown = useMemo(() => ({
+    system: estimateTokens(`${skillBlock ?? ''}\n${contextCourses.map(course => course.name).join('\n')}`),
+    history: (compressionEnabled ? retainedContext(messages, contextPlan) : messages).reduce((sum, message) => sum + estimateTokens(message.content), 0),
+    current: estimateTokens(draft),
+  }), [skillBlock, contextCourses, compressionEnabled, messages, contextPlan, draft]);
+  const tokens = breakdown.system + breakdown.history + breakdown.current;
+  const compression = useContextCompression({ sessionId: activeId, tokens, windowTokens: ctxWin, query: draft,
+    busy: loading || !loaded || pendingAsk != null || pendingPlan != null });
+  return <ContextUsageButton tokens={tokens} windowTokens={ctxWin} breakdown={breakdown} testId="chat-context-usage"
+    compression={compression.state} onCompress={compression.compress}
+    isDisabled={loading || !loaded || activeId == null || pendingAsk != null || pendingPlan != null} />;
+}
+
+/** Input owns only draft, attachments and task/interaction controls. Ordinary
+ * assistant text never changes these selectors. */
+const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef, composerHoldRef, pinIfSticking, onSelectProject }: {
+  composerRef: React.RefObject<HTMLTextAreaElement | null>; composerHoldRef: React.RefObject<HTMLDivElement | null>;
+  pinIfSticking: () => void; onSelectProject: () => void;
+}) {
+  if (import.meta.env.DEV) recordChatRender('CourseChatInputRegion');
+  const activeId = useCourseChat(s => s.activeId), loaded = useCourseChat(s => s.loaded), loading = useCourseChat(s => s.loading);
+  const draft = useCourseChat(s => s.draft), setDraft = useCourseChat(s => s.setDraft), send = useCourseChat(s => s.send), stop = useCourseChat(s => s.stop);
+  const pendingAsk = useCourseChat(s => s.pendingAsk), pendingPlan = useCourseChat(s => s.pendingPlan), project = useCourseChat(s => s.project);
+  const composerAsk = useCourseChat(s => s.pendingAsk ? s.messages.find(message => message.key === s.pendingAsk!.messageKey)?.ask : undefined);
+  const attachmentItems = useChatAttachments(s => s.items);
+  const hasDraft = !!draft.trim() || attachmentItems.length > 0;
+  const attachmentsPending = attachmentItems.some(item => !item.value || !!item.error);
+  const generating = loading && pendingAsk == null && pendingPlan == null;
+  const composerOverflow = useComposerSize(composerRef, draft, !composerAsk);
+  const voiceDraftBase = useRef('');
+  const [voiceEditVersion, setVoiceEditVersion] = useState(0);
+  const ime = useImeEnter();
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (pendingAsk) return;
+    const attachments = useChatAttachments.getState(), files = Array.from(event.clipboardData.files);
+    if (files.length) { event.preventDefault(); attachments.add(files); return; }
+    const file = pastedTextAttachment(event.clipboardData.getData('text/plain'));
+    if (!file) return;
+    event.preventDefault();
+    if (attachments.items.length >= MAX_CHAT_ATTACHMENTS) { toast.error(`每条消息最多 ${MAX_CHAT_ATTACHMENTS} 个附件，请移除附件后重新粘贴`); return; }
+    attachments.add([file]); toast.info('粘贴内容超过 4000 字节，已自动转换为 txt 附件');
+  };
+  const submit = () => { setVoiceEditVersion(version => version + 1); void send(useCourseChat.getState().draft, 'queue'); };
+  return <ChatComposer className="course-chat__composer" ref={composerHoldRef} data-asking={composerAsk ? 'true' : undefined}
+    onDragOver={event => { if (event.dataTransfer.types.includes('Files') && !pendingAsk) event.preventDefault(); }}
+    onDrop={event => { if (event.dataTransfer.files.length && !pendingAsk) { event.preventDefault(); useChatAttachments.getState().add(Array.from(event.dataTransfer.files)); } }}>
+    {composerAsk && pendingAsk ? <AskCard key={`${activeId}:${pendingAsk.messageKey}`} ask={composerAsk} messageKey={pendingAsk.messageKey}
+      active restored={pendingAsk.restored} onPick={async answer => {
+        const current = useCourseChat.getState();
+        if (current.activeId !== activeId || current.pendingAsk?.messageKey !== pendingAsk.messageKey) throw new Error('本次提问已结束，请使用当前问题卡');
+        await current.answerAsk(answer);
+      }} /> : <>
+      <div className="course-chat__composer-context"><ChatAttachmentDraft /></div>
+      <ChatAddMenu disabled={!loaded || !!pendingAsk} onSelectProject={onSelectProject} />
+      <ComposerExpand visible={composerOverflow} key={`expand-${activeId ?? 'draft'}`} value={draft} onPaste={handlePaste}
+        onChange={value => { setVoiceEditVersion(version => version + 1); setDraft(value); }} />
+      <ChatComposerInput ref={composerRef} className="course-chat__input" aria-label="给 AI 助手发送消息"
+        aria-description="长按输入栏说话，松开完成，上滑取消；识别后可编辑再发送" rows={1} fullWidth value={draft}
+        onChange={event => { setVoiceEditVersion(version => version + 1); setDraft(event.target.value); }} onPaste={handlePaste}
+        enterKeyHint="send" {...ime.compositionProps} onFocus={pinIfSticking} disabled={!loaded} placeholder="随便问点什么，或长按说话"
+        onKeyDown={event => { if (!ime.isSubmitEnter(event)) return; event.preventDefault(); submit(); }} />
+      <ChatComposerTools className="course-chat__composer-tools" aria-label="输入区工具" orientation="horizontal">
+        <PluginActions surface="chat.composer.actions" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} />
+        <span className="course-chat__context-usage-slot"><CourseChatContextUsage /></span>
+        {generating ? <Tooltip><Tooltip.Trigger><Button isIconOnly variant="tertiary" size="sm"
+          aria-label={hasDraft ? '排队发送' : '停止生成（已写出的内容会保留）'}
+          className={hasDraft ? 'course-chat__send' : 'course-chat__stop'} data-testid={hasDraft ? 'chat-send' : 'chat-stop'}
+          isDisabled={hasDraft && (!loaded || attachmentsPending)} onPress={hasDraft ? submit : stop}>
+          <Sym name={hasDraft ? 'arrow_upward' : 'stop'} filled={!hasDraft} />
+        </Button></Tooltip.Trigger><Tooltip.Content><p>{hasDraft ? '排队发送' : '停止生成（已写出的内容会保留）'}</p></Tooltip.Content></Tooltip>
+        : <VoiceInput key={activeId ?? 'draft'} holdTargetRef={composerHoldRef} disabled={!loaded || attachmentsPending}
+          hasText={hasDraft} editVersion={voiceEditVersion} onStart={() => { voiceDraftBase.current = useCourseChat.getState().draft; }}
+          onText={text => { const base = voiceDraftBase.current; setDraft(base ? `${base} ${text}` : text); }} onSend={submit} sendLabel={loading ? '排队发送' : '发送'} />}
+      </ChatComposerTools>
+    </>}
+  </ChatComposer>;
+});
+
 export default function CourseChat() {
+  if (import.meta.env.DEV) recordChatRender('CourseChat');
   const { t: chatText } = useTranslation('common');
   const isNarrow = useMediaQuery('(max-width: 900px)');
   const [welcomeGreeting] = useState(() => chatGreeting());
@@ -507,10 +616,6 @@ export default function CourseChat() {
   const welcomeRef = useRef<HTMLDivElement>(null);
   const composerHoldRef = useRef<HTMLDivElement>(null);
   const composerWrapRef = useRef<HTMLDivElement>(null);
-  const voiceDraftBase = useRef('');
-  const [voiceEditVersion, setVoiceEditVersion] = useState(0);
-  /** 输入法选词中的回车不是发送（含 Safari 先 compositionend 再 keydown 的情况，见 utils/imeEnter）。 */
-  const ime = useImeEnter();
   /** 显隐只写 data-show，避免每次滚动都重渲整棵消息树。 */
   const jumpBtnRef = useRef<HTMLButtonElement | null>(null);
   const ready = useCourseChat((s) => s.ready);
@@ -533,57 +638,32 @@ export default function CourseChat() {
       useChatNotifications.getState().setViewing(null);
     };
   }, [activeId, loaded, settingsOpen]);
-  const messages = useCourseChat((s) => s.messages);
+  const loading = useCourseChat((s) => s.loading);
+  const messageLayout = useCourseChat(useShallow(s => s.messages.flatMap(message => [
+    message.key, message.role, message.role === 'user' ? message.content : '',
+  ])));
+  // Content growth belongs to row subscriptions. Refresh this layout projection
+  // on membership or task/interaction transitions, not every checkpoint.
+  const interactionKey = useCourseChat(s => `${s.pendingAsk?.messageKey ?? ''}|${s.pendingPlan?.messageKey ?? ''}`);
+  const messages = useMemo(() => useCourseChat.getState().messages, [messageLayout, activeId, loading, interactionKey]);
   // Only the latest unresolved answer needs an inline status. Older rows keep
   // their retry action, but repeated notices make a long conversation noisy.
-  const latestInterruptedKey = useMemo(
-    () => [...messages].reverse().find((message) => message.role === 'ai' && message.interrupted && !message.streaming)?.key,
-    [messages],
-  );
+  const latestInterruptedKey = useCourseChat(s => [...s.messages].reverse().find(
+    message => message.role === 'ai' && message.interrupted && !message.streaming)?.key);
   /** 新追加的消息（发出去的提问 + 助手占位）播一次上浮淡入，见 useMessageEnter */
   const entering = useMessageEnter(messages.map((m) => m.key), activeId);
   const hasOlder = useCourseChat((s) => s.hasOlder);
   const loadingOlder = useCourseChat((s) => s.loadingOlder);
   const historyError = useCourseChat((s) => s.historyError);
   const loadOlder = useCourseChat((s) => s.loadOlder);
-  const loading = useCourseChat((s) => s.loading);
   /**
    * 正在生成的会话 id（可能不止一条）。侧栏 Recent 行尾的 分支/归档/删除 据此
    * **只禁那条在跑的**：别的会话在后台跑不影响你操作一条空闲会话。
    */
-  const draft = useCourseChat((s) => s.draft);
-  const attachmentItems = useChatAttachments((state) => state.items);
-  const hasDraft = !!draft.trim() || attachmentItems.length > 0;
-  const attachmentsPending = attachmentItems.some((item) => !item.value || !!item.error);
   const courseCount = useCourseChat((s) => s.courseCount);
-  const skillIds = useCourseChat((s) => s.skillIds);
-  const contextCourses = useCourseChat((s) => s.contextCourses);
   const project = useCourseChat((s) => s.project);
   const pendingAsk = useCourseChat((s) => s.pendingAsk);
-  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (pendingAsk) return;
-    const attachments = useChatAttachments.getState();
-    const files = Array.from(event.clipboardData.files);
-    if (files.length) {
-      event.preventDefault();
-      attachments.add(files);
-      return;
-    }
-    const file = pastedTextAttachment(event.clipboardData.getData('text/plain'));
-    if (!file) return;
-    event.preventDefault();
-    if (attachments.items.length >= MAX_CHAT_ATTACHMENTS) {
-      toast.error(`每条消息最多 ${MAX_CHAT_ATTACHMENTS} 个附件，请移除附件后重新粘贴`);
-      return;
-    }
-    attachments.add([file]);
-    toast.info('粘贴内容超过 4000 字节，已自动转换为 txt 附件');
-  };
-  const pendingQuestion = pendingAsk ? messages.find((message) => message.key === pendingAsk.messageKey)?.ask : undefined;
-  const composerAsk = pendingQuestion?.picked == null ? pendingQuestion : undefined;
-  const composerOverflow = useComposerSize(composerRef, draft, !composerAsk);
   const pendingPlan = useCourseChat((s) => s.pendingPlan);
-  const generating = loading && pendingAsk == null && pendingPlan == null;
   const planApplying = useCourseChat((s) => s.planApplying);
   const refreshCourseCount = useCourseChat((s) => s.refreshCourseCount);
   const loadSession = useCourseChat((s) => s.loadSession);
@@ -594,10 +674,8 @@ export default function CourseChat() {
   const auxiliary = useBotPanel((state) => state.auxiliary);
   const setAuxiliary = useBotPanel((state) => state.setAuxiliary);
   const setBotOpen = useBotPanel((state) => state.setOpen);
-  const setDraft = useCourseChat((s) => s.setDraft);
   const send = useCourseChat((s) => s.send);
   const answerAsk = useCourseChat((s) => s.answerAsk);
-  const stop = useCourseChat((s) => s.stop);
   // ── 流式期间的输入（排队 / 插入）─────────────────────────────────────────
   /** 还没交出去的话（生成中投递的队列）。只在内存里，见 store 文件头第 3 条不变量 */
   const queued = useCourseChat((s) => s.queued);
@@ -609,30 +687,7 @@ export default function CourseChat() {
   const cancelPlan = useCourseChat((s) => s.cancelPlan);
   const retryMessage = useCourseChat((s) => s.retryMessage);
   const forkSession = useCourseChat((s) => s.forkSession);
-  /** 上下文窗口（输入 + 输出的总容量）：用量环的分母，也是历史裁剪的预算来源 */
-  const ctxWin = useSettings((s) => s.contextWindow);
-  const compressionEnabled = useSettings((s) => s.jev.contextCompression && !!decisionConfigOf(s).apiKey.trim());
   const widgetDark = useResolvedDark(useSettings((s) => s.theme));
-  const contextPlan = useContextCompressionStore((s) => activeId == null ? EMPTY_COMPRESSION : s.sessions[activeId] ?? EMPTY_COMPRESSION);
-  /**
-   * 本轮技能元数据清单（`- 名称：用途` 的单行块）。
-   *
-   * 用量环要把它算进系统提示词 —— 它跟着本轮一起发出去，不数的话用量会低估。
-   * 与 `send` 用的是同一个口子（`loadSessionSkillMeta` + `skillMetaBlock`），
-   * 这样环上的数字才与真正发出去的提示词对齐。技能是异步从库里读的，所以先进 state；
-   * `skillIds` 变了重取一次（清空范围则退回 `undefined` = 无技能段）。
-   */
-  const [skillBlock, setSkillBlock] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const metas = await loadSessionSkillMeta(skillIds);
-      if (!cancelled) setSkillBlock(metas.length > 0 ? skillMetaBlock(metas) : undefined);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [skillIds]);
 
   // 每次挂载都重新数一次课程：`courseCount` 是 bootstrap 时的快照，
   // 而「去课程库导入 → 切回对话页」是这里的常规动线，刷新晚了空状态会一直停在
@@ -728,69 +783,6 @@ export default function CourseChat() {
     return () => observer.disconnect();
   }, [pinIfSticking]);
 
-  const iconButton = (
-    label: string,
-    icon: React.ReactNode,
-    onClick: () => void,
-    options: {
-      disabled?: boolean;
-      variant?: 'primary' | 'secondary' | 'tertiary';
-      testId?: string;
-      className?: string;
-    } = {},
-  ) => (
-    <Tooltip>
-      <Tooltip.Trigger>
-        <Button
-          isIconOnly
-          aria-label={label}
-          variant={options.variant ?? 'tertiary'}
-          size="sm"
-          isDisabled={options.disabled}
-          className={options.className}
-          data-testid={options.testId}
-          onPress={onClick}
-        >
-          {icon}
-        </Button>
-      </Tooltip.Trigger>
-      <Tooltip.Content>
-        <p>{label}</p>
-      </Tooltip.Content>
-    </Tooltip>
-  );
-
-  /**
-   * 可以发消息了吗。
-   *
-   * 懒创建之后**不能**再带 `activeId != null`：草稿态（会话还没落库）是完全正常的状态，
-   * 用户就是在那儿发出第一条消息的。带上它的话草稿态的输入框与发送键永远是禁用的，
-   * 用户连第一条都发不出去 —— 这是本轮最容易踩、且症状最像「应用坏了」的一处。
-   */
-  const sessionReady = loaded;
-  /** 有没有课程可用：决定提示词、工具集与空状态走哪一套。null = 还在数 */
-  const hasCourses = (courseCount ?? 0) > 0;
-  /**
-   * 本轮上下文用量估算（系统提示词 + 历史 + 当前草稿），仅供工具行那枚环提示。
-   *
-   * 与 `store/courseChat` 的 `send` 同口径：系统提示词走 `libraryAssistantSystemPrompt`、
-   * 历史只算 `content`（reasoning / 工具回执都不随下一轮重发）、草稿按当前输入框内容算。
-   * 不做精确的分词计数，`estimateTokens` 本来就是「按字符量级的保守估值」——
-   * 环的作用是让用户看出「快满了」，不是报一个能被审计的账。
-   */
-  const ctxBreakdown = useMemo(() => {
-    // Only the selected display context is known here. The authoritative system
-    // prompt and tool budget are assembled and enforced by the server task.
-    const system = estimateTokens(`${skillBlock ?? ''}\n${contextCourses.map(course => course.name).join('\n')}`);
-    const historyRows = compressionEnabled ? retainedContext(messages, contextPlan) : messages;
-    const history = historyRows.reduce((sum, message) => sum + estimateTokens(message.content), 0);
-    return { system, history, current: estimateTokens(draft) };
-  }, [skillBlock, contextCourses, hasCourses, messages, draft, contextPlan, compressionEnabled]);
-  const ctxEst = ctxBreakdown.system + ctxBreakdown.history + ctxBreakdown.current;
-  const contextCompression = useContextCompression({
-    sessionId: activeId, tokens: ctxEst, windowTokens: ctxWin, query: draft,
-    busy: loading || !loaded || pendingAsk != null || pendingPlan != null,
-  });
   /**
    * 课程库还在数的期间要不要出骨架。
    *
@@ -888,6 +880,146 @@ export default function CourseChat() {
     </>
   );
 
+  // Created once per root render, not once per virtualizer measurement. Default
+  // memo compares this function too, so changed action closures are never hidden.
+  const renderMessage = (message: CourseChatMessage, index: number) => {
+              const user = message.role === 'user';
+              /**
+               * 「重新生成」只对**最后一条**完整回答成立：改历史中间的一步要用「分支」
+               * （删掉它后面所有消息是一次不可见的批量删除，用户会看到一条会话凭空少一段）。
+               * 判据与 store 的 `retryMessage` 一致，两边都挡一道。
+               */
+              const canRetry = !!message.interrupted || index === messages.length - 1;
+              /**
+               * 提问上的「重试」= 重新回答这句话，所以它只在**这条提问的答复就是最后一条**时成立
+               * （提问后面必须紧跟一条回答，且那条回答在末尾）。判据与 store 的 `retryMessage` 一致，
+               * 两边都挡一道。
+               */
+              const canRetryAsk =
+                user && messages[index + 1]?.role === 'ai' && index === messages.length - 2;
+              return (
+                <article
+                  key={message.key}
+                  className={
+                    (user
+                      ? 'course-chat__message course-chat__message--user'
+                      : 'course-chat__message course-chat__message--ai')
+                    + (entering.has(message.key) ? ' t-msg-enter' : '')
+                  }
+                  data-error={message.error ? 'true' : undefined}
+                  data-chat-message={message.key}
+                >
+                  {/* AI 侧不挂头像气泡：showcase 里助手的回答是**直接铺在正文流里**的，
+                      加一个头像就把每条回答切成了「卡片」，长回答读起来很累。 */}
+                  {user ? (
+                    <UserMessageBubble message={message} busy={loading || deleting} canRetry={canRetryAsk}
+                      onRetry={() => void retryMessage(message.key)} onFork={() => void onForkMessage(message)}
+                      onDelete={() => void deleteMessage(message.key)} />
+                  ) : (
+                    <div className="course-chat__bubble course-chat__bubble--ai" data-dust-surface>
+                      <>
+                        {message.error && !message.streaming && canRetry && (
+                          <div className="course-chat__failed" data-testid="chat-answer-failed" role="alert">
+                            <Sym name="error" aria-hidden="true" />
+                            <span className="course-chat__failed-text">{displayChatFailure(message.content)}</span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="course-chat__failed-continue"
+                              data-testid="chat-error-continue"
+                              isDisabled={loading}
+                              onPress={() => void retryMessage(message.key)}
+                            >
+                              继续回答
+                            </Button>
+                          </div>
+                        )}
+                        <ArtifactEditProvider rowId={message.rowId} content={message.content}
+                          disabled={loading || !!message.streaming || !!message.error || !!message.interrupted || !!message.ask && !message.ask.picked}
+                          onSaved={reflectArtifactEdit}>
+                        <WidgetMessage message={message} content={message.error ? '' : message.content} dark={widgetDark} rowId={message.rowId}
+                          disabled={loading || !!message.streaming || !!message.error || !!message.interrupted || !!message.ask && !message.ask.picked}
+                          onPrompt={(text) => void send(text)}>
+                        {(markdown) => (
+                          <ResponseTimeline message={message} content={markdown}>
+                          {(content, active) => <AssistantContent content={content} streaming={active}>
+                            {(part, streaming) => <AnswerMarkdown content={part} streaming={streaming} link={CourseLink} />}
+                          </AssistantContent>}
+                          </ResponseTimeline>
+                        )}
+                        </WidgetMessage>
+                        {message.widgetPreview && (
+                           <WidgetStreamFrame html={message.widgetPreview.html} dark={widgetDark} status="正在生成交互图形" />
+                        )}
+                        </ArtifactEditProvider>
+                        {!message.content && (message.ask || message.folderPlan) && <div aria-hidden="true" data-chat-answer-start="" />}
+                        {/* 提问/确认在当前输出之后；用户回应后 store 会另起助手消息。 */}
+                        {renderCards(message)}
+                        {/* 操作行与来源都只在**这一轮写完**之后出现：流式进行中时正文还在变，
+                            这两个块的计数与内容每一帧都不一样，闪得人没法读。 */}
+                        {/* 中断提示条。正文里**不嵌**「回答中断：xxx」那句（与「已停止生成」
+                            不同）—— 这半截内容要能当 assistant 前缀发给模型接着写，
+                            正文里夹一句系统口吻的说明会污染它。中断由这条提示条表达。 */}
+                        {!message.streaming && message.interrupted && message.key === latestInterruptedKey && (
+                          <div className="course-chat__interrupted" data-testid="chat-interrupted">
+                            <span className="course-chat__interrupted-text">
+                              {chatText('chat.interrupted')}
+                              {message.interruptReason ? `：${displayChatError(message.interruptReason)}` : ''}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="tertiary"
+                              className="course-chat__interrupted-continue"
+                              data-testid="chat-continue"
+                              isDisabled={loading}
+                              onPress={() => void retryMessage(message.key)}
+                            >
+                              {chatText('chat.continue')}
+                            </Button>
+                          </div>
+                        )}
+                        {!message.streaming && message.content && message.rowId != null && (
+                          <MessageActions
+                            content={message.content}
+                            isUser={false}
+                            busy={loading || deleting}
+                            canRetry={canRetry}
+                            /* 两种语义必须说得不一样，否则用户不知道点下去会得到什么 */
+                            retryHint={message.interrupted ? '接着写（从断点继续，不重复已写内容）' : '重新生成这条回答'}
+                            onRetry={() => void retryMessage(message.key)}
+                            onFork={() => void onForkMessage(message)}
+                            onExport={exportSession}
+                            onDelete={() => void deleteMessage(message.key)}
+                          />
+                        )}
+                        {!message.streaming && message.content && (
+                          <SourceList sources={extractChatSources(message.content)} />
+                        )}
+                      </>
+                    </div>
+                  )}
+
+                  {/* 提问的操作行**挂在气泡外面**（另起一行、右对齐）—— 复制这条提问 / 重新回答这句话 /
+                      从这条提问分叉。塞回气泡里的话，悬停时那块底色会多长出一条图标行，
+                      气泡本身跟着变形（见 MessageActions 的注释）。
+                      还没落库的消息没有行可复制、也没有可重发的行，所以不显示。 */}
+                  {user && !message.streaming && message.rowId != null && (
+                    <MessageActions
+                      content={message.content}
+                      isUser
+                      busy={loading || deleting}
+                      canRetry={canRetryAsk}
+                      retryHint="重新回答这句话（删掉这一问一答，用同样的问题重跑一次）"
+                      onRetry={() => void retryMessage(message.key)}
+                      onFork={() => void onForkMessage(message)}
+                      onExport={exportSession}
+                      onDelete={() => void deleteMessage(message.key)}
+                    />
+                  )}
+                </article>
+              );
+  };
+
   return (
     <PageShell
       title={activeTitle}
@@ -959,143 +1091,8 @@ export default function CourseChat() {
               )}
             </div>}
             {messages.length > 0 && <VirtualMessages key={activeId} items={messages} scrollRef={listRef}
-              ref={virtualMessagesRef} onResize={pinIfSticking} scrollPaddingStart={88}>{(message, index) => {
-              const user = message.role === 'user';
-              /**
-               * 「重新生成」只对**最后一条**完整回答成立：改历史中间的一步要用「分支」
-               * （删掉它后面所有消息是一次不可见的批量删除，用户会看到一条会话凭空少一段）。
-               * 判据与 store 的 `retryMessage` 一致，两边都挡一道。
-               */
-              const canRetry = !!message.interrupted || index === messages.length - 1;
-              /**
-               * 提问上的「重试」= 重新回答这句话，所以它只在**这条提问的答复就是最后一条**时成立
-               * （提问后面必须紧跟一条回答，且那条回答在末尾）。判据与 store 的 `retryMessage` 一致，
-               * 两边都挡一道。
-               */
-              const canRetryAsk =
-                user && messages[index + 1]?.role === 'ai' && index === messages.length - 2;
-              return (
-                <article
-                  key={message.key}
-                  className={
-                    (user
-                      ? 'course-chat__message course-chat__message--user'
-                      : 'course-chat__message course-chat__message--ai')
-                    + (entering.has(message.key) ? ' t-msg-enter' : '')
-                  }
-                  data-error={message.error ? 'true' : undefined}
-                  data-chat-message={message.key}
-                >
-                  {/* AI 侧不挂头像气泡：showcase 里助手的回答是**直接铺在正文流里**的，
-                      加一个头像就把每条回答切成了「卡片」，长回答读起来很累。 */}
-                  {user ? (
-                    <UserMessageBubble message={message} busy={loading || deleting} canRetry={canRetryAsk}
-                      onRetry={() => void retryMessage(message.key)} onFork={() => void onForkMessage(message)}
-                      onDelete={() => void deleteMessage(message.key)} />
-                  ) : (
-                    <div className="course-chat__bubble course-chat__bubble--ai" data-dust-surface>
-                      <>
-                        {message.error && !message.streaming && canRetry && (
-                          <div className="course-chat__failed" data-testid="chat-answer-failed" role="alert">
-                            <Sym name="error" aria-hidden="true" />
-                            <span className="course-chat__failed-text">{displayChatFailure(message.content)}</span>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="course-chat__failed-continue"
-                              data-testid="chat-error-continue"
-                              isDisabled={loading}
-                              onPress={() => void retryMessage(message.key)}
-                            >
-                              继续回答
-                            </Button>
-                          </div>
-                        )}
-                        <ArtifactEditProvider rowId={message.rowId} content={message.content}
-                          disabled={loading || !!message.streaming || !!message.error || !!message.interrupted || !!message.ask && !message.ask.picked}
-                          onSaved={reflectArtifactEdit}>
-                        <WidgetMessage message={message} content={message.error ? '' : message.content} dark={widgetDark} rowId={message.rowId}
-                          disabled={loading || !!message.streaming || !!message.error || !!message.interrupted || !!message.ask && !message.ask.picked}
-                          onPrompt={(text) => void send(text)}>
-                        {(markdown) => (
-                          <ResponseTimeline message={message} content={markdown}>
-                          {(content, active) => <AssistantContent content={content} streaming={active}>
-                            {(part, streaming) => <AnswerMarkdown content={part} streaming={streaming} link={CourseLink} />}
-                          </AssistantContent>}
-                          </ResponseTimeline>
-                        )}
-                        </WidgetMessage>
-                        {message.widgetPreview && (
-                           <StreamingHtmlPreview html={message.widgetPreview.html} />
-                        )}
-                        </ArtifactEditProvider>
-                        {!message.content && (message.ask || message.folderPlan) && <div aria-hidden="true" data-chat-answer-start="" />}
-                        {/* 提问/确认在当前输出之后；用户回应后 store 会另起助手消息。 */}
-                        {renderCards(message)}
-                        {/* 操作行与来源都只在**这一轮写完**之后出现：流式进行中时正文还在变，
-                            这两个块的计数与内容每一帧都不一样，闪得人没法读。 */}
-                        {/* 中断提示条。正文里**不嵌**「回答中断：xxx」那句（与「已停止生成」
-                            不同）—— 这半截内容要能当 assistant 前缀发给模型接着写，
-                            正文里夹一句系统口吻的说明会污染它。中断由这条提示条表达。 */}
-                        {!message.streaming && message.interrupted && message.key === latestInterruptedKey && (
-                          <div className="course-chat__interrupted" data-testid="chat-interrupted">
-                            <span className="course-chat__interrupted-text">
-                              {chatText('chat.interrupted')}
-                              {message.interruptReason ? `：${displayChatError(message.interruptReason)}` : ''}
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="tertiary"
-                              className="course-chat__interrupted-continue"
-                              data-testid="chat-continue"
-                              isDisabled={loading}
-                              onPress={() => void retryMessage(message.key)}
-                            >
-                              {chatText('chat.continue')}
-                            </Button>
-                          </div>
-                        )}
-                        {!message.streaming && message.content && message.rowId != null && (
-                          <MessageActions
-                            content={message.content}
-                            isUser={false}
-                            busy={loading || deleting}
-                            canRetry={canRetry}
-                            /* 两种语义必须说得不一样，否则用户不知道点下去会得到什么 */
-                            retryHint={message.interrupted ? '接着写（从断点继续，不重复已写内容）' : '重新生成这条回答'}
-                            onRetry={() => void retryMessage(message.key)}
-                            onFork={() => void onForkMessage(message)}
-                            onExport={exportSession}
-                            onDelete={() => void deleteMessage(message.key)}
-                          />
-                        )}
-                        {!message.streaming && message.content && (
-                          <SourceList sources={extractChatSources(message.content)} />
-                        )}
-                      </>
-                    </div>
-                  )}
-
-                  {/* 提问的操作行**挂在气泡外面**（另起一行、右对齐）—— 复制这条提问 / 重新回答这句话 /
-                      从这条提问分叉。塞回气泡里的话，悬停时那块底色会多长出一条图标行，
-                      气泡本身跟着变形（见 MessageActions 的注释）。
-                      还没落库的消息没有行可复制、也没有可重发的行，所以不显示。 */}
-                  {user && !message.streaming && message.rowId != null && (
-                    <MessageActions
-                      content={message.content}
-                      isUser
-                      busy={loading || deleting}
-                      canRetry={canRetryAsk}
-                      retryHint="重新回答这句话（删掉这一问一答，用同样的问题重跑一次）"
-                      onRetry={() => void retryMessage(message.key)}
-                      onFork={() => void onForkMessage(message)}
-                      onExport={exportSession}
-                      onDelete={() => void deleteMessage(message.key)}
-                    />
-                  )}
-                </article>
-              );
-            }}</VirtualMessages>}
+              ref={virtualMessagesRef} onResize={pinIfSticking} scrollPaddingStart={88}>{(item, slotIndex) => <MessageSubscription
+                messageKey={item.key} index={slotIndex}>{renderMessage}</MessageSubscription>}</VirtualMessages>}
           </div>
 
           <ChatMessageNav key={activeId} messages={messages} scrollRef={listRef}
@@ -1159,115 +1156,8 @@ export default function CourseChat() {
                 ><Sym name="close" /></Button>
               </div>
             )}
-            <ChatComposer className="course-chat__composer" ref={composerHoldRef} data-asking={composerAsk ? 'true' : undefined}
-              onDragOver={(event) => { if (event.dataTransfer.types.includes('Files') && !pendingAsk) event.preventDefault(); }}
-              onDrop={(event) => { if (event.dataTransfer.files.length && !pendingAsk) { event.preventDefault(); useChatAttachments.getState().add(Array.from(event.dataTransfer.files)); } }}>
-              {composerAsk && pendingAsk ? (
-                <AskCard
-                  key={`${activeId}:${pendingAsk.messageKey}`}
-                  ask={composerAsk}
-                  messageKey={pendingAsk.messageKey}
-                  active
-                  restored={pendingAsk.restored}
-                  onPick={async answer => {
-                    const current = useCourseChat.getState();
-                    if (current.activeId !== activeId || current.pendingAsk?.messageKey !== pendingAsk.messageKey)
-                      throw new Error('本次提问已结束，请使用当前问题卡');
-                    await current.answerAsk(answer);
-                  }}
-                />
-              ) : <>
-              {/* 课程引用收在添加菜单中；输入区只保留待发送的附件。 */}
-              <div className="course-chat__composer-context">
-              <ChatAttachmentDraft />
-              </div>
-              <ChatAddMenu disabled={!sessionReady || !!pendingAsk} onSelectProject={() => setProjectPickerOpen(true)} />
-              <ComposerExpand visible={composerOverflow} key={`expand-${activeId ?? 'draft'}`} value={draft} onPaste={handlePaste} onChange={(value) => {
-                setVoiceEditVersion((version) => version + 1);
-                setDraft(value);
-              }} />
-              <ChatComposerInput
-                ref={composerRef}
-                className="course-chat__input"
-                aria-label="给 AI 助手发送消息"
-                aria-description="长按输入栏说话，松开完成，上滑取消；识别后可编辑再发送"
-                rows={1}
-                fullWidth
-                value={draft}
-                onChange={(event) => {
-                  setVoiceEditVersion((version) => version + 1);
-                  setDraft(event.target.value);
-                }}
-                onPaste={handlePaste}
-                /**
-                 * 移动端键盘的回车键改成「发送」：Android Chrome 认 enterkeyhint，
-                 * 会把按键的文案与语义从「换行」换成「发送」（iOS Safari 暂不认，
-                 * 但加上没有副作用）。没有它，手机上要找一颗小小的发送键，
-                 * 而回车键就在拇指底下。
-                 */
-                enterKeyHint="send"
-                {...ime.compositionProps}
-                /** 聚焦即吸底：键盘弹出会顶矮面板，先一步把最新消息留在可视区里 */
-                onFocus={pinIfSticking}
-                /**
-                 * **生成中不再禁用**（2026-10-16 修订）。
-                 *
-                 * 旧逻辑是 `disabled={!sessionReady || (loading && pendingAsk == null)}`：
-                 * 想补一句话只能先按停止，而停止会把已经写了一半的回答作废。
-                 * 用户真正的意图往往只是「等它答完，接着问下一句」—— 那条路现在是
-                 * **排队**（Enter），输入框全程可打。
-                 *
-                 * 历史没就绪时禁用；等待作答时由 AskCard 接管输入栏。
-                 */
-                disabled={!sessionReady}
-                placeholder="随便问点什么，或长按说话"
-                onKeyDown={(event) => {
-                  if (!ime.isSubmitEnter(event)) return;
-                  event.preventDefault();
-                  setVoiceEditVersion((version) => version + 1);
-                  // 生成中一律排队；只有待发消息上的手动插入操作才打断本轮。
-                  void send(draft, 'queue');
-                }}
-              />
-               {/* Toolbar 负责方向键在输入区工具间循环。 */}
-              <ChatComposerTools
-                className="course-chat__composer-tools"
-                aria-label="输入区工具"
-                orientation="horizontal"
-              >
-                <PluginActions surface="chat.composer.actions" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} />
-                <span className="course-chat__context-usage-slot">
-                  <ContextUsageButton
-                    tokens={ctxEst} windowTokens={ctxWin} breakdown={ctxBreakdown} testId="chat-context-usage"
-                    compression={contextCompression.state} onCompress={contextCompression.compress}
-                    isDisabled={loading || !loaded || activeId == null || pendingAsk != null || pendingPlan != null}
-                  />
-                </span>
-                {/* 发送与停止共用最右侧的操作位：生成中有草稿就发送，没有才停止。 */}
-                {generating ? (
-                  hasDraft ? iconButton('排队发送', <Sym name="arrow_upward" />,
-                    () => void send(draft, 'queue'), { className: 'course-chat__send', testId: 'chat-send', disabled: !sessionReady || attachmentsPending })
-                  : iconButton('停止生成（已写出的内容会保留）', <Sym name="stop" filled />, stop, {
-                    className: 'course-chat__stop',
-                    testId: 'chat-stop',
-                  })
-                ) : <VoiceInput
-                  key={activeId ?? 'draft'}
-                  holdTargetRef={composerHoldRef}
-                  disabled={!sessionReady || attachmentsPending}
-                  hasText={hasDraft}
-                  editVersion={voiceEditVersion}
-                  onStart={() => { voiceDraftBase.current = useCourseChat.getState().draft; }}
-                  onText={(text) => {
-                    const base = voiceDraftBase.current;
-                    setDraft(base ? `${base} ${text}` : text);
-                  }}
-                  onSend={() => void send(useCourseChat.getState().draft, 'queue')}
-                  sendLabel={loading ? '排队发送' : '发送'}
-                />}
-              </ChatComposerTools>
-              </>}
-            </ChatComposer>
+            <CourseChatInputRegion composerRef={composerRef} composerHoldRef={composerHoldRef}
+              pinIfSticking={pinIfSticking} onSelectProject={() => setProjectPickerOpen(true)} />
           </div>
         </section>
       </div>

@@ -16,6 +16,9 @@ const { CloudRecords } = await import('../apps/api/src/cloud/records.ts');
 const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
 let runtime, store, release;
 const sockets = [];
+let delayedRead;
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+const holdNextRead = () => delayedRead = { read: deferred(), resume: deferred() };
 async function until(test, label) {
   for (let i = 0; i < 300; i++) { if (test()) return; await delay(20); }
   throw new Error(`Timeout: ${label}`);
@@ -35,7 +38,13 @@ try {
   put('chatSessions', 1, { id: 1, title: 'Journal' });
   for (let id = 1; id <= 50; id++) put('chats', id, row(id));
   runtime = await createClientRuntime({ server: base, account: owner, scope: 'session-journal-test' }, { interactions: 'answer', transport: {
-    fetch: (url, init) => fetch(new URL(url, base), { ...init, headers: { ...init?.headers, cookie } }), streamBaseUrl: base,
+    fetch: async (url, init) => {
+      const gate = new URL(url, base).pathname === '/api/clientRuntime/read' ? delayedRead : undefined;
+      if (gate) delayedRead = undefined;
+      const response = await fetch(new URL(url, base), { ...init, headers: { ...init?.headers, cookie } });
+      if (gate) { await response.clone().arrayBuffer(); gate.read.resolve(); await gate.resume.promise; }
+      return response;
+    }, streamBaseUrl: base,
     createWebSocket: url => { const socket = new WebSocket(url, { headers: { cookie, origin: base } }); sockets.push(socket); return socket; },
   } });
   const model = runtime.session(1);
@@ -68,6 +77,56 @@ try {
   await until(() => model.projection()?.rows.some(row => row.id === 1) && model.projection()?.rows.some(row => row.id === 201), 'retained cursor full repair');
   assert.equal(model.projection().rows.length, 200);
   assert.equal(model.projection().hasOlder, false);
+  // Actual HTTP is read by SQLite, then held while the real WS journal moves.
+  // Row 1001 is outside the loaded window: absence alone cannot protect it.
+  put('chatSessions', 2, { id: 2, title: 'Delayed pagination' });
+  for (let id = 1001; id <= 1065; id++) put('chats', id, { ...row(id), sessionId: 2 });
+  const paged = runtime.session(2);
+  let releasePaged = paged.acquire();
+  await until(() => paged.getSnapshot().status === 'ready', 'race session baseline');
+  const gate = holdNextRead();
+  const pendingPage = runtime.sessionPage(2, { id: 1026, createdAt: 1026 });
+  await gate.read.promise;
+  put('chats', 1001, null);
+  put('chats', 1065, { ...row(1065), sessionId: 2, content: 'delete observed' });
+  await until(() => paged.projection()?.rows.at(-1)?.content === 'delete observed', 'WS passes unseen delete while HTTP held');
+  gate.resume.resolve(); await pendingPage;
+  assert.equal(paged.projection().rows.some(row => row.id === 1001), false, 'delayed HTTP must not resurrect deleted unseen row');
+  assert.equal(paged.projection().rows.length, 64);
+
+  const gapGate = holdNextRead();
+  const oldWindow = runtime.sessionPage(2, { id: 1065, createdAt: 1065 });
+  await gapGate.read.promise; // this latest-window page says hasOlder=true
+  store.transaction(() => {
+    put('chats', 1002, null);
+    store.db.prepare('UPDATE client_session_cursors SET floor=cursor WHERE owner_id=? AND session_id=2').run(owner);
+    store.db.prepare('DELETE FROM client_session_events WHERE owner_id=? AND session_id=2').run(owner);
+  });
+  paged.refresh();
+  await until(() => paged.getSnapshot().status === 'ready' && paged.projection()?.rows.length === 63 && !paged.projection()?.hasOlder, 'full gap baseline while HTTP held');
+  const repaired = paged.projection();
+  gapGate.resume.resolve(); await oldWindow;
+  assert.equal(paged.projection(), repaired, 'late page cannot replace full repair or regress hasOlder');
+  assert.equal(repaired.rows[0].id, 1003, 'full gap repair still includes older-than-window rows');
+
+  const releaseGate = holdNextRead();
+  const releasedPage = runtime.sessionPage(2, { id: 1065, createdAt: 1065 });
+  await releaseGate.read.promise;
+  releasePaged(); releasePaged = paged.acquire();
+  await until(() => paged.getSnapshot().status === 'ready', 'release/reacquire resumed stream');
+  const reacquired = paged.projection();
+  releaseGate.resume.resolve(); await releasedPage;
+  assert.equal(paged.projection(), reacquired, 'old observation page cannot publish into reacquired model');
+
+  const disposeGate = holdNextRead();
+  const disposedPage = runtime.sessionPage(2, { id: 1065, createdAt: 1065 });
+  await disposeGate.read.promise;
+  paged.dispose();
+  disposeGate.resume.resolve(); await disposedPage;
+  assert.equal(paged.getSnapshot().error, 'client_model_disposed');
+  assert.equal(paged.getSnapshot().data, undefined, 'disposed model cannot be repopulated by a pending page');
+  assert.throws(() => paged.acquire(), /client_model_disposed/);
+  releasePaged();
   const reducer = new SessionJournalModel();
   reducer.apply({ type: 'baseline', cursor: 5, session: {}, tasks: [], hasOlder: false });
   reducer.reconnect();
@@ -81,6 +140,7 @@ try {
   ]) assert.throws(() => reducer.apply(frame), /journal_gap/);
   assert.equal(reducer.cursor, 5);
   fs.writeFileSync(path.join(directory, 'result.json'), JSON.stringify({ passed: true, initial: 40, afterBurst: 120, afterReconnect: 189, repaired: 200,
-    rollback: true, incompleteBaseline: true, duplicateAndGapRejected: true }, null, 2));
+    rollback: true, incompleteBaseline: true, duplicateAndGapRejected: true,
+    delayedHttp: { unseenDelete: true, fullGapBaseline: true, releaseReacquire: true, dispose: true } }, null, 2));
   console.log(`PASS session durable journal, rollback, 80-event burst, real WS reconnect, tombstones and full cursor-gap repair: ${directory}`);
 } finally { release?.(); await runtime?.dispose(); for (const socket of sockets) socket.terminate(); store?.close(); await app.close(); }

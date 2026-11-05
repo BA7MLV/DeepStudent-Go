@@ -105,7 +105,7 @@ try {
   }
   scripted = [
     { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'skill-read', type: 'function', function: { name: 'read', arguments: '{"path":"/skills/test-1001"}' } }] }, finish_reason: 'tool_calls' }] },
-    { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'ref-read', type: 'function', function: { name: 'read', arguments: '{"path":"/skills/test-1001/references/references/guide.md"}' } }] }, finish_reason: 'tool_calls' }] },
+    { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'ref-read', type: 'function', function: { name: 'read', arguments: '{"path":"/skills/test-1001/references/guide.md"}' } }] }, finish_reason: 'tool_calls' }] },
   ];
   await run('chat');
   assert.ok(requestBody().includes('_TURN_END'));

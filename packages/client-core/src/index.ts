@@ -12,13 +12,15 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'client/record-conflict': { table: string; key: string | number; fields: string[] };
   }
 }
-import { applyRuntimePatch, reconcileRuntime, diffRuntime } from '@wangke/contracts/runtime-projection';
+import { applyRuntimePatch, reconcileRuntime } from '@wangke/contracts/runtime-projection';
 import { SessionJournalModel } from './session.js';
 export { BotHistoryModel, mergeMessages, mergeById, sameMessage } from './bot-history.js';
 export { SessionQueueModel } from './session-queue.js';
 export type { SessionQueueItem, SessionQueuePort } from './session-queue.js';
 export type { BotThreadProjection } from './bot-history.js';
 export { SessionTimelineModel } from './session.js';
+export type { SessionMessage, SessionRow } from './session.js';
+export { SessionStateModel, ConversationSessionModel } from './session-state.js';
 export { BotFollowModel } from './bot-follow.js';
 export { DurableCommands } from './durable-commands.js';
 export type { DurableCommand, CommandJournal } from './durable-commands.js';
@@ -45,7 +47,10 @@ export class RuntimeModel {
     private readonly open?: (signal: AbortSignal) => AsyncIterable<RuntimeFrame>) {}
   getSnapshot = (): ModelSnapshot => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  private publish(next: ModelSnapshot) { this.snapshot = next; for (const listener of this.listeners) listener(); }
+  protected invalidatePendingReads() {}
+  protected publish(next: ModelSnapshot) { if (next.status !== 'ready') this.invalidatePendingReads(); this.snapshot = next; for (const listener of this.listeners) listener(); }
+  protected materialize(next: RuntimeJson) { return reconcileRuntime(this.snapshot.data, next); }
+  protected updateData(frame: Exclude<RuntimeFrame, RuntimeSnapshot>) { return applyRuntimePatch(this.snapshot.data!, frame.changes); }
   acquire(): () => void {
     if (this.disposed) throw new Error('client_model_disposed');
     if (++this.refs === 1) this.start();
@@ -68,12 +73,12 @@ export class RuntimeModel {
       name: 'clientRuntime', isSnapshot: (frame): frame is RuntimeSnapshot => frame.type === 'snapshot',
       replace: frame => {
         if (!current()) return;
-        this.publish({ status: 'ready', revision: frame.revision, data: reconcileRuntime(this.snapshot.data, frame.value) });
+        this.publish({ status: 'ready', revision: frame.revision, data: this.materialize(frame.value) });
       },
       update: frame => {
         if (!current()) return;
         if (this.snapshot.data === undefined || frame.baseRevision !== this.snapshot.revision || frame.revision <= frame.baseRevision) throw new Error('protocol_revision_gap');
-        this.publish({ status: 'ready', revision: frame.revision, data: applyRuntimePatch(this.snapshot.data, frame.changes) });
+        this.publish({ status: 'ready', revision: frame.revision, data: this.updateData(frame) });
       },
       failed: error => { if (current()) this.publish({ ...this.snapshot, status: 'error', error: error instanceof Error ? error.message : 'remote_failed' }); },
     });
@@ -88,9 +93,10 @@ export class RuntimeModel {
     // A protocol failure terminates RemoteSnapshotStream's consumer. Restarting
     // only its carrier cannot revive that consumer; create a new incarnation.
     if (this.snapshot.status === 'error') { this.stop(); this.start(); }
-    else this.stream?.restart();
+    else { this.invalidatePendingReads(); this.stream?.restart(); }
   }
   private stop() {
+    this.invalidatePendingReads();
     ++this.incarnation;
     this.stopState?.(); this.stopState = undefined;
     const stream = this.stream; this.stream = undefined;
@@ -164,6 +170,7 @@ export class TaskListModel extends RuntimeModel {
 }
 
 export class SessionModel extends RuntimeModel {
+  private readonly journal: SessionJournalModel;
   private data?: RuntimeJson;
   private value?: RuntimeSessionProjection;
   constructor(ctx: Context, readonly sessionId: number) {
@@ -171,29 +178,46 @@ export class SessionModel extends RuntimeModel {
     const journal = new SessionJournalModel(sessionId);
     let revision = 0;
     super(ctx, request, async function* (signal) {
+      signal.throwIfAborted();
       journal.reconnect();
       let previous: RuntimeJson | undefined;
       for await (const frame of ctx.remote.clientRuntime.watchSessionJournal({ sessionId,
         ...(journal.cursor === undefined ? {} : { after: journal.cursor }) }, signal)) {
+        signal.throwIfAborted();
         const value = journal.apply(frame);
         if (!value) continue;
         const next = value as unknown as RuntimeJson;
         const baseRevision = revision++;
         if (previous === undefined) yield { type: 'snapshot' as const, revision, value: next };
-        else yield { type: 'delta' as const, baseRevision, revision, changes: diffRuntime(previous, next) };
+        // Internal materialized-frame handoff, not a second wire protocol or a
+        // snapshot→diff→patch round trip. The journal already merged identities.
+        else yield { type: 'delta' as const, baseRevision, revision, changes: [{ path: [], value: next }] };
         previous = next;
         // RemoteSnapshotStream applies the projection before requesting next.
+        signal.throwIfAborted();
         journal.commit(frame.cursor);
       }
     });
+    this.journal = journal;
+  }
+  protected override materialize(next: RuntimeJson) { return next; }
+  protected override updateData(frame: Exclude<RuntimeFrame, RuntimeSnapshot>) { return frame.changes[0].value!; }
+  protected override invalidatePendingReads() { this.journal.invalidatePages(); }
+  beginPage() {
+    return this.getSnapshot().status === 'ready' && this.diagnostics().active ? this.journal.beginPage() : undefined;
+  }
+  endPage(fence: ReturnType<SessionJournalModel['beginPage']>) { this.journal.endPage(fence); }
+  prepend(page: RuntimeSessionProjection, fence: ReturnType<SessionJournalModel['beginPage']>) {
+    const data = this.journal.prepend(page, fence);
+    if (data) this.publish({ ...this.getSnapshot(), data: data as unknown as RuntimeJson });
   }
   projection(): RuntimeSessionProjection | undefined {
     const snapshot = this.getSnapshot();
     if (snapshot.data === undefined) return undefined;
     if (snapshot.data !== this.data) {
-      const frame = TYPERT_REMOTE.methods['clientRuntime/watchSession'].result.create().parse({ type: 'snapshot', revision: snapshot.revision, value: snapshot.data });
-      if (frame.type !== 'snapshot') throw new Error('protocol_session_baseline');
-      this.data = snapshot.data; this.value = frame.value;
+      // Journal frames were validated by the generated remote boundary already.
+      // Re-parsing the full projection here would replace every nested identity.
+      this.data = snapshot.data; this.value = snapshot.data as unknown as RuntimeSessionProjection;
     }
     return this.value;
   }
@@ -253,12 +277,19 @@ export async function createClientRuntime(identity: { server: string; account: s
     session: (sessionId: number) => model(`session:${sessionId}`, () => new SessionModel(ctx, sessionId)),
     sessionPage: async (sessionId: number, before?: { createdAt: number; id: number; role?: string }) => {
       if (disposed) throw new Error('client_runtime_disposed');
-      const result = await ctx.remote.clientRuntime.read({ kind: 'session', sessionId, ...(before ? { before } : {}) });
-      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
-      if (disposed) throw new Error('client_runtime_disposed');
-      const frame = TYPERT_REMOTE.methods['clientRuntime/watchSession'].result.create().parse(result.value);
-      if (frame.type !== 'snapshot') throw new Error('protocol_session_baseline');
-      return frame.value;
+      // Bind the request to the exact retained model BEFORE opening HTTP.
+      // Never look up/create a different observation when its response arrives.
+      const target = before ? model(`session:${sessionId}`, () => new SessionModel(ctx, sessionId)) : undefined;
+      const fence = target?.beginPage();
+      try {
+        const result = await ctx.remote.clientRuntime.read({ kind: 'session', sessionId, ...(before ? { before } : {}) });
+        if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
+        if (disposed) throw new Error('client_runtime_disposed');
+        const frame = TYPERT_REMOTE.methods['clientRuntime/watchSession'].result.create().parse(result.value);
+        if (frame.type !== 'snapshot') throw new Error('protocol_session_baseline');
+        target?.prepend(frame.value, fence);
+        return frame.value;
+      } finally { target?.endPage(fence); }
     },
     task: (taskId: string) => model(`task:${taskId}`, () => new TaskModel(ctx, taskId)),
     plugin: (request: Extract<RuntimeRead, { kind: 'plugin' | 'pluginQueries' }>) => model(JSON.stringify(request), () => new PluginInstanceModel(ctx, request)),
@@ -351,7 +382,7 @@ export async function createClientRuntime(identity: { server: string; account: s
     },
     followRecords: (sink: { cursor(): Promise<number>; apply(page: RuntimeRecordsPage, signal: AbortSignal): Promise<void>; failed(error: unknown): void }) => {
       if (disposed) throw new Error('client_runtime_disposed');
-      const source = ctx.remote.$stream<RuntimeRecordsPage>({
+      const open = () => ctx.remote.$stream<RuntimeRecordsPage>({
         name: 'records',
         open: async function* (signal) {
           const cursor = await sink.cursor();
@@ -360,34 +391,53 @@ export async function createClientRuntime(identity: { server: string; account: s
         },
         ended: () => new Error('protocol_records_ended'),
       });
+      let source = open(), stopped = false, failures = 0;
       let retry: (() => void) | undefined;
-      const stop = () => { void source.dispose(); retry?.(); retry = undefined; };
+      const stop = () => { stopped = true; void source.dispose(); retry?.(); };
       lifetime.signal.addEventListener('abort', stop, { once: true });
+      const done = () => stopped || disposed;
+      // Background sync heals itself: back off (1s → 30s) and resume from the
+      // sink's committed cursor. An explicit restart (online, user flush) skips the wait.
+      const backoff = () => new Promise<void>(resolve => {
+        const wake = () => { clearTimeout(timer); if (retry === wake) retry = undefined; resolve(); };
+        const timer = setTimeout(wake, Math.min(30_000, 1_000 * 2 ** failures++));
+        retry = wake;
+      });
       void (async () => {
         try {
-          for await (const item of source) {
-            // Disposal is terminal. Continuing an acknowledgement-driven source
-            // without accepting its final frame can spin during pagehide and
-            // prevent the browser from committing the next document.
-            if (disposed || source.signal.aborted) break;
-            if (item.signal.aborted) continue;
+          while (!done()) {
             try {
-              await sink.apply(item.value, item.signal);
-              if (!item.signal.aborted) item.accept();
+              for await (const item of source) {
+                // Disposal is terminal. Continuing an acknowledgement-driven source
+                // without accepting its final frame can spin during pagehide and
+                // prevent the browser from committing the next document.
+                if (done() || source.signal.aborted) break;
+                if (item.signal.aborted) continue;
+                try {
+                  await sink.apply(item.value, item.signal);
+                  if (!item.signal.aborted) { item.accept(); failures = 0; }
+                } catch (error) {
+                  if (done() || source.signal.aborted) break;
+                  if (item.signal.aborted) continue;
+                  // A failure is not a license to skip the frame or its cursor:
+                  // reopen from the last committed cursor after the backoff.
+                  sink.failed(error);
+                  await backoff();
+                  if (!done()) source.restart();
+                }
+              }
             } catch (error) {
-              if (disposed || source.signal.aborted) break;
-              if (item.signal.aborted) continue;
-              // A conflict is not a license to skip the frame or its cursor.
-              // Suspend with one bounded page until explicit recovery, then
-              // reopen from the sink's last committed cursor.
-              sink.failed(error);
-              await new Promise<void>(resolve => { retry = resolve; });
-              retry = undefined;
-              if (!disposed && !source.signal.aborted) source.restart();
+              // The transport gave up (e.g. repeated carrier loss). Recreate the
+              // logical stream instead of freezing the cache until a reload.
+              if (!done()) sink.failed(error);
             }
+            if (done()) break;
+            await backoff();
+            if (done()) break;
+            void source.dispose();
+            source = open();
           }
-        } catch (error) { if (!disposed && !source.signal.aborted) sink.failed(error); }
-        finally { lifetime.signal.removeEventListener('abort', stop); await source.dispose(); }
+        } finally { lifetime.signal.removeEventListener('abort', stop); await source.dispose(); }
       })();
       return { dispose: stop, restart: () => { if (retry) retry(); else source.restart(); } };
     },

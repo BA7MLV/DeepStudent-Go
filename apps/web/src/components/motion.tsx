@@ -12,6 +12,7 @@ import {
   type RefObject,
 } from 'react';
 import { Sym } from '../ui/icons';
+import { useMarkdownStreaming } from './markdown/streaming';
 
 /**
  * 新消息入场动画的 key 跟踪（配 .t-msg-enter，见 transitions.css）。
@@ -448,34 +449,19 @@ export function useReasoningStream(
   return stop;
 }
 
-/**
- * 30 Streaming text — 流式段落：把字符串子节点按词包成 .t-stream-w，
- * 每个词挂载后经 reflow 补 .is-in，经 opacity + 小模糊逐一「解析」到位。
- * 非字符串子节点（链接、代码等）原样透传。追加式流式渲染下 key 按序稳定。
- */
-function StreamWord({ w }: { w: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    void el.offsetWidth; // flush the hidden rest state
-    el.classList.add('is-in');
-  }, []);
-  return (
-    <span ref={ref} className="t-stream-w">
-      {w}
-    </span>
-  );
-}
+// Whitespace alone treats a whole Chinese paragraph as one word: only its
+// first token would animate. Segment words without splitting emoji/surrogates.
+const streamWords = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'word' }) : undefined;
 
 function StreamChildren({ children }: { children?: ReactNode }) {
   const out: ReactNode[] = [];
   let i = 0;
   for (const child of Array.isArray(children) ? children : [children]) {
     if (typeof child === 'string') {
-      for (const piece of child.split(/(\s+)/)) {
+      const pieces = streamWords ? Array.from(streamWords.segment(child), part => part.segment) : child.split(/(\s+)/);
+      for (const piece of pieces) {
         if (!piece) continue;
-        out.push(/^\s+$/.test(piece) ? piece : <StreamWord key={i} w={piece} />);
+        out.push(/^\s+$/.test(piece) ? piece : <span key={i} className="t-stream-w">{piece}</span>);
         i++;
       }
     } else if (child != null && child !== false) {
@@ -487,9 +473,21 @@ function StreamChildren({ children }: { children?: ReactNode }) {
 }
 
 export function StreamParagraph({ children }: { children?: ReactNode }) {
+  const streaming = useMarkdownStreaming();
+  const ref = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const paragraph = ref.current;
+    if (!streaming || !paragraph) return;
+    const fresh = paragraph.querySelectorAll('.t-stream-w:not(.is-in)');
+    if (!fresh.length) return;
+    // One layout read per batch, not one forced layout per word. Reveal only
+    // new words; history/replayed paragraphs are immediately readable.
+    void paragraph.offsetWidth;
+    for (const word of fresh) word.classList.add('is-in');
+  }, [children, streaming]);
   return (
-    <p className="t-stream">
-      <StreamChildren>{children}</StreamChildren>
+    <p ref={ref} className="t-stream">
+      {streaming ? <StreamChildren>{children}</StreamChildren> : children}
     </p>
   );
 }

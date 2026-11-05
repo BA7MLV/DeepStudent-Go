@@ -11,7 +11,13 @@ import gongkaoShenlun from '@wangke/study-core/skills/builtin/gongkao-shenlun/SK
 import diagramming from '@wangke/study-core/skills/builtin/diagramming/SKILL.md?raw';
 import interactiveExplainer from '@wangke/study-core/skills/builtin/interactive-explainer/SKILL.md?raw';
 import interactiveApi from '@wangke/study-core/skills/builtin/interactive-explainer/references/runtime.md?raw';
-import interactiveExamples from '@wangke/study-core/skills/builtin/interactive-explainer/references/examples.md?raw';
+import interactiveExplore from '@wangke/study-core/skills/builtin/interactive-explainer/references/explore.md?raw';
+import interactiveStepper from '@wangke/study-core/skills/builtin/interactive-explainer/references/stepper.md?raw';
+import interactiveSimulation from '@wangke/study-core/skills/builtin/interactive-explainer/references/simulation.md?raw';
+import interactiveManipulate from '@wangke/study-core/skills/builtin/interactive-explainer/references/manipulate.md?raw';
+import interactiveChart from '@wangke/study-core/skills/builtin/interactive-explainer/references/chart.md?raw';
+import interactivePractice from '@wangke/study-core/skills/builtin/interactive-explainer/references/practice.md?raw';
+import interactiveHostQuestion from '@wangke/study-core/skills/builtin/interactive-explainer/references/host-question.md?raw';
 import libraryOrganizer from '@wangke/study-core/skills/builtin/library-organizer/SKILL.md?raw';
 import courseHandout from '@wangke/study-core/skills/builtin/course-handout/SKILL.md?raw';
 import handoutWriting from '@wangke/study-core/skills/builtin/course-handout/references/writing.md?raw';
@@ -51,7 +57,7 @@ export const LEGACY_HANDOUT_SKILLS: BuiltinSkill[] = [
 export const BUILTIN_SKILLS: BuiltinSkill[] = [
   // 会话可视化与文件导出是不同交付通道。
   fromMd(diagramming),
-  fromMd(interactiveExplainer, [ref('references/runtime.md', interactiveApi), ref('references/examples.md', interactiveExamples)]),
+  fromMd(interactiveExplainer, [ref('references/runtime.md', interactiveApi), ref('references/explore.md', interactiveExplore), ref('references/stepper.md', interactiveStepper), ref('references/simulation.md', interactiveSimulation), ref('references/manipulate.md', interactiveManipulate), ref('references/chart.md', interactiveChart), ref('references/practice.md', interactivePractice), ref('references/host-question.md', interactiveHostQuestion)]),
   // 资料目录整理：方法与命名规范；真正的写入仍由 propose_folder_plan 的确认闸门把关
   fromMd(libraryOrganizer),
   fromMd(courseHandout, [

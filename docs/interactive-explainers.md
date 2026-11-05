@@ -1,6 +1,59 @@
 # 交互式讲解
 
-普通聊天与课程问答复用 `show_widget(format="html")`，新增内置「交互式讲解」技能。静态结构、函数和普通数据图继续使用 diagram / Mermaid；只有参数探索、算法单步等确实有助于理解时才生成交互件。
+普通聊天与课程问答复用 `show_widget(format="html")`，新增内置「交互式讲解」技能。静态结构、函数和普通数据图继续使用 diagram / Mermaid；参数探索、算法单步、可视化练习等确实有助于理解时生成交互件。
+
+## 渐进加载：技能分类型参考 + 生成中高保真预览（2026-11-05）
+
+**技能层（按需加载）。** `SKILL.md` 只做路由和核心契约（正文约 1.9k 字），按需求类型指向参考文件，模型只读当前任务需要的一份：
+
+| 文件 | 内容 |
+| --- | --- |
+| `runtime.md` | 状态 API、追问、图片、渐进显示的源码顺序、外观/布局/样式类、动效规则 |
+| `explore.md` | 参数探索与并排对比（原 `examples.md`，抛物线示例不变，增加静态首帧） |
+| `stepper.md` | 算法单步：二分查找 |
+| `simulation.md` | 过程模拟：斜抛运动，用户启动的播放/暂停 |
+| `manipulate.md` | 直接操作：单位圆拖动，键盘可操作的 slider 手柄 |
+| `chart.md` | Chart.js 交互图：单利/复利，主题色转 RGBA |
+| `practice.md` | 可视化练习（不变） |
+| `host-question.md` | ask_user / 正式题卡 presentation（从 runtime.md 移出） |
+
+动效规则由“不自动播放、不加动效”改为：只由用户启动、可暂停、播完停止不循环；`prefers-reduced-motion` 时直接显示终态；页面隐藏或滚出视口时暂停；播放中不逐帧保存。`WIDGET_PRACTICE_RULE` 从约 480 字压到 330 字，`SERVER_WIDGET_RULE` 增加类型路由与源码顺序。
+
+**渲染层（生成中渐进显示）。** 工具参数流式到达时，`WidgetStreamFrame` 把片段渲染进**不执行脚本**的 iframe（`sandbox="allow-same-origin"`，无 `allow-scripts`；文档 CSP `script-src 'none'`、`img-src data:`、禁网络；DOMPurify 私有实例去掉 script、事件属性、外链 URL 与嵌入元素）。与旧的正文内静态预览不同，它保留作者 CSS、id/class 与内联 SVG，使用同一套 UI kit 和主题令牌，`body inert` 使控件在生成中不可操作。已完成的顶层元素冻结、只替换未完成尾部；高度在正常流中增长，无内层滚动。
+
+作品通过校验后，`WidgetBlock` 在准备运行环境期间继续显示同一份无脚本首帧，可执行 iframe 在其后方启动，ready 后原地替换，不再出现“正在准备图形…”灰框。根节点和舞台在各阶段保持同一 React 位置，首帧不重挂。旧 `StreamingHtmlPreview`（正文 HTML 回答）未改动。
+
+技能要求源码按 `<style>` → 带静态首帧的结构（默认读数、写好 viewBox/尺寸的画面）→ 末尾 `<script>` 的顺序书写，生成中的预览即为有效画面。
+
+验证：
+
+```sh
+npm run test:explainer                    # 路由完整性、6 个参考示例过 show_widget 校验 + 源码顺序/作用域 CSS/静态首帧/动效与键盘规则
+npm run test:explainer:stream-frame:e2e   # 需 npm run dev；Chromium + WebKit，1280/360px
+npx tsx scripts/e2e-server-widgets.mjs    # 真实 API：流式预览为无脚本 iframe → 作品可交互
+```
+
+已安装技能包仍不自动覆盖（见下节）；已有账户要拿到新参考，需在设置中更新内置技能或重新安装。
+
+## Skill 生成可视化练习（2026-11-05）
+
+做题界面也可由「交互式讲解」技能生成，不为每种题型硬编码组件。技能新增 `references/practice.md`，包含可直接交给 `show_widget` 的完整 HTML 片段：作答时隐藏答案，提交后在原组件自动展开 **AI 参考** 核对、答案及解析；「重新练习」本地清选择、反馈、参考分数与计时并恢复作答，不额外请求模型、不弹阻断模态。
+
+- 普通教学练习用 `window.__wbw.widgetState/setWidgetState` 和 `wbw:statechange` 保存/恢复当前状态；重练后的空白状态也保存。初次加载/恢复不反向保存；保存中防重复操作，失败显示未保存并允许重试。不承诺未成功保存的状态刷新可恢复，不声称跨设备一致。
+- 这是生成式参考练习，不是真实成绩或错题系统。主观题仅对照参考，缺少可靠答案时待核验；HTML 不得伪造 authoritative。正式 quiz 的可信判分/自评/错题链路沿用现有宿主 `submitAnswer`、`answerFeedback` 与 `wbw:feedbackchange`，未新增正式重练命令或服务器轮次 schema。普通 `ask_user` 仍只用于确认/偏好，不出现判分或练习动作。
+- 浏览器提示词与服务器 `SERVER_WIDGET_RULE` 共用练习行为规则；服务器无需调用不存在的技能读取器也会收到提交/重练/参考边界。题面布局和交互仍由模型按题意生成，宿主通用沙箱/保存协议未改动。首次 widget 归属绑定按 rowId 响应式等待真实 confirmed cache（上限 12 秒，取消/卸载/账户切换清理），文字流不等待整账户同步；精确源码/ID 到达后自动运行。已运行绑定的删除/改版仍立即拒绝，不用等待绕过验证。
+- 本次不覆盖或迁移用户已安装、可能自行改过的技能包。新账户从内置资产安装新参考；既有服务器聊天直接收到更新后的共用规则。需要把完整新例子带入已有自定义技能时，应由用户明确选择更新，不覆盖其内容。
+
+验证入口（独立临时 API/SQLite/账户，仅模型返回固定技能 HTML，无真实付费调用）：
+
+```sh
+npx tsx scripts/test-skill-practice.mjs
+npm run build:api
+npx tsx scripts/e2e-skill-practice.mjs
+npx tsx scripts/e2e-widget-ownership.mjs
+```
+
+浏览器验证走真实 `show_widget` → 持久化助手消息 → `WidgetBlock` → 现有 `setWidgetState` 保存通道。故意延迟 confirmed cache、保持 session 正文实时流，验证首次生成后自动绑定且当场可玩，无 flushCloud/刷新前置；另覆盖提交前隐藏、错/对参考核对自动展开、重练后清空可再答、保存失败重试、服务器保存与刷新恢复、恢复不写回、320px 与不触发额外模型请求。ownership 测试额外覆盖取消/卸载/超时释放、显式重试、源码改版、归属删除和 A→B→A 账户生命周期。具体本次运行结果见 `docs/quiz-repractice-2026-11-05.md`，不以固定例子证明任意真实模型都会稳定生成正确代码。
 
 ## HTML 作品与代码示例（2026-10-29）
 

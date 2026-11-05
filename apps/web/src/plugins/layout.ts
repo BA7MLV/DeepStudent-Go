@@ -13,6 +13,17 @@ export function pageUrl(placement: PluginPlacement) {
 export function scopeAvailable(scope: PluginScope, catalog: PluginCatalog) {
   return scope.kind === 'account' || (scope.kind === 'project' ? !!catalog.scopes?.projects.some(p => p.id === scope.id) : !!catalog.scopes?.materials?.some(m => m.id === scope.id));
 }
+/** The board is a slot, not a feature: it exists only once a user component is mounted there. */
+export function hasBoardComponents(catalog?: PluginCatalog) {
+  if (!catalog) return false;
+  const layout = readLayout(catalog);
+  return layout.placements.some(placement => {
+    if (placement.surface !== 'board.main' || catalog.scopes?.unavailableInstances.includes(placement.instanceId)) return false;
+    const instance = layout.instances.find(i => i.id === placement.instanceId);
+    const plugin = catalog.plugins.find(p => p.id === instance?.pluginId && !p.error && p.manifest?.enabled);
+    return !!plugin?.manifest?.views[placement.viewId]?.surfaces.includes('board.main');
+  });
+}
 export function navigationEntries(catalog?: PluginCatalog) {
   if (!catalog) return [];
   const layout = readLayout(catalog);

@@ -4,6 +4,7 @@ import type { BuiltinViewProps } from '../builtins';
 import type { CardRow } from '../../store/db';
 import { confirmDialog } from '../../ui';
 import './learning.css';
+import { useSustained } from '../../utils/useSustained';
 
 interface ResultTask { id: string; status: string; error: string | null; progress?: { message?: string }; artifacts?: { count: number; cardIds: number[] }; deliveryError?: string }
 interface Snapshot { cards: CardRow[]; revision: string; tasks: ResultTask[] }
@@ -21,10 +22,11 @@ export default function FlashcardsView(props: BuiltinViewProps) {
     ]);
   const next = projection.data as unknown as { materials: { materials: { id: string; name: string }[] }; cards?: Pick<Snapshot, 'cards' | 'revision'>; results?: Pick<Snapshot, 'tasks'> } | undefined;
   const materials = next?.materials.materials ?? [];
+  const reconnecting = useSustained(projection.status === 'reconnecting', 10000);
   return <div className="learning-plugin" data-testid="plugin-flashcards">
     {instance.scope.kind === 'account' && !context.materialId ? <label>选择资料<select aria-label="卡片资料" value={chosen} onChange={e => setChosen(e.target.value)}><option value="">请选择资料</option>{materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select></label> : <p>{materials.find(m => m.id === materialId)?.name ?? materialId}</p>}
     {projection.error ? <p role="alert">{projection.error}</p> : null}
-    {projection.status === 'reconnecting' ? <p role="status">连接中断，正在恢复学习记录…</p> : null}
+    {reconnecting ? <p role="status">连接中断，正在恢复学习记录…</p> : null}
     {materialId ? <MaterialCards key={projectionKey} materialId={materialId} call={call} snapshot={next?.cards && next.results ? { ...next.cards, ...next.results } : null} /> : <p>选择一份资料，或在阅读侧栏挂载此实例。</p>}
   </div>;
 }

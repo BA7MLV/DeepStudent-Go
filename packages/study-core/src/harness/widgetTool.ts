@@ -27,7 +27,7 @@ export const SHOW_WIDGET_TOOL: ToolDef = {
             '{"type":"graph","nodes":[{"id":"a","label":"客户端"},{"id":"b","label":"服务器"}],"edges":[{"from":"a","to":"b"}]}。' +
             'mermaid 以图种声明开头；svg 以 <svg 开头 </svg> 结尾并带 viewBox。html 只给片段（不要 DOCTYPE/html/head/body），可带内联 style/script；' +
             '禁止联网、外部脚本/资源、CSS @import/外链 url()、srcset、导航和读取宿主数据。图形优先内联 SVG/CSS，不编造 Base64。已有材料原图用 <img data-wbw-image="#source-image/材料ID/图片key" alt="说明">（最多6张，不设src），宿主只提供此声明的本地图片，外链原图需先导入。使用原生控件和 --wbw-foreground/--wbw-muted/--wbw-border/--wbw-surface/--wbw-accent 主题变量。' +
-            'window.__wbw.widgetState 读取快照，setWidgetState({modelContent,privateContent}) 保存小型 JSON 参数；sendPrompt(text) 经用户确认后追问。调参只本地重绘，不请求模型。',
+            'window.__wbw.widgetState 读取快照，setWidgetState({modelContent,privateContent}) 保存小型 JSON 参数；sendPrompt(text) 经用户确认后追问。调参只本地重绘，不请求模型。教学练习提交后原地自动展示 AI 参考答案与解析，并提供重新练习清本轮状态；不是 ask_user 或正式判分。',
         },
         title: { type: 'string', description: 'mermaid / diagram / svg 的短标题，2~12 个字；不要写成正文句子。html 不传 title。' },
         libs: { type: 'array', items: { type: 'string', enum: ['chart.js'] }, description: '仅 html：需要宿主内联的库。交互图表可填 ["chart.js"] 并使用全局 Chart；不要引 CDN。' },
@@ -37,6 +37,10 @@ export const SHOW_WIDGET_TOOL: ToolDef = {
   },
 };
 
-/** Server turns have no browser skill reader; provide the essential contract directly. */
-export const SERVER_WIDGET_RULE = `可视化：当前已提供 show_widget，空资料库也能使用。网页作品、交互式讲解或预览 HTML 示例必须调用 show_widget(format="html")，不要以裸 HTML 或 html interactive 代替；只解释代码时才用普通 html 围栏。成功后将工具给出的 wbw-widget 引用原样穿插正文，保留每幅作品的独立引用，不声称写入了文件。作品先显示源码，用户点预览才运行。
-HTML 片段使用透明外层、原生带 label 的控件、宿主主题变量和响应式排版（适配 320px，不用 100vh）；CSS 和 DOM 查询限定在自己的根内。无网络、CDN、嵌套页面、导航、文件/课程/宿主读取能力。需要交互图表时声明 libs:["chart.js"]。图片优先内联 SVG/CSS，不编造 Base64；已有材料原图可用 <img data-wbw-image="#source-image/材料ID/图片key" alt="说明">（最多6张，不设src），仅宿主读取声明的本地原图；外链原图需先导入。不能用 CSS @import/外链 url() 或 srcset。调参只在本地重绘；仅用户明确点击后可 window.__wbw.sendPrompt(text)，宿主仍会要求确认。window.__wbw.widgetState 可为 null，校验后恢复；setWidgetState({modelContent,privateContent}) 保存总共不超过 16 KiB 的 JSON 参数，恢复时不反向保存。不要存秘密或原文，privateContent 也不是秘密存储。静态关系、函数或普通数据图优先 diagram / mermaid。只调用本轮已注册的工具，不调用未提供的技能读取工具。`;
+/** Shared behavior, not a fixed question layout or a new grading domain. */
+export const WIDGET_PRACTICE_RULE = '可视化做题用「交互式讲解」技能 + show_widget HTML 按题意生成，不硬编码题型、不新增成绩系统。标明 AI 参考、非正式判分；作答时隐藏答案，提交后在原组件自动展开参考对错（主观/缺答案为参考或待核验）、答案与解析，不弹模态。揭晓后提供“重新练习”，本地清空本轮并恢复作答，不请求模型。setWidgetState 保存当前状态（含重练后的空白），恢复不反向保存，失败标未保存可重试。普通 show_widget 不调用 submitAnswer；正式 quiz presentation 用 submitAnswer 与只读 answerFeedback，不伪造 authoritative。ask_user 只做确认/偏好，不加判分或重练。';
+
+/** Common tool essentials; native chat loads owner-scoped skill packages on demand. */
+export const SERVER_WIDGET_RULE = `可视化：当前已提供 show_widget，空资料库也能使用。参数探索、算法单步、过程模拟、拖拽操作、交互图表、可视化练习或预览 HTML 示例调用 show_widget(format="html")；动手前若可用则加载「交互式讲解」技能并按类型读取对应参考。不要用裸 HTML 或 html interactive 代替；只解释代码时用普通 html 围栏。成功后把 wbw-widget 引用原样放在正文相应位置，每幅作品保留独立引用，不声称写入了文件。静态关系、函数或普通数据图优先 diagram / mermaid。
+${WIDGET_PRACTICE_RULE}
+HTML 片段：唯一根、CSS/查询限定在根内；顺序为 <style> → 带静态首帧的结构（默认读数、定好尺寸的 svg/canvas）→ 末尾 <script>，生成中会按此渐进预览。透明外层、原生带 label 的控件、宿主主题变量、适配 320px、不用 100vh。无网络、CDN、嵌套页面、导航、文件/课程/宿主读取；交互图表声明 libs:["chart.js"]。图片优先内联 SVG/CSS，不编造 Base64；材料原图用 <img data-wbw-image="#source-image/材料ID/图片key" alt="说明">（最多6张，不设src），不用 CSS @import/外链 url()/srcset。调参、单步、播放只在本地重绘，动画由用户启动、可暂停、不循环；仅用户点击后 window.__wbw.sendPrompt(text)，宿主会再确认。window.__wbw.widgetState 可为 null，校验后恢复；setWidgetState({modelContent,privateContent}) 合计不超过 16 KiB，不存秘密或原文。只调用本轮已注册的工具。`;

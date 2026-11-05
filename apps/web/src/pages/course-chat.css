@@ -139,13 +139,26 @@
 }
 
 .course-chat__sync-status {
+  /* 浮在输入区正上方、脱离文档流：出现/消失都不改变 composer-wrap 的高度，
+     消息列表的底部留白（--chat-composer-height）也就不会跟着跳。
+     左右各让出「回到底部」按钮的位置。 */
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 128px);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.5rem;
   color: var(--muted);
   font-size: 0.75rem;
-  padding-block: 0.25rem;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--background);
+  pointer-events: auto;
 }
 .course-chat__sync-status button {
   color: inherit;

@@ -1,0 +1,75 @@
+/* 同步与恢复提醒的浮层。
+ *
+ * 它曾是 .live-share-host 里的普通流内节点：一条提醒出现/消失，整页（包括聊天
+ * 视口和输入框）就被顶下去/弹回来。现在固定在右上角、脱离文档流：
+ *  - 正常同步完全不出现（见 cloud/quiet.ts 的延迟阈值）；
+ *  - 只有需要用户处理的冲突、长时间未确认的修改才以卡片形式出现；
+ *  - 容器本身不接收指针事件，不会挡住下面的按钮，只有卡片可点。 */
+.cloud-activity {
+  position: fixed;
+  top: calc(var(--vv-top, 0px) + env(safe-area-inset-top, 0px) + 64px);
+  right: max(12px, env(safe-area-inset-right, 0px));
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(var(--vvh, 100vh) - 160px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+.cloud-activity:empty { display: none; }
+
+.cloud-activity > * {
+  pointer-events: auto;
+  width: 100%;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 8px 24px rgb(0 0 0 / 0.08);
+  animation: cloud-activity-in var(--duration-quick, 160ms) ease-out;
+}
+.cloud-activity > * :is(p, details) + :is(p, details, div, button) { margin-top: 4px; }
+.cloud-activity button {
+  margin-inline-end: 8px;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.cloud-activity button:disabled { color: var(--muted); cursor: wait; }
+.cloud-activity pre { font-size: 0.75rem; }
+
+/* 连接状态是一句旁注，不是卡片：胶囊、不抢焦点。 */
+.cloud-activity > .cloud-activity__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  max-width: 100%;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  color: var(--muted);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+.cloud-activity__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--warning, var(--muted));
+}
+
+@keyframes cloud-activity-in {
+  from { opacity: 0; transform: translateY(-4px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cloud-activity > * { animation: none; }
+}

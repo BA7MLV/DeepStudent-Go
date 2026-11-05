@@ -74,7 +74,11 @@ document.body.dataset.ready='yes';`;
   const put = (table, key, value) => records.apply(owner, [{ id: crypto.randomUUID(), table, key, before: records.get(owner, table, key), after: value }]);
   put('videos', 'course', { id: 'course', name: 'Course fixture', kind: 'material', materialFormat: 'pdf', createdAt: 1 });
   put('chatSessions', 900001, { id: 900001, videoId: 'course', title: 'Course session', createdAt: 1 });
+  put('chats', 80, { id: 80, sessionId: 900001, videoId: 'course', role: 'user', content: 'idle QA question', createdAt: 1 });
+  put('chats', 81, { id: 81, sessionId: 900001, videoId: 'course', role: 'assistant', content: 'idle QA original', createdAt: 2 });
   put('chatSessions', 900002, { id: 900002, videoId: '__library_assistant__', title: 'Compression session', createdAt: 2 });
+  put('chatSessions', 900006, { id: 900006, videoId: 'another-material', title: 'Unrelated material', createdAt: 0 });
+  put('chats', 5000, { id: 5000, sessionId: 900006, videoId: 'another-material', role: 'user', content: 'unrelated initial', createdAt: 0 });
   for (let n = 0; n < 8; n++) put('chats', 100 + n, { id: 100 + n, videoId: '__library_assistant__', sessionId: 900002, role: n % 2 ? 'assistant' : 'user', content: n % 2 ? `old answer ${n}` : `old request ${n}`, createdAt: 100 + n });
   put('chatSessions', 900003, {id:900003,videoId:'__library_assistant__',title:'Server pagination',createdAt:3});
   const pageRows = [];
@@ -85,11 +89,42 @@ document.body.dataset.ready='yes';`;
   page.on('request', request => { if (request.url().includes('/api/clientRuntime/submitTask')) evidence.requests.push(request.postDataJSON()); });
   await page.goto(origin + '/__chat-ui'); await page.locator('body[data-ready="yes"]').waitFor({ timeout: 60000 });
   await page.locator('textarea').waitFor({ timeout: 60000 });
+  await page.getByText('idle QA original', { exact: false }).first().waitFor();
+  put('chats', 81, { ...records.get(owner, 'chats', 81), content: 'idle QA remotely updated' });
+  await page.getByText('idle QA remotely updated', { exact: false }).first().waitFor();
+  put('chats', 81, null);
+  await page.getByText('idle QA remotely updated', { exact: false }).first().waitFor({ state: 'detached' });
+  put('chatSessions', 900005, { id: 900005, videoId: 'course', title: 'Remote empty session', createdAt: 5 });
+  await page.getByTestId('chat-session').locator('option[value="900005"]').waitFor({ state: 'attached' });
+  await page.getByTestId('chat-session').locator('[data-slot="select-trigger"]').click();
+  try { await page.getByRole('option', { name: 'Remote empty session', exact: true }).waitFor(); }
+  catch (error) {
+    console.error('QA SESSION DEBUG', await page.locator('body').innerText());
+    await page.screenshot({ path: path.join(directory, 'session-list-failure.png') });
+    console.error('Evidence:', directory); throw error;
+  }
+  await page.keyboard.press('Escape');
+  // Count scoped history reads after caches and subscriptions have settled.
+  let scopedReads = 0;
+  const countReads = request => { if (request.url().endsWith('/api/clientRuntime/read') && request.postData()?.includes('900001')) scopedReads++; };
+  page.on('request', countReads);
+  await page.evaluate(() => probe.page(900001));
+  assert.ok(scopedReads > 0, 'counter observes an actual scoped history read');
+  await page.waitForTimeout(300); scopedReads = 0;
+  put('studyDays', '2026-11-05', { date: '2026-11-05', seconds: 17, updatedAt: Date.now() });
+  put('chats', 5000, { ...records.get(owner, 'chats', 5000), content: 'unrelated-session-change' });
+  await page.waitForTimeout(500);
+  assert.equal(scopedReads, 0, 'studyTime and other-session row changes do not refetch QA history');
+  evidence.qaRecordChanges = { idleEdit: true, idleDelete: true, emptySessionAppears: true, unrelatedHistoryReads: scopedReads };
+  page.off('request', countReads);
+  evidence.assertions.push('idle QA same-row remote content edit/delete and new empty material session update without any task; unrelated studyTime/other-session changes cause zero scoped history reads');
+  put('chats', 80, null);
+  await page.getByText('idle QA question', { exact: false }).first().waitFor({ state: 'detached' });
   const paginated = await page.evaluate(async () => {let before,all=[]; for(let n=0;n<20;n++){const page=await probe.page(900003,before);all=[...page.rows,...all];if(!page.hasOlder)return all;before=page.rows[0];}throw new Error('pagination_never_ends');});
   const {compareChatRows}=await import('../packages/study-core/src/utils/chatOrder.ts');
   assert.deepEqual(paginated.map(row=>row.id),pageRows.sort(compareChatRows).map(row=>row.id));
   evidence.assertions.push('real server pagination preserves all 220 rows across legacy pair ties and a 90-row timestamp bucket, with no local fallback');
-  assert.deepEqual(await page.evaluate(() => probe.lazyPage()),{rows:[],hasOlder:false});
+  assert.deepEqual(await page.evaluate(() => probe.lazyPage()),{rows:[],hasOlder:false,tasks:[]});
   assert.equal(records.get(owner,'chatSessions',900004).title,'Lazy confirmed');
   evidence.assertions.push('lazy session creation drains the learning journal before requesting its first server page');
   await page.evaluate(() => probe.select());
@@ -111,7 +146,11 @@ document.body.dataset.ready='yes';`;
   await page.getByTestId('chat-fork-message').last().click();
   let fork;
   await until(() => (fork = records.list(owner, 0, 1000).find(row => row.table === 'chatSessions' && row.value?.title === 'Course session · 分支')?.value));
-  await page.locator(`[data-chat-session-id="${fork.id}"]`).waitFor();
+   await page.locator(`[data-chat-session-id="${fork.id}"]`).waitFor().catch(async error => {
+     console.error('FORK UI', await page.locator('body').innerText(), evidence.errors);
+     await page.screenshot({ path: path.join(directory, 'fork-failure.png') });
+     console.error('Evidence:', directory); throw error;
+   });
   await page.getByTestId('chat-delete-message').last().click();
   try { await page.getByTestId('message-delete-popconfirm').getByTestId('popconfirm-confirm').click(); }
   catch (error) { await page.screenshot({path:path.join(directory,'delete-failure.png')}); fs.writeFileSync(path.join(directory,'delete-failure.html'),await page.content()); console.log(directory); throw error; }

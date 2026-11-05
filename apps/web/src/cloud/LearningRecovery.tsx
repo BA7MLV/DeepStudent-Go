@@ -6,6 +6,7 @@ import { cloud } from './state';
 import { drainLearning, type LearningCommandRow } from '../client/learning';
 import { encodeRecoveryValue } from './recovery-export';
 import { confirmDialog } from '../ui/feedback';
+import { useClock, useHealthyAge } from './quiet';
 
 export default function LearningRecovery() {
   const { t } = useTranslation('settings', { keyPrefix: 'recovery' });
@@ -21,7 +22,12 @@ export default function LearningRecovery() {
     });
     return () => { active = false; subscription.unsubscribe(); };
   }, [scope]);
-  if (!rows.length) return null;
+  // A queued/uncertain command is routine (offline edits, a dropped response).
+  // Conflicts surface at once; anything else only after 15s of usable connection.
+  const now = useClock(rows.length > 0);
+  const age = useHealthyAge();
+  const problems = rows.filter(row => row.state === 'conflict' || age(row.createdAt, now) >= 15000);
+  if (!problems.length && !error) return null;
   const exportDraft = async (row: LearningCommandRow) => {
     if (!current()) return;
     const database = db, owner = cloud.userId;
@@ -48,8 +54,8 @@ export default function LearningRecovery() {
     await drainLearning();
   };
   return <section className="bg-surface p-3" aria-label={t('drafts')}>
-    <p>{t('draftCount', { count: rows.length })}</p>
-    {rows.map(row => <details key={row.operationId}>
+    <p>{t('draftCount', { count: problems.length })}</p>
+    {problems.map(row => <details key={row.operationId}>
       <summary>{t(row.state === 'conflict' ? 'conflict' : row.state === 'confirmed' ? 'awaitProjection' : row.state === 'queued' ? 'queued' : 'uncertain')}</summary>
       <p>{new Date(row.createdAt).toLocaleString()}</p>
       <button type="button" onClick={() => void exportDraft(row)}>{t('exportDraft')}</button>

@@ -107,7 +107,9 @@ test('「交互式讲解」区分本地调参与确认追问，附带运行时�
   }
   assert.match(s.description, /会话教学/);
   assert.match(s.description, /不把会话组件.*Markdown.*讲义正文/);
-  assert.deepEqual(s.refs.map((r) => r.path).sort(), ['references/examples.md', 'references/runtime.md']);
+  assert.deepEqual(s.refs.map((r) => r.path).sort(), ['chart', 'explore', 'host-question', 'manipulate', 'practice', 'runtime', 'simulation', 'stepper'].map((n) => `references/${n}.md`));
+  // SKILL.md is a router: every reference it points to must exist, and every reference must be routed.
+  for (const ref of s.refs) assert.ok(s.body.includes(`\`${ref.path}\``), `技能正文未路由到 ${ref.path}`);
   assert.ok(s.body.length < 4000, '正文保持精简，细节放参考文件');
 });
 
