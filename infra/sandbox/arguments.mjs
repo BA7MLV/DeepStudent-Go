@@ -1,5 +1,14 @@
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { workspacePath, workspaceFileReader } from './file-read.mjs';
+
+const defaultProfile = fileURLToPath(new URL('./seccomp.json', import.meta.url));
+export const seccompProfile = () => process.env.SANDBOX_SECCOMP_PROFILE ?? defaultProfile;
+/** Set SANDBOX_SECCOMP_PROFILE=none only for rolling upgrades without the profile. */
+export const seccompArgs = () => {
+  const profile = seccompProfile();
+  return profile === 'none' ? [] : ['--security-opt', `seccomp=${profile}`];
+};
 
 export const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -33,7 +42,7 @@ export function sandboxArgs({ owner, threadId, projectId, executionId, command, 
     mounts.push(`type=bind,source=${accountSystem},target=/system${systemWrite ? '' : ',readonly'}`);
   }
   return ['run', '--rm', '--name', `wangke-exec-${executionId}`, '--label', 'wangke.sandbox=true',
-    '--init', '--user', `${uid}:${gid}`, '--cap-drop=ALL', '--security-opt=no-new-privileges:true',
+    '--init', '--user', `${uid}:${gid}`, '--cap-drop=ALL', '--security-opt=no-new-privileges:true', ...seccompArgs(),
     '--read-only', '--pids-limit=128', '--memory=1g', '--memory-swap=1g', '--cpus=1',
     '--network', filePath === undefined && network ? process.env.SANDBOX_NETWORK || 'bridge' : 'none', '--tmpfs', '/tmp:rw,nosuid,size=256m',
     ...mounts.flatMap(value => ['--mount', value]), '--workdir', '/workspace', '--env', 'HOME=/workspace',

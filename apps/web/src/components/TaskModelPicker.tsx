@@ -31,9 +31,9 @@ export default function TaskModelPicker({ sessionId, onClose }: { sessionId: num
     } catch { toast.error('会话默认模型保存失败，请刷新后重试'); }
   };
   return <div className="flex flex-wrap items-center gap-1" data-testid="task-model-selection">
-    <span className="text-xs">本次模型</span>
+    {choice && <span className="text-xs">本次模型</span>}
     <ModelPicker slot="chat" field="llmModel" variant="chip" showThinking onClose={onClose} value={choice?.modelRef ?? sessionDefault?.modelRef ?? account} onChange={modelRef => set(key, { modelRef })} />
-    <button type="button" className="text-xs" onClick={() => set(key)} disabled={!choice}>继承会话默认</button>
+    {choice && <button type="button" className="text-xs" onClick={() => set(key)}>继承会话默认</button>}
     {sessionId != null && choice ? <button type="button" className="text-xs" onClick={() => void saveDefault()}>设为本会话默认</button> : null}
   </div>;
 }

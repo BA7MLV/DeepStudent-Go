@@ -12,7 +12,7 @@ export const shellToolTimeoutMs = (args: { timeoutSeconds?: number }) => shellTi
 export type SandboxResult = { stdout: string; stderr: string; exitCode: number; terminationReason?: string; output?: { stdoutBytes: number; stderrBytes: number; stdoutTruncated: boolean; stderrTruncated: boolean; complete: boolean; limitBytes: number }; artifacts?: object; outputStorageError?: string };
 export type SandboxOutputSink = (stream: 'stdout' | 'stderr', chunk: Uint8Array) => Promise<void>;
 export type SandboxExecutor = (request: SandboxRequest, signal: AbortSignal, output?: SandboxOutputSink) => Promise<SandboxResult>;
-export const sandboxFailureCodes = ['sandbox_unavailable', 'sandbox_not_configured', 'sandbox_busy', 'sandbox_cleanup_pending', 'sandbox_start_failed', 'sandbox_unauthorized', 'sandbox_invalid_request', 'sandbox_protocol_error'] as const;
+export const sandboxFailureCodes = ['sandbox_unavailable', 'sandbox_not_configured', 'sandbox_busy', 'sandbox_cleanup_pending', 'sandbox_start_failed', 'sandbox_unauthorized', 'sandbox_invalid_request', 'sandbox_protocol_error', 'sandbox_workspace_quota_exceeded'] as const;
 export class SandboxFailure extends Error {
   constructor(readonly code: typeof sandboxFailureCodes[number], readonly terminationReason?: string) { super(code); }
 }
