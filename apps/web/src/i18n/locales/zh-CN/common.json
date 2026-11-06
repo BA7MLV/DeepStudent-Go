@@ -8,6 +8,7 @@
   },
   "settings": "设置",
   "board": {
+    "editForm": "新建 / 编辑",
     "title": "看板",
     "description": "把任务与日常工具放在一起，按需插拔。",
     "template": "插件模板",
@@ -207,7 +208,7 @@
     "archived": "已归档",
     "conversation": "与 {{name}} 的对话",
     "composer": "消息",
-    "taskPlaceholder": "随便问点什么，或长按说话",
+    "taskPlaceholder": "随便问点什么",
     "projectPurpose": "在当前项目中处理文件与任务",
     "attach": "添加附件",
     "attachment": "附件",

@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: boolean; onSelectProject?: () => void }) {
   const { t } = useTranslation('settings');
   const { t: tp } = useTranslation('projects');
+  const { t: text } = useTranslation('interface');
   const navigate = useNavigate();
   const imageInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -41,7 +42,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
   const contextCourses = useCourseChat((state) => state.contextCourses);
   const project = useCourseChat((state) => state.project);
   const projectLabel = project ? `${tp('selectProject')} · ${projectDisplayName(project.name)}` : tp('selectProject');
-  const contextLabel = contextCourses.length ? `课程引用 · ${contextCourses.length} 门` : '课程引用';
+  const contextLabel = contextCourses.length ? text('chatAdd.referenceCount', { count: contextCourses.length }) : text('chatAdd.references');
   const addFiles = useChatAttachments((state) => state.add);
   const openCourses = async () => {
     setError(''); setBusy(true); setQuery(''); setCoursesOpen(true);
@@ -51,13 +52,13 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
       const scope = folderCourseScope(folders, rows, project?.folderId);
       setCourses(rows.filter(row => !scope || scope.has(row.id)).map(({ id, name }) => ({ id, name })));
     }
-    catch { setError('课程列表读取失败，请关闭后重试'); }
+    catch { setError(text('chatAdd.readFailed')); }
     finally { setBusy(false); }
   };
   const saveCourses = async () => {
     setBusy(true); setError('');
     try { await useCourseChat.getState().setCourseContext(selected); setCoursesOpen(false); }
-    catch { setError('课程选择保存失败，请重试'); }
+    catch { setError(text('chatAdd.saveFailed')); }
     finally { setBusy(false); }
   };
   const addHandout = async () => {
@@ -71,9 +72,9 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
       if (prepared.skillIds !== session.skillIds) current.setSkillIds(prepared.skillIds);
       current.setTurnSkillIds([...new Set([...current.turnSkillIds, prepared.id])]);
       current.setDraft(handoutDraft(current.draft, prepared.prompt));
-      toast.info('已添加讲义提示词，可修改后发送');
+      toast.info(text('chatAdd.handoutAdded'));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '讲义提示词加载失败，请重试');
+      toast.error(error instanceof Error ? error.message : text('chatAdd.handoutFailed'));
     } finally {
       setHandoutPreparing(false);
     }
@@ -81,12 +82,12 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
   return <>
     <div className="chat-add-menu">
       <Dropdown isOpen={addOpen} onOpenChange={setAddOpen}>
-        <Button className="chat-add-menu__trigger" isIconOnly size="sm" variant="tertiary" aria-label={`添加内容或调整模型${contextCourses.length ? `，已引用 ${contextCourses.length} 门课程` : ''}`} data-testid="chat-add" isDisabled={disabled}>
+        <Button className="chat-add-menu__trigger" isIconOnly size="sm" variant="tertiary" aria-label={`${text('chatAdd.title')}${contextCourses.length ? ` · ${contextLabel}` : ''}`} data-testid="chat-add" isDisabled={disabled}>
           <Sym name="add" />
           {contextCourses.length > 0 && <span className="chat-add-menu__context-dot" data-testid="chat-context-dot" aria-hidden="true" />}
         </Button>
         <Dropdown.Popover placement="top start">
-          <Dropdown.Menu aria-label="添加到对话" disabledKeys={[...(loading ? ['handout', 'project'] : []), ...(handoutPreparing ? ['handout'] : [])]} onAction={(key) => {
+          <Dropdown.Menu aria-label={text('composer.add')} disabledKeys={[...(loading ? ['handout', 'project'] : []), ...(handoutPreparing ? ['handout'] : [])]} onAction={(key) => {
             if (key === 'courses') void openCourses();
             else if (key === 'images') imageInput.current?.click();
             else if (key === 'files') fileInput.current?.click();
@@ -99,10 +100,10 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
               <Sym name="school" />
               <Label>{contextLabel}</Label>
             </Dropdown.Item>
-            <Dropdown.Item id="images" textValue="上传图片"><Sym name="image" />上传图片</Dropdown.Item>
-            <Dropdown.Item id="files" textValue="上传文件"><Sym name="attach_file" />上传文件</Dropdown.Item>
-            <Dropdown.Item id="handout" textValue="生成讲义" data-testid="handout-prompt"><Sym name="description" />生成讲义</Dropdown.Item>
-            <Dropdown.Item id="skills" textValue={t('skillPicker.title')}><Sym name="extension" />{t('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
+            <Dropdown.Item id="images" textValue={text('composer.images')}><Sym name="image" />{text('composer.images')}</Dropdown.Item>
+            <Dropdown.Item id="files" textValue={text('composer.files')}><Sym name="attach_file" />{text('composer.files')}</Dropdown.Item>
+            <Dropdown.Item id="handout" textValue={text('chatAdd.handout')} data-testid="handout-prompt"><Sym name="description" />{text('chatAdd.handout')}</Dropdown.Item>
+            <Dropdown.Item id="skills" textValue={t('skillPicker.title')}><Sym name="extension" />{t('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ` · ${text('chatAdd.limited')}` : ''}</Dropdown.Item>
           </Dropdown.Menu>
           <div className="chat-add-menu__model px-2 py-1">
             <TaskModelPicker sessionId={sessionId} onClose={() => setAddOpen(false)} />
@@ -117,31 +118,31 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
     <Modal.Root isOpen={coursesOpen} onOpenChange={setCoursesOpen}>
       <Modal.Backdrop><Modal.Container placement="center" size="md" className={MODAL_CONTAINER_CLASS}>
         <Modal.Dialog data-testid="chat-course-picker">
-          <Modal.Header><Modal.Heading>课程引用</Modal.Heading></Modal.Header>
+          <Modal.Header><Modal.Heading>{text('chatAdd.references')}</Modal.Heading></Modal.Header>
           <Modal.Body>
-            <Input aria-label="搜索课程" placeholder="搜索课程" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <Input aria-label={text('chatAdd.search')} placeholder={text('chatAdd.search')} value={query} onChange={(event) => setQuery(event.target.value)} />
             <div className="chat-course-picker__selection">
-              <span aria-label={`已选择 ${selected.length} 门，最多 ${MAX_COURSE_CONTEXT} 门`}>{selected.length} / {MAX_COURSE_CONTEXT}</span>
-              <Button size="sm" variant="tertiary" data-testid="chat-context-reset" isDisabled={busy || loading || selected.length === 0} onPress={() => setSelected([])}>{selected.length ? '恢复自动选择' : '自动选择'}</Button>
+              <span aria-label={text('chatAdd.selected', { count: selected.length, max: MAX_COURSE_CONTEXT })}>{selected.length} / {MAX_COURSE_CONTEXT}</span>
+              <Button size="sm" variant="tertiary" data-testid="chat-context-reset" isDisabled={busy || loading || selected.length === 0} onPress={() => setSelected([])}>{text(selected.length ? 'chatAdd.reset' : 'chatAdd.auto')}</Button>
             </div>
-            {loading && <p className="text-sm text-muted">回复完成后可修改课程引用。</p>}
+            {loading && <p className="text-sm text-muted">{text('chatAdd.wait')}</p>}
             <div className="chat-course-picker__list" aria-busy={busy}>
-              {busy ? <p role="status">正在读取课程…</p> : courses.length === 0 ? <>
-                <p>课程库还是空的</p><Button variant="secondary" onPress={() => { setCoursesOpen(false); navigate('/library'); }}>导入课程</Button>
+              {busy ? <p role="status">{text('chatAdd.loading')}</p> : courses.length === 0 ? <>
+                <p>{text('chatAdd.empty')}</p><Button variant="secondary" onPress={() => { setCoursesOpen(false); navigate('/library'); }}>{text('chatAdd.import')}</Button>
               </> : courses.filter((course) => course.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map((course) => (
                 <Checkbox key={course.id} isSelected={selected.includes(course.id)} isDisabled={loading || (!selected.includes(course.id) && selected.length >= MAX_COURSE_CONTEXT)}
                   onChange={(checked) => setSelected((current) => checked ? [...current, course.id] : current.filter((id) => id !== course.id))}>
                   <Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>{course.name}</span></Checkbox.Content>
                 </Checkbox>
               ))}
-              {!busy && courses.length > 0 && !courses.some((course) => course.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())) && <p>没有匹配的课程</p>}
+              {!busy && courses.length > 0 && !courses.some((course) => course.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())) && <p>{text('chatAdd.noMatches')}</p>}
             </div>
             {error && <p role="alert" className="chat-attachments__error">{error}</p>}
           </Modal.Body>
           <Modal.Footer>
-            {courses.length > 0 && <Button variant="tertiary" onPress={() => { setCoursesOpen(false); navigate('/library'); }}>导入新课程</Button>}
-            <Button variant="tertiary" onPress={() => setCoursesOpen(false)}>取消</Button>
-            <Button variant="primary" isDisabled={busy || loading} onPress={() => void saveCourses()}>保存</Button>
+            {courses.length > 0 && <Button variant="tertiary" onPress={() => { setCoursesOpen(false); navigate('/library'); }}>{text('chatAdd.importNew')}</Button>}
+            <Button variant="tertiary" onPress={() => setCoursesOpen(false)}>{text('chatAdd.cancel')}</Button>
+            <Button variant="primary" isDisabled={busy || loading} onPress={() => void saveCourses()}>{text('chatAdd.save')}</Button>
           </Modal.Footer>
         </Modal.Dialog>
       </Modal.Container></Modal.Backdrop>

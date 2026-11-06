@@ -5,9 +5,11 @@ import { db } from '../store/db';
 import { useCourseChat } from '../store/courseChat';
 import { popconfirm, promptDialog, Sym, toast } from '../ui';
 import type { RecentItem } from '../ui/layout';
+import { useTranslation } from 'react-i18next';
 
 /** 由共享布局持有查询和操作，切页不重挂；只有对话页显示当前会话高亮。 */
 export function useRecentChats(showActive = false) {
+  const { t } = useTranslation('interface');
   const navigate = useNavigate();
   const sessions = useCourseChat((s) => s.sessions);
   const activeId = useCourseChat((s) => s.activeId);
@@ -36,48 +38,48 @@ export function useRecentChats(showActive = false) {
       next: setActivity,
       error: (error) => {
         console.error('[useRecentChats] 最近会话查询失败', error);
-        toast.error('最近会话加载失败，请刷新重试');
+        toast.error(t('recent.loadFailed'));
       },
     });
     return () => subscription.unsubscribe();
-  }, [sessions, ready]);
+  }, [sessions, ready, t]);
 
   // 不改变 store 顺序：bootstrap 和删除后的落脚点依赖原有顺序。
   const recentSessions = useMemo(() => {
-    if (!activity) return [];
+    if (!activity && !(showActive && activeId != null)) return [];
     return sessions
-    .filter((session) => activity.has(session.id!) && activity.get(session.id!) !== 0)
+    .filter((session) => (showActive && session.id === activeId) || (activity?.get(session.id!) ?? 0) > 0)
     .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)
-      || activity.get(b.id!)! - activity.get(a.id!)!
+      || (activity?.get(b.id!) || b.createdAt) - (activity?.get(a.id!) || a.createdAt)
       || b.createdAt - a.createdAt || b.id! - a.id!);
-  }, [sessions, activity]);
+  }, [sessions, activity, showActive, activeId]);
 
   const remove = async (id: number, title: string) => {
     const ok = await popconfirm({
-      headline: `删除会话「${title}」？`,
-      description: '会话里的问答记录会被永久删除，课程和学习数据不受影响。',
-      confirmText: '删除', danger: true, testId: 'recent-delete-popconfirm',
+      headline: t('recent.deleteTitle', { title }),
+      description: t('recent.deleteDescription'),
+      confirmText: t('recent.delete'), danger: true, testId: 'recent-delete-popconfirm',
     });
     if (ok) await useCourseChat.getState().deleteSessionById(id);
   };
   const rename = async (id: number, title: string) => {
     const next = await promptDialog({
-      headline: '重命名会话',
-      description: '给这段对话起个名字，方便以后在 Recent 里认出来。',
-      defaultValue: title, placeholder: '会话标题', confirmText: '保存',
-      validate: (value) => value.length > 60 ? '标题太长了，60 个字以内就行' : null,
+      headline: t('recent.renameTitle'),
+      description: t('recent.renameDescription'),
+      defaultValue: title, placeholder: t('recent.placeholder'), confirmText: t('recent.save'),
+      validate: (value) => value.length > 60 ? t('recent.tooLong') : null,
     });
     if (next) await useCourseChat.getState().renameSession(id, next);
   };
   const archive = async (id: number, title: string) => {
     await useCourseChat.getState().setArchived(id, true);
-    toast.info(`「${title}」已归档，可在「设置 → 数据 → 已归档会话」恢复`);
+    toast.info(t('recent.archived', { title }));
   };
   const fork = async (id: number) => {
     const newId = await useCourseChat.getState().forkSession(id);
-    if (newId == null) toast.warning('这条会话还没有内容，无法分支');
+    if (newId == null) toast.warning(t('recent.emptyFork'));
     else {
-      toast.success('已分支出新会话');
+      toast.success(t('recent.forked'));
       if (!showActive) navigate('/');
     }
   };
@@ -98,17 +100,17 @@ export function useRecentChats(showActive = false) {
       },
       testId: `chat-recent-${id}`,
       menu: [
-        { key: 'rename', label: '重命名', icon: <Sym name="edit" />, onAction: () => void rename(id, session.title) },
-        { key: 'pin', label: session.pinned ? '取消置顶' : '置顶', icon: <Sym name={session.pinned ? 'pin_off' : 'pin'} />, onAction: pin },
-        { key: 'fork', label: '分支出新会话', icon: <Sym name="fork" />, isDisabled: busy, onAction: () => void fork(id) },
-        { key: 'archive', label: '归档', icon: <Sym name="archive" />, isDisabled: busy, onAction: () => void archive(id, session.title) },
-        { key: 'delete', label: '删除', icon: <Sym name="delete" />, danger: true, isDisabled: busy, onAction: () => void remove(id, session.title) },
+        { key: 'rename', label: t('recent.rename'), icon: <Sym name="edit" />, onAction: () => void rename(id, session.title) },
+        { key: 'pin', label: t(session.pinned ? 'recent.unpin' : 'recent.pin'), icon: <Sym name={session.pinned ? 'pin_off' : 'pin'} />, onAction: pin },
+        { key: 'fork', label: t('recent.fork'), icon: <Sym name="fork" />, isDisabled: busy, onAction: () => void fork(id) },
+        { key: 'archive', label: t('recent.archive'), icon: <Sym name="archive" />, isDisabled: busy, onAction: () => void archive(id, session.title) },
+        { key: 'delete', label: t('recent.delete'), icon: <Sym name="delete" />, danger: true, isDisabled: busy, onAction: () => void remove(id, session.title) },
       ],
       onDelete: () => void remove(id, session.title),
-      deleteLabel: `删除会话 ${session.title}`,
+      deleteLabel: t('recent.deleteLabel', { title: session.title }),
       deleteTestId: `chat-recent-delete-${id}`,
       deleteDisabled: busy,
     };
   });
-  return { label: '最近', items, loading: !ready || activity === null };
+  return { label: t('recent.label'), items, loading: !ready || activity === null };
 }

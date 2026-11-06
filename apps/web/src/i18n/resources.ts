@@ -8,9 +8,11 @@ import gatewayZh from './locales/zh-CN/gateway.json';
 import gatewayEn from './locales/en-US/gateway.json';
 import botZh from './locales/zh-CN/bot.json';
 import botEn from './locales/en-US/bot.json';
+import interfaceZh from './locales/zh-CN/interface.json';
+import interfaceEn from './locales/en-US/interface.json';
 
 /** 首阶段随 JS 打包，切换语言不依赖网络，也可由 PWA 预缓存。 */
 export const resources = {
-  'zh-CN': { common: commonZh, settings: settingsZh, projects: projectsZh, gateway: gatewayZh, bot: botZh },
-  'en-US': { common: commonEn, settings: settingsEn, projects: projectsEn, gateway: gatewayEn, bot: botEn },
+  'zh-CN': { common: commonZh, settings: settingsZh, projects: projectsZh, gateway: gatewayZh, bot: botZh, interface: interfaceZh },
+  'en-US': { common: commonEn, settings: settingsEn, projects: projectsEn, gateway: gatewayEn, bot: botEn, interface: interfaceEn },
 } as const;

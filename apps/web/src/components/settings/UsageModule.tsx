@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Button } from '@heroui/react';
+import { Button, DateField, Label } from '@heroui/react';
+import { parseDate } from '@internationalized/date';
 import { useTranslation } from 'react-i18next';
 import type { ModelUsageCounts, ModelUsageReport, ModelUsageSource } from '@wangke/contracts/cloud';
 import { SectionCard } from '../../ui';
 import { cloudRequest } from '../../cloud/state';
+import { AppSelect } from '../../ui/AppSelect';
 
 const day = (time: number) => new Date(time).toISOString().slice(0, 10);
-const control = 'min-w-0 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground';
 const compactNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1, useGrouping: false });
 const tokenAmount = (value: number) => {
   if (value < 1000) return String(value);
@@ -55,15 +56,16 @@ export default function UsageModule() {
       <Button size="sm" variant="secondary" isDisabled={!valid} isPending={loading} data-testid="usage-refresh" onPress={() => setRefresh(value => value + 1)}>{t('usage.refresh')}</Button>
     }>
       <p className="text-sm text-muted">{t('usage.description')}</p>
+      <details className="mt-2 text-xs text-muted"><summary className="cursor-pointer">{t('usage.details')}</summary><p className="mt-2">{t('usage.technicalNote')}</p></details>
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <label className="grid min-w-0 gap-1 text-sm">{t('usage.start')}<input className={`${control} w-full`} type="date" value={start} max={end} onChange={event => setStart(event.target.value)} /></label>
-        <label className="grid min-w-0 gap-1 text-sm">{t('usage.end')}<input className={`${control} w-full`} type="date" value={end} min={start} onChange={event => setEnd(event.target.value)} /></label>
-        <label className="grid min-w-0 gap-1 text-sm">{t('usage.source')}<select aria-label={t('usage.source')} className={control} value={source} onChange={event => setSource(event.target.value as typeof source)}>
-          <option value="all">{t('usage.sources.all')}</option><option value="chat">{t('usage.sources.chat')}</option><option value="bot">{t('usage.sources.bot')}</option>
-        </select></label>
-        <label className="grid min-w-0 gap-1 text-sm">{t('usage.groupBy')}<select aria-label={t('usage.groupBy')} className={control} value={groupBy} onChange={event => setGroupBy(event.target.value as typeof groupBy)}>
-          <option value="model">{t('usage.byModel')}</option><option value="day">{t('usage.byDay')}</option>
-        </select></label>
+        <DateField className="min-w-0" value={start ? parseDate(start) : null} maxValue={end ? parseDate(end) : undefined} onChange={value => setStart(value?.toString() ?? '')}>
+          <Label>{t('usage.start')}</Label><DateField.Group><DateField.Input>{segment => <DateField.Segment segment={segment} />}</DateField.Input></DateField.Group>
+        </DateField>
+        <DateField className="min-w-0" value={end ? parseDate(end) : null} minValue={start ? parseDate(start) : undefined} onChange={value => setEnd(value?.toString() ?? '')}>
+          <Label>{t('usage.end')}</Label><DateField.Group><DateField.Input>{segment => <DateField.Segment segment={segment} />}</DateField.Input></DateField.Group>
+        </DateField>
+        <AppSelect label={t('usage.source')} value={source} onChange={value => setSource(value as typeof source)} options={(['all', 'chat', 'bot'] as const).map(id => ({ id, label: t(`usage.sources.${id}`) }))} />
+        <AppSelect label={t('usage.groupBy')} value={groupBy} onChange={value => setGroupBy(value as typeof groupBy)} options={[{ id: 'model', label: t('usage.byModel') }, { id: 'day', label: t('usage.byDay') }]} />
       </div>
       {!valid ? <p role="alert" className="mt-3 text-sm text-danger">{t('usage.invalidWindow')}</p> : null}
       {loading ? <p role="status" className="mt-3 text-sm text-muted">{t('usage.loading')}</p> : null}

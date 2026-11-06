@@ -28,10 +28,9 @@ export function registerClientRuntime(app: FastifyInstance, options: {
   resources: ResourceFiles;
   configuration: CloudConfiguration;
   submitTask(owner: string, request: RuntimeTaskSubmit): unknown;
-  prepareRecords(owner: string): void;
 }) {
   const ctx = new Context();
-  const domain = new ClientRuntimeDomain(options.store, options.plugins, options.submitTask, options.prepareRecords, options.resources, options.configuration);
+  const domain = new ClientRuntimeDomain(options.store, options.plugins, options.submitTask, options.resources, options.configuration);
   let handler: ConnectionRpcHandler | undefined;
   const livePeers = new Map<Peer, { request: { headers: IncomingMessage['headers'] }; account?: string }>();
   const createPeer = (request: { headers: IncomingMessage['headers'] }) => {

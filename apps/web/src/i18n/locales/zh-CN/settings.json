@@ -51,9 +51,9 @@
   },
   "saveBar": {
     "label": "保存设置",
-    "unsaved": "有未保存修改",
+    "unsaved": "有未保存修改，点击保存后生效",
     "saving": "正在保存…",
-    "saved": "所有修改已保存",
+    "saved": "暂无未保存修改",
     "loading": "正在读取设置…",
     "retry": "重试",
     "useServerVersion": "使用服务器版本…",
@@ -128,9 +128,9 @@
     "models": "模型",
     "assistant": "AI 能力",
     "agent": "Agent",
-    "bot": "Bot",
+    "bot": "机器人",
     "gateway": "消息渠道",
-    "botChannels": "Bot 与渠道",
+    "botChannels": "机器人与渠道",
     "usage": "用量",
     "experience": "界面与播放",
     "appearance": "外观",
@@ -143,15 +143,15 @@
     "data": "数据"
   },
   "usage": {
-    "description": "从服务器 SQLite 账本读取。Chat 包含聊天和普通模型请求；Bot 包含其子任务，同一次请求只统计一次。浏览器直连历史不计入此页。",
+    "description": "查看服务器上的模型用量，按来源、模型或日期汇总。",
     "refresh": "刷新",
-    "start": "开始日期（UTC）",
-    "end": "结束日期（UTC，含当日）",
+    "start": "开始日期",
+    "end": "结束日期（含当日）",
     "source": "来源",
     "sources": {
       "all": "全部用量",
-      "chat": "Chat / 普通请求",
-      "bot": "Bot"
+      "chat": "对话与普通请求",
+      "bot": "机器人"
     },
     "groupBy": "汇总方式",
     "byModel": "按来源、供应商 / 模型",
@@ -170,14 +170,16 @@
     "cacheWrite": "缓存写入 token",
     "reasoning": "推理 token",
     "hitRate": "缓存命中率",
-    "accountingNote": "总 token = 已知输入 + 已知输出，不含预留量，也非费用账单。缓存读写已包含在输入中，推理已包含在输出中，不重复相加。缺失字段为未知；部分覆盖时只展示已知小计。命中率仅按有缓存读统计的请求输入量加权。",
+    "accountingNote": "仅汇总已返回的用量，不代表实际费用。缺失数据标为未知。",
+    "details": "统计说明",
+    "technicalNote": "按世界标准时间划分日期（与北京时间相差 8 小时）。每次服务器请求只计一次；机器人子任务包含在机器人用量中。总量为已知输入与输出之和，缓存与推理不重复相加。部分覆盖时仅展示已知小计，缓存命中率按有缓存读统计的输入量加权。",
     "empty": "所选范围暂无请求。",
     "breakdown": "用量汇总明细（可横向滚动）",
-    "date": "日期（UTC）",
+    "date": "日期",
     "providerModel": "供应商 / 模型 ID",
     "requests": "请求数",
     "measured": "完整用量 / 请求数",
-    "updated": "{{start}} 至 {{end}}（UTC）· 统计时间：{{time}}"
+    "updated": "{{start}} 至 {{end}} · 更新于 {{time}}"
   },
   "serverStorage": {
     "title": "服务器存储占用",

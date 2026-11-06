@@ -11,6 +11,7 @@ const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.con
 const revision = (stat: fs.Stats) => `${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
 export const projectIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const textLimit = 1024 * 1024;
+type FileMutation = <T>(projects: string[], run: () => T) => T;
 
 /** Linux uses pinned directory descriptors: a renamed parent or symlink swap
  * cannot redirect an operation outside the project. macOS development uses
@@ -34,7 +35,7 @@ export class ProjectFiles {
   private matches(id: string, value: string, expected: string | null, actual: string) {
     return expected === actual || this.journal?.accepts(id, value, expected, actual);
   }
-  constructor(root: string) {
+  constructor(root: string, private readonly mutate: FileMutation = (_projects, run) => run()) {
     fs.mkdirSync(root, { recursive: true, mode: 0o700 });
     this.root = fs.realpathSync(root);
   }
@@ -176,7 +177,7 @@ export class ProjectFiles {
 
   write(id: string, value: string, text: string, expected: string | null) {
     if (typeof text !== 'string' || Buffer.byteLength(text) > textLimit || (expected !== null && typeof expected !== 'string')) throw new ProjectError('invalid_project_text');
-    return this.parent(id, value, file => {
+    return this.mutate([id], () => this.parent(id, value, file => {
       let stat: fs.Stats | undefined;
       try { stat = this.stat(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       if (stat?.isDirectory() || (stat ? !this.matches(id, value, expected, revision(stat)) : expected !== null)) throw new ProjectError('project_file_conflict', 409);
@@ -191,18 +192,18 @@ export class ProjectFiles {
         if (stat) fs.renameSync(temporary, file); else this.installNew(temporary, file);
       } finally { fs.rmSync(temporary, { force: true }); }
       return { path: value, revision: revision(fs.statSync(file)) };
-    });
+    }));
   }
 
   mkdir(id: string, value: string) {
-    this.parent(id, value, file => {
+    this.mutate([id], () => this.parent(id, value, file => {
       if (this.journal) this.journal.directoryAt({ id, path: value });
       else { fs.mkdirSync(file, { mode: 0o700 }); this.workspaceOwner(file); }
-    });
+    }));
   }
 
   installUpload(id: string, value: string, temporary: string) {
-    this.parent(id, value, file => {
+    this.mutate([id], () => this.parent(id, value, file => {
       try { fs.lstatSync(file); throw new ProjectError('project_file_exists', 409); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       this.workspaceOwner(temporary);
@@ -211,7 +212,7 @@ export class ProjectFiles {
         return;
       }
       this.installNew(temporary, file);
-    });
+    }));
   }
 
   identity(id: string, value: string) {
@@ -222,7 +223,7 @@ export class ProjectFiles {
 
   /** Copy migration input, never link it: a sandbox must not mutate old backups. */
   copy(id: string, value: string, source: string, expected: string | null = null) {
-    return this.parent(id, value, file => {
+    return this.mutate([id], () => this.parent(id, value, file => {
       let stat: fs.Stats | undefined;
       try { stat = this.stat(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       if (stat?.isDirectory() || (stat ? !this.matches(id, value, expected, revision(stat)) : expected !== null)) throw new ProjectError('project_file_conflict', 409);
@@ -238,30 +239,30 @@ export class ProjectFiles {
         fs.chmodSync(temporary, 0o600); this.workspaceOwner(temporary);
         if (stat) fs.renameSync(temporary, file); else this.installNew(temporary, file);
       } finally { fs.rmSync(temporary, { force: true }); }
-    });
+    }));
   }
 
   move(id: string, value: string, targetId: string, target: string, expected: string) {
     if (id === targetId && (target === value || target.startsWith(`${value}/`))) throw new ProjectError('invalid_project_path');
-    this.parent(id, value, source => this.parent(targetId, target, destination => {
+    this.mutate([id, targetId], () => this.parent(id, value, source => this.parent(targetId, target, destination => {
       const stat = this.stat(source);
       if (!this.matches(id, value, expected, revision(stat))) throw new ProjectError('project_file_conflict', 409);
       try { fs.lstatSync(destination); throw new ProjectError('project_file_exists', 409); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       if (this.journal) this.journal.move({ id, path: value }, { id: targetId, path: target });
       else fs.renameSync(source, destination);
-    }));
+    })));
   }
 
   remove(id: string, value: string, expected: string) {
-    this.parent(id, value, file => {
+    this.mutate([id], () => this.parent(id, value, file => {
       const stat = this.stat(file);
       if (typeof expected !== 'string' || !this.matches(id, value, expected, revision(stat))) throw new ProjectError('project_file_conflict', 409);
       if (this.journal) {
         if (stat.isDirectory() && fs.readdirSync(file).length) throw new ProjectError('project_directory_not_empty', 409);
         this.journal.remove({ id, path: value });
       } else if (stat.isDirectory()) fs.rmdirSync(file); else fs.unlinkSync(file);
-    });
+    }));
   }
 
   removeWorkspace(id: string, commit: () => void) {

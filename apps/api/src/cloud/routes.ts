@@ -27,7 +27,6 @@ interface Dependencies {
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => any;
   checkOrigin: (request: FastifyRequest, reply: FastifyReply) => boolean;
   filesDir: string; maxFileBytes: number; fetch?: typeof fetch;
-  syncResources?: (owner: string) => void;
   canStart?: () => boolean;
 }
 
@@ -118,7 +117,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     const user = authorize(request, reply); if (!user) return;
     const after = Number(request.query.after ?? 0);
     if (!Number.isSafeInteger(after) || after < 0) return fail(reply, 400, 'invalid_cursor');
-    deps.syncResources?.(user.id);
+    // Record feeds must not mutate workspace files or depend on sandbox leases.
     const result = records.list(user.id, after);
     return { records: result, cursor: result.at(-1)?.revision ?? after, more: result.length === 200 };
   });

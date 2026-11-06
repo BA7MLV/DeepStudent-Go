@@ -97,7 +97,7 @@
   "errors": {
     "project_trashed": "This folder is in Trash. Restore it first.",
     "protected_resource_folder": "This workspace is used by the system and cannot be deleted.",
-    "project_busy": "A folder task is running. Stop it or try again later.",
+    "project_busy": "The target folder is still in use by an unfinished operation. Try again later.",
     "thread_busy": "Stop this session's tasks before deleting it.",
     "project_archived": "Restore the archived folder first.",
     "thread_archived": "Restore the archived session first.",

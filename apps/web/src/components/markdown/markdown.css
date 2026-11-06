@@ -12,6 +12,23 @@
 /* Reasoning inherits its muted typography, but Markdown owns whitespace/layout. */
 .reasoning-markdown { white-space: normal; color: inherit; font: inherit; }
 
+/* The app reset removes heading typography; disabling the library's styles
+   means prose must restore it here, without leaking into embedded controls. */
+.x-markdown :where(h1, h2, h3, h4, h5, h6):not(:where(.md-embedded-ui *)) {
+  margin-block: 1.4em .6em;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.x-markdown :where(h1):not(:where(.md-embedded-ui *)) { font-size: 1.65em; }
+.x-markdown :where(h2):not(:where(.md-embedded-ui *)) { font-size: 1.4em; }
+.x-markdown :where(h3):not(:where(.md-embedded-ui *)) { font-size: 1.2em; }
+.x-markdown :where(h4):not(:where(.md-embedded-ui *)) { font-size: 1.08em; }
+.x-markdown :where(h5):not(:where(.md-embedded-ui *)) { font-size: 1em; }
+.x-markdown :where(h6):not(:where(.md-embedded-ui *)) { font-size: .95em; color: var(--muted); }
+.x-markdown :where(h1, h2, h3, h4, h5, h6):first-child:not(:where(.md-embedded-ui *)) { margin-top: 0; }
+.x-markdown :where(h1, h2, h3, h4, h5, h6):last-child:not(:where(.md-embedded-ui *)) { margin-bottom: 0; }
+
 /* XMarkdown's default descendant selectors also style React-owned controls.
    Keep its prose geometry/variables, but stop at embedded UI. One class keeps
    prose above the app reset, without competing with embedded host utilities. */

@@ -392,7 +392,7 @@ export class BotRunner {
          const notice = new WorkspaceHandoff(this.store, this.projects).resume(run.id, thread);
          // Recheck before attachment import can mutate the reacquired scope.
          // Persist the notice and consume the checkpoint in this transaction.
-         if (!thread.project_id && this.projects && this.options.study && thread.agent_id) importBotAttachments(this.projects, this.options.study.filesDir, owner, this.workspaceId(thread));
+         if (!thread.project_id && this.projects && this.options.study && thread.agent_id) importBotAttachments(this.projects, this.options.study.filesDir, owner);
          context = run.context_json ? JSON.parse(run.context_json) : this.initialContext(run, modelKey);
          this.consumeInputs(run, context);
          if (notice) context.push({ role: 'user', runtime_notice: true, content: notice });
@@ -1047,7 +1047,7 @@ export class BotRunner {
          const filename = args.path.startsWith('/workspace/') ? args.path.slice(11) : args.path;
          this.store.db.prepare("INSERT OR IGNORE INTO resource_attachments VALUES(?,?,?,?,'done')").run(owner, value.fileId, attachmentProjectId, filename);
        }
-      if (!thread.project_id && this.projects && workspaceId && ['study_export', 'study_send_file'].includes(name)) importBotAttachments(this.projects, this.options.study!.filesDir, owner, workspaceId);
+      if (!thread.project_id && this.projects && workspaceId && ['study_export', 'study_send_file'].includes(name)) importBotAttachments(this.projects, this.options.study!.filesDir, owner);
       this.store.db.prepare('INSERT OR IGNORE INTO bot_operations(step_id,owner_id,result,created_at) VALUES(?,?,?,?)').run(step, owner, JSON.stringify(value), now());
       this.configuration?.audit(owner, 'bot.study_tool', { run: run.id, step, name, capability: plugin.capability(args) });
       return JSON.stringify(value);

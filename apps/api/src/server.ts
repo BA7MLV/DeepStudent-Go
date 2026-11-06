@@ -260,7 +260,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
 
    const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch, mcp,
      canStart: () => !held && !draining,
-     syncResources: owner => { if (store.db.prepare('SELECT 1 FROM resource_roots WHERE owner_id=?').get(owner)) resources.migrate(owner); } });
+   });
    registerResourceRoutes(app, resources, requireAuth, checkOrigin);
    registerSystemRoutes(app, systemMaterials, cloudConfig, requireAuth, checkOrigin);
    registerBoardRoutes(app, boardFiles, cloudRunner, botService, requireAuth, checkOrigin);
@@ -270,8 +270,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
          resources, configuration: cloudConfig,
        identity: request => session(request as FastifyRequest),
          origin: checkOrigin, canStart: () => !held && !draining, canExecute: () => !held,
-        submitTask: (owner, request) => submitOwnerTask(store, cloudRecords, cloudConfig, owner, request),
-        prepareRecords: owner => { if (store.db.prepare('SELECT 1 FROM resource_roots WHERE owner_id=?').get(owner)) resources.migrate(owner); } });
+        submitTask: (owner, request) => submitOwnerTask(store, cloudRecords, cloudConfig, owner, request) });
     study.register(pluginTool(pluginService));
    registerMcpRoutes(app, { manager: mcp, store, records: cloudRecords, requireAuth, checkOrigin });
    registerWebSearchRoutes(app, { service: webSearch, store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin });
@@ -791,7 +790,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
             return parsed.files.some(value => {
               if (thread.project_id) {
                 if (value.projectId !== thread.project_id || typeof value.projectPath !== 'string') return true;
-                if (process.platform !== 'linux') projects.assertIdle(thread.project_id);
+                if (process.platform !== 'linux') projects.assertNoExecution(thread.project_id);
                 const file = projects.files.open(thread.project_id, value.projectPath); fs.closeSync(file.fd); return false;
               }
               return typeof value.fileId !== 'string' || !store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(value.fileId, user.id);

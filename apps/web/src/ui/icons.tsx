@@ -131,6 +131,8 @@ const ICONS: Record<string, Icon> = {
   archive: IconArchive,
   /** 从归档里恢复（设置 → 数据 → 已归档会话） */
   archive_restore: IconArchiveOff,
+  restore_from_trash: IconArchiveOff,
+  auto_awesome: IconBolt,
   logout: IconLogout,
   arrow_back: IconArrowLeft,
   /** 向下：对话页「回到底部」。与 `arrow_upward`（发送）成对，一个把内容送上去、一个把人拉回最新 */

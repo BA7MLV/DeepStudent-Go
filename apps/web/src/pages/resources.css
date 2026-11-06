@@ -34,6 +34,7 @@
 .resource-window .finder-interaction-hint { position: static; flex-shrink: 0; white-space: nowrap; }
 .resource-window .resource-count { flex-shrink: 0; white-space: nowrap; }
 .resource-window .finder-status code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; }
-.resource-window[data-mobile='true'] .resource-more { position: static; display: flex; justify-content: flex-end; }
+.resource-window[data-mobile='true'] .resource-more { position: absolute; display: flex; right: 0; top: 0; }
 .resource-window[data-mobile='true'] .resource-grid[data-view='list'] .resource-tile { display: flex; }
-.resource-window[data-mobile='true'] .resource-grid[data-view='list'] .resource-open { padding-right: 8px; }
+.resource-window[data-mobile='true'] .resource-grid[data-view='list'] .resource-open { padding-right: 48px; }
+.resource-window[data-mobile='true'] .resource-grid[data-view='list'] .resource-more { top: 8px; }

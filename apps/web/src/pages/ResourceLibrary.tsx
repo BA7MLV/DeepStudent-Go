@@ -52,6 +52,7 @@ function ResourceSkeleton({ view, count }: { view: 'icons' | 'list'; count: numb
 /** The server filesystem is the browser's directory listing, not a second library. */
 export default function ResourceLibrary({ onImport }: { onImport: (folderId?: number) => void }) {
   const { t } = useTranslation('projects');
+  const { t: text } = useTranslation('interface');
   const navigate = useNavigate();
   const mobile = useIsMobile();
   const [search, setSearch] = useSearchParams();
@@ -84,9 +85,9 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const closeEditor = async () => {
     if (busy) return;
     if (editorDirty && !await confirmDialog({
-      headline: '放弃未保存的修改？',
-      description: '关闭后本次编辑不会写入文件。',
-      confirmText: '放弃修改', danger: true,
+      headline: text('resources.discardTitle'),
+      description: text('resources.discardDescription'),
+      confirmText: text('resources.discard'), danger: true,
     })) return;
     setEditor(null);
   };
@@ -246,8 +247,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     } catch { /* Unrelated drag payload. */ }
   };
   const entries = (data?.entries ?? []).filter(entry => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name, undefined, { numeric: true }));
-  const showSystemFolder = !projectId && 'system skills 技能'.includes(query.toLocaleLowerCase());
-  const entryCount = entries.length + Number(showSystemFolder);
+  const entryCount = entries.length;
   const breadcrumbs = directory.split('/').filter(Boolean);
   const readOnly = Boolean(data?.project?.archived);
   const dragOverFolder = (event: React.DragEvent, entry: ResourceEntry) => {
@@ -287,7 +287,6 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
         <div className="finder-navigation"><Button isIconOnly variant="ghost" aria-label={t('back')} isDisabled={!projectId} onPress={() => openDirectory(directory ? projectId : undefined, breadcrumbs.slice(0, -1).join('/'))}><Sym name="chevron_left" /></Button></div>
         <h2 className="finder-title">{breadcrumbs.at(-1) ?? data?.project?.name ?? t('resources')}</h2>
         <div className="finder-tools">
-          <Button isIconOnly variant="ghost" aria-label={t('trash')} onPress={() => setTrashOpen(true)}><Sym name="delete" /></Button>
           <Button isIconOnly variant="ghost" aria-label={t('changeView')} onPress={() => setView(v => v === 'icons' ? 'list' : 'icons')}><Sym name={view === 'icons' ? 'list' : 'grid_view'} /></Button>
           <Button isIconOnly variant="ghost" data-testid="btn-new-folder" aria-label={t('newFolder')} isDisabled={busy || readOnly || loading} onPress={() => void createFolder()}><Sym name="create_new_folder" /></Button>
           <Button isIconOnly variant="ghost" aria-label={t('upload')} isDisabled={busy || readOnly || loading} onPress={() => input.current?.click()}><Sym name="upload" /></Button>
@@ -295,6 +294,8 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
             { key: 'import', label: t('importMaterials'), icon: <Sym name="link" />, disabled: busy || readOnly || !data, onAction: () => onImport(data?.folderId) },
             { key: 'new', label: t('newFile'), icon: <Sym name="edit" />, disabled: busy || readOnly || !data, onAction: () => { setEditorBaseline(JSON.stringify({ path: '', text: '' })); setEditor({ projectId: projectId ?? data!.rootId, path: '', text: '', revision: null }); } },
             { key: 'refresh', label: t('refresh'), icon: <Sym name="refresh" />, onAction: refresh },
+            { key: 'trash', label: text('resources.trash'), icon: <Sym name="restore_from_trash" />, onAction: () => setTrashOpen(true) },
+            { key: 'system', label: text('resources.system'), icon: <Sym name="settings" />, onAction: () => useLibraryNavigation.getState().setFolderHistory(h => ({ entries: [...h.entries.slice(0, h.index + 1), 'system'], index: h.index + 1 })) },
             ...(projectId ? [
               { key: 'chat', label: t('botChat'), icon: <Sym name="chat" />, onAction: () => navigate(`/library/folders/${projectId}/chat`) },
               { key: 'settings', label: t('settings'), icon: <Sym name="tune" />, onAction: () => void editSettings(projectId) },
@@ -313,7 +314,6 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
         <SkeletonReveal show={showSkeleton && !draggedEntries.length} skeleton={<ResourceSkeleton view={view} count={mobile ? 3 : 6} />}>
         <>
           <ul className="resource-grid" data-view={view}>
-            {!loading && !showSkeleton && showSystemFolder && <li className="resource-tile" data-kind="directory" data-testid="system-folder"><button className="resource-open" title="/system" disabled={busy} onClick={() => useLibraryNavigation.getState().setFolderHistory(h => ({ entries: [...h.entries.slice(0, h.index + 1), 'system'], index: h.index + 1 }))}><FolderIcon color="gray" /><span>system</span><small>{t('systemFiles')}</small></button></li>}
             {renderedEntries.map(entry => <li key={keyOf(entry)} className="resource-tile" data-kind={entry.kind} data-testid="resource-entry"
               data-selection-key={keyOf(entry)} data-selected={selection.has(keyOf(entry)) || undefined}
               data-drag-retained={retainedKeys.has(keyOf(entry)) || undefined} aria-hidden={retainedKeys.has(keyOf(entry)) || undefined}
@@ -366,7 +366,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
               {entry.kind === 'file' && entry.courseId ? <PluginActions surface="resource.actions" materialId={entry.courseId} /> : null}
             </li>)}
           </ul>
-          {!loading && !showSkeleton && !entryCount && (projectId || query) && !error && <div className="project-empty">{query ? t('noResults') : t('folderEmpty')}</div>}
+          {!loading && !showSkeleton && !entryCount && !error && <div className="project-empty">{query ? t('noResults') : t('folderEmpty')}</div>}
         </>
         </SkeletonReveal>
       </div>

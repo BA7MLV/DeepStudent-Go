@@ -61,6 +61,7 @@
     "test:memory-context": "tsx scripts/test-memory-context.mjs",
     "test:system-files:e2e": "tsx scripts/e2e-system-files.mjs",
     "test:projects": "tsx scripts/test-projects.mjs",
+    "test:projects:concurrency": "tsx --test scripts/test-project-concurrency.mjs",
     "test:resources": "tsx scripts/test-resource-folders.mjs && tsx scripts/test-bot-resources.mjs",
     "test:resources:recovery": "tsx scripts/test-resource-recovery.mjs && tsx scripts/e2e-resource-recovery.mjs",
     "test:resources:e2e": "tsx scripts/e2e-resource-folders.mjs",

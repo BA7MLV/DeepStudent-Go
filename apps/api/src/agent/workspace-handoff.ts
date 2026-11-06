@@ -5,7 +5,8 @@ import { ProjectError } from '../projects/files.js';
 type Snapshot = { projectId: string; revision: string }[];
 
 /** Evidence at the existing Bot scheduler's release boundary, not a new lock
- * manager. The running scope and project_executions remain lock authorities. */
+ * manager. Running scopes serialize task scheduling; project_executions guard
+ * raw sandbox access. Managed file writes use per-file CAS, not running scopes. */
 export class WorkspaceHandoff {
   constructor(private readonly store: DatabaseStore, private readonly projects?: ProjectRepository) {}
 

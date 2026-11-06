@@ -3,7 +3,7 @@
    ----------------------------------------------------------------------------
    口径与讲义渲染器一致（src/handout-doc.css 的 .hd-table）：**只有三条横线** ——
    顶线、栏目线、底线，两侧不封口、单元格之间不画竖线、无底纹。
-   粗细取 2px / 1px（讲义那套 1.5 / 0.5 在屏幕上是亚像素，会被取整成同一条粗细）。
+   使用主题分隔色的细线，避免表格边框压过正文。
 
    为什么是全局（而不是只挂 .chat-bubble）：
    x-markdown 是问答正文 / 题卡解析 / Markdown 素材共用的渲染器，三处原本都只有
@@ -16,8 +16,8 @@
 /* ── 三线：顶线 / 栏目线 / 底线 ────────────────────────────────────────── */
 
 .x-markdown table:not(pre):not(:where(.md-embedded-ui *)) {
-  border-top: 2px solid var(--foreground);
-  border-bottom: 2px solid var(--foreground);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 /* 先清竖线：任何来源的单元格边框都不该出现在三线表里；栏目线由下一条补回来 */
@@ -27,7 +27,7 @@
 
 /* 栏目线：表头下沿。选择器比上一条更具体（多 thead / tr / th 三层），顺序放后面也稳 */
 .x-markdown table:not(pre):not(:where(.md-embedded-ui *)) > thead > tr > th {
-  border-bottom: 1px solid var(--foreground);
+  border-bottom: 1px solid var(--border);
 }
 
 /* ── 行高：默认内边距是照「无线的表格」设的 ──────────────────────────────

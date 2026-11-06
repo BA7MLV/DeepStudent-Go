@@ -35,6 +35,11 @@ export class ResourceFiles {
     };
   }
   private get db() { return this.projects.store.db; }
+  private deferBusy(error: unknown) {
+    // Compatibility projection is resumable per item. An unrelated sandbox
+    // must not fail a directory read or prevent other projects from migrating.
+    if (!(error instanceof ProjectError) || error.code !== 'project_busy') throw error;
+  }
   private rows(owner: string, table: string): any[] {
     return (this.db.prepare('SELECT value FROM cloud_records WHERE owner_id=? AND table_name=? AND value IS NOT NULL').all(owner, table) as { value: string }[]).map(r => JSON.parse(r.value));
   }
@@ -111,21 +116,23 @@ export class ResourceFiles {
     // concurrent Bot edit is never silently unlinked. Empty revision is a
     // tombstone, not a request to delete a future file at the same path.
     for (const mapped of this.db.prepare('SELECT * FROM resource_files WHERE owner_id=?').all(owner) as Placement[]) {
-      if (trashed.has(mapped.project_id)) continue;
-      const course = this.records.get(owner, 'videos', mapped.course_id);
-      const reference = this.records.get(owner, 'courseFiles', mapped.course_id);
-      if (course && !course.fileDeleted && reference) continue;
-      if (mapped.revision) {
-        this.projects.writable(owner, mapped.project_id); this.projects.assertIdle(mapped.project_id);
-        try { this.projects.files.remove(mapped.project_id, mapped.path, mapped.revision); }
-        catch (error) { if (!(error instanceof ProjectError) || error.status !== 404) throw error; }
-      }
-      this.put(owner, 'files', mapped.course_id, null);
-      this.put(owner, 'courseFiles', mapped.course_id, null);
-      if (course) {
-        if (!course.fileDeleted) this.put(owner, 'videos', mapped.course_id, { ...course, fileDeleted: 1 });
-        this.db.prepare("UPDATE resource_files SET revision='' WHERE owner_id=? AND course_id=?").run(owner, mapped.course_id);
-      } else this.db.prepare('DELETE FROM resource_files WHERE owner_id=? AND course_id=?').run(owner, mapped.course_id);
+      try {
+        if (trashed.has(mapped.project_id)) continue;
+        const course = this.records.get(owner, 'videos', mapped.course_id);
+        const reference = this.records.get(owner, 'courseFiles', mapped.course_id);
+        if (course && !course.fileDeleted && reference) continue;
+        if (mapped.revision) {
+          this.projects.writable(owner, mapped.project_id); this.projects.assertNoExecution(mapped.project_id);
+          try { this.projects.files.remove(mapped.project_id, mapped.path, mapped.revision); }
+          catch (error) { if (!(error instanceof ProjectError) || error.status !== 404) throw error; }
+        }
+        this.put(owner, 'files', mapped.course_id, null);
+        this.put(owner, 'courseFiles', mapped.course_id, null);
+        if (course) {
+          if (!course.fileDeleted) this.put(owner, 'videos', mapped.course_id, { ...course, fileDeleted: 1 });
+          this.db.prepare("UPDATE resource_files SET revision='' WHERE owner_id=? AND course_id=?").run(owner, mapped.course_id);
+        } else this.db.prepare('DELETE FROM resource_files WHERE owner_id=? AND course_id=?').run(owner, mapped.course_id);
+      } catch (error) { this.deferBusy(error); }
     }
     const folders = new Map(this.rows(owner, 'folders').map(f => [f.id, f]));
     const visiting = new Set<number>();
@@ -158,50 +165,59 @@ export class ResourceFiles {
       visiting.delete(id); return location;
     };
     for (const id of folders.keys()) {
-      const mapped = this.folder(owner, id);
-      if (!mapped || !trashed.has(mapped.project_id)) locate(id);
+      try {
+        const mapped = this.folder(owner, id);
+        if (!mapped || !trashed.has(mapped.project_id)) locate(id);
+      } catch (error) {
+        visiting.clear();
+        this.deferBusy(error);
+      }
     }
     for (const course of this.rows(owner, 'videos')) {
-      if (course.fileDeleted) continue;
-      const original = sourceMetadata.get(course.id);
-      const preserveMetadata = Boolean(original && original.name === course.name && original.folderId === course.folderId);
-      let mapped = this.placement(owner, course.id);
-      if (mapped && trashed.has(mapped.project_id)) continue;
-      if (mapped && !preserveMetadata) {
-        const parent = course.folderId != null ? this.folder(owner, course.folderId) : undefined;
-        const targetId = parent?.project_id ?? root;
-        const basename = path.posix.basename(mapped.path), title = basename.replace(/\.[^.]+$/, '');
-        const name = course.name === title ? basename : cleanName(String(course.name)) + path.posix.extname(basename);
-        const target = join(parent?.path ?? '', name);
-        if (mapped.project_id !== targetId || mapped.path !== target) {
-          this.move(owner, mapped.project_id, mapped.path, targetId, target, this.entry(mapped.project_id, mapped.path).revision);
-          mapped = this.placement(owner, course.id);
+      try {
+        if (course.fileDeleted) continue;
+        // A deferred parent must not silently redirect its files to the root.
+        if (course.folderId != null && folders.has(course.folderId) && !this.folder(owner, course.folderId)) continue;
+        const original = sourceMetadata.get(course.id);
+        const preserveMetadata = Boolean(original && original.name === course.name && original.folderId === course.folderId);
+        let mapped = this.placement(owner, course.id);
+        if (mapped && trashed.has(mapped.project_id)) continue;
+        if (mapped && !preserveMetadata) {
+          const parent = course.folderId != null ? this.folder(owner, course.folderId) : undefined;
+          const targetId = parent?.project_id ?? root;
+          const basename = path.posix.basename(mapped.path), title = basename.replace(/\.[^.]+$/, '');
+          const name = course.name === title ? basename : cleanName(String(course.name)) + path.posix.extname(basename);
+          const target = join(parent?.path ?? '', name);
+          if (mapped.project_id !== targetId || mapped.path !== target) {
+            this.move(owner, mapped.project_id, mapped.path, targetId, target, this.entry(mapped.project_id, mapped.path).revision);
+            mapped = this.placement(owner, course.id);
+          }
         }
-      }
-      const edited = this.records.get(owner, 'files', course.id);
-      const reference = this.records.get(owner, 'courseFiles', course.id);
-      const sourceId = edited?.blob?.$file ?? (!mapped || !reference?.resourceProjectId ? reference?.fileId : undefined);
-      if (!sourceId || mapped?.source_file === sourceId) {
-        if (edited && sourceId && mapped?.source_file === sourceId) this.put(owner, 'files', course.id, null);
-        continue;
-      }
-      const source = this.db.prepare('SELECT storage_name FROM files WHERE id=? AND owner_id=?').get(sourceId, owner) as { storage_name: string } | undefined;
-      if (!source) continue;
-      const sourcePath = path.resolve(this.filesDir, source.storage_name);
-      if (path.dirname(sourcePath) !== path.resolve(this.filesDir) || !fs.existsSync(sourcePath)) continue;
-      const location = mapped ? { project_id: mapped.project_id, path: path.posix.dirname(mapped.path) === '.' ? '' : path.posix.dirname(mapped.path) }
-        : course.folderId != null ? this.folder(owner, course.folderId) : undefined;
-      const projectId = location?.project_id ?? root;
-      this.projects.writable(owner, projectId);
-      this.projects.assertIdle(projectId);
-      const originalExtension = path.extname(String(course.name)).toLowerCase();
-      const extension = course.materialFormat ? `.${course.materialFormat}` : video.has(originalExtension.slice(1)) ? originalExtension
-        : course.mimeType?.startsWith('video/') ? videoExtension[course.mimeType] ?? '.mp4' : '';
-      const title = cleanName(String(course.name));
-      const filename = mapped?.path ?? this.unique(projectId, location?.path ?? '', title.toLowerCase().endsWith(extension) ? title : title + extension);
-      this.projects.files.copy(projectId, filename, sourcePath, mapped?.revision ?? null);
-      this.remember(owner, course.id, projectId, filename, sourceId, preserveMetadata);
-      if (edited) this.put(owner, 'files', course.id, null);
+        const edited = this.records.get(owner, 'files', course.id);
+        const reference = this.records.get(owner, 'courseFiles', course.id);
+        const sourceId = edited?.blob?.$file ?? (!mapped || !reference?.resourceProjectId ? reference?.fileId : undefined);
+        if (!sourceId || mapped?.source_file === sourceId) {
+          if (edited && sourceId && mapped?.source_file === sourceId) this.put(owner, 'files', course.id, null);
+          continue;
+        }
+        const source = this.db.prepare('SELECT storage_name FROM files WHERE id=? AND owner_id=?').get(sourceId, owner) as { storage_name: string } | undefined;
+        if (!source) continue;
+        const sourcePath = path.resolve(this.filesDir, source.storage_name);
+        if (path.dirname(sourcePath) !== path.resolve(this.filesDir) || !fs.existsSync(sourcePath)) continue;
+        const location = mapped ? { project_id: mapped.project_id, path: path.posix.dirname(mapped.path) === '.' ? '' : path.posix.dirname(mapped.path) }
+          : course.folderId != null ? this.folder(owner, course.folderId) : undefined;
+        const projectId = location?.project_id ?? root;
+        this.projects.writable(owner, projectId);
+        this.projects.assertNoExecution(projectId);
+        const originalExtension = path.extname(String(course.name)).toLowerCase();
+        const extension = course.materialFormat ? `.${course.materialFormat}` : video.has(originalExtension.slice(1)) ? originalExtension
+          : course.mimeType?.startsWith('video/') ? videoExtension[course.mimeType] ?? '.mp4' : '';
+        const title = cleanName(String(course.name));
+        const filename = mapped?.path ?? this.unique(projectId, location?.path ?? '', title.toLowerCase().endsWith(extension) ? title : title + extension);
+        this.projects.files.copy(projectId, filename, sourcePath, mapped?.revision ?? null);
+        this.remember(owner, course.id, projectId, filename, sourceId, preserveMetadata);
+        if (edited) this.put(owner, 'files', course.id, null);
+      } catch (error) { this.deferBusy(error); }
     }
     this.importChatAttachments(owner);
     importBotAttachments(this.projects, this.filesDir, owner);
@@ -226,62 +242,64 @@ export class ResourceFiles {
       ORDER BY refs.session_id,f.created_at,f.id
     `).all(owner, owner, owner) as { id: string; storage_name: string; original_name: string; sha256: string; session_id: number }[];
     for (const source of sources) {
-      const original = path.resolve(this.filesDir, source.storage_name);
-      if (path.dirname(original) !== path.resolve(this.filesDir) || !fs.existsSync(original)) continue;
-      let binding = this.db.prepare(`SELECT f.* FROM chat_resource_sessions s LEFT JOIN resource_folders f
-        ON f.owner_id=s.owner_id AND f.folder_id=s.folder_id WHERE s.owner_id=? AND s.session_id=?`).get(owner, source.session_id) as Folder | undefined;
-      // A deleted/moved-to-trash grouping is the user's decision, not a request
-      // to reconstruct it from the retained chat/task history.
-      if (binding && !binding.project_id) continue;
-      if (!binding) {
-        let root = this.db.prepare('SELECT project_id FROM chat_resource_roots WHERE owner_id=?').get(owner) as { project_id: string } | undefined;
-        if (!root) {
-          const names = new Set(this.projects.list(owner).map(item => item.name));
-          let name = '聊天附件', n = 2;
-          while (names.has(name)) name = `聊天附件 (${n++})`;
-          const project = this.projects.create(owner, name);
-          this.db.prepare('INSERT INTO chat_resource_roots VALUES(?,?)').run(owner, project.id);
-          root = { project_id: project.id };
+      try {
+        const original = path.resolve(this.filesDir, source.storage_name);
+        if (path.dirname(original) !== path.resolve(this.filesDir) || !fs.existsSync(original)) continue;
+        let binding = this.db.prepare(`SELECT f.* FROM chat_resource_sessions s LEFT JOIN resource_folders f
+          ON f.owner_id=s.owner_id AND f.folder_id=s.folder_id WHERE s.owner_id=? AND s.session_id=?`).get(owner, source.session_id) as Folder | undefined;
+        // A deleted/moved-to-trash grouping is the user's decision, not a request
+        // to reconstruct it from the retained chat/task history.
+        if (binding && !binding.project_id) continue;
+        if (!binding) {
+          let root = this.db.prepare('SELECT project_id FROM chat_resource_roots WHERE owner_id=?').get(owner) as { project_id: string } | undefined;
+          if (!root) {
+            const names = new Set(this.projects.list(owner).map(item => item.name));
+            let name = '聊天附件', n = 2;
+            while (names.has(name)) name = `聊天附件 (${n++})`;
+            const project = this.projects.create(owner, name);
+            this.db.prepare('INSERT INTO chat_resource_roots VALUES(?,?)').run(owner, project.id);
+            root = { project_id: project.id };
+          }
+          if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(root.project_id, owner)) continue;
+          this.projects.assertNoExecution(root.project_id);
+          const session = this.records.get(owner, 'chatSessions', source.session_id);
+          const first = this.db.prepare("SELECT json_extract(input,'$.text') text FROM cloud_tasks WHERE owner_id=? AND kind='chat' AND json_extract(input,'$.sessionId')=? ORDER BY created_at LIMIT 1").get(owner, source.session_id) as { text?: string } | undefined;
+          const title = cleanName(String(session?.title && session.title !== '新会话' ? session.title : first?.text || '新会话')).slice(0, 40);
+          const directory = this.unique(root.project_id, '', title);
+          this.projects.files.mkdir(root.project_id, directory);
+          const folderId = this.folderId(owner, root.project_id, directory)!;
+          this.db.prepare('INSERT INTO chat_resource_sessions VALUES(?,?,?)').run(owner, source.session_id, folderId);
+          binding = this.folder(owner, folderId)!;
         }
-        if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(root.project_id, owner)) continue;
-        this.projects.assertIdle(root.project_id);
-        const session = this.records.get(owner, 'chatSessions', source.session_id);
-        const first = this.db.prepare("SELECT json_extract(input,'$.text') text FROM cloud_tasks WHERE owner_id=? AND kind='chat' AND json_extract(input,'$.sessionId')=? ORDER BY created_at LIMIT 1").get(owner, source.session_id) as { text?: string } | undefined;
-        const title = cleanName(String(session?.title && session.title !== '新会话' ? session.title : first?.text || '新会话')).slice(0, 40);
-        const directory = this.unique(root.project_id, '', title);
-        this.projects.files.mkdir(root.project_id, directory);
-        const folderId = this.folderId(owner, root.project_id, directory)!;
-        this.db.prepare('INSERT INTO chat_resource_sessions VALUES(?,?,?)').run(owner, source.session_id, folderId);
-        binding = this.folder(owner, folderId)!;
-      }
-      if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(binding.project_id, owner)) continue;
-      // Do not revive a directory removed outside the app either.
-      try { this.projects.files.list(binding.project_id, binding.path); }
-      catch (error) { if (error instanceof ProjectError && error.status === 404) continue; throw error; }
-      this.projects.writable(owner, binding.project_id); this.projects.assertIdle(binding.project_id);
-      let receipt = this.db.prepare('SELECT project_id,path,status FROM chat_resource_attachments WHERE owner_id=? AND session_id=? AND file_id=?')
-        .get(owner, source.session_id, source.id) as { project_id: string; path: string; status: string } | undefined;
-      const allocate = () => this.unique(binding!.project_id, binding!.path, safeFileName(source.original_name));
-      if (!receipt) {
-        receipt = { project_id: binding.project_id, path: allocate(), status: 'pending' };
-        this.db.prepare("INSERT INTO chat_resource_attachments VALUES(?,?,?,?,?,'pending')").run(owner, source.session_id, source.id, receipt.project_id, receipt.path);
-      }
-      if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(receipt.project_id, owner)) continue;
-      this.projects.writable(owner, receipt.project_id); this.projects.assertIdle(receipt.project_id);
-      const parent = path.posix.dirname(receipt.path);
-      const entry = this.projects.files.list(receipt.project_id, parent === '.' ? '' : parent).find(item => item.path === receipt!.path);
-      let installed = false;
-      if (entry?.kind === 'file') {
-        const file = this.projects.files.open(receipt.project_id, receipt.path);
-        try { installed = crypto.createHash('sha256').update(fs.readFileSync(file.fd)).digest('hex') === source.sha256; }
-        finally { fs.closeSync(file.fd); }
-      }
-      if (entry && !installed) {
-        receipt = { ...receipt, project_id: binding.project_id, path: allocate() };
-        this.db.prepare('UPDATE chat_resource_attachments SET project_id=?,path=? WHERE owner_id=? AND session_id=? AND file_id=?').run(receipt.project_id, receipt.path, owner, source.session_id, source.id);
-      }
-      if (!installed) this.projects.files.copy(receipt.project_id, receipt.path, original);
-      this.db.prepare("UPDATE chat_resource_attachments SET status='done' WHERE owner_id=? AND session_id=? AND file_id=?").run(owner, source.session_id, source.id);
+        if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(binding.project_id, owner)) continue;
+        // Do not revive a directory removed outside the app either.
+        try { this.projects.files.list(binding.project_id, binding.path); }
+        catch (error) { if (error instanceof ProjectError && error.status === 404) continue; throw error; }
+        this.projects.writable(owner, binding.project_id); this.projects.assertNoExecution(binding.project_id);
+        let receipt = this.db.prepare('SELECT project_id,path,status FROM chat_resource_attachments WHERE owner_id=? AND session_id=? AND file_id=?')
+          .get(owner, source.session_id, source.id) as { project_id: string; path: string; status: string } | undefined;
+        const allocate = () => this.unique(binding!.project_id, binding!.path, safeFileName(source.original_name));
+        if (!receipt) {
+          receipt = { project_id: binding.project_id, path: allocate(), status: 'pending' };
+          this.db.prepare("INSERT INTO chat_resource_attachments VALUES(?,?,?,?,?,'pending')").run(owner, source.session_id, source.id, receipt.project_id, receipt.path);
+        }
+        if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(receipt.project_id, owner)) continue;
+        this.projects.writable(owner, receipt.project_id); this.projects.assertNoExecution(receipt.project_id);
+        const parent = path.posix.dirname(receipt.path);
+        const entry = this.projects.files.list(receipt.project_id, parent === '.' ? '' : parent).find(item => item.path === receipt!.path);
+        let installed = false;
+        if (entry?.kind === 'file') {
+          const file = this.projects.files.open(receipt.project_id, receipt.path);
+          try { installed = crypto.createHash('sha256').update(fs.readFileSync(file.fd)).digest('hex') === source.sha256; }
+          finally { fs.closeSync(file.fd); }
+        }
+        if (entry && !installed) {
+          receipt = { ...receipt, project_id: binding.project_id, path: allocate() };
+          this.db.prepare('UPDATE chat_resource_attachments SET project_id=?,path=? WHERE owner_id=? AND session_id=? AND file_id=?').run(receipt.project_id, receipt.path, owner, source.session_id, source.id);
+        }
+        if (!installed) this.projects.files.copy(receipt.project_id, receipt.path, original);
+        this.db.prepare("UPDATE chat_resource_attachments SET status='done' WHERE owner_id=? AND session_id=? AND file_id=?").run(owner, source.session_id, source.id);
+      } catch (error) { this.deferBusy(error); }
     }
   }
   private entry(projectId: string, filename: string) {
@@ -369,7 +387,7 @@ export class ResourceFiles {
     this.migrate(owner);
     const rootId = this.root(owner), id = projectId ?? rootId;
     const project = this.projects.get(owner, id);
-    if (process.platform !== 'linux') this.projects.assertIdle(id);
+    if (process.platform !== 'linux') this.projects.assertNoExecution(id);
     const entries = this.projects.files.list(id, directory).map(file => this.index(owner, id, { ...file, projectId: id }));
     for (const mapped of this.db.prepare('SELECT * FROM resource_files WHERE owner_id=? AND project_id=?').all(owner, id) as Placement[]) {
       const parent = path.posix.dirname(mapped.path) === '.' ? '' : path.posix.dirname(mapped.path);
@@ -397,8 +415,10 @@ export class ResourceFiles {
   setFolderColor(owner: string, projectId: string, directory: string, color: ResourceFolderColor) {
     if (!RESOURCE_FOLDER_COLORS.includes(color)) throw new ProjectError('invalid_folder_color');
     this.projects.writable(owner, projectId);
-    this.projects.assertIdle(projectId);
-    if (directory && this.entry(projectId, directory).kind !== 'directory') throw new ProjectError('invalid_resource_folder');
+    if (directory) {
+      if (process.platform !== 'linux') this.projects.assertNoExecution(projectId);
+      if (this.entry(projectId, directory).kind !== 'directory') throw new ProjectError('invalid_resource_folder');
+    }
     const { folderId } = this.folderMetadata(owner, projectId, directory);
     if (folderId == null) throw new ProjectError('invalid_resource_folder');
     const folder = this.records.get(owner, 'folders', folderId)!;
@@ -410,7 +430,7 @@ export class ResourceFiles {
     const mapped = this.placement(owner, id);
     if (!mapped) throw new ProjectError('project_file_not_found', 404);
     this.projects.get(owner, mapped.project_id);
-    if (process.platform !== 'linux') this.projects.assertIdle(mapped.project_id);
+    if (process.platform !== 'linux') this.projects.assertNoExecution(mapped.project_id);
     const parent = path.posix.dirname(mapped.path) === '.' ? '' : path.posix.dirname(mapped.path);
     const file = this.projects.files.list(mapped.project_id, parent).find(f => f.path === mapped.path);
     if (!file) throw new ProjectError('project_file_not_found', 404);
@@ -425,7 +445,7 @@ export class ResourceFiles {
     const mapped = this.placement(owner, id);
     if (mapped) {
       this.projects.get(owner, mapped.project_id);
-      if (process.platform !== 'linux') this.projects.assertIdle(mapped.project_id);
+      if (process.platform !== 'linux') this.projects.assertNoExecution(mapped.project_id);
       return { ...this.projects.files.open(mapped.project_id, mapped.path), mimeType: course.mimeType ?? reference.mimeType ?? 'application/octet-stream' };
     }
     // Old uploads can play before the resource library has migrated them. Never
@@ -448,7 +468,7 @@ export class ResourceFiles {
   }
   saveText(owner: string, id: string, text: string, expected: string) {
     const mapped = this.course(owner, id);
-    this.projects.writable(owner, mapped.project_id); this.projects.assertIdle(mapped.project_id);
+    this.projects.writable(owner, mapped.project_id); this.projects.assertNoExecution(mapped.project_id);
     const current = this.projects.files.read(mapped.project_id, mapped.path);
     if (typeof expected !== 'string' || current.text !== expected) throw new ProjectError('project_file_conflict', 409);
     this.projects.files.write(mapped.project_id, mapped.path, text, current.revision);
@@ -472,7 +492,7 @@ export class ResourceFiles {
       const folder = input.folderId === undefined ? undefined : this.folder(owner, input.folderId);
       if (input.folderId !== undefined && !folder) throw new ProjectError('project_file_not_found', 404);
       const projectId = folder?.project_id ?? this.root(owner);
-      this.projects.writable(owner, projectId); this.projects.assertIdle(projectId);
+      this.projects.writable(owner, projectId); this.projects.assertNoExecution(projectId);
       const filename = this.unique(projectId, folder?.path ?? '', `${cleanName(input.name ?? id).replace(/\.md$/i, '')}.md`);
       this.projects.files.write(projectId, filename, text, null);
       this.put(owner, 'videos', id, { id, name: input.name ?? id, kind: 'material', materialFormat: 'md', mimeType: 'text/markdown', duration: 0, size: Buffer.byteLength(text), createdAt: Date.now(), status: 'transcribed', coverState: 'pending' });
@@ -514,7 +534,7 @@ export class ResourceFiles {
       if (item.target != null && !target) throw new ProjectError('project_file_not_found', 404);
       const targetId = target?.project_id ?? root, destination = join(target?.path ?? '', path.posix.basename(source.path));
       this.projects.writable(owner, source.project_id); this.projects.writable(owner, targetId);
-      this.projects.assertIdle(source.project_id); this.projects.assertIdle(targetId);
+      this.projects.assertNoExecution(source.project_id); this.projects.assertNoExecution(targetId);
       if (source.project_id === targetId && (destination === source.path || destination.startsWith(`${source.path}/`))) throw new ProjectError('invalid_resource_move');
       const entry = this.entry(source.project_id, source.path);
       if (this.projects.files.list(targetId, target?.path ?? '').some(entry => entry.path === destination)) throw new ProjectError('project_file_exists', 409);
@@ -543,7 +563,7 @@ export class ResourceFiles {
     const moves = new Map<string, { key: string; parent: number | null; target: number | null }>();
     const missing = new Set<string>();
     const created: string[] = [];
-    this.projects.writable(owner, root); this.projects.assertIdle(root);
+    this.projects.writable(owner, root); this.projects.assertNoExecution(root);
     try {
       return this.projects.store.transaction(() => {
       for (const folder of folders) {
@@ -579,7 +599,7 @@ export class ResourceFiles {
   /** Delete a resource and its learning records as one Resource Library action. */
   remove(owner: string, projectId: string, filename: string, expected: string) {
     this.migrate(owner);
-    this.projects.writable(owner, projectId); this.projects.assertIdle(projectId);
+    this.projects.writable(owner, projectId); this.projects.assertNoExecution(projectId);
     const placement = this.db.prepare('SELECT * FROM resource_files WHERE owner_id=? AND project_id=? AND path=?').get(owner, projectId, filename) as Placement | undefined;
     const courseId = placement?.course_id;
     const mutations: Array<{ id: string; table: string; key: string | number; before: Record<string, any>; after: null }> = [];
@@ -603,7 +623,7 @@ export class ResourceFiles {
   }
   move(owner: string, id: string, filename: string, targetId: string, target: string, revision: string, moved: () => void = () => {}) {
     this.projects.writable(owner, id); this.projects.writable(owner, targetId);
-    this.projects.assertIdle(id); this.projects.assertIdle(targetId);
+    this.projects.assertNoExecution(id); this.projects.assertNoExecution(targetId);
     const placements = this.db.prepare('SELECT * FROM resource_files WHERE owner_id=? AND project_id=?').all(owner, id) as Placement[];
     const folders = this.db.prepare('SELECT folder_id,project_id,path FROM resource_folders WHERE owner_id=? AND project_id=?').all(owner, id) as Folder[];
     // Tombstoned learning paths still have stable identities. Detect collisions

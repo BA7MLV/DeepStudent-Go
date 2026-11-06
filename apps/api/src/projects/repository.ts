@@ -20,7 +20,15 @@ export class ProjectRepository {
   readonly files: ProjectFiles;
   isActive: (id: string) => boolean = () => false;
   onChange: (owner: string, id: string) => void = () => {};
-  constructor(readonly store: DatabaseStore, directory: string) { this.files = new ProjectFiles(directory); }
+  constructor(readonly store: DatabaseStore, directory: string) {
+    this.files = new ProjectFiles(directory, (ids, run) => store.db.transaction(() => {
+      // Only synchronous commits hold the SQLite writer lock. Model calls,
+      // approvals and uploads never hold it. Every managed writer (including
+      // Bot tools) checks the durable sandbox lease under this same lock.
+      for (const id of new Set(ids)) this.assertNoExecution(id);
+      return run();
+    }).immediate());
+  }
 
   defaultAgent(owner: string) {
     return (this.store.db.prepare('SELECT id FROM agent_profiles WHERE owner_id=? AND enabled=1 ORDER BY created_at,id LIMIT 1').get(owner) as { id: string } | undefined)?.id;
@@ -146,11 +154,19 @@ export class ProjectRepository {
     return thread;
   }
 
+  /** Lifecycle operations affect the entire workspace, not a single file. */
   assertIdle(id: string) {
     if (this.isActive(id) || this.hasExecution(id) || this.store.db.prepare(`SELECT 1 FROM runs r JOIN threads t ON t.id=r.thread_id
       LEFT JOIN bot_workspaces b ON b.owner_id=t.owner_id AND t.mode='bot'
         AND (t.agent_id IS NOT NULL OR EXISTS(SELECT 1 FROM thread_participants WHERE thread_id=t.id))
       WHERE COALESCE(t.project_id,b.project_id)=? AND r.status='running' LIMIT 1`).get(id)) throw new ProjectError('project_busy', 409);
+  }
+
+  /** Raw sandbox processes bypass file CAS. Until their writable mounts are
+   * isolated, only an actual/uncertain execution blocks managed file commits;
+   * a running conversation is NOT a file lock. */
+  assertNoExecution(id: string) {
+    if (this.hasExecution(id)) throw new ProjectError('project_busy', 409);
   }
 
   hasExecution(id: string) { return Boolean(this.store.db.prepare('SELECT 1 FROM project_executions WHERE project_id=?').get(id)); }

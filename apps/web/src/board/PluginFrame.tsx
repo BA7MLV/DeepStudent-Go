@@ -25,10 +25,13 @@ function readTheme() {
   for (const [to, from] of [['--background', '--surface'], ['--foreground', '--foreground'], ['--muted', '--muted'], ['--accent', '--accent'], ['--border', '--border'], ['--radius', '--radius-control'], ['--danger', '--danger']]) values[to] = css.getPropertyValue(from).trim();
   return { values, colorScheme: css.colorScheme === 'dark' ? 'dark' : 'light' };
 }
-function source(html: string, channel: string, locale: string, labels: unknown, initialTheme: ReturnType<typeof readTheme>) {
+function source(html: string, channel: string, locale: string, labels: unknown, initialTheme: ReturnType<typeof readTheme>, compact: boolean, formLabel: string) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'"><style>
   :root{color-scheme:light;background:var(--background)}*{box-sizing:border-box}body{margin:0;padding:0 2px 4px;font:14px/1.5 system-ui,sans-serif;color:var(--foreground);background:transparent;overflow-wrap:anywhere}button,input,select,textarea{font:inherit;border:1px solid var(--border);border-radius:var(--radius,8px);padding:8px 10px;color:var(--foreground);background:var(--background)}button{cursor:pointer}button:disabled{opacity:.5;cursor:wait}button[aria-pressed=true]{border-color:transparent;background:color-mix(in oklab,var(--accent) 8%,var(--background));color:var(--accent)}input{min-width:0;flex:1}input[type=checkbox]{accent-color:var(--accent)}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.stack{display:grid;gap:10px}.muted{color:var(--muted)}.error{color:var(--danger,#c43b4a)}.error:empty{display:none}p{margin:10px 0}
   body{display:flow-root}input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
+  select,input[type=date],input[type=time],input[type=datetime-local]{min-height:40px;box-shadow:0 1px 2px rgb(0 0 0/.04);background:color-mix(in oklab,var(--foreground) 4%,var(--background));border-color:transparent}
+  select{appearance:none;padding-right:32px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23888' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
+  .host-compact-form{margin-bottom:12px}.host-compact-form>summary{cursor:pointer;min-height:40px;padding:8px 0;color:var(--foreground)}.host-compact-form[open]>form{margin-block:8px}
   @media(max-width:600px){button,select,input:not([type=checkbox]),textarea{min-height:44px}input:not([type=checkbox]),select,textarea{font-size:16px}label:has(input[type=checkbox]){min-height:44px}}
   @media(max-width:360px){.row>label:has(select,input){flex-basis:100%}}
   </style><script>
@@ -76,7 +79,15 @@ function source(html: string, channel: string, locale: string, labels: unknown, 
   window.plugin=Object.freeze({...window.board,context:{get:()=>call('context.get')},state:{read:window.board.read,write:window.board.write},queries:Object.freeze({observe}),draft:{read:()=>call('draft.read'),write:data=>call('draft.write',{data})},events:{subscribe:(name,fn)=>{if(!listeners.has(name))listeners.set(name,new Set());listeners.get(name).add(fn);return()=>listeners.get(name)?.delete(fn);}}});
   addEventListener('error',event=>parent.postMessage({channel,pluginError:event.message||'board_script_failed'},'*'));
   addEventListener('unhandledrejection',event=>parent.postMessage({channel,pluginError:String(event.reason?.message||event.reason||'board_script_failed')},'*'));
-  addEventListener('DOMContentLoaded',()=>{const resize=()=>parent.postMessage({channel,height:Math.ceil(document.body.getBoundingClientRect().height)},'*');new ResizeObserver(resize).observe(document.body);resize();});
+  addEventListener('DOMContentLoaded',()=>{
+    // Compact cards keep long editors available behind a disclosure. Moving the
+    // existing form preserves plugin listeners, field values and validation.
+    if(${compact})for(const form of document.querySelectorAll('form')){
+      if(form.closest('details')||form.querySelectorAll('input:not([type=hidden]):not([type=submit]),select,textarea').length<4)continue;
+      const details=document.createElement('details'),summary=document.createElement('summary');details.className='host-compact-form';summary.textContent=${escapeScript(formLabel)};form.before(details);details.append(summary,form);
+      form.addEventListener('invalid',()=>{details.open=true;},true);
+    }
+    const resize=()=>parent.postMessage({channel,height:Math.ceil(document.body.getBoundingClientRect().height)},'*');new ResizeObserver(resize).observe(document.body);resize();});
   parent.postMessage({channel,ready:true},'*');})();
   </script></head><body>${html}</body></html>`;
 }
@@ -108,7 +119,9 @@ export function PluginFrame({ plugin, adapter }: { plugin: BoardPlugin; adapter?
   // target the replacement sandbox, even if its logical placement is the same.
   const channel = useMemo(() => crypto.randomUUID(), [identity, plugin.revision, attempt, i18n.language, html, labels]);
   // Seed before the first paint. Subsequent theme changes use messages, preserving drafts and timers.
-  const document = useMemo(() => html === undefined ? undefined : source(html, channel, i18n.language, labels, readTheme()), [html, channel, i18n.language, labels]);
+  const compact = adapter?.context.mode === 'compact';
+  const formLabel = t('board.editForm');
+  const document = useMemo(() => html === undefined ? undefined : source(html, channel, i18n.language, labels, readTheme(), compact, formLabel), [html, channel, i18n.language, labels, compact, formLabel]);
   useLayoutEffect(() => {
     if (document === undefined) return;
     const ownedFrame = frame.current;

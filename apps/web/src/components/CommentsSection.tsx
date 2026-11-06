@@ -21,6 +21,7 @@ import { Collapse, TextSwap } from './motion';
 import ModelPicker from './ModelPicker';
 import PersistentError from './PersistentError';
 import './comments.css';
+import { useTranslation } from 'react-i18next';
 
 /** 落库后的行：`id` 由 Dexie 自增生成，取出来一定有值（这里只是把类型收窄给 groupThreads） */
 type Row = CommentRow & { id: number };
@@ -47,6 +48,7 @@ interface Props {
  * 内容全部由 AI 生成（只读，不做点赞，见非目标）。
  */
 export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOpenChange }: Props) {
+  const { t } = useTranslation('interface');
   const available = usePluginAvailable('material-tools');
   const [rows, setRows] = useState<Row[]>([]);
   /** 首次读回之前为 false —— 折叠态那行「还没有讨论」与展开态空态都靠它门控（不变量 I1） */
@@ -115,6 +117,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
   };
 
   const running = progress !== null;
+  const disabledReason = !available ? t('comments.unavailable') : hasSubtitles === null ? t('comments.loading') : hasSubtitles === false ? t('comments.subtitles') : '';
   const pct =
     progress && progress.total > 1 ? Math.round((progress.done / progress.total) * 100) : undefined;
 
@@ -168,7 +171,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
                 </LoadingButton>
               </Tooltip.Trigger>
               <Tooltip.Content>
-                <p>{hasSubtitles === false ? '请等待字幕自动处理完成' : '按课程内容生成多轮讨论'}</p>
+                <p>{disabledReason || t('comments.ready')}</p>
               </Tooltip.Content>
             </Tooltip>
 
@@ -192,6 +195,8 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
             <div className="comments-bar__spacer" />
             <ModelPicker slot="chat" field="llmModel" />
           </div>
+
+          {disabledReason && !running && <p className="comments-source" role="status" data-testid="comments-disabled-reason">{disabledReason}</p>}
 
           <p className="comments-source">AI 生成的学习讨论，供复习参考。</p>
 

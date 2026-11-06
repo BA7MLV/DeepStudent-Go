@@ -32,9 +32,9 @@ export function registerProjectRoutes(app: FastifyInstance, deps: {
   // descriptor walks; on macOS don't let sandbox commands race file access.
   const readable = (owner: string, id: string) => {
     projects.get(owner, id);
-    if (process.platform !== 'linux') projects.assertIdle(id);
+    if (process.platform !== 'linux') projects.assertNoExecution(id);
   };
-  const writable = (owner: string, id: string) => { projects.writable(owner, id); projects.assertIdle(id); };
+  const writable = (owner: string, id: string) => { projects.writable(owner, id); projects.assertNoExecution(id); };
   type Location = { Params: { id: string }; Querystring: { path?: string; operationId?: string } };
 
   app.get('/api/v1/projects', async (request, reply) => {

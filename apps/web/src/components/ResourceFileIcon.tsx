@@ -10,17 +10,26 @@ export function ResourceFileIcon({ entry }: { entry: ResourceEntry }) {
   const { projectId, path, name, courseId, revision, missing } = entry;
   const coverRevision = useCoverRevision();
   const [cover, setCover] = useState<{ key: string; url: string } | null>(null);
+  const [media, setMedia] = useState<{ key: string; video: boolean } | null>(null);
   const markdown = /\.(md|markdown)$/i.test(name);
-  const video = /\.(mp4|mov|m4v|webm|mkv|avi|flv|ts|m2ts|mpeg|mpg|wmv|3gp|rmvb|rm)$/i.test(name);
   const image = /\.(png|jpe?g|gif|webp|avif|bmp)$/i.test(name);
   const key = JSON.stringify([projectId, path, courseId, revision, missing]);
+  const video = /\.(mp4|mov|m4v|webm|mkv|avi|flv|ts|m2ts|mpeg|mpg|wmv|3gp|rmvb|rm)$/i.test(name)
+    || (media?.key === key && media.video);
 
   useEffect(() => {
     if (image && !missing) return;
     let cancelled = false;
     let objectUrl: string | undefined;
     void (async () => {
-      const stored = courseId ? await db.covers.get(courseId).catch(() => undefined) : undefined;
+      const [stored, course] = courseId ? await Promise.all([
+        db.covers.get(courseId).catch(() => undefined),
+        db.videos.get(courseId).catch(() => undefined),
+      ]) : [];
+      if (cancelled) return;
+      // Imported/renamed videos may have display names without an extension.
+      // The confirmed course kind, not just the filename, owns their media icon.
+      setMedia({ key, video: !!course && course.kind !== 'material' });
       let blob = stored?.blob;
       // Markdown is live filesystem content. Repaint on its file revision, rather
       // than showing an old derived cover after a reader/Bot edit. User covers win.
@@ -50,7 +59,7 @@ export function ResourceFileIcon({ entry }: { entry: ResourceEntry }) {
   }, [projectId, path, name, courseId, revision, missing, key, markdown, image, coverRevision]);
 
   const src = image && !missing ? serverClient.projectDownloadUrl(projectId, path) : cover?.key === key ? cover.url : null;
-  const extension = markdown ? 'MD' : name.includes('.') ? name.split('.').pop()!.toUpperCase() : video ? 'VIDEO' : 'FILE';
+  const extension = video ? 'VIDEO' : markdown ? 'MD' : name.includes('.') ? name.split('.').pop()!.toUpperCase() : 'FILE';
   return <span className="resource-file-icon" aria-hidden="true">
     <span className={video ? 'finder-video' : 'finder-document'}>
       {src ? <img src={src} alt="" loading="lazy" decoding="async" /> : <span className="finder-file-placeholder">{video ? <Sym name="play_circle" /> : <><i /><i /><i /><i /><i /><i /></>}</span>}

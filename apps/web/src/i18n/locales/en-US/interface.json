@@ -1,0 +1,22 @@
+{
+  "nav": { "home": "Home", "resources": "Resources", "bot": "Bot" },
+  "composer": {
+    "attach": "Add attachment", "add": "Add to conversation", "images": "Upload images", "files": "Upload files", "scope": "Tool scope", "settings": "Models and permissions",
+    "tools": "Message tools", "sending": "Sending", "queue": "Queue message", "stop": "Stop", "message": "Message the AI assistant",
+    "placeholder": "Ask anything", "touchPlaceholder": "Ask anything, or hold to speak",
+    "touchHelp": "Hold the input to speak, release to finish, or swipe up to cancel. Edit the transcript before sending.",
+    "desktopHelp": "Enter to send, Shift + Enter for a new line. Click the microphone for voice input."
+  },
+  "chatAdd": { "title": "Add content or change models", "references": "Course references", "referenceCount": "Course references · {{count}}", "readFailed": "Could not load courses. Close and try again.", "saveFailed": "Could not save course selection. Try again.", "handoutAdded": "Handout prompt added. Edit it before sending if needed.", "handoutFailed": "Could not load the handout prompt. Try again.", "handout": "Generate handout", "limited": "Limited", "search": "Search courses", "selected": "{{count}} selected, up to {{max}}", "auto": "Select automatically", "reset": "Reset to automatic", "wait": "Wait for the reply to finish before changing course references.", "loading": "Loading courses…", "empty": "No courses yet", "import": "Import courses", "importNew": "Import new courses", "noMatches": "No matching courses", "cancel": "Cancel", "save": "Save" },
+  "context": {
+    "detail": "Context usage ≈{{used}} / {{total}} ({{percent}}%)", "view": "View context details", "title": "Context details",
+    "used": "Used (estimated)", "window": "Context window", "remaining": "Remaining", "system": "System instructions", "history": "Message history", "current": "Current input / attachments",
+    "hint": "Usage is estimated. Leave room for the model reply. Compression filters older context but keeps the full conversation history.",
+    "compressing": "Compressing…", "compress": "Compress context", "disabled": "Wait until the conversation is ready and the reply has finished to compress."
+  },
+  "resources": { "advanced": "Advanced tools", "system": "System files", "systemHint": "Instructions and skills", "trash": "Open trash", "discardTitle": "Discard unsaved changes?", "discardDescription": "Closing will not save these edits to the file.", "discard": "Discard changes" },
+  "plugins": { "context": "Project context", "all": "Everywhere", "reconnecting": "Connection lost. Restoring plugin state…", "loading": "Loading plugins…", "open": "Expand", "openNamed": "Open the full {{name}} page", "empty": "No tools here yet." },
+  "assistant": { "title": "Study tools", "open": "Open study tools", "close": "Close study tools", "drag": "Drag to move study tools", "move": "Drag to move", "panels": "Study panels", "subs": "Subtitles", "chat": "Q&A", "dm": "Live comments", "cards": "Cards", "plugins": "Tools", "resize": "Resize study tools: {{edge}}", "resizeHelp": "Drag to resize, use arrow keys for small adjustments, or Home to reset", "edges": { "n": "top edge", "e": "right edge", "s": "bottom edge", "w": "left edge", "nw": "top left corner", "ne": "top right corner", "sw": "bottom left corner", "se": "bottom right corner" } },
+  "comments": { "unavailable": "Enable Material tools on the board before generating discussions.", "subtitles": "Discussions will be available when subtitles are ready.", "loading": "Checking subtitles…", "ready": "Generate discussions from this course" },
+  "recent": { "label": "Recent", "loadFailed": "Could not load recent conversations. Refresh to retry.", "rename": "Rename", "pin": "Pin", "unpin": "Unpin", "fork": "Branch conversation", "archive": "Archive", "delete": "Delete", "deleteTitle": "Delete “{{title}}”?", "deleteDescription": "Messages will be permanently deleted. Courses and study data are not affected.", "deleteLabel": "Delete conversation {{title}}", "renameTitle": "Rename conversation", "renameDescription": "Give this conversation a name to find it in Recent.", "placeholder": "Conversation title", "save": "Save", "tooLong": "Use no more than 60 characters", "archived": "“{{title}}” archived. Restore it in Settings → Data.", "emptyFork": "This conversation has no messages to branch from", "forked": "Conversation branched" }
+}

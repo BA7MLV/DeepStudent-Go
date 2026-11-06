@@ -85,9 +85,12 @@ DATA_DIR/
 - 项目会话的 `project_id` 创建后不可迁移，但 Bot 可显式访问同一用户的其他项目；shell 和二进制文件读取可用准确 projectId 选择挂载到 `/workspace` 的项目。
 - 用户自己的资源项目不再依赖逐项目 grant；读写/管理授权仍受全局 read/write/remove/shell 策略及项目 shell/network 策略约束，归档项目只读。审批绑定持久化工具参数，执行前再次校验权限。
 - 项目会话不继承全局 MCP 连接器，也不能通过项目管理工具越出当前用户。Bot 可列出并按明确 ID 访问用户自己的全部项目，重命名仍需要管理授权。
-- 同项目运行任务串行，不同项目按 `BOT_CONCURRENCY` 并发。等待审批/定时唤醒时释放运行槽；继续执行时重新校验文件 revision 与授权。
-- 浏览器写入与运行中的项目任务互斥，返回 409 `project_busy`；上传先写入不挂载到沙盒的暂存目录，提交时再次检查项目状态和锁。
+- 同项目运行任务串行，不同项目按 `BOT_CONCURRENCY` 并发。这是任务调度边界，不是文件锁；Bot 思考、网络等待和普通文件工具调用不再阻止浏览器访问或编辑文件。等待审批/定时唤醒时释放运行槽；继续执行时重新校验文件 revision 与授权。
+- 受控文件写入（浏览器、Bot 工具、附件复制、迁移）统一在同步 SQLite 写事务中检查沙盒执行租约并完成目标文件的 revision 校验和原子安装。旧版本只使该文件返回 409 `project_file_conflict`，不同文件互不产生版本冲突；新建同名文件拒绝覆盖。事务不跨越模型请求、人工审批、上传接收或其他异步等待。当前仍是单 API/runtime，不能据此允许不受控的宿主进程并发改盘。
+- Shell 目前仍直接读写挂载真实工作区，不能遵守应用层文件 CAS。因此只有实际沙盒操作执行中或其清理未确认时，保留该工作区的受控写入保护（409 `project_busy`）；其他工作区不受影响。Linux 通过固定目录描述符读取，macOS 路径回退在此期间也限制文件读取，避免符号链接替换竞态。项目删除等整体生命周期操作仍协调运行任务。
+- 登录后的记录分页（HTTP 和客户端 runtime）不再触发资源迁移、附件落盘或工作区清理。资源访问中的兼容迁移遇到忙碌工作区时按条目延后，其他项目照常处理；下一次资源访问会重试，不把版本冲突或权限错误冒充为忙碌。上传先写入不挂载到沙盒的暂存目录，提交时再次检查项目状态和执行租约。
 - shell 执行登记持久化租约。取消/重启后，只有 broker 确认旧容器已移除才释放租约；broker 不可达时保留锁并重试，避免旧命令与新写入重叠。
+- 后续若要在任意 Shell 执行期间也开放同工作区编辑，需要先引入隔离可写快照/写时复制层，并按变更文件的基础版本校验后发布结果；仅删掉执行租约检查或只增加文件级建议锁不安全。此次未改变沙盒挂载协议。
 - Linux 文件访问逐层使用 `O_NOFOLLOW` 和固定目录描述符；路径穿越、符号链接、硬链接和特殊文件不能通过文件 API 访问。macOS 开发环境使用检查路径，并禁止沙盒运行期间的文件 API 访问。
 - 当前为单 API/runtime + SQLite 部署；没有跨实例调度锁、磁盘配额或项目文件语义检索。
 
@@ -121,7 +124,7 @@ POST           /resources/courses/:id/text       { text, expected }
 
 资源目录项的文件夹带 `folderId`、可选 `color`；创建文件夹响应也返回 `folderId`，供聊天关联同一个资源实体。
 
-阅读器 Markdown 保存传完整原文快照 `expected` 做比较后写入；并发 Bot／页面修改返回 409，不覆盖新内容，编辑器保留草稿。目录／文件移动沿用 revision 校验、同名保护、路径安全和运行任务互斥。HTML 等课程原文件按附件返回，不能当作应用页面执行。
+阅读器 Markdown 保存传完整原文快照 `expected` 做比较后写入；并发 Bot／页面修改返回 409，不覆盖新内容，编辑器保留草稿。目录／文件移动沿用 revision 校验、同名保护、路径安全和实际沙盒执行保护，不再因对话处于运行状态而一律拒绝。HTML 等课程原文件按附件返回，不能当作应用页面执行。
 
 ## 旧数据与备份
 
@@ -142,3 +145,9 @@ Bot 全资源访问回归：`npx tsx scripts/test-bot-resource-access.mjs`（也
 聊天项目验证：`npm run test:chat-projects`、`npm run test:chat-projects:e2e`，覆盖本地／服务端创建、会话归属、发送后收起、子目录检索及桌面／手机文件夹颜色。截图在 `test-results/chat-projects`。
 
 兼容边缘验证：`npx tsx scripts/test-resource-compat.mjs`，覆盖原生解析／封面、固定描述符与符号链接替换、worker 写回、旧删除／并发保护／文件重建、移动索引预检及视频扩展名。
+
+### 2026-11-06 并发边界回归
+
+`npm run test:projects:concurrency` 新增 8 项，覆盖运行中编辑、同文件旧版本冲突、跨文件独立提交、事务内租约竞争、Bot 写入与不确定沙盒保护、逐项迁移延后及附件重试、记录分页不执行工作区迁移、日志恢复，以及真实 HTTP 登录／两种记录接口／无关项目可用性。8 项、API 类型检查、`test-resource-folders.mjs`、`test-resource-recovery.mjs`、`test-client-runtime.mjs` 通过；未运行真实 Docker/Linux 验收。
+
+额外旧套件未全绿：`test-projects.mjs` 的上传 fixture 缺受理凭证（400 `resource_upload_admission_required`）；`test-bot-resources.mjs`、`test-bot-workspace-files.mjs`、`test-bot-default-workspace.mjs`、`test-bot-resource-access.mjs` 的 runner mock 缺 `freezeModel()`；`test-resource-compat.mjs` 在媒体 Node 子进程失败，尚未定位。不删除断言或放松生产准入来绕过这些失败。

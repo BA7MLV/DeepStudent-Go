@@ -71,7 +71,9 @@ export class ProjectTools {
       return JSON.stringify(this.projects.list(thread.owner_id).map(({ id, name, workspacePath, archived }) => ({ id, name, workspacePath, archived, defaultWorkspace: id === workspace, resourceRoot: id === root })));
     }
     const id = this.workspace(thread, args.projectId);
-    if (id !== this.projects.workspaceId(thread)) this.projects.assertIdle(id);
+    // Managed writes are serialized and lease-checked by ProjectFiles. Linux
+    // reads use pinned descriptors; macOS retains its raw-sandbox race guard.
+    if (process.platform !== 'linux') this.projects.assertNoExecution(id);
     const filename = String(args.path);
     const offset = Number(args.offset ?? 0);
     if (args.action === 'list') {

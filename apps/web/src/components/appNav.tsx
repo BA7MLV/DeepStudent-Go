@@ -17,6 +17,7 @@ import { hasBoardComponents, navigationEntries } from '../plugins/layout';
  */
 export function useAppNav(catalog?: PluginCatalog): NavConfig {
   const { t } = useTranslation('common');
+  const { t: text } = useTranslation('interface');
   const { pathname, search } = useLocation();
   const pages = navigationEntries(catalog);
   const query = new URLSearchParams(search);
@@ -32,7 +33,7 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
     {
       // 主页就是待输入的新会话；后台生成和已有草稿仍沿用会话 store 的保留规则。
       value: 'home',
-      label: '主页',
+      label: text('nav.home'),
       icon: <Sym name="home" />,
       onClick: () => {
         void createSession();
@@ -44,14 +45,14 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
     },
     {
       value: 'resources',
-      label: '资源',
+      label: text('nav.resources'),
       icon: <Sym name="video_library" />,
       to: '/library',
       testId: 'nav-rail-home',
     },
     {
       value: 'bot',
-      label: 'Bot',
+      label: text('nav.bot'),
       icon: <Sym name="smart_toy" />,
       onClick: () => {
         useBotPanel.getState().setOpen(true);

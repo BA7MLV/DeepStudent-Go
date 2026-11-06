@@ -49,14 +49,15 @@ export function recoverResourceWorkflow(resources: ResourceStorage, owner: strin
     if (receipt.status !== 'pending') return;
     try {
       const journal = new ProjectFileJournal(resources.projects.files, owner, operationId);
-      for (const projectId of journal.projectIds()) resources.projects.assertIdle(projectId);
+      for (const projectId of journal.projectIds()) resources.projects.assertNoExecution(projectId);
       journal.rollback();
       db.prepare("UPDATE client_commands SET status='failed',error='resource_retryable' WHERE owner_id=? AND operation_id=?").run(owner, operationId);
       db.prepare('UPDATE resource_workflows SET last_error=NULL,updated_at=? WHERE owner_id=? AND operation_id=?').run(Date.now(), owner, operationId);
-    } catch {
+    } catch (error) {
       // Keep the original file/backup and request intact for support. No generic
       // retry can overwrite an external edit to resolve this condition.
-      db.prepare("UPDATE resource_workflows SET last_error='resource_rollback_conflict',updated_at=? WHERE owner_id=? AND operation_id=?").run(Date.now(), owner, operationId);
+      const code = error instanceof ProjectError && error.code === 'project_busy' ? 'project_busy' : 'resource_rollback_conflict';
+      db.prepare('UPDATE resource_workflows SET last_error=?,updated_at=? WHERE owner_id=? AND operation_id=?').run(code, Date.now(), owner, operationId);
     }
   }).immediate();
 }

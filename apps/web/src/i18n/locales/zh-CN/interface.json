@@ -1,0 +1,22 @@
+{
+  "nav": { "home": "主页", "resources": "资源", "bot": "机器人" },
+  "composer": {
+    "attach": "添加附件", "add": "添加到对话", "images": "上传图片", "files": "上传文件", "scope": "工具范围", "settings": "模型与权限",
+    "tools": "输入区工具", "sending": "正在发送", "queue": "排队发送", "stop": "停止", "message": "给 AI 助手发送消息",
+    "placeholder": "随便问点什么", "touchPlaceholder": "随便问点什么，或长按说话",
+    "touchHelp": "长按输入栏说话，松开完成，上滑取消；识别后可编辑再发送",
+    "desktopHelp": "回车发送，Shift + 回车换行；点击麦克风开始语音输入"
+  },
+  "chatAdd": { "title": "添加内容或调整模型", "references": "课程引用", "referenceCount": "课程引用 · {{count}} 门", "readFailed": "课程列表读取失败，请关闭后重试", "saveFailed": "课程选择保存失败，请重试", "handoutAdded": "已添加讲义提示词，可修改后发送", "handoutFailed": "讲义提示词加载失败，请重试", "handout": "生成讲义", "limited": "已限定", "search": "搜索课程", "selected": "已选择 {{count}} 门，最多 {{max}} 门", "auto": "自动选择", "reset": "恢复自动选择", "wait": "回复完成后可修改课程引用。", "loading": "正在读取课程…", "empty": "课程库还是空的", "import": "导入课程", "importNew": "导入新课程", "noMatches": "没有匹配的课程", "cancel": "取消", "save": "保存" },
+  "context": {
+    "detail": "上下文用量 ≈{{used}} / {{total}}（{{percent}}%）", "view": "查看上下文详情", "title": "上下文详情",
+    "used": "已用（估算）", "window": "上下文窗口", "remaining": "剩余容量", "system": "系统提示词", "history": "历史消息", "current": "当前输入 / 附件",
+    "hint": "用量为估算值，剩余容量还需容纳模型回复。压缩仅筛选旧上下文，完整聊天记录会保留。",
+    "compressing": "正在压缩…", "compress": "压缩上下文", "disabled": "当前暂不可压缩，请在会话就绪且回复结束后重试。"
+  },
+  "resources": { "advanced": "高级工具", "system": "系统文件", "systemHint": "提示词与技能", "trash": "打开回收站", "discardTitle": "放弃未保存的修改？", "discardDescription": "关闭后本次编辑不会写入文件。", "discard": "放弃修改" },
+  "plugins": { "context": "项目上下文", "all": "所有地方", "reconnecting": "连接中断，正在恢复插件状态…", "loading": "加载插件…", "open": "展开", "openNamed": "打开{{name}}完整页", "empty": "此处还没有功能。" },
+  "assistant": { "title": "学习助手", "open": "打开学习助手", "close": "收起学习助手", "drag": "拖动移动学习助手", "move": "拖动可移动", "panels": "学习面板", "subs": "字幕", "chat": "问答", "dm": "弹幕", "cards": "卡片", "plugins": "组件", "resize": "调整学习助手{{edge}}", "resizeHelp": "拖动调整尺寸，方向键微调，Home 恢复默认", "edges": { "n": "上边缘", "e": "右边缘", "s": "下边缘", "w": "左边缘", "nw": "左上角", "ne": "右上角", "sw": "左下角", "se": "右下角" } },
+  "comments": { "unavailable": "请先在看板中启用「资料处理」组件，再生成讨论。", "subtitles": "字幕就绪后即可生成讨论。", "loading": "正在检查字幕…", "ready": "按课程内容生成多轮讨论" },
+  "recent": { "label": "最近", "loadFailed": "最近会话加载失败，请刷新重试", "rename": "重命名", "pin": "置顶", "unpin": "取消置顶", "fork": "分支出新会话", "archive": "归档", "delete": "删除", "deleteTitle": "删除会话「{{title}}」？", "deleteDescription": "会话里的问答记录会被永久删除，课程和学习数据不受影响。", "deleteLabel": "删除会话 {{title}}", "renameTitle": "重命名会话", "renameDescription": "给这段对话起个名字，方便以后在最近列表中认出来。", "placeholder": "会话标题", "save": "保存", "tooLong": "标题请控制在 60 个字以内", "archived": "「{{title}}」已归档，可在设置的数据页恢复", "emptyFork": "这条会话还没有内容，无法分支", "forked": "已分支出新会话" }
+}

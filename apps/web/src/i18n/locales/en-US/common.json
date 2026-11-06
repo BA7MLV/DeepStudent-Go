@@ -8,6 +8,7 @@
   },
   "settings": "Settings",
   "board": {
+    "editForm": "Create / edit",
     "title": "Board",
     "description": "Tasks and everyday tools, with plugins you can add or remove.",
     "template": "Plugin template",
@@ -207,7 +208,7 @@
     "archived": "Archived",
     "conversation": "Conversation with {{name}}",
     "composer": "Message",
-    "taskPlaceholder": "Ask anything, or hold to speak",
+    "taskPlaceholder": "Ask anything",
     "projectPurpose": "Work on files and tasks in this project",
     "attach": "Add attachment",
     "attachment": "Attachment",

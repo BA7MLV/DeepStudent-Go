@@ -115,7 +115,7 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
   if (operation.kind === 'move') resources.projects.writable(owner, operation.targetProjectId);
    if (operation.kind === 'createDirectory' || operation.kind === 'saveProjectText' || operation.kind === 'upload') {
     resources.projects.writable(owner, operation.projectId);
-    resources.projects.assertIdle(operation.projectId);
+    resources.projects.assertNoExecution(operation.projectId);
    }
    if (operation.kind === 'upload') {
      if (!Number.isSafeInteger(operation.size) || operation.size < 0 || !/^[a-f0-9]{64}$/.test(operation.sha256)
@@ -140,7 +140,7 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
     // admission and another process may have archived/revoked the target.
     if ('projectId' in operation && !['restore', 'deleteTrash'].includes(operation.kind)) resources.projects.get(owner, operation.projectId);
     if (operation.kind === 'saveProjectText' || operation.kind === 'createDirectory') {
-      resources.projects.writable(owner, operation.projectId); resources.projects.assertIdle(operation.projectId);
+      resources.projects.writable(owner, operation.projectId); resources.projects.assertNoExecution(operation.projectId);
     }
     let result: unknown = { ok: true };
     switch (operation.kind) {

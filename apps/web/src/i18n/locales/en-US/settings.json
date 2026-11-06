@@ -51,9 +51,9 @@
   },
   "saveBar": {
     "label": "Save settings",
-    "unsaved": "Unsaved changes",
+    "unsaved": "Unsaved changes — save to apply",
     "saving": "Saving…",
-    "saved": "All changes saved",
+    "saved": "No unsaved changes",
     "loading": "Loading settings…",
     "retry": "Retry",
     "useServerVersion": "Use Server Version…",
@@ -143,10 +143,10 @@
     "data": "Data"
   },
   "usage": {
-    "description": "Read from the server SQLite ledgers. Chat includes chat and ordinary model requests; Bot includes its child tasks, counted once. Browser-direct history is not included here.",
+    "description": "View server model usage by source, model, or date.",
     "refresh": "Refresh",
-    "start": "Start date (UTC)",
-    "end": "End date (UTC, inclusive)",
+    "start": "Start date",
+    "end": "End date (inclusive)",
     "source": "Source",
     "sources": {
       "all": "All usage",
@@ -170,14 +170,16 @@
     "cacheWrite": "Cache write tokens",
     "reasoning": "Reasoning tokens",
     "hitRate": "Cache hit rate",
-    "accountingNote": "Total tokens = known input + known output, excluding reservations; this is not a bill. Cache reads/writes are included in input and reasoning in output, never added twice. Missing fields are unknown; partial coverage shows known subtotals only. Hit rate is weighted by input tokens of requests reporting cache reads.",
+    "accountingNote": "Includes reported usage only, not actual costs. Missing data is marked unknown.",
+    "details": "How usage is counted",
+    "technicalNote": "Dates use Coordinated Universal Time, not your local timezone. Each server request is counted once; Bot subtasks are included in Bot usage. Totals add known input and output without double-counting cache or reasoning. Partial coverage shows known subtotals; cache hit rate is weighted by input with cache-read measurements.",
     "empty": "No requests in the selected range.",
     "breakdown": "Usage breakdown (scroll horizontally)",
-    "date": "Date (UTC)",
+    "date": "Date",
     "providerModel": "Provider / model ID",
     "requests": "Requests",
     "measured": "Full usage / requests",
-    "updated": "{{start}} through {{end}} (UTC) · Measured: {{time}}"
+    "updated": "{{start}} through {{end}} · Updated {{time}}"
   },
   "serverStorage": {
     "title": "Server storage",

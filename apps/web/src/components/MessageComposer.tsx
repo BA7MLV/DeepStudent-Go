@@ -6,6 +6,8 @@ import ComposerExpand, { useComposerSize } from './ComposerExpand';
 import { ChatComposer, ChatComposerInput, ChatComposerTools } from './ChatComposer';
 import VoiceInput from './VoiceInput';
 import { CHAT_IMAGE_ACCEPT } from '../chat/attachments';
+import { useTranslation } from 'react-i18next';
+import { useMediaQuery } from '../utils/useMobile';
 import './message-composer.css';
 
 /**
@@ -60,11 +62,13 @@ const MessageComposer = forwardRef<MessageComposerHandle, MessageComposerProps>(
   onScope,
   onSettings,
   onFocus,
-  attachLabel = '添加附件',
+  attachLabel,
   ariaLabel,
   accessory,
   className,
 }, ref) {
+  const { t } = useTranslation('interface');
+  const touch = useMediaQuery('(pointer: coarse)');
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const holdRef = useRef<HTMLDivElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
@@ -96,17 +100,17 @@ const MessageComposer = forwardRef<MessageComposerHandle, MessageComposerProps>(
         {accessory && <div className="imsg-composer__accessory">{accessory}</div>}
         {onFiles && <div className="imsg-composer__attach chat-add-menu">
           <Dropdown>
-            <Button isIconOnly size="sm" variant="tertiary" className="chat-add-menu__trigger" aria-label={attachLabel} isDisabled={disabled} data-testid="bot-add"><Sym name="add" /></Button>
-            <Dropdown.Popover placement="top start"><Dropdown.Menu aria-label="添加到对话" onAction={key => {
+            <Button isIconOnly size="sm" variant="tertiary" className="chat-add-menu__trigger" aria-label={attachLabel ?? t('composer.attach')} isDisabled={disabled} data-testid="bot-add"><Sym name="add" /></Button>
+            <Dropdown.Popover placement="top start"><Dropdown.Menu aria-label={t('composer.add')} onAction={key => {
               if (key === 'images') imageInput.current?.click();
               else if (key === 'files') fileInput.current?.click();
               else if (key === 'scope') onScope?.();
               else if (key === 'settings') onSettings?.();
             }}>
-              <Dropdown.Item id="images" textValue="上传图片"><Sym name="image" />上传图片</Dropdown.Item>
-              <Dropdown.Item id="files" textValue="上传文件"><Sym name="attach_file" />上传文件</Dropdown.Item>
-              {onScope && <Dropdown.Item id="scope" textValue="工具范围"><Sym name="extension" />工具范围</Dropdown.Item>}
-              {onSettings && <Dropdown.Item id="settings" textValue="模型与权限"><Sym name="tune" />模型与权限</Dropdown.Item>}
+              <Dropdown.Item id="images" textValue={t('composer.images')}><Sym name="image" />{t('composer.images')}</Dropdown.Item>
+              <Dropdown.Item id="files" textValue={t('composer.files')}><Sym name="attach_file" />{t('composer.files')}</Dropdown.Item>
+              {onScope && <Dropdown.Item id="scope" textValue={t('composer.scope')}><Sym name="extension" />{t('composer.scope')}</Dropdown.Item>}
+              {onSettings && <Dropdown.Item id="settings" textValue={t('composer.settings')}><Sym name="tune" />{t('composer.settings')}</Dropdown.Item>}
             </Dropdown.Menu></Dropdown.Popover>
           </Dropdown>
           <input ref={imageInput} type="file" accept={CHAT_IMAGE_ACCEPT} multiple hidden data-testid="bot-image-input" onChange={event => { onFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
@@ -126,7 +130,7 @@ const MessageComposer = forwardRef<MessageComposerHandle, MessageComposerProps>(
             onChange={(event) => edit(event.target.value)}
             onPaste={paste}
             onFocus={onFocus}
-            aria-description="长按输入栏说话，松开完成，上滑取消；识别后可编辑再发送"
+            aria-description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')}
             {...ime.compositionProps}
             onKeyDown={(event) => {
               if (!ime.isSubmitEnter(event)) return;
@@ -134,9 +138,9 @@ const MessageComposer = forwardRef<MessageComposerHandle, MessageComposerProps>(
               submit();
             }}
           />
-        <ChatComposerTools aria-label="输入区工具">
-          {sending ? <Spinner size="sm" aria-label="正在发送" /> : busy && onStop ? (
-            <Button isIconOnly size="sm" variant={hasDraft ? 'primary' : 'tertiary'} className={hasDraft ? 'imsg-composer__send' : 'imsg-composer__stop'} aria-label={hasDraft ? '排队发送' : '停止'} isDisabled={hasDraft && !canSend} onPress={hasDraft ? submit : onStop}>
+        <ChatComposerTools aria-label={t('composer.tools')}>
+          {sending ? <Spinner size="sm" aria-label={t('composer.sending')} /> : busy && onStop ? (
+            <Button isIconOnly size="sm" variant={hasDraft ? 'primary' : 'tertiary'} className={hasDraft ? 'imsg-composer__send' : 'imsg-composer__stop'} aria-label={t(hasDraft ? 'composer.queue' : 'composer.stop')} isDisabled={hasDraft && !canSend} onPress={hasDraft ? submit : onStop}>
               <Sym name={hasDraft ? 'arrow_upward' : 'stop'} filled={!hasDraft} />
             </Button>
           ) : (

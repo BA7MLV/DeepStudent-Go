@@ -96,7 +96,7 @@
   "errors": {
     "project_trashed": "文件夹已在废纸篓中，请先恢复。",
     "protected_resource_folder": "这是系统使用的工作区，不能删除。",
-    "project_busy": "文件夹正在执行任务，请停止任务或稍后重试。",
+    "project_busy": "目标文件夹仍被未完成的操作占用，请稍后重试。",
     "thread_busy": "请先停止会话任务，再删除会话。",
     "project_archived": "文件夹已归档，请先恢复。",
     "thread_archived": "会话已归档，请先恢复。",

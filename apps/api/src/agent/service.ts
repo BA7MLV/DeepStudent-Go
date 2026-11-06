@@ -55,7 +55,7 @@ export class BotApplicationService {
       if (!parsed) throw new Error('invalid_message');
       for (const attachment of parsed.files) if (thread.project_id) {
         if (attachment.projectId !== thread.project_id || typeof attachment.projectPath !== 'string') throw new Error('invalid_message');
-        if (process.platform !== 'linux') this.projects!.assertIdle(thread.project_id);
+        if (process.platform !== 'linux') this.projects!.assertNoExecution(thread.project_id);
         const file = this.projects!.files.open(thread.project_id, attachment.projectPath); fs.closeSync(file.fd);
       } else if (!attachment.fileId || !this.store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(attachment.fileId, owner)) throw new Error('invalid_message');
     }

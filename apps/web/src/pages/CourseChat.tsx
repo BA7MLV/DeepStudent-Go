@@ -539,6 +539,8 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
   pinIfSticking: () => void; onSelectProject: () => void;
 }) {
   if (import.meta.env.DEV) recordChatRender('CourseChatInputRegion');
+  const { t } = useTranslation('interface');
+  const touch = useMediaQuery('(pointer: coarse)');
   const activeId = useCourseChat(s => s.activeId), loaded = useCourseChat(s => s.loaded), loading = useCourseChat(s => s.loading);
   const draft = useCourseChat(s => s.draft), setDraft = useCourseChat(s => s.setDraft), send = useCourseChat(s => s.send), stop = useCourseChat(s => s.stop);
   const pendingAsk = useCourseChat(s => s.pendingAsk), pendingPlan = useCourseChat(s => s.pendingPlan), project = useCourseChat(s => s.project);
@@ -575,12 +577,12 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
       <ChatAddMenu disabled={!loaded || !!pendingAsk} onSelectProject={onSelectProject} />
       <ComposerExpand visible={composerOverflow} key={`expand-${activeId ?? 'draft'}`} value={draft} onPaste={handlePaste}
         onChange={value => { setVoiceEditVersion(version => version + 1); setDraft(value); }} />
-      <ChatComposerInput ref={composerRef} className="course-chat__input" aria-label="给 AI 助手发送消息"
-        aria-description="长按输入栏说话，松开完成，上滑取消；识别后可编辑再发送" rows={1} fullWidth value={draft}
+      <ChatComposerInput ref={composerRef} className="course-chat__input" aria-label={t('composer.message')}
+        aria-description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')} rows={1} fullWidth value={draft}
         onChange={event => { setVoiceEditVersion(version => version + 1); setDraft(event.target.value); }} onPaste={handlePaste}
-        enterKeyHint="send" {...ime.compositionProps} onFocus={pinIfSticking} disabled={!loaded} placeholder="随便问点什么，或长按说话"
+        enterKeyHint="send" {...ime.compositionProps} onFocus={pinIfSticking} disabled={!loaded} placeholder={t(touch ? 'composer.touchPlaceholder' : 'composer.placeholder')}
         onKeyDown={event => { if (!ime.isSubmitEnter(event)) return; event.preventDefault(); submit(); }} />
-      <ChatComposerTools className="course-chat__composer-tools" aria-label="输入区工具" orientation="horizontal">
+      <ChatComposerTools className="course-chat__composer-tools" aria-label={t('composer.tools')} orientation="horizontal">
         <PluginActions surface="chat.composer.actions" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} />
         <span className="course-chat__context-usage-slot"><CourseChatContextUsage /></span>
         {generating ? <Tooltip><Tooltip.Trigger><Button isIconOnly variant="tertiary" size="sm"
@@ -814,7 +816,7 @@ export default function CourseChat() {
       顶栏毫无反应，分不清自己看的是哪一段对话。 */
   const activeSession = sessions.find((session) => session.id === activeId);
   // 草稿态的主页不显示标题；已有会话仍显示自己的标题。
-  const activeTitle = activeSession?.title ?? (activeId == null ? '' : 'AI 助手');
+  const activeTitle = messages.length > 0 ? activeSession?.title ?? 'AI 助手' : '';
   /**
    * 本轮循环是否还活着（或卡片是否**从断点恢复**成了可答）：两张卡的 `active` 由
    * `pendingAsk` / `pendingPlan` 的 `messageKey` 是否对上这条消息决定。刷新后从库里读回的卡

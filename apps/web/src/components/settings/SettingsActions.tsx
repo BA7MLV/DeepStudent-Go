@@ -51,7 +51,7 @@ export function SettingsSaveBar({ dirty, busy = false, disabled = false, error, 
       </p>
       <div className="settings-save-bar__buttons">
         {children}
-        <LoadingButton variant="primary" loading={busy} isDisabled={disabled} onPress={onSave} data-testid={saveTestId}>
+        <LoadingButton variant="primary" loading={busy} isDisabled={disabled || !dirty} onPress={onSave} data-testid={saveTestId}>
           {busy ? t('saveBar.saving') : saveLabel}
         </LoadingButton>
       </div>

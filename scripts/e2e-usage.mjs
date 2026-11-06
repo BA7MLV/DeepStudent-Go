@@ -66,15 +66,29 @@ try {
   assert.equal(await unknown.getByRole('cell', { name: '未知', exact: true }).count(), 6);
   const zero = module.getByRole('row').filter({ hasText: 'zero-model' });
   assert.equal(await zero.getByRole('cell', { name: '0', exact: true }).count(), 5);
-  const source = page.getByLabel('来源', { exact: true });
+  const select = async (label, option) => {
+    await page.locator(`button[data-slot="select-trigger"][aria-label="${label}"]`).click();
+    await page.getByRole('option', { name: option, exact: true }).click();
+  };
+  const source = { selectOption: value => select('来源', ({ bot: '机器人', chat: '对话与普通请求', all: '全部用量' })[value]) };
+  const date = label => ({ fill: async value => {
+    const field = page.getByRole('group', { name: label, exact: true }).first();
+    const parts = value.split('-');
+    for (const [index, type] of ['year', 'month', 'day'].entries()) {
+      const segment = field.locator(`[data-type="${type}"]`);
+      await segment.focus(); await segment.press('ArrowUp');
+      await segment.pressSequentially(String(Number(parts[index])));
+    }
+    await page.keyboard.press('Tab');
+  } });
   await source.selectOption('bot'); await waitTotal('2,200');
   assert.equal(await page.getByTestId('usage-source-chat').count(), 0);
   assert.equal(await module.getByRole('row').count(), 2, 'header and one Bot model group');
   await source.selectOption('all'); await waitTotal('3,300');
-  await page.getByLabel('汇总方式').selectOption('day');
+  await select('汇总方式', '按日期、来源、供应商 / 模型');
   await module.getByRole('cell', { name: yesterday, exact: true }).waitFor();
-  await page.getByLabel('开始日期（UTC）', { exact: true }).fill(today); await waitTotal('1,100');
-  await page.getByLabel('开始日期（UTC）', { exact: true }).fill(yesterday); await waitTotal('3,300');
+  await date('开始日期').fill(today); await waitTotal('1,100');
+  await date('开始日期').fill(yesterday); await waitTotal('3,300');
   const screenshots = path.resolve('test-results/usage'); fs.mkdirSync(screenshots, { recursive: true });
   await page.screenshot({ path: path.join(screenshots, 'desktop-zh.png') });
 
@@ -101,8 +115,8 @@ try {
   await page.unrouteAll({ behavior: 'wait' });
   assert.match(await total.innerText(), /1\.1K/, 'late response cannot replace a newer source');
 
-  const end = page.getByLabel('结束日期（UTC，含当日）', { exact: true });
-  const start = page.getByLabel('开始日期（UTC）', { exact: true });
+  const end = date('结束日期（含当日）');
+  const start = date('开始日期');
   const emptyDay = new Date(Date.parse(today) - 86400000 * 30).toISOString().slice(0, 10);
   await start.fill(emptyDay); await end.fill(emptyDay); await waitTotal('0 token');
   assert.match(await page.getByTestId('usage-breakdown').innerText(), /暂无请求/);
@@ -113,6 +127,14 @@ try {
 
   for (const width of [360, 390]) {
     await page.setViewportSize({ width, height: 844 }); await waitTotal('3,300');
+    // Responsive navigation and the modal settle after the resize event; the
+    // previous report can already be visible before that layout has committed.
+    try { await page.waitForFunction(() => document.documentElement.scrollWidth <= innerWidth, undefined, { timeout: 5000 }); }
+    catch (error) {
+      await page.screenshot({ path: path.join(screenshots, `overflow-${width}.png`), fullPage: true });
+      console.error(await page.evaluate(() => [...document.querySelectorAll('body *')].filter(node => node.getBoundingClientRect().right > innerWidth + 1).map(node => ({ tag: node.tagName, class: node.className, right: node.getBoundingClientRect().right })).slice(0, 20)));
+      throw error;
+    }
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert.equal(await module.evaluate(element => element.scrollWidth > element.clientWidth), false, 'wide table scrolls inside its own region');
     await page.screenshot({ path: path.join(screenshots, `mobile-zh-${width}.png`) });
@@ -135,8 +157,9 @@ try {
   await local.route('https://models.dev/**', route => route.fulfill({ json: {} }));
   const localPage = await local.newPage();
   await localPage.goto(`${origin}/#/settings`);
-  await localPage.getByTestId('settings-modal').waitFor();
-  assert.equal(await localPage.getByTestId('settings-nav-usage').count(), 0, 'browser-direct mode never mislabels local history as server usage');
+  await localPage.getByRole('alert').waitFor();
+  assert.equal(await localPage.getByTestId('settings-modal').count(), 0, 'an unavailable server stays at the connection gate');
+  assert.equal(await localPage.getByTestId('settings-nav-usage').count(), 0, 'server-only usage never falls back to local history');
   await local.close();
   console.log('PASS: real SQLite → authenticated API → settings deep link, source/date/model grouping, unknown/zero, refresh/retry, stale-response cancellation, empty/invalid windows, Chinese/English and 360/390/1440px layouts');
 } finally { await browser?.close(); await vite?.close(); store?.close(); await api.close(); fs.rmSync(directory, { recursive: true, force: true }); }

@@ -445,7 +445,7 @@ export function StudyDashboard() {
         </div>
 
         <div className="text-secondary heat-note">
-          只在本机记录：页面切到后台、锁屏或超过 {idleMinutes} 分钟没有操作时不计时；
+          学习记录随账号保存到服务器。页面切到后台、锁屏或超过 {idleMinutes} 分钟没有操作时不计时；
           正在播放视频时不判空闲（看课本来就不需要一直操作）。想改判定时长或清空记录，见
           「设置 → 学习」。
         </div>

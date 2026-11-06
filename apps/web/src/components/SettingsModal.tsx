@@ -27,14 +27,14 @@ import { SettingsActionsScope } from './settings/SettingsActions';
 type Module = { key: SettingsModule; icon: string; tint: string; Component: LazyExoticComponent<ComponentType>; cloudOnly?: boolean };
 const ALL_MODULES: Module[] = [
   { key: 'models', icon: 'neurology', tint: '#5e5ce6', Component: lazy(() => import('../cloud/Models')) },
-  { key: 'assistant', icon: 'neurology', tint: '#0a84ff', Component: lazy(() => import('./settings/AssistantModule')) },
+  { key: 'assistant', icon: 'auto_awesome', tint: '#af52de', Component: lazy(() => import('./settings/AssistantModule')) },
   { key: 'websearch', icon: 'search', tint: '#30b0c7', Component: lazy(() => import('../web-search/WebSearchSettings')), cloudOnly: true },
   // Bot 与消息渠道只在连着自己服务器时存在：本机模式没有 Bot 运行时，也就没有这一屏。
   { key: 'botChannels', icon: 'forum', tint: '#34c759', Component: lazy(() => import('./settings/BotChannelsModule')), cloudOnly: true },
-  { key: 'usage', icon: 'bar_chart', tint: '#30b0c7', Component: lazy(() => import('./settings/UsageModule')), cloudOnly: true },
+  { key: 'usage', icon: 'bar_chart', tint: '#d18a19', Component: lazy(() => import('./settings/UsageModule')), cloudOnly: true },
   { key: 'experience', icon: 'style', tint: '#ff9f0a', Component: lazy(() => import('./settings/ExperienceModule')) },
-  { key: 'sources', icon: 'cloud_upload', tint: '#30b0c7', Component: lazy(() => import('./settings/SourcesModule')) },
-  { key: 'live', icon: 'link', tint: '#34c759', Component: lazy(() => import('./settings/LiveModule')) },
+  { key: 'sources', icon: 'cloud_upload', tint: '#607d8b', Component: lazy(() => import('./settings/SourcesModule')) },
+  { key: 'live', icon: 'link', tint: '#d65d7a', Component: lazy(() => import('./settings/LiveModule')) },
   { key: 'study', icon: 'calendar_month', tint: '#ff453a', Component: lazy(() => import('./settings/StudyModule')) },
   { key: 'data', icon: 'folder', tint: '#64d2ff', Component: lazy(() => import('./settings/DataModule')) },
 ];

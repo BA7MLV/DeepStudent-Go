@@ -65,7 +65,6 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   private readonly domains: ReturnType<typeof assembleRuntimeDomains>;
   constructor(private readonly store: DatabaseStore, private readonly plugins: PluginService,
     private readonly submit?: (owner: string, request: RuntimeTaskSubmit) => unknown,
-    private readonly prepareRecords?: (owner: string) => void,
     private readonly resources?: ResourceFiles,
      private readonly configuration?: CloudConfiguration) {
     this.domains = assembleRuntimeDomains({ store, plugins, resources, canonical,
@@ -355,7 +354,8 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   async recordsPage(owner: string, after: number): Promise<RuntimeRecordsPage> {
     if (!Number.isSafeInteger(after) || after < 0) throw new RemoteError('gateway/bad-request', 'Invalid records cursor', {});
-    this.prepareRecords?.(owner);
+    // Record pages never run project migration, attachment installation or
+    // workspace cleanup. A busy file must not gate login or record feeds.
     const records = new CloudRecords(this.store).list(owner, after);
     const highWater = (this.store.db.prepare("SELECT seq FROM sqlite_sequence WHERE name='cloud_records'").get() as { seq: number } | undefined)?.seq ?? 0;
     return TYPERT_REMOTE.methods['clientRuntime/recordsPage'].result.create().parse({ records, cursor: records.at(-1)?.revision ?? Math.min(after, highWater), more: records.length === 200,
