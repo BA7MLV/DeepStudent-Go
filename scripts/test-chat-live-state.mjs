@@ -12,6 +12,27 @@ test('historical media receipt cannot poison the task-list wire baseline', () =>
   assert.equal(task.executor, 'node');
 });
 
+test('activity task projection drops historical result and the duplicate transcript', () => {
+  const base = { id: 'task', kind: 'chat', resource: 'r', status: 'completed', input: '{"sessionId":1}',
+    progress: JSON.stringify({ phase: 'answer', content: 'final answer', modelTranscript: { version: 1, messages: [] } }),
+    result: JSON.stringify({ content: 'final answer', rowId: 2 }), error: null, created_at: new Date().toISOString(), executor: 'node' };
+  const task = taskDto(base, 'activity');
+  assert.equal(task.result, null, 'historical results are not repeated to every live subscriber');
+  assert.deepEqual(task.progress, { phase: 'answer' }, 'terminal prose stays in the record projection');
+  assert.equal(task.progress.modelTranscript, undefined);
+  const running = { ...base, status: 'running', progress: JSON.stringify({ phase: 'answer', content: 'streaming', modelTranscript: { version: 1, messages: [] } }) };
+  const activity = taskDto(running, 'activity');
+  assert.deepEqual(activity.progress, { phase: 'answer' }, 'the global task list does not repeat the open answer');
+  const session = taskDto(running, 'session');
+  assert.equal(session.progress.content, 'streaming', 'the open conversation still receives its live text');
+  assert.equal(session.progress.modelTranscript, undefined, 'progress never duplicates the stored model trace');
+  const full = taskDto(base, 'full');
+  assert.deepEqual(full.result, { content: 'final answer', rowId: 2 }, 'one-shot readers still receive the full task');
+  assert.deepEqual(full.progress, { phase: 'answer', content: 'final answer', modelTranscript: { version: 1, messages: [] } });
+  const codec = TYPERT_REMOTE.methods['clientRuntime/watchTasks'].result.create();
+  assert.doesNotThrow(() => codec.parse(JSON.parse(JSON.stringify({ type: 'snapshot', revision: 1, value: { tasks: [task, activity, session] } }))));
+});
+
 test('thinking checkpoints stay streaming through history reconciliation; terminal error preserves cause', () => {
   let task = { id: 't', status: 'running', createdAt: new Date().toISOString(), progress: { phase: 'thinking' } };
   const convert = row => ({ key: 'stored', rowId: row.id, role: 'ai', taskId: 't', ...chatTaskState(row, task) });

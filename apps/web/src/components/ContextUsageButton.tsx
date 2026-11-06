@@ -23,8 +23,12 @@ function compact(n: number): string {
 }
 
 /**
- * 上下文用量指示器：常驻百分比（包括 0%），仅压缩期间显示忙碌动画。
- * 点击查看具体估值与用量构成，避免空闲状态被误认为正在加载。
+ * 上下文用量指示器：输入卡工具行右端的一枚**环形进度**图标。
+ *
+ * ## 为什么是环而不是文字
+ * 工具行的宽度是稀缺资源（模型 chip / 技能 / 发送键都在抢），常驻的
+ * 「≈32.5k / 128k」会把这一行撑到换行。环把「还剩多少」压进一颗图标的大小：
+ * 抬眼一看填充比例就够了，点击后再查看具体估值与用量构成。
  *
  * ## 三档口径与 ChatPanel 对齐
  * >70% 变 `--warning`、>90% 变 `--danger`，与视频问答面板底部那行用量文字
@@ -45,14 +49,26 @@ export default function ContextUsageButton({ tokens, windowTokens, breakdown, te
     return () => clearTimeout(timer);
   }, [compression?.phase, compression?.revision]);
   const ratio = windowTokens > 0 ? tokens / windowTokens : 0;
+  const filled = Math.min(1, Math.max(0, ratio));
   const pct = Math.round(ratio * 100);
   const level = ratio > 0.9 ? 'bad' : ratio > 0.7 ? 'warn' : 'normal';
+  // r=8 的周长；进度靠 dashoffset 倒着画，配 rotate(-90) 让弧从 12 点方向起笔。
+  const circumference = 2 * Math.PI * 8;
+  const offset = circumference * (1 - filled);
   const detail = t('context.detail', { used: compact(tokens), total: compact(windowTokens), percent: pct });
   const message = compression?.message ?? '';
+  const ring = (
+    <svg className="ctx-usage__ring" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <circle className="ctx-usage__track" cx="10" cy="10" r="8" />
+      <circle className="ctx-usage__fill" cx="10" cy="10" r="8"
+        strokeDasharray={circumference.toFixed(2)} strokeDashoffset={offset.toFixed(2)} transform="rotate(-90 10 10)" />
+    </svg>
+  );
 
   return (
     <Popover>
         <Button
+          isIconOnly
           variant="tertiary"
           size="sm"
           className="ctx-usage"
@@ -62,7 +78,7 @@ export default function ContextUsageButton({ tokens, windowTokens, breakdown, te
           aria-busy={compressing}
           data-compression={compressing ? 'compressing' : showResult ? 'success' : compression?.phase === 'error' ? 'error' : 'idle'}
         >
-          <IconSwap active={compressing || showResult ? 'b' : 'a'} a={<span className="ctx-usage__percent">{pct}%</span>} b={
+          <IconSwap active={compressing || showResult ? 'b' : 'a'} a={ring} b={
             <IconSwap active={showResult ? 'b' : 'a'}
                a={<MatrixDots className="ctx-usage__spinner" />}
               b={showResult ? <SuccessCheck key={compression?.revision} size={18} color="currentColor" /> : <span />}

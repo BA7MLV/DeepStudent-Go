@@ -4,6 +4,7 @@ import http from 'node:http';
 import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici';
 import { agentHttpInit } from '../apps/api/src/agent/http.ts';
 import { modelRequestPolicy } from '../apps/api/src/agent/model-policy.ts';
+import { createStreamDeadline } from '../apps/api/src/agent/stream-deadline.ts';
 import { ModelClient } from '../apps/api/src/agent/model-client.ts';
 import { ToolRegistry } from '../apps/api/src/agent/tools/registry.ts';
 import { executeSandbox, shellTimeoutSeconds, shellToolTimeoutMs } from '../apps/api/src/agent/sandbox.ts';
@@ -23,12 +24,58 @@ async function withClock(operation) {
 }
 
 test('model configuration links attempt timeout, retry count and total deadline', () => {
-  assert.deepEqual(modelRequestPolicy({}, {}), { timeoutMs: 120000, attempts: 3, chainMs: 420000 });
-  assert.deepEqual(modelRequestPolicy({}, { MODEL_TIMEOUT_MS: '600000', MODEL_MAX_RETRIES: '0' }), { timeoutMs: 600000, attempts: 1, chainMs: 660000 });
+  assert.deepEqual(modelRequestPolicy({}, {}), {
+    timeoutMs: 300000, attempts: 3, chainMs: 960000,
+    firstTokenMs: 120000, idleMs: 120000, streamTotalMs: 600000,
+  });
+  const noRetries = modelRequestPolicy({}, { MODEL_TIMEOUT_MS: '600000', MODEL_MAX_RETRIES: '0' });
+  assert.equal(noRetries.timeoutMs, 600000); assert.equal(noRetries.attempts, 1); assert.equal(noRetries.chainMs, 660000);
   assert.equal(modelRequestPolicy({}, { MODEL_TIMEOUT_MS: '300000' }).chainMs, 960000);
   assert.equal(modelRequestPolicy({}, { MODEL_CHAIN_TIMEOUT_MS: '10000' }).chainMs, 10000);
   assert.deepEqual(modelRequestPolicy({}, { MODEL_TIMEOUT_MS: 'Infinity', MODEL_MAX_RETRIES: '-1', MODEL_CHAIN_TIMEOUT_MS: '' }), modelRequestPolicy({}, {}));
   assert.throws(() => modelRequestPolicy({ attempts: 0 }, {}), /invalid_model_request_policy/);
+});
+
+test('stream deadlines are purpose-specific and independently configurable', () => {
+  const chat = modelRequestPolicy({}, {});
+  const vision = modelRequestPolicy({ purpose: 'vision' }, {});
+  const memory = modelRequestPolicy({ purpose: 'memory' }, {});
+  assert.ok(chat.firstTokenMs > memory.firstTokenMs && chat.idleMs > memory.idleMs && chat.streamTotalMs > memory.streamTotalMs);
+  assert.ok(vision.streamTotalMs < chat.streamTotalMs && vision.streamTotalMs > memory.streamTotalMs);
+  const configured = modelRequestPolicy({ purpose: 'chat' }, {
+    MODEL_FIRST_TOKEN_TIMEOUT_MS: '45000', MODEL_STREAM_IDLE_TIMEOUT_MS: '15000', MODEL_STREAM_TOTAL_TIMEOUT_MS: '120000',
+  });
+  assert.deepEqual([configured.firstTokenMs, configured.idleMs, configured.streamTotalMs], [45000, 15000, 120000]);
+  assert.equal(configured.chainMs, 960000);
+  const bad = modelRequestPolicy({}, {
+    MODEL_FIRST_TOKEN_TIMEOUT_MS: '0', MODEL_STREAM_IDLE_TIMEOUT_MS: 'infinity', MODEL_STREAM_TOTAL_TIMEOUT_MS: '99999999',
+  });
+  assert.deepEqual([bad.firstTokenMs, bad.idleMs, bad.streamTotalMs], [chat.firstTokenMs, chat.idleMs, chat.streamTotalMs]);
+});
+
+test('stream deadline separates first token, idle reset and non-stream bodies', async () => {
+  const outer = new AbortController().signal;
+  const first = createStreamDeadline(outer, { firstTokenMs: 20, idleMs: 1000, streamTotalMs: 1000 });
+  await new Promise(resolve => setTimeout(resolve, 35));
+  assert.equal(first.signal.aborted, true);
+  assert.equal(first.signal.reason?.name, 'TimeoutError');
+  first.close();
+
+  const json = createStreamDeadline(outer, { firstTokenMs: 20, idleMs: 20, streamTotalMs: 500 });
+  json.nonStream();
+  await new Promise(resolve => setTimeout(resolve, 35));
+  assert.equal(json.signal.aborted, false);
+  json.close();
+
+  const idle = createStreamDeadline(outer, { firstTokenMs: 50, idleMs: 25, streamTotalMs: 500 });
+  for (let i = 0; i < 3; i++) {
+    await new Promise(resolve => setTimeout(resolve, 15));
+    idle.chunk();
+  }
+  assert.equal(idle.signal.aborted, false);
+  await new Promise(resolve => setTimeout(resolve, 35));
+  assert.equal(idle.signal.aborted, true);
+  idle.close();
 });
 
 test('retry transient HTTP failures, but not authentication or billing failures', async () => {

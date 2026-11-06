@@ -33,6 +33,7 @@ import { readPartialWidgetArguments, widgetReference, type WidgetPayload } from 
 import { executeServerWidget } from './widgets';
 import { parseWebSearchResult, type WebSearchResult } from '@wangke/contracts/web-search';
 import { gatewayTaskTarget, gatewayTaskFetch } from '../src/agent/model-gateway-runtime.js';
+import { ModelFailure } from '../src/agent/model-client.js';
 import { modelThinkingLevel } from '../src/agent/model-preferences.js';
 import { cardsRevision, ensureLearningResults, learningCards, recordLearningReceipt } from '../src/plugins/learning-results.js';
 import { validateQuiz, type QuizQuestion } from '@wangke/study-core/quiz';
@@ -164,8 +165,10 @@ function modelFetch(context: TaskContext): typeof fetch {
   return async (url, init) => {
     context.checkActive();
     try {
-      const response = await gatewayTaskFetch(context)(url, { ...init, redirect: 'error',
-        signal: AbortSignal.any([context.signal, AbortSignal.timeout(300_000)]) });
+      // The model gateway owns the absolute request deadline. An independent
+      // outer 300s timer here would silently cap a longer stream or a configured
+      // reasoning-model budget before the gateway can classify it.
+      const response = await gatewayTaskFetch(context)(url, { ...init, redirect: 'error' });
       if (!response.ok) {
         await response.body?.cancel();
         const retryAfter = response.headers.get('retry-after');
@@ -178,7 +181,10 @@ function modelFetch(context: TaskContext): typeof fetch {
     } catch (error) {
       context.signal.throwIfAborted();
       if (error instanceof Error && error.name === 'BudgetBlocked') throw error;
-      // Provider errors must not persist URLs, request headers or credentials in task results.
+      // Stable gateway codes are safe to persist; provider text, URLs and
+      // credentials are not. Preserve timeout/cancellation instead of turning
+      // every pre-response failure into a generic connection error.
+      if (error instanceof ModelFailure) throw error;
       throw new Error('model_connection_failed');
     }
   };
@@ -349,6 +355,8 @@ async function runServerAgent(
   const stepBudget = new TaskStepBudget(context.store, context.configuration);
   let lastReportAt = 0;
   let lastReportPhase = '';
+  let lastSnapshotAt = 0;
+  let rowIdentity: { rowId: number; userRowId: number } | undefined;
   const report = (phase: string, round: number, force = false) => {
     const now = Date.now();
     // Do not turn every model token into a SQLite write.  100 ms is still
@@ -358,17 +366,25 @@ async function runServerAgent(
     if (!force && phase === lastReportPhase && now - lastReportAt < 100) return;
     lastReportAt = now;
     lastReportPhase = phase;
-    const transcript = [...out.slice(initialCount), ...(streaming && answer.trim() ? [{ role: 'assistant' as const, content: answer }] : [])];
-    const identities = onSnapshot?.({ content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript, requests, widgets: [...widgets], ...(ask ? { ask } : {}) });
-    if (identities?.widgets) widgets.splice(0, widgets.length, ...identities.widgets);
+    const tools = traceResult(traces);
+    // The live checkpoint rewrites two chat rows and clones their modelTrace.
+    // That is far heavier than the progress row, so keep it on tool/phase
+    // boundaries and at most once a second. Every visible token still reaches
+    // the browser through progress; only crash recovery loses the last second.
+    if (force || !rowIdentity || now - lastSnapshotAt >= 1_000) {
+      const transcript = [...out.slice(initialCount), ...(streaming && answer.trim() ? [{ role: 'assistant' as const, content: answer }] : [])];
+      const identities = onSnapshot?.({ content: content(), reasoning: reasoning || undefined, tools, transcript, requests, widgets: [...widgets], ...(ask ? { ask } : {}) });
+      if (identities) rowIdentity = { rowId: identities.rowId, userRowId: identities.userRowId };
+      if (identities?.widgets) widgets.splice(0, widgets.length, ...identities.widgets);
+      lastSnapshotAt = now;
+    }
     context.report({
       // Progress and the saved answer must describe the same text. Clipping here
       // made long answers alternate between a full checkpoint and a short prefix.
-      phase, round, content: content(), reasoning, tools: traceResult(traces),
+      phase, round, content: content(), reasoning, tools,
       modelRequests: requests,
-      ...(ask ? { ask, view: { pendingAsk: pendingAsk ? { messageKey: `row:${identities?.rowId}` } : null } } : {}),
-      modelTranscript: modelTrace(content(), transcript),
-      ...identities,
+      ...(ask ? { ask, view: { pendingAsk: pendingAsk ? { messageKey: `row:${rowIdentity?.rowId}` } : null } } : {}),
+      ...(rowIdentity ?? {}),
       widgets, widget: widgets.at(-1), widgetPreview,
     });
   };
@@ -756,6 +772,7 @@ function addConversationMutations(
   assistantRow: Record<string, any>,
   sessionPatch?: Record<string, unknown>,
   requireExisting = false,
+  writeUser = true,
 ) {
   // Read the latest committed timeline at commit time, not before the model request.
   // IDs remain identities, never ordering keys for a new question/answer pair.
@@ -780,7 +797,7 @@ function addConversationMutations(
   userRow.createdAt = previousUser?.createdAt ?? times.user;
   assistantRow.createdAt = previousAssistant?.createdAt ?? times.assistant;
   const mutations = [
-    recordMutation('chats', userRow.id, previousUser, { ...userRow, taskId: context.task.id }),
+    ...(writeUser ? [recordMutation('chats', userRow.id, previousUser, { ...userRow, taskId: context.task.id })] : []),
     recordMutation('chats', assistantRow.id, previousAssistant, { ...assistantRow, taskId: context.task.id }),
   ];
   if (sessionPatch) {
@@ -818,10 +835,16 @@ async function qa(context: TaskContext) {
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, messages, skills.messages.length > 0);
   const title = session.title === '新会话' ? text.slice(0, 18) || '新会话' : undefined;
   let checkpointed = Boolean(checkpoint);
+  let writtenRequests = -1;
   const persist = (result: ServerAgentResult, interrupted = true) => {
+    // The user row only changes when the turn starts or accumulates a model
+    // request. Rewriting it on every checkpoint clones the whole skill prompt.
+    const writeUser = !checkpointed || writtenRequests !== result.requests.length;
     const assistantRow = { id: assistantId, videoId, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
-    addConversationMutations(context, sessionId, { ...userRow, modelTrace: modelTrace(userRow.content, [...skills.messages, current]), modelRequests: result.requests }, assistantRow, { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed);
+    const user = writeUser ? { ...userRow, modelTrace: modelTrace(userRow.content, [...skills.messages, current]), modelRequests: result.requests } : userRow;
+    addConversationMutations(context, sessionId, user, assistantRow, checkpointed ? undefined : { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed, writeUser);
     checkpointed = true;
+    if (writeUser) writtenRequests = result.requests.length;
     result.widgets = assistantRow.widgets ?? [];
     return { rowId: assistantId, userRowId: userId, ...widgetFields(result) };
   };
@@ -859,11 +882,18 @@ async function chat(context: TaskContext) {
   const assistantId = checkpoint && typeof context.task.progress?.rowId === 'number' ? context.task.progress.rowId : newRecordId();
   const title = session.title === '新会话' ? text.slice(0, 18) || '新会话' : undefined;
   let checkpointed = Boolean(checkpoint);
+  let writtenRequests = -1;
   const persist = (result: ServerAgentResult, interrupted = true) => {
-    const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, ...(attachments.length ? { attachments } : {}), modelTrace: modelTrace(text, [...skills.messages, current]), modelRequests: result.requests, createdAt: startedAt };
+    // The user row only changes when the turn starts or accumulates a model
+    // request. Rebuilding it per checkpoint clones the skill prompt on every
+    // stream tick even though no field changed.
+    const writeUser = !checkpointed || writtenRequests !== result.requests.length;
+    const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, ...(attachments.length ? { attachments } : {}), createdAt: startedAt,
+      ...(writeUser ? { modelTrace: modelTrace(text, [...skills.messages, current]), modelRequests: result.requests } : {}) };
     const assistantRow = { id: assistantId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.ask ? { ask: result.ask } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
-    addConversationMutations(context, sessionId, userRow, assistantRow, { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed);
+    addConversationMutations(context, sessionId, userRow, assistantRow, checkpointed ? undefined : { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed, writeUser);
     checkpointed = true;
+    if (writeUser) writtenRequests = result.requests.length;
     result.widgets = assistantRow.widgets ?? [];
     return { rowId: assistantId, userRowId: userId, ...widgetFields(result) };
   };
@@ -902,19 +932,27 @@ async function continueChat(context: TaskContext) {
   let pending = '';
   let final: ChatMessage | undefined;
   let lastReportAt = 0;
+  let lastCommitAt = 0;
   const snapshot = (interrupted: boolean, interruptReason?: string, force = false) => {
-    if (!force && Date.now() - lastReportAt < 100) return;
+    const now = Date.now();
+    if (!force && now - lastReportAt < 100) return;
+    lastReportAt = now;
     context.checkActive();
     const current = context.records.get(context.owner, 'chats', rowId);
     if (!current || current.sessionId !== sessionId || current.content !== lastContent) throw new Error('原回答已删除或修改，续写已停止');
-    const next: Record<string, any> = { ...current, content, reasoning: reasoning || undefined, taskId: context.task.id,
-      modelTrace: modelTrace(content, [...priorTrace, instruction, ...(final ? [final] : pending ? [{ role: 'assistant' as const, content: pending }] : [])]),
-      modelRequests: [...(original.modelRequests ?? []), ...requests] };
-    delete next.interrupted; delete next.interruptReason;
-    if (interrupted) { next.interrupted = true; next.interruptReason = interruptReason; }
-    commitTask(context, [recordMutation('chats', rowId, current, next)]);
-    lastContent = content;
-    lastReportAt = Date.now();
+    // Re-serializing modelTrace every 100 ms is pure checkpoint work. Live
+    // progress below already carries the new text; persist on boundaries and
+    // at most once a second so crash recovery loses no more than that.
+    if (force || now - lastCommitAt >= 1_000) {
+      const next: Record<string, any> = { ...current, content, reasoning: reasoning || undefined, taskId: context.task.id,
+        modelTrace: modelTrace(content, [...priorTrace, instruction, ...(final ? [final] : pending ? [{ role: 'assistant' as const, content: pending }] : [])]),
+        modelRequests: [...(original.modelRequests ?? []), ...requests] };
+      delete next.interrupted; delete next.interruptReason;
+      if (interrupted) { next.interrupted = true; next.interruptReason = interruptReason; }
+      commitTask(context, [recordMutation('chats', rowId, current, next)]);
+      lastContent = content;
+      lastCommitAt = now;
+    }
     context.report({ phase: interruptReason ? 'error' : 'answer', content, reasoning, rowId, userRowId: userRow?.id,
       tools: current.tools, widgets: current.widgets, widget: current.widget });
   };

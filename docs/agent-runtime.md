@@ -12,16 +12,23 @@ There is no default total active-time limit. The old 15-minute default is retire
 - **Model requests:** the following server environment settings apply to requests through the Bot model client (including its vision and memory calls). A caller may use a smaller retry budget, such as the memory worker's single attempt.
 
 ```dotenv
-# Complete-response deadline per attempt, including response body (1000–600000 ms).
-MODEL_TIMEOUT_MS=120000
+# Non-stream complete-response deadline per attempt, including response body (1000–600000 ms).
+MODEL_TIMEOUT_MS=300000
+# Streaming: wait for the first token, then allow this long between chunks.
+MODEL_FIRST_TOKEN_TIMEOUT_MS=120000
+MODEL_STREAM_IDLE_TIMEOUT_MS=120000
+# Absolute cap for one streaming turn, regardless of continuous output.
+MODEL_STREAM_TOTAL_TIMEOUT_MS=600000
 # Retries after the first attempt (0–5); 2 means at most 3 physical requests.
 MODEL_MAX_RETRIES=2
-# Blank/unset: timeout × attempts + 60000 ms for backoff (default 420000 ms).
+# Blank/unset: max(timeout × attempts, stream total) + 60000 ms.
 # Explicit total deadline: 1000–3660000 ms; a shorter deadline may cut retries short.
 MODEL_CHAIN_TIMEOUT_MS=
 ```
 
-For slower reasoning models, start with `MODEL_TIMEOUT_MS=300000` or `600000`; leaving the chain deadline blank automatically scales it. Invalid environment values fall back to defaults. These are deployment-wide defaults, not per-model settings. **Existing installations retain their saved `.env` values**, including `MODEL_TIMEOUT_MS=30000`; update that value explicitly and recreate the API container to use the longer deadline. Recreate the sandbox broker as well when deploying per-command shell deadlines.
+A stream is not cut merely because it lasts longer than `MODEL_FIRST_TOKEN_TIMEOUT_MS`; that timer only covers queue/prefill and the first chunk. Every chunk resets the idle timer, while `MODEL_STREAM_TOTAL_TIMEOUT_MS` remains the absolute safety cap.
+
+When the timeout variables are unset, built-in purpose profiles apply: chat/bot 300s non-stream, 120s first token, 120s idle, 600s total; vision 180/90/60/300s; ASR 120/60/60/180s; decision/memory 60/30/30/90s. For slower reasoning models, raise the first-token and stream-total limits; leaving the chain deadline blank automatically scales it. Invalid environment values fall back to defaults. These are deployment-wide defaults, not per-model settings. **Existing installations retain their saved `.env` values**, including `MODEL_TIMEOUT_MS=30000`; update that value explicitly and recreate the API container to use the longer deadline. Recreate the sandbox broker as well when deploying per-command shell deadlines.
 
 Local timeouts, network errors, HTTP 408/409/429 and 5xx are retried within both limits. Retries use exponential backoff with jitter, honoring `Retry-After`; authentication, billing/quota and invalid-request failures are not retried. Cancellation interrupts both in-flight requests and backoff. The model/shell HTTP transport has a separate 10-second connection timeout and disables Node's implicit five-minute headers/body timeout in favor of these explicit deadlines. Each physical model attempt is accounted separately; unknown usage remains reserved and retries do not replay tools. A deterministic slow request needs a longer deadline, not extra retries.
 

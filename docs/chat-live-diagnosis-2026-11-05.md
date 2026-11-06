@@ -95,3 +95,13 @@ npm run build
 截图证据：`/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/chat-live-state-6ieZvG/{thinking-and-queue,session-attachments}.png`。
 
 首次 E2E fixture 缺 nonce、随后等待了非流式思考按钮及落在100ms持久化节流内的单个思考块，均修正测试设置后完整通过；没有放宽业务断言。工作目录另有并发附件模型读取和历史恢复 UI 改动，本轮未覆盖。服务器仍待统一发布和真实模型复验。
+
+## 2026-11-06 流式性能修复（本地已验证，未部署）
+
+- 实时进度仍按约 100ms 写入；聊天行的持久化检查点改为「工具/阶段边界 + 最多 1s」，用户行只在本轮开始或新增模型请求时重写。服务端崩溃最多丢失约 1s 正文，刷新/中断仍从进度与最终行恢复。
+- 进度不再携带 `modelTranscript`：聊天行的 `modelTrace` 是唯一副本。
+- 任务列表订阅改为轻量投影：终态任务不再下发 `result`；终态 chat/qa 的 progress 不再读取；`session` 投影保留活动正文，`activity` 只保留状态与计数。会话投影改为按 `sessionId` 直接查询，不再读全账号 200 条任务。
+- chat 进度更新改走 `cloud_task_progress` 失效域，不再唤醒全局 200 条任务列表；打开中的会话仍由 `client_session_tasks` 唤醒。
+- 失效 pump 从 100ms 改为 25ms，去掉第二个 100ms 闸门造成的 100–200ms 抖动。
+- 涉及 `apps/api/runtime/node.ts`、`apps/api/src/cloud/tasks.ts`、`apps/api/src/realtime/{domain,migration,runtime-domains}.ts`；新增回归 `scripts/test-task-projections.mjs`。
+- 已通过 `test-task-executors`、`test-task-projections`、`test-chat-live-state`、`test-session-model`、`test-session-queue`、`test-background-tasks`、`e2e-chat-live-state`、`e2e-cloud-activity`。

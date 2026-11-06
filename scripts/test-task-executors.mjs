@@ -136,7 +136,8 @@ try {
   assert.equal(prefix.prompt_cache_key, `study:${owner}:11`);
   assert.equal(records.get(owner, 'chats', measured.result.userRowId).modelRequests.length, 2);
   assert.deepEqual(records.get(owner, 'chats', measured.result.rowId).modelTrace.messages.map(m => m.role), ['assistant', 'tool', 'assistant']);
-  assert.equal(measured.progress.modelTranscript.messages[1].tool_call_id, 'server-read');
+  assert.equal(records.get(owner, 'chats', measured.result.rowId).modelTrace.messages[1].tool_call_id, 'server-read');
+  assert.equal(measured.progress.modelTranscript, undefined, 'progress does not duplicate the stored transcript');
   await runner.close();
   runner = new CloudTaskRunner(store, { records, configuration, filesDir, fetch: mockFetch }); runner.start('http://127.0.0.1:1');
   await completed(enqueue('qa', { videoId, sessionId: 11, text: '继续', videoName: '新课程名' }, 'session:11'));

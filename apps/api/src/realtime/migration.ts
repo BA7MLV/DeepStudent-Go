@@ -53,6 +53,24 @@ export function migrateClientRuntime(db: Database.Database) {
   ]);
   db.prepare('INSERT INTO schema_migrations(version,applied_at) VALUES(34,?)').run(new Date().toISOString());
   }
+  // Chat progress is a high-frequency append-only signal. The open conversation
+  // is already woken by client_session_tasks; making the global task watcher
+  // reread its 200-row list on every token batch was pure amplification. Other
+  // task kinds keep the normal domain so their job UI still receives progress.
+  db.exec('DROP TRIGGER IF EXISTS client_cloud_tasks_update');
+  db.exec(`CREATE TRIGGER client_cloud_tasks_update AFTER UPDATE ON cloud_tasks
+    WHEN NEW.owner_id IS NOT NULL
+    BEGIN
+      INSERT INTO client_changes(owner_id,domain,entity) VALUES(
+        NEW.owner_id,
+        CASE WHEN NEW.kind='chat'
+          AND OLD.status IS NEW.status
+          AND OLD.error IS NEW.error
+          AND OLD.result IS NEW.result
+          AND OLD.executor IS NEW.executor
+          THEN 'cloud_task_progress' ELSE 'cloud_tasks' END,
+        NEW.id);
+    END`);
   db.exec(`CREATE TABLE IF NOT EXISTS resource_command_scopes (
     owner_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, scope TEXT NOT NULL
   );

@@ -7,6 +7,7 @@ import { ModelGatewayFailure, modelErrorClass } from './model-errors.js';
 import { BudgetBlocked, type UsageLedger } from './budget.js';
 import { boundedRequest, checkRequestCapacity } from './request-budget.js';
 import { modelRequestPolicy } from './model-policy.js';
+import { createStreamDeadline } from './stream-deadline.js';
 import { accountedFetch } from './accounted-fetch.js';
 import { ModelAdapter } from './model-adapter.js';
 import { agentHttpInit } from './http.js';
@@ -32,6 +33,12 @@ async function delay(ms: number, signal: AbortSignal) {
     const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, ms);
     signal.addEventListener('abort', abort, { once: true });
   });
+}
+/** Only a request that explicitly asked for SSE gets streaming idle semantics.
+ * A provider that ignores stream=true still keeps the non-stream total deadline. */
+function wantsStream(endpoint: string, body: BodyInit | null | undefined) {
+  if (!['chat/completions', 'responses', 'messages'].includes(endpoint) || typeof body !== 'string') return false;
+  try { return (JSON.parse(body) as { stream?: unknown })?.stream === true; } catch { return false; }
 }
 /** The only policy/replay owner. ModelClient executes exactly ONE physical
  * request per attempt and is the sole budget reserver/settler on this path.
@@ -108,10 +115,11 @@ export class ModelGateway {
     else if (input.body instanceof FormData) delete headers['content-type'];
     // The native bridge cannot safely replay a one-shot upload stream.
     const replayable = input.body === undefined || input.body === null || typeof input.body === 'string' || input.body instanceof FormData;
-    const policy = modelRequestPolicy({ ...(replayable ? {} : { attempts: 1 }) });
+    const policy = modelRequestPolicy({ purpose: input.purpose, ...(replayable ? {} : { attempts: 1 }) });
     const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.endpoint === 'models' ? 20000 : policy.chainMs)]);
     const audio = input.endpoint === 'audio/transcriptions' ? await adapter.prepareNativeAudio(input.body, input.contentType, signal) : undefined;
     if (audio) { body = audio.body; delete headers['content-type']; }
+    const streaming = wantsStream(input.endpoint, body);
     const pagination = new URLSearchParams();
     if (input.endpoint === 'models') for (const key of ['after_id', 'limit']) {
       const value = input.pagination?.get(key); if (value !== null && value !== undefined) pagination.set(key, value);
@@ -124,13 +132,17 @@ export class ModelGateway {
       const started = this.clock();
       const record = (outcome: 'completed' | 'failed', errorClass?: ModelErrorClass) => attempts.push({ ...input.modelRef, candidateIndex: 0, attempt, durationMs: Math.max(0, this.clock() - started), outcome, ...(errorClass ? { errorClass } : {}) });
       if (signal.aborted) throw new ModelFailure(input.signal.aborted ? 'model_cancelled' : 'model_timeout');
-      const attemptSignal = AbortSignal.any([signal, AbortSignal.timeout(policy.timeoutMs)]);
+      // A stream is bounded by first-token, inter-chunk idle and absolute-turn
+      // deadlines. Non-stream bodies keep one complete-response deadline.
+      const deadline = streaming ? createStreamDeadline(signal, policy) : undefined;
+      const attemptSignal = deadline?.signal ?? AbortSignal.any([signal, AbortSignal.timeout(policy.timeoutMs)]);
       let response: Response;
       try {
         response = await abortable(fetcher(url, agentHttpInit({ method: input.endpoint === 'models' ? 'GET' : 'POST', headers, body, redirect: 'error', signal: attemptSignal,
           ...(!replayable ? { duplex: 'half' } : {}) })), attemptSignal);
       } catch (error) {
         record('failed', modelErrorClass(error, attemptSignal));
+        deadline?.close();
         if (error instanceof BudgetBlocked) throw error;
         if (signal.aborted || attempt >= policy.attempts || !replayable) throw new ModelFailure(input.signal.aborted ? 'model_cancelled' : attemptSignal.aborted ? 'model_timeout' : 'model_connection_failed');
         await (this.options.sleep ?? delay)(500 * 2 ** (attempt - 1), signal);
@@ -138,15 +150,22 @@ export class ModelGateway {
       }
       if (response.ok) {
         record('completed');
-        if (!response.body) return response;
+        if (!response.body) { deadline?.close(); return response; }
+        // A provider may ignore stream=true and return one JSON body. It has no
+        // inter-chunk gaps, so only the absolute turn limit should apply.
+        if (deadline && !(response.headers.get('content-type') ?? '').toLowerCase().includes('text/event-stream')) deadline.nonStream();
         const reader = response.body.getReader();
         // Once returned, no transport exception or SSE parser failure may replay.
         return new Response(new ReadableStream<Uint8Array>({
           async pull(controller) {
-            try { const { value, done } = await abortable(reader.read(), attemptSignal); if (done) { reader.releaseLock(); controller.close(); } else controller.enqueue(value); }
-            catch { void reader.cancel().catch(() => {}); controller.error(new ModelFailure(input.signal.aborted ? 'model_cancelled' : attemptSignal.aborted ? 'model_timeout' : 'model_connection_failed')); }
+            try {
+              const { value, done } = await abortable(reader.read(), attemptSignal);
+              if (done) { deadline?.close(); reader.releaseLock(); controller.close(); }
+              else { deadline?.chunk(); controller.enqueue(value); }
+            }
+            catch { deadline?.close(); void reader.cancel().catch(() => {}); controller.error(new ModelFailure(input.signal.aborted ? 'model_cancelled' : attemptSignal.aborted ? 'model_timeout' : 'model_connection_failed')); }
           },
-          async cancel() { await reader.cancel().catch(() => {}); },
+          async cancel() { deadline?.close(); await reader.cancel().catch(() => {}); },
         }), { status: response.status, headers: response.headers });
       }
       let quota = false;
@@ -157,6 +176,7 @@ export class ModelGateway {
           quota = ['insufficient_quota', 'billing_hard_limit_reached', 'credit_balance_too_low'].includes(body?.error?.code ?? '');
         } catch { /* classify by status; never echo provider body */ }
       } else void response.body?.cancel().catch(() => {});
+      deadline?.close();
       const status = quota ? 402 : response.status;
       record('failed', quota ? 'quota_exhausted' : status === 429 ? 'rate_limited' : status >= 500 ? 'server_error' : status === 401 || status === 403 ? 'auth_failed' : status === 404 ? 'model_not_found' : 'invalid_request');
       const retry = !quota && [408, 409, 429, 500, 502, 503, 504].includes(status);
@@ -172,7 +192,7 @@ export class ModelGateway {
     const base = { owner: request.owner, traceId, purpose: request.purpose, ...(request.presetId ? { presetId: request.presetId } : {}) };
     this.event({ ...base, type: 'model.route.started' });
     const { candidates, preset } = this.resolver.resolve(request);
-    const policy = modelRequestPolicy({ attempts: limits.maxAttemptsPerCandidate ?? preset?.policy?.maxAttemptsPerCandidate, chainMs: preset?.policy?.maxChainMs });
+    const policy = modelRequestPolicy({ purpose: request.purpose, attempts: limits.maxAttemptsPerCandidate ?? preset?.policy?.maxAttemptsPerCandidate, chainMs: preset?.policy?.maxChainMs });
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(policy.chainMs)]);
     const deadline = this.clock() + policy.chainMs;
     let lastClass: ModelErrorClass = 'server_error';
@@ -205,7 +225,7 @@ export class ModelGateway {
             const transport = adapter.transport(wire.path, request);
             if (audio) delete transport.headers['content-type'];
             const body = await this.client.request(transport.url, { method: 'POST', headers: transport.headers, body: audio?.body ?? JSON.stringify(bounded.body), redirect: 'error', signal }, { owner: request.owner, run: request.run, step: request.step, task: request.task, purpose: limits.attributionPurpose ?? request.purpose, provider: target.providerId, model: target.model }, bounded.total,
-              { ordinary: !request.run, attempts: 1, timeoutMs: policy.timeoutMs, chainMs: Math.max(1, Math.min(policy.chainMs, deadline - this.clock())) });
+              { ordinary: !request.run, purpose: request.purpose, attempts: 1, timeoutMs: policy.timeoutMs, chainMs: Math.max(1, Math.min(policy.chainMs, deadline - this.clock())) });
             // Decode before publishing a visible result. Never return provider body in errors.
             const response = audio ? adapter.decodeAudio(body) : adapter.decode(body, request.purpose, request.tools);
             attempts.push({ providerId: target.providerId, model: target.model, candidateIndex, attempt, durationMs: Math.max(0, this.clock() - started), outcome: 'completed' });

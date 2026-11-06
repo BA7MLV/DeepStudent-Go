@@ -73,7 +73,7 @@ export class StudyTools {
           const ids = [...new Set(args.taskIds as string[])];
           const tasks = ids.map(id => store.db.prepare('SELECT t.* FROM cloud_tasks t JOIN task_delegations d ON d.task_id=t.id WHERE t.id=? AND t.owner_id=? AND d.parent_run_id=?').get(id, c.owner, c.run) as any);
           if (tasks.some(t => !t)) throw new Error('task_not_owned_by_run');
-          if (tasks.every(t => ['completed','failed','cancelled','interrupted'].includes(t.status))) return { tasks: tasks.map(taskDto), waiting: false };
+          if (tasks.every(t => ['completed','failed','cancelled','interrupted'].includes(t.status))) return { tasks: tasks.map(task => taskDto(task)), waiting: false };
           const existing = store.db.prepare('SELECT id FROM run_waits WHERE run_id=? AND step_id=?').get(c.run, c.step) as any;
           const id = existing?.id ?? crypto.randomUUID();
           if (!existing) store.db.prepare("INSERT INTO run_waits(id,run_id,step_id,task_ids,status,created_at) VALUES(?,?,?,?,'waiting',?)").run(id, c.run, c.step, JSON.stringify(ids), new Date().toISOString());

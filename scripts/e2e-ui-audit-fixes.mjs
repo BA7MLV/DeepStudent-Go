@@ -92,7 +92,8 @@ try {
   const composer = page.getByRole('textbox', { name: '给 AI 助手发送消息', exact: true });
   assert.equal(await composer.getAttribute('placeholder'), '随便问点什么');
   assert.match(await composer.getAttribute('aria-description'), /Shift/);
-  assert.match(await page.getByTestId('chat-context-usage').innerText(), /\d+%/);
+  assert.match(await page.getByTestId('chat-context-usage').getAttribute('aria-label'), /\d+%/);
+  assert.equal(await page.getByTestId('chat-context-usage').locator('svg.ctx-usage__ring').count(), 1);
   const empty = { id: 987654, videoId: '__library_assistant__', title: 'Empty opened conversation', createdAt: Date.now() };
   records.apply(owner, [{ id: crypto.randomUUID(), table: 'chatSessions', key: empty.id, before: null, after: empty }]);
   await page.waitForFunction(async () => (await import('/src/store/courseChat.ts')).useCourseChat.getState().sessions.some(s => s.id === 987654));
@@ -102,7 +103,7 @@ try {
   });
   await page.getByTestId('chat-recent-987654').waitFor();
   assert.equal(await page.getByTestId('top-app-bar').getByText('Empty opened conversation', { exact: true }).count(), 0);
-  evidence.assertions.push('desktop composer has keyboard hints; usage is a percentage; opened empty session is in Recent without a misleading welcome title');
+  evidence.assertions.push('desktop composer has keyboard hints; usage is a ring icon with an accessible percentage; opened empty session is in Recent without a misleading welcome title');
 
   await page.evaluate(() => { location.hash = '/library'; });
   await page.getByTestId('resource-list').waitFor();
@@ -143,8 +144,7 @@ try {
   assert.equal(typography.border, '1px'); assert.notEqual(typography.borderColor, typography.foreground);
   assert.equal(await page.locator('.code-block__source code').textContent(), 'const answer = 42;\n');
   assert.ok(await page.locator('.code-block__source').evaluate(node => parseFloat(getComputedStyle(node).paddingTop) < 8));
-  assert.equal(await page.getByTestId('audit-context').innerText(), '0%');
-  assert.equal(await page.getByTestId('audit-context').locator('svg.ctx-usage__ring').count(), 0);
+  assert.equal(await page.getByTestId('audit-context').locator('svg.ctx-usage__ring').count(), 1);
   assert.equal(await page.getByTestId('audit-save').isDisabled(), true);
   await page.getByTestId('audit-edit').click(); assert.equal(await page.getByTestId('audit-save').isDisabled(), false);
   await page.getByTestId('audit-save').click(); assert.equal(await page.getByTestId('audit-save').isDisabled(), true);

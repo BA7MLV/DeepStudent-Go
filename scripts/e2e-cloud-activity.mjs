@@ -69,7 +69,9 @@ probe.mount(); document.body.dataset.ready = 'true';`;
   await page.waitForFunction(() => probe.state().tasks?.find(t => t.id === 'activity-task')?.progress?.content === 'pushed progress');
   await page.waitForTimeout(60000);
   store.db.prepare("UPDATE cloud_tasks SET status='completed',result='42' WHERE id='activity-task'").run();
-  await page.waitForFunction(() => probe.state().tasks?.find(t => t.id === 'activity-task')?.result === 42);
+  await page.waitForFunction(() => probe.state().tasks?.find(t => t.id === 'activity-task')?.status === 'completed');
+  assert.equal(await page.evaluate(() => probe.state().tasks?.find(t => t.id === 'activity-task')?.result), null,
+    'the activity projection does not replay a finished task result to every subscriber');
   await page.evaluate(() => probe.unmount());
   await page.waitForFunction(() => probe.diagnostics().models.every(m => !m.active && m.refs === 0 && m.listeners === 0));
   for (let i = 0; i < 100; i++) await page.evaluate(async () => { probe.mount(); await Promise.resolve(); probe.unmount(); });

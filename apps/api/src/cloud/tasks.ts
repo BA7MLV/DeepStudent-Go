@@ -11,27 +11,68 @@ import type { WebSearchService } from '../web-search/service.js';
 import { executeDelegatedTask } from './delegation.js';
 
 export const TASK_KINDS: CloudTaskKind[] = ['chat', 'qa', 'transcribe', 'handout', 'cards', 'comments', 'danmaku', 'material', 'cover', 'artifactEdit', 'handoutEdit', 'modelOnce'];
-export function taskDto(row: any): CloudTask {
+/** List/subscription projections are read on every streaming checkpoint. The
+ * full projection stays for one-shot reads (HTTP task list, single task).
+ * `activity` feeds the global task watcher (status/counters only for chat);
+ * `session` feeds one open conversation (live text, no duplicate transcript). */
+export type TaskListDetail = 'full' | 'activity' | 'session';
+const ACTIVE_TASK_STATUSES = new Set(['queued', 'running', 'waiting_user', 'waiting_event']);
+
+function progressSummary(progress: Record<string, unknown>) {
+  const summary: Record<string, unknown> = {};
+  for (const key of ['phase', 'message', 'done', 'total']) if (progress[key] !== undefined) summary[key] = progress[key];
+  return Object.keys(summary).length ? summary : null;
+}
+
+function progressDto(row: any, detail: TaskListDetail): CloudTask['progress'] {
+  if (!row.progress) return null;
+  const progress = JSON.parse(row.progress);
+  if (detail === 'full' || !progress || typeof progress !== 'object' || Array.isArray(progress)) return progress;
+  // A chat row's modelTrace is the authoritative transcript. Keeping a second
+  // copy in progress made every stream update serialize the whole answer twice.
+  delete progress.modelTranscript;
+  if (!ACTIVE_TASK_STATUSES.has(row.status)) return progressSummary(progress);
+  // The global activity watcher only needs a chat task's status; its open
+  // conversation receives the live text from the session projection instead.
+  if (detail === 'activity' && row.kind === 'chat') return progressSummary(progress);
+  return progress;
+}
+
+export function taskDto(row: any, detail: TaskListDetail = 'full'): CloudTask {
   return { id: row.id, kind: row.kind, resource: row.resource, status: row.status, input: JSON.parse(row.input),
-    progress: row.progress ? JSON.parse(row.progress) : null, result: row.result ? JSON.parse(row.result) : null,
+    progress: progressDto(row, detail), result: detail === 'full' && row.result ? JSON.parse(row.result) : null,
     // Media tasks now execute in the Node runtime. Persisted historical receipts
     // must obey the current wire contract too, or one cover breaks watchTasks.
     error: row.error, createdAt: row.created_at, executor: row.executor === 'media' ? 'node' : row.executor ?? undefined,
-    ...(row.model_snapshot ? { frozenModel: JSON.parse(row.model_snapshot) } : {}),
+    ...(detail === 'full' && row.model_snapshot ? { frozenModel: JSON.parse(row.model_snapshot) } : {}),
     source: row.parent_run_id ? { kind: 'bot', ...(typeof row.bot_name === 'string' ? { name: row.bot_name } : {}) } : { kind: 'app' },
     ...(typeof row.resource_name === 'string' ? { resourceName: row.resource_name } : {}) };
 }
 
-export function listOwnerTasks(store: DatabaseStore, owner: string): CloudTask[] {
-  return (store.db.prepare(`SELECT t.*, a.name AS bot_name, json_extract(v.value,'$.name') AS resource_name
+export function listOwnerTasks(store: DatabaseStore, owner: string, detail: TaskListDetail = 'full', sessionId?: number): CloudTask[] {
+  if (sessionId !== undefined && (!Number.isSafeInteger(sessionId) || sessionId <= 0)) throw new Error('invalid_session');
+  // Never SELECT t.* for a live projection: SQLite would still copy the 200
+  // most recent result/model_snapshot blobs on every checkpoint. Finished
+  // chat/qa progress is a second copy of the answer and is never read by these
+  // views, so the query returns NULL instead of transferring it to JS.
+  const progressColumn = detail === 'full' ? 't.progress'
+    : `CASE WHEN t.progress IS NULL THEN NULL
+        WHEN t.status IN ('queued','running','waiting_user','waiting_event') THEN t.progress
+        WHEN t.kind IN ('chat','qa') THEN NULL
+        ELSE t.progress END AS progress`;
+  const columns = detail === 'full'
+    ? 't.*'
+    : `t.id,t.kind,t.resource,t.status,t.input,${progressColumn},t.created_at,t.executor,t.error,t.parent_run_id`;
+  return (store.db.prepare(`SELECT ${columns}, a.name AS bot_name, json_extract(v.value,'$.name') AS resource_name
     FROM cloud_tasks t
     LEFT JOIN runs r ON r.id=t.parent_run_id
     LEFT JOIN threads th ON th.id=r.thread_id AND th.owner_id=t.owner_id
     LEFT JOIN agent_profiles a ON a.id=th.agent_id AND a.owner_id=t.owner_id
     LEFT JOIN cloud_records v ON v.owner_id=t.owner_id AND v.table_name='videos'
       AND v.record_key=json_quote(json_extract(t.input,'$.videoId'))
-    WHERE t.owner_id=?
-    ORDER BY CASE WHEN t.status IN ('queued','running','waiting_user') THEN 0 ELSE 1 END, t.created_at DESC LIMIT 200`).all(owner) as any[]).map(taskDto);
+    WHERE t.owner_id=?${sessionId === undefined ? '' : " AND t.kind='chat' AND CAST(json_extract(t.input,'$.sessionId') AS INTEGER)=?"}
+    ORDER BY CASE WHEN t.status IN ('queued','running','waiting_user') THEN 0 ELSE 1 END, t.created_at DESC LIMIT 200`)
+    .all(...(sessionId === undefined ? [owner] : [owner, sessionId])) as any[]).map(row => taskDto(row, detail));
 }
 
 let nativeRuntime: Promise<{ executeNodeTask: TaskExecutor }> | undefined;

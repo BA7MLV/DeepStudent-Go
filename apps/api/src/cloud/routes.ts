@@ -9,6 +9,7 @@ import { CloudTaskRunner, taskDto, listOwnerTasks, TASK_KINDS } from './tasks.js
 import type { CloudConfig, CloudMutation } from '@wangke/contracts/cloud';
 import type { ModelSettingsUpdate, ProviderSettingsUpdate } from '@wangke/contracts/model-settings';
 import { BudgetBlocked } from '../agent/budget.js';
+import { ModelFailure } from '../agent/model-client.js';
 import { createModelGateway } from '../agent/model-gateway-factory.js';
 import { ModelGatewayFailure } from '../agent/model-errors.js';
 import { gatewayDisabledPurposes } from '../agent/model-rollout.js';
@@ -146,7 +147,10 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
       const disconnected = new AbortController();
       request.raw.once('aborted', () => disconnected.abort());
       reply.raw.once('close', () => { if (!reply.raw.writableEnded) disconnected.abort(); });
-      const init: RequestInit & { duplex?: 'half' } = { signal: AbortSignal.any([AbortSignal.timeout(endpoint === 'models' ? 20000 : 300000), disconnected.signal]) };
+      // The gateway owns model deadlines (first token / idle / total). This
+      // layer only cancels when the browser disconnects; a second fixed timer
+      // here would silently override a longer configured stream budget.
+      const init: RequestInit & { duplex?: 'half' } = { signal: disconnected.signal };
       if (request.method === 'POST') {
         if (request.body instanceof Readable) { init.body = request.body as any; init.duplex = 'half'; }
         else {
@@ -184,6 +188,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
         if (error instanceof BudgetBlocked) {
           return fail(reply, 429, error.code);
         }
+        if (error instanceof ModelFailure) return fail(reply, 502, error.code);
         return fail(reply, 502, 'model_connection_failed');
       }
     },

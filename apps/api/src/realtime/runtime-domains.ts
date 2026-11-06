@@ -103,8 +103,8 @@ function activityReads({ store }: Ports): Pick<ReadHandlers, 'permissions' | 'in
         return { task: task ? taskDto(task) : null, operations: request.operationIds.map(id => ({ id, committed: !!store.db.prepare('SELECT 1 FROM cloud_operations WHERE owner_id=? AND id=?').get(owner, id) })) };
       }, matches: (_, change) => inDomains(change, ['cloud_tasks', 'cloud_records']),
     },
-    tasks: { read: owner => ({ tasks: listOwnerTasks(store, owner) }), matches: (_, change) => inDomains(change, ['cloud_tasks', 'threads', 'agent_profiles']) },
-    task: { read: (owner, request) => { const row = store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId); if (!row) throw new Error('task_not_found'); return taskDto(row); }, matches: (request, change) => change.domain === 'cloud_tasks' && change.entity === request.taskId },
+    tasks: { read: owner => ({ tasks: listOwnerTasks(store, owner, 'activity') }), matches: (_, change) => inDomains(change, ['cloud_tasks', 'threads', 'agent_profiles']) },
+    task: { read: (owner, request) => { const row = store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId); if (!row) throw new Error('task_not_found'); return taskDto(row); }, matches: (request, change) => ['cloud_tasks', 'cloud_task_progress'].includes(change.domain) && change.entity === request.taskId },
   };
 }
 

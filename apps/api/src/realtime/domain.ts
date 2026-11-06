@@ -71,7 +71,9 @@ export class ClientRuntimeDomain implements RuntimeDomain {
       recordsPage: (owner, after) => this.recordsPage(owner, after),
       sessionProjection: (owner, request) => this.sessionProjection(owner, request) });
     this.cursor = this.revision();
-    this.timer = setInterval(() => this.pump(), 100);
+    // Task progress is persisted about every 100 ms. A second 100 ms gate here
+    // made the browser see 100–200 ms gaps; an idle pump is one indexed read.
+    this.timer = setInterval(() => this.pump(), 25);
     this.timer.unref();
     if (resources) {
       // Files remain authoritative even when changed by a local sandbox/tool.
@@ -396,7 +398,7 @@ export class ClientRuntimeDomain implements RuntimeDomain {
       const data = JSON.parse(row.value);
       return { id: data.id, sessionId: data.sessionId, createdAt: data.createdAt, role: data.role, content: data.content, ...(data.taskId ? { taskId: data.taskId } : {}), data };
     }), hasOlder,
-      tasks: listOwnerTasks(this.store, owner).filter(task => task.kind === 'chat' && Number(task.input.sessionId) === request.sessionId)
+      tasks: listOwnerTasks(this.store, owner, 'session', request.sessionId)
         .map(task => TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(task)) };
   }
   async *watchSession(owner: string, request: Extract<RuntimeRead, { kind: 'session' }>, signal: AbortSignal): AsyncIterable<RuntimeSessionFrame> {

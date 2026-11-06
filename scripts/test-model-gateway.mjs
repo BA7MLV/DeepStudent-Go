@@ -91,7 +91,7 @@ test('explicit references validate provider, capability and exact private model 
   assert.throws(() => resolver.resolve({ ...input(), purpose: 'asr', modelRef: ref('primary') }), /model_capability_unavailable/);
   assert.throws(() => resolver.resolve({ ...input(), presetId: 'missing' }), /model_preset_not_found/);
 });
-const nativeInput = (extra = {}) => ({ owner: 'fixture-owner', purpose: 'bot', modelRef: ref('primary'), endpoint: 'chat/completions', body: JSON.stringify({ model: 'fixture-model', messages: [{ role: 'user', content: 'private-prompt' }] }), signal: new AbortController().signal, attribution: { run: 'fixture-run' }, ...extra });
+const nativeInput = (extra = {}) => ({ owner: 'fixture-owner', purpose: 'bot', modelRef: ref('primary'), endpoint: 'chat/completions', body: JSON.stringify({ model: 'fixture-model', stream: true, messages: [{ role: 'user', content: 'private-prompt' }] }), signal: new AbortController().signal, attribution: { run: 'fixture-run' }, ...extra });
 test('native SSE preserves bytes and usage and never retries after a visible chunk', async () => {
   let requests = 0, controller;
   const state = setup(async () => { requests++; return new Response(new ReadableStream({ start(c) { controller = c; c.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"fixture"}}]}\n\n')); } }), { headers: { 'content-type': 'text/event-stream' } }); });
@@ -186,18 +186,76 @@ test('native stream cancellation propagates upstream and never replays', async (
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(cancelled, 1);
 });
-test('native bounded attempt deadline interrupts a stalled success body without replay', async () => {
-  const previous = process.env.MODEL_TIMEOUT_MS; process.env.MODEL_TIMEOUT_MS = '1000';
+test('native bounded first-token deadline interrupts a stalled success body without replay', async () => {
+  const previous = process.env.MODEL_FIRST_TOKEN_TIMEOUT_MS; process.env.MODEL_FIRST_TOKEN_TIMEOUT_MS = '1000';
   let requests = 0;
   try {
     const state = setup(async () => { requests++; return new Response(new ReadableStream({}), { headers: { 'content-type': 'text/event-stream' } }); });
     const response = await state.gateway.forward(nativeInput());
-    // Keep the event loop alive: AbortSignal.timeout's timer itself is unreferenced.
+    // Keep the event loop alive: deadline timers are unreferenced.
     const keepAlive = setInterval(() => {}, 100);
     try { await assert.rejects(response.text(), e => e.code === 'model_timeout'); }
     finally { clearInterval(keepAlive); }
     assert.equal(requests, 1);
-  } finally { if (previous === undefined) delete process.env.MODEL_TIMEOUT_MS; else process.env.MODEL_TIMEOUT_MS = previous; }
+  } finally { if (previous === undefined) delete process.env.MODEL_FIRST_TOKEN_TIMEOUT_MS; else process.env.MODEL_FIRST_TOKEN_TIMEOUT_MS = previous; }
+});
+test('native stream idle deadline interrupts a stalled body without replay', async () => {
+  const previous = ['MODEL_FIRST_TOKEN_TIMEOUT_MS', 'MODEL_STREAM_IDLE_TIMEOUT_MS', 'MODEL_STREAM_TOTAL_TIMEOUT_MS']
+    .map(key => [key, process.env[key]]);
+  process.env.MODEL_FIRST_TOKEN_TIMEOUT_MS = '2000'; process.env.MODEL_STREAM_IDLE_TIMEOUT_MS = '1000'; process.env.MODEL_STREAM_TOTAL_TIMEOUT_MS = '5000';
+  let requests = 0;
+  try {
+    const state = setup(async () => { requests++; return new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: {"delta":"fixture"}\n\n')); } }), { headers: { 'content-type': 'text/event-stream' } }); });
+    const response = await state.gateway.forward(nativeInput());
+    const reader = response.body.getReader();
+    assert.match(new TextDecoder().decode((await reader.read()).value), /fixture/);
+    const keepAlive = setInterval(() => {}, 100);
+    try { await assert.rejects(reader.read(), e => e.code === 'model_timeout'); }
+    finally { clearInterval(keepAlive); }
+    assert.equal(requests, 1);
+  } finally {
+    for (const [key, value] of previous) value === undefined ? delete process.env[key] : process.env[key] = value;
+  }
+});
+test('native stream idle deadline resets on every chunk', async () => {
+  const previous = ['MODEL_FIRST_TOKEN_TIMEOUT_MS', 'MODEL_STREAM_IDLE_TIMEOUT_MS', 'MODEL_STREAM_TOTAL_TIMEOUT_MS']
+    .map(key => [key, process.env[key]]);
+  process.env.MODEL_FIRST_TOKEN_TIMEOUT_MS = '1200'; process.env.MODEL_STREAM_IDLE_TIMEOUT_MS = '1000'; process.env.MODEL_STREAM_TOTAL_TIMEOUT_MS = '5000';
+  try {
+    const state = setup(async () => new Response(new ReadableStream({
+      start(c) {
+        let count = 0;
+        const timer = setInterval(() => {
+          count++;
+          c.enqueue(new TextEncoder().encode(`data: {"delta":${count}}\n\n`));
+          if (count === 10) { clearInterval(timer); c.close(); }
+        }, 100);
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } }));
+    const response = await state.gateway.forward(nativeInput());
+    const text = await response.text();
+    assert.equal((text.match(/data:/g) ?? []).length, 10);
+  } finally {
+    for (const [key, value] of previous) value === undefined ? delete process.env[key] : process.env[key] = value;
+  }
+});
+test('native stream absolute total deadline still caps continuous output', async () => {
+  const previous = ['MODEL_FIRST_TOKEN_TIMEOUT_MS', 'MODEL_STREAM_IDLE_TIMEOUT_MS', 'MODEL_STREAM_TOTAL_TIMEOUT_MS']
+    .map(key => [key, process.env[key]]);
+  process.env.MODEL_FIRST_TOKEN_TIMEOUT_MS = '2000'; process.env.MODEL_STREAM_IDLE_TIMEOUT_MS = '1000'; process.env.MODEL_STREAM_TOTAL_TIMEOUT_MS = '1500';
+  try {
+    let timer;
+    const state = setup(async () => new Response(new ReadableStream({
+      start(c) { timer = setInterval(() => c.enqueue(new TextEncoder().encode('data: {"delta":"fixture"}\n\n')), 100); },
+      cancel() { clearInterval(timer); },
+    }), { headers: { 'content-type': 'text/event-stream' } }));
+    const response = await state.gateway.forward(nativeInput());
+    const keepAlive = setInterval(() => {}, 100);
+    try { await assert.rejects(response.text(), e => e.code === 'model_timeout'); }
+    finally { clearInterval(keepAlive); }
+  } finally {
+    for (const [key, value] of previous) value === undefined ? delete process.env[key] : process.env[key] = value;
+  }
 });
 test('native cancellation during Retry-After cannot expose the caller abort reason', async () => {
   const controller = new AbortController();
