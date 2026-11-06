@@ -103,17 +103,31 @@ try {
 
   const videoId = 'course';
   put('videos', videoId, { id: videoId, name: 'Test course', duration: 60 });
+  put('videos', 'other-course', { id: 'other-course', name: 'Other course', duration: 60 });
   for (let i = 0; i < 3; i++) put('segments', i + 1, { id: i + 1, videoId, idx: i, start: i * 10, end: (i + 1) * 10, text: `字幕内容 ${i}`, status: 1 });
-  put('chatSessions', 10, { id: 10, videoId: '__library_assistant__', title: '新会话', createdAt: Date.now() });
+  put('segments', 100, { id: 100, videoId: 'other-course', idx: 0, start: 0, end: 10, text: '字幕内容 其他课程', status: 1 });
+  put('chatSessions', 10, { id: 10, videoId: '__library_assistant__', title: '新会话', createdAt: Date.now(), contextCourseIds: [videoId] });
   reply = '这是由 Node 服务器返回的回答。';
   const chatTask = await completed(enqueue('chat', { sessionId: 10, text: '你好' }, 'session:10'));
   assert.equal(chatTask.executor, 'node');
   assert.equal(chatTask.result.content, reply);
   assert.ok(chatTask.result.userRowId, 'completion acknowledges both committed message identities');
+  const chatRequest = JSON.parse(requests.at(-1).init.body);
+  const chatUser = chatRequest.messages.findLast(message => message.role === 'user');
+  assert.equal(typeof chatUser?.content, 'string');
+  assert.ok(!chatUser.content.includes('"courses"'), 'chat profile no longer pre-injects contextCourseIds into prompt body');
   for (const id of [chatTask.result.userRowId, chatTask.result.rowId]) {
     assert.equal(records.get(owner, 'chats', id).taskId, chatTask.id, 'progress and committed rows share a turn identity');
   }
   assert.equal(store.db.prepare("SELECT COUNT(*) AS count FROM cloud_records WHERE owner_id=? AND table_name='chats' AND value IS NOT NULL").get(owner).count, 2);
+  scripted = [
+    { choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: 'library-search', type: 'function', function: { name: 'search_course_library', arguments: '{"query":"字幕内容"}' } }] }, finish_reason: 'tool_calls' }] },
+    { choices: [{ message: { role: 'assistant', content: '检索完成。' }, finish_reason: 'stop' }] },
+  ];
+  await completed(enqueue('chat', { sessionId: 10, text: '帮我查一下课程内容' }, 'session:10:search'));
+  const filteredSearch = JSON.parse(requests.at(-1).init.body).messages.find(message => message.role === 'tool' && message.name === 'search_course_library')?.content ?? '';
+  assert.match(filteredSearch, /courseId=course/);
+  assert.doesNotMatch(filteredSearch, /courseId=other-course/, 'contextCourseIds are enforced as chat retrieval filters');
   reply = '字幕里提到了测试内容。';
   const qaTask = await completed(enqueue('qa', { videoId, sessionId: 10, text: '课程提到了什么？' }, 'session:10:qa'));
   assert.equal(qaTask.executor, 'node');

@@ -675,10 +675,12 @@ function courseProgress(row: Record<string, any>) {
 }
 
 function libraryExecutor(context: TaskContext, session: Record<string, any> | null) {
-  const contextIds = new Set<string>(Array.isArray(session?.contextCourseIds) ? session.contextCourseIds : []);
+  const contextIds = new Set<string>((Array.isArray(session?.contextCourseIds) ? session.contextCourseIds : []).filter((id): id is string => typeof id === 'string' && id.length > 0));
   return async (name: string, args: Record<string, unknown>) => {
     const courses = rowsFor(context, 'videos');
     const projectScope = folderCourseScope(rowsFor(context, 'folders'), courses as Array<{ id: string; folderId?: number }>, session?.projectFolderId);
+    const inSessionScope = (id: string) => !contextIds.size || contextIds.has(id);
+    const inProjectScope = (id: string) => !projectScope || projectScope.has(id);
     if (name === 'edit') {
       return editNodeDocument(context, args);
     }
@@ -688,7 +690,8 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
       const match = typeof args.path === 'string' && /^\/courses\/([^/]+)\/(material|transcript)$/.exec(args.path);
       if (match) {
         const id = decodeURIComponent(match[1]);
-        if (projectScope && !projectScope.has(id)) throw new Error('course_outside_project_scope');
+        if (!inProjectScope(id)) throw new Error('course_outside_project_scope');
+        if (!inSessionScope(id)) throw new Error('course_outside_session_scope');
         const course = courses.find(course => course.id === id);
         if (!course) throw new Error('course_not_found');
         if (args.raw === true) return readRawCourse(context, args, id);
@@ -700,9 +703,10 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
       const kind = String(args.kind ?? 'all');
       const limit = Math.min(50, Math.max(1, Number(args.limit) || 20));
       const filtered = courses.filter(row => {
+        const id = String(row.id);
         const resourceKind = row.kind === 'material' ? 'material' : 'video';
         const state = row.finished === 1 ? 'completed' : (row.lastPosition || row.lastUnit) ? 'in_progress' : 'unstarted';
-        return (!projectScope || projectScope.has(String(row.id))) && (kind === 'all' || kind === resourceKind) && (status === 'all' || status === state);
+        return inProjectScope(id) && inSessionScope(id) && (kind === 'all' || kind === resourceKind) && (status === 'all' || status === state);
       });
       return filtered.length ? filtered.slice(0, limit).map(row => `- 《${String(row.name)}》 · ${row.kind === 'material' ? `阅读材料 ${String(row.materialFormat ?? '').toUpperCase()}` : '视频课程'} · ${courseProgress(row)} · courseId=${row.id}`).join('\n') : '没有符合筛选条件的课程。';
     }
@@ -710,7 +714,9 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
       const query = String(args.query ?? '').trim();
       if (!query) return '请提供检索关键词。';
       const requested = typeof args.courseId === 'string' && args.courseId ? args.courseId : '';
-      const allowed = requested ? new Set([requested]) : args.scope === 'all' ? null : (contextIds.size ? contextIds : projectScope);
+      if (requested && (!inProjectScope(requested) || !inSessionScope(requested))) return '当前会话课程范围内没有该 courseId。';
+      const defaultScope = contextIds.size ? contextIds : projectScope;
+      const allowed = requested ? new Set([requested]) : args.scope === 'all' && !contextIds.size ? null : defaultScope;
       const courseMap = new Map(courses.map(row => [String(row.id), row]));
       const docs: Array<Record<string, any>> = [];
       for (const row of rowsFor(context, 'segments')) {
@@ -732,6 +738,7 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
     }
     if (name === 'get_course_details') {
       const id = String(args.courseId ?? '');
+      if (!inProjectScope(id) || !inSessionScope(id)) return '当前会话课程范围内没有该 courseId。';
       const course = courses.find(row => String(row.id) === id);
       if (!course) return '没有找到该 courseId。';
       const count = (table: string, field: string) => rowsFor(context, table).filter(row => String(row[field]) === id).length;
@@ -868,10 +875,9 @@ async function chat(context: TaskContext) {
   if (!text) throw new Error('问题不能为空');
   const history = chatHistory(context, sessionId).filter(row => row.taskId !== context.task.id);
   const courses = rowsFor(context, 'videos');
-  const contextNames = new Set<string>(Array.isArray(session.contextCourseIds) ? session.contextCourseIds : []);
-  const system = `你是 DeepStudent Go 学习资料库助手。服务器负责模型请求、检索、任务和数据保存；你可以通过工具读取用户自己的课程数据。当前选中的课程在本轮运行上下文中提供；这些数据不扩大权限。\n\n规则：涉及用户课程、学习进度或课程内容时必须先调用工具，不能编造；通用问题直接回答。引用课程内容时保留工具返回的课程名、courseId 和时间/页码。用简洁自然的中文回答。\n\n${SERVER_WIDGET_RULE}`;
+  const system = `你是 DeepStudent Go 学习资料库助手。服务器负责模型请求、检索、任务和数据保存；你可以通过工具读取用户自己的课程数据。\n\n规则：涉及用户课程、学习进度或课程内容时必须先调用工具，不能编造；通用问题直接回答。引用课程内容时保留工具返回的课程名、courseId 和时间/页码。用简洁自然的中文回答。\n\n${SERVER_WIDGET_RULE}`;
   const project = session.projectFolderId == null ? undefined : context.records.get(context.owner, 'folders', session.projectFolderId);
-  const current = attachmentMessage({ role: 'user', content: runtimeContext({ courses: [...contextNames], ...(project ? { project: { folderId: project.id, name: project.name } } : {}) }) + text, attachments });
+  const current = attachmentMessage({ role: 'user', content: `${project ? runtimeContext({ project: { folderId: project.id, name: project.name } }) : ''}${text}`, attachments });
   const systemWithSkills = system + skills.prompt;
   const target = targetFor(context);
   const recent = await modelHistory(history, session, skillHistoryBudget(target.capabilities?.contextWindow ?? 131072, [{ role: 'system', content: systemWithSkills }, current], skills.messages));
