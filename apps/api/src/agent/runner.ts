@@ -944,6 +944,7 @@ export class BotRunner {
         sandbox_unauthorized: '执行服务认证失败，需要检查服务器配置。',
         sandbox_invalid_request: '执行请求或工作区配置不符合要求，本次命令未执行。',
         sandbox_protocol_error: '执行结果传输不完整或格式异常，操作可能已发生，请先检查结果，不要直接重试。',
+        sandbox_workspace_quota_exceeded: '工作区文件已超过磁盘配额，本次命令未执行。请先删除工作区中不需要的文件再重试。',
       };
       if (sandboxNotices[code]) this.append(run.thread_id, 'text', sandboxNotices[code]);
       if (code === 'wechat_reply_format_failed') this.append(run.thread_id, 'text', '这次回复的公式没能转换成微信可读的格式，请重试。');

@@ -4,14 +4,31 @@ import { timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { sandboxArgs, commandTimeoutSeconds, uuid } from './arguments.mjs';
+import { sandboxArgs, commandTimeoutSeconds, seccompProfile, uuid } from './arguments.mjs';
 import { workspacePath, workspaceFileLimit } from './file-read.mjs';
 import { OutputPreview, outputLimitBytes } from './output.mjs';
 import { removeContainer } from './cleanup.mjs';
+import { directoryBytes, volumeBytes, workspaceQuotaBytes } from './quota.mjs';
 export { sandboxArgs } from './arguments.mjs';
 
 const token = process.env.SANDBOX_TOKEN;
 if (!token || token.length < 32) throw new Error('SANDBOX_TOKEN must contain at least 32 characters');
+const sandboxImage = process.env.SANDBOX_IMAGE || 'wangke-sandbox:0.1.0';
+const quotaBytes = workspaceQuotaBytes();
+const run = promisify(execFile);
+// Fail fast instead of surfacing sandbox_start_failed on every command.
+{
+  const profile = seccompProfile();
+  if (profile !== 'none' && !fs.existsSync(profile)) throw new Error(`seccomp_profile_missing:${profile}`);
+  const { stdout } = await run('docker', ['image', 'inspect', '--format', '{{.Id}}', sandboxImage], { timeout: 10_000 });
+  const imageId = stdout.trim();
+  if (process.env.SANDBOX_IMAGE_ID && process.env.SANDBOX_IMAGE_ID !== imageId) throw new Error(`sandbox_image_mismatch:${imageId}`);
+  console.info(JSON.stringify({ event: 'sandbox.image', image: sandboxImage, id: imageId, quotaBytes }));
+}
+async function workspaceBytes(body) {
+  if (body.projectId) return directoryBytes(path.join(process.env.SANDBOX_PROJECTS_DIR, body.projectId));
+  return volumeBytes(`wangke-workspace-${body.threadId}`, sandboxImage);
+}
 const active = new Map();
 const executions = new Map();
 const cancelled = new Map();
@@ -83,6 +100,18 @@ const server = http.createServer(async (req, res) => {
   if (cancelled.has(body.executionId)) return reply(409, { error: 'execution_cancelled' });
   const scope = body.projectId ? `project:${body.projectId}` : `thread:${body.threadId}`;
   if (active.has(scope) || executions.has(body.executionId) || active.size >= 8) return reply(409, { error: 'sandbox_busy' });
+  if (!readingFile && body.projectId !== undefined && !fs.existsSync(path.join(process.env.SANDBOX_PROJECTS_DIR, body.projectId))) return reply(400, { error: 'invalid_project_workspace' });
+  if (!readingFile) {
+    // Quota is enforced before admission: an over-quota workspace blocks new
+    // commands until the user clears it, so a runaway script cannot wedge the
+    // host disk. Reads stay available for inspection and recovery.
+    let used;
+    try { used = await workspaceBytes(body); } catch { return reply(503, { error: 'sandbox_unavailable' }); }
+    if (used > quotaBytes) {
+      console.info(JSON.stringify({ event: 'sandbox.quota_exceeded', executionId: body.executionId, scope, used, quotaBytes }));
+      return reply(409, { error: 'sandbox_workspace_quota_exceeded' });
+    }
+  }
   const name = `wangke-exec-${body.executionId}`;
   let resolveDone;
   const execution = { name, cancelled: false, stop: null, done: new Promise(resolve => { resolveDone = resolve; }) };

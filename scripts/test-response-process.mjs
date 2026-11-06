@@ -35,6 +35,8 @@ test('执行阶段决定标题，不用正文是否为空来猜正在思考', ()
   assert.equal(processTitle({ streaming: true, phase: 'thinking', calls }), '正在思考');
   assert.equal(processTitle({ streaming: true, phase: 'answering', calls }), '正在组织回答');
   assert.equal(processTitle({ streaming: false, phase: 'thinking', calls }), '思考过程');
+  assert.equal(processTitle({ streaming: true, phase: 'preparing', calls: [] }), '正在思考');
+  assert.equal(processTitle({ streaming: true, phase: 'preparing', calls: [], hint: '正在转写' }), '正在转写');
 });
 
 test('确认和失败场景不会伪装成成功或继续思考', () => {

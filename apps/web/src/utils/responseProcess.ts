@@ -47,5 +47,5 @@ export function processTitle({ streaming, phase, calls, hint, waiting }: {
   }
   if (phase === 'thinking') return '正在思考';
   if (phase === 'answering') return '正在组织回答';
-  return hint || '正在准备下一步';
+  return hint || '正在思考';
 }
