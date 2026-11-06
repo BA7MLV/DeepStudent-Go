@@ -95,7 +95,7 @@ export default function CloudGate({ initialized, authenticated, hasPasskey = fal
       const response = passkey
         ? await serverClient.passkeyLoginVerify(await startAuthentication({ optionsJSON: await serverClient.passkeyLoginOptions() }))
         : await serverClient.login(password);
-      await startCloud(response.user!.id);
+      await startCloud(response.user!.id, { background: true });
       setPassword(''); setSecret(''); setReady(true);
       if (setup) go(step === 'account' ? 'name' : 'models');
     } catch (e) {

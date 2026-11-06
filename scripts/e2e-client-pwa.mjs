@@ -48,12 +48,18 @@ try {
       }));
       if (!navigator.serviceWorker.controller) await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
       const keys = await caches.keys();
-      const urls = (await Promise.all(keys.map(async key => (await (await caches.open(key)).keys()).map(request => request.url)))).flat();
-      return { active: registration.active?.state, script: registration.active?.scriptURL, keys, urls };
+      const entries = await Promise.all(keys.map(async key => [key,
+        (await (await caches.open(key)).keys()).map(request => request.url)]));
+      const urls = entries.flatMap(([, cached]) => cached);
+      return { active: registration.active?.state, script: registration.active?.scriptURL, keys, urls, entries: Object.fromEntries(entries) };
     });
     assert.equal(sw.active, 'activated');
     assert.ok(sw.urls.some(url => /\/assets\/.*\.js/.test(url)));
-    assert.equal(sw.urls.some(url => /\/api\/|\/config\.js|\/index\.html/.test(url)), false, 'no business authority, runtime config or HTML in SW cache');
+    assert.equal(sw.urls.some(url => /\/api\/|\/config\.js/.test(url)), false, 'no business authority or runtime config in SW cache');
+    // HTML 只允许作为离线导航兑底（app-shell-html）被缓存：在线导航永远走网络拿最新外壳，
+    // 断网时才回放这份拷贝，已安装的 PWA 离线也能打开而不是浏览器错误页。
+    const htmlCaches = Object.entries(sw.entries).filter(([, cached]) => cached.some(url => /\/index\.html$/.test(url))).map(([name]) => name);
+    assert.deepEqual(htmlCaches, ['app-shell-html'], 'index.html cached only as the offline navigation fallback');
     const assetUrl = new URL(sw.urls.find(url => /\/assets\/.*\.js/.test(url))); assetUrl.searchParams.delete('__WB_REVISION__');
     const asset = assetUrl.href;
     // Actual origin failures (not WebKit's context.setOffline interception,
@@ -73,5 +79,5 @@ try {
   const after = identity(); assert.deepEqual(after, before, 'refuse mixed production artifact evidence');
   fs.writeFileSync(path.join(directory, 'result.json'), JSON.stringify({ before, after, results,
     externalNotCovered: ['physical Safari device', 'OS PWA installation', 'target reverse proxy/deployment'] }, null, 2));
-  console.log(`PASS production PWA service worker in Chromium/WebKit, offline static cache, no business/config/HTML cache, online recovery/update (${directory})`);
+  console.log(`PASS production PWA service worker in Chromium/WebKit, offline static cache, no business/config cache, offline navigation shell, online recovery/update (${directory})`);
 } finally { await browser?.close(); await new Promise(resolve => web ? web.httpServer.close(resolve) : resolve()); store?.close(); await app.close(); }
