@@ -207,9 +207,13 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // ffmpeg.wasm / onnxruntime 的 wasm 文件较大
-        maximumFileSizeToCacheInBytes: 48 * 1024 * 1024,
-        // 不预缓存 html：否则 SW 回放时会丢掉 Cloudflare 下发的 COOP/COEP，VAD wasm 无法用 SharedArrayBuffer
+        // 预缓存只留 App Shell（js/css/svg）。wasm 一律改为运行时按需缓存：
+        // onnxruntime 的 threaded wasm 单文件就 14MB，进预缓存会让首次安装
+        // 下载几十 MB、拖慢 SW install，而多数用户当次根本用不到转写/导出。
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
+        // 不预缓存 html、也不用 navigateFallback（那会让**在线**导航也走 SW 回放的旧外壳）：
+        // 在线新鲜度交给 no-cache 响应头，离线兜底交给下面 runtimeCaching 里的
+        // NetworkFirst 导航规则 —— 断网时才回放，且 COOP/COEP 随响应一起缓存、回放不丢。
         //
         // ⚠️ 这里**刻意不加 `mjs`**（pdf.js 的 worker 是 .mjs）：
         // globPatterns 是「必须有匹配」的语义 —— workbox 遇到匹配不到的模式会**直接让构建失败**
@@ -217,7 +221,7 @@ export default defineConfig({
         //   "One of the glob patterns doesn't match any files" 并中断构建）。
         // 而 worker 的文件名带内容哈希、由 Vite 在打包期才定，配置期没法确定它一定存在。
         // 改成下面的**运行时 CacheFirst**：正则匹配不到只是不缓存，绝不会让构建挂掉。
-        globPatterns: ['**/*.{js,css,svg,wasm}'],
+        globPatterns: ['**/*.{js,css,svg}'],
         // config.js 是运行时配置（web 容器启动时按 API_BASE_URL 重写），不能被 SW 缓存成旧值。
         globIgnores: ['config.js'],
         navigateFallback: undefined,
@@ -251,6 +255,31 @@ export default defineConfig({
             options: {
               cacheName: 'pdfjs-worker',
               expiration: { maxEntries: 4, maxAgeSeconds: 365 * 24 * 3600 },
+            },
+          },
+          {
+            // SPA 导航兜底：在线时永远走网络拿最新的 index.html（保持现有的
+            // no-cache 语义），断网/超时才回放到缓存里的外壳 —— 已安装的 PWA
+            // 离线也能打开，而不是浏览器错误页。COOP/COEP 由 Caddy/代理下发，
+            // 随响应一起进缓存，回放不丢；/api/ 不是页面导航，不在此处理。
+            urlPattern: ({ request, url }) =>
+              request.mode === 'navigate' && !url.pathname.startsWith('/api/'),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'app-shell-html',
+              networkTimeoutSeconds: 4,
+              expiration: { maxEntries: 4, maxAgeSeconds: 30 * 24 * 3600 },
+            },
+          },
+          {
+            // 大体积 wasm / onnx 模型：真正用到（转写、导出、ffmpeg 解码）才下载，
+            // 下载后长留（离线可用）。覆盖 /ort/ 下的 mjs+wasm、mediabunny 的
+            // 解码器 wasm 和 VAD 的 onnx 模型。
+            urlPattern: /\.(?:wasm|onnx|mjs)$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'wasm-runtime',
+              expiration: { maxEntries: 60, maxAgeSeconds: 365 * 24 * 3600 },
             },
           },
         ],

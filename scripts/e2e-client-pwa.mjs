@@ -22,7 +22,13 @@ try {
   const api = await app.listen({ host: '127.0.0.1', port: 0 });
   web = await preview({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'),
     plugins: [{ name: 'pwa-origin-outage', configurePreviewServer(server) {
-      server.middlewares.use((_request, response, next) => { if (!unavailable) return next(); response.statusCode = 503; response.end('fixture origin unavailable'); });
+      server.middlewares.use((request, response, next) => {
+        if (!unavailable) return next();
+        // A failed navigation must reach the SW as a network failure, not an
+        // HTTP error page (NetworkFirst legitimately returns HTTP responses).
+        if (request.headers.accept?.includes('text/html')) { response.destroy(); return; }
+        response.statusCode = 503; response.end('fixture origin unavailable');
+      });
     } }],
     preview: { host: '127.0.0.1', port: 0, proxy: { '/api': { target: api, ws: true, changeOrigin: false } } } });
   const origin = web.resolvedUrls.local[0].replace(/\/$/, '');
@@ -41,19 +47,35 @@ try {
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(`${origin}/#/board`);
     await page.waitForFunction(() => document.querySelector('#root')?.textContent?.length > 10);
-    const sw = await page.evaluate(async () => {
+    await page.evaluate(async () => {
       const registration = await navigator.serviceWorker.ready;
       if (registration.active?.state !== 'activated') await new Promise(resolve => registration.active.addEventListener('statechange', function changed() {
         if (this.state === 'activated') { this.removeEventListener('statechange', changed); resolve(); }
       }));
       if (!navigator.serviceWorker.controller) await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
+    });
+    // The installing SW cannot cache the navigation that loaded this page.
+    // Warm the runtime navigation cache with an actual controlled navigation.
+    await page.reload();
+    await page.waitForFunction(async () => {
+      const cache = await caches.open('app-shell-html');
+      return !!(await cache.match(location.href.split('#')[0]));
+    });
+    const sw = await page.evaluate(async () => {
+      const registration = await navigator.serviceWorker.ready;
       const keys = await caches.keys();
-      const urls = (await Promise.all(keys.map(async key => (await (await caches.open(key)).keys()).map(request => request.url)))).flat();
-      return { active: registration.active?.state, script: registration.active?.scriptURL, keys, urls };
+      const entries = await Promise.all(keys.map(async key => [key,
+        (await (await caches.open(key)).keys()).map(request => request.url)]));
+      const urls = entries.flatMap(([, cached]) => cached);
+      return { active: registration.active?.state, script: registration.active?.scriptURL, keys, urls, entries: Object.fromEntries(entries) };
     });
     assert.equal(sw.active, 'activated');
     assert.ok(sw.urls.some(url => /\/assets\/.*\.js/.test(url)));
-    assert.equal(sw.urls.some(url => /\/api\/|\/config\.js|\/index\.html/.test(url)), false, 'no business authority, runtime config or HTML in SW cache');
+    assert.equal(sw.urls.some(url => /\/api\/|\/config\.js/.test(url)), false, 'no business authority or runtime config in SW cache');
+    // HTML 只允许作为离线导航兑底（app-shell-html）被缓存：在线导航永远走网络拿最新外壳，
+    // 断网时才回放这份拷贝，已安装的 PWA 离线也能打开而不是浏览器错误页。
+    const htmlCaches = Object.entries(sw.entries).filter(([, cached]) => cached.some(url => new URL(url).pathname === '/')).map(([name]) => name);
+    assert.deepEqual(htmlCaches, ['app-shell-html'], 'navigation URL cached only as the offline navigation fallback');
     const assetUrl = new URL(sw.urls.find(url => /\/assets\/.*\.js/.test(url))); assetUrl.searchParams.delete('__WB_REVISION__');
     const asset = assetUrl.href;
     // Actual origin failures (not WebKit's context.setOffline interception,
@@ -62,6 +84,9 @@ try {
     assert.ok(await page.evaluate(async url => (await fetch(url)).ok, asset), 'actual SW serves cached static asset offline');
     assert.equal(await page.evaluate(async () => (await fetch('/api/v1/cloud/config')).status), 503, 'SW does not synthesize offline business facts');
     assert.equal(await page.evaluate(async () => (await fetch('/uncached-outage-probe')).status), 503, 'origin is genuinely unavailable, not just an app flag');
+    const offlineNavigation = await page.reload();
+    assert.equal(offlineNavigation.status(), 200, 'cached shell opens when the navigation network fails');
+    assert.ok((await offlineNavigation.text()).includes('<div id="root">'), 'offline navigation returns the application HTML');
     unavailable = false;
     await page.waitForFunction(async () => { try { return (await fetch('/api/v1/cloud/config')).ok; } catch { return false; } });
     await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
@@ -73,5 +98,5 @@ try {
   const after = identity(); assert.deepEqual(after, before, 'refuse mixed production artifact evidence');
   fs.writeFileSync(path.join(directory, 'result.json'), JSON.stringify({ before, after, results,
     externalNotCovered: ['physical Safari device', 'OS PWA installation', 'target reverse proxy/deployment'] }, null, 2));
-  console.log(`PASS production PWA service worker in Chromium/WebKit, offline static cache, no business/config/HTML cache, online recovery/update (${directory})`);
+  console.log(`PASS production PWA service worker in Chromium/WebKit, offline static cache, no business/config cache, offline navigation shell, online recovery/update (${directory})`);
 } finally { await browser?.close(); await new Promise(resolve => web ? web.httpServer.close(resolve) : resolve()); store?.close(); await app.close(); }

@@ -30,6 +30,7 @@ import './md-table.css';
 import { apiUrl } from './api/base';
 import { consumeBootstrapLink } from './cloud/bootstrapLink';
 import DatabaseNotice from './cloud/DatabaseNotice';
+import { PageLoader, toast } from './ui';
 
 // Consume once, outside React rendering (including StrictMode), before API calls.
 const bootstrapSecret = consumeBootstrapLink(location, history);
@@ -60,7 +61,9 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 
 /** 同步主题类与 HeroUI 强调色令牌，实际配色由 CSS 变量控制。 */
-let bootView: React.ReactNode;
+// 首帧兜底：boot() 要等会话状态接口返回才能决定渲染登录页还是应用，在此之前
+// 先渲染与 index.html 内联启动骨架同款的扫光 loading，避免弱网下白屏。
+let bootView: React.ReactNode = <PageLoader label="正在启动…" />;
 function Root() {
   const theme = useSettings((s) => s.theme);
   const accentColor = useSettings((s) => s.accentColor);
@@ -90,6 +93,17 @@ function render() {
   );
 }
 
+// PWA autoUpdate：新 SW 在后台接管后，老页面仍在跑旧版本。这里给一条轻提示，
+// 把「改了怎么还是旧的」变成「刷新即可更新」；首次安装激活不提示。
+if ('serviceWorker' in navigator) {
+  let hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) { hadController = true; return; }
+    hadController = true;
+    toast.info(i18n.t('newVersionReady'));
+  });
+}
+
 // HeroUI 的组件是纯 React 实现（无 Web Components 注册等待），直接渲染首帧。
 async function boot() {
   try {
@@ -97,7 +111,7 @@ async function boot() {
     const status = await response.json().catch(() => null);
     if (!response.ok || status?.cloud !== true) throw new Error(i18n.t('serverUnavailable'));
     const [bootstrap, session] = await Promise.all([serverClient.bootstrapStatus(), serverClient.session()]);
-    if (session.authenticated && session.user) await startCloud(session.user.id);
+    if (session.authenticated && session.user) await startCloud(session.user.id, { background: true });
     window.addEventListener('cloud-session-expired', stopCloud);
     bootView = <CloudGate initialized={bootstrap.initialized} authenticated={session.authenticated} hasPasskey={bootstrap.hasPasskey} initialSecret={bootstrap.initialized ? '' : bootstrapSecret} />;
   } catch (error) {

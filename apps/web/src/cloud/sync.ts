@@ -342,7 +342,18 @@ async function resolveConflictLocked(database: typeof db, lifetime: AccountLifet
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
-export async function startCloud(owner: string) {
+export interface StartCloudOptions {
+  /**
+   * true：本地阶段（打开数据库、迁移、账号隔离）完成即返回，配置拉取、
+   * 基线对账、订阅这些网络往返在后台自息（退避重试 + degraded 状态），
+   * 仅冲突类错误通过 reportSyncFailure 醒目地报给用户。登录后的首帧
+   * 不再等网络 —— 页面直接从 IndexedDB 读历史数据先渲染。
+   * 缺省 false：等远端阶段全部完成（或抛错），供 e2e 与诊断使用。
+   */
+  background?: boolean;
+}
+
+export async function startCloud(owner: string, options: StartCloudOptions = {}) {
   disposeServerRuntime();
   flight = undefined;
   fileCache.clear();
@@ -366,6 +377,25 @@ export async function startCloud(owner: string) {
   // 登录前的语言不随模型配置重置；有账号语言偏好时，后续 loadPreferences 再覆盖。
   const uiLanguage = useSettings.getState().uiLanguage;
   useSettings.setState({ ...useSettings.getInitialState(), uiLanguage });
+  // 本地阶段到此完成。远端阶段（config / 基线对账 / 订阅）要么在后台跑，
+  // 要么按调用方要求等它跑完。
+  const remote = cloudRemotePhase(owner, lifetime, databaseAtStart, guard);
+  if (options.background) {
+    remote.catch(error => {
+      if ((error as Error)?.message === 'client_account_changed') return;
+      reportSyncFailure(error, 'flush');
+    });
+    return;
+  }
+  await remote;
+}
+
+async function cloudRemotePhase(
+  owner: string,
+  lifetime: AccountLifetime,
+  databaseAtStart: typeof db,
+  guard: () => void,
+) {
   const config = await cloudRequest<CloudConfig>('/config', { signal: lifetime.signal });
   guard();
   applyCloudConfig(config);
@@ -379,7 +409,8 @@ export async function startCloud(owner: string) {
   await startPreferences();
   guard();
   startResourceCommands();
-  const database = db;
+  const database = databaseAtStart;
+  guard();
   let closed = false;
   let lastLearningWake = 0;
   let follow: { dispose(): void; restart(): void } | undefined;
