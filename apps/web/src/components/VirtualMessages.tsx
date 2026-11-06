@@ -1,4 +1,4 @@
-import { useCallback, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type RefObject } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 export interface VirtualMessagesHandle {
@@ -18,6 +18,11 @@ export default function VirtualMessages<T extends { key: string }>({ items, scro
   positionEmpty?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
+  // A restored baseline can mount this child together with its scrollport.
+  // Child layout effects run before the parent's ref is attached; without a
+  // post-commit observation, a quiet stream stays at a zero viewport forever.
+  useEffect(() => { setScrollElement(scrollRef.current); }, [scrollRef]);
   const [margin, setMargin] = useState(0);
   const [positioned, setPositioned] = useState(false);
   const restore = useRef(initialAnchor);
@@ -26,7 +31,7 @@ export default function VirtualMessages<T extends { key: string }>({ items, scro
   const getItemKey = useCallback((index: number) => items[index].key, [items]);
   const virtualizer = useVirtualizer({
     count: items.length,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => scrollElement ?? scrollRef.current,
     getItemKey,
     estimateSize: () => 180,
     overscan: 4,
@@ -99,7 +104,7 @@ export default function VirtualMessages<T extends { key: string }>({ items, scro
     // final action row grows. Observe the virtual content's actual height too.
     observer.observe(host);
     return () => observer.disconnect();
-  }, [scrollRef, onResize]);
+  }, [scrollRef, scrollElement, onResize]);
   return (
     <div ref={hostRef} data-chat-positioned={positioned ? 'true' : 'false'}
       style={{ height: virtualizer.getTotalSize(), position: 'relative', overflowAnchor: 'none' }}>

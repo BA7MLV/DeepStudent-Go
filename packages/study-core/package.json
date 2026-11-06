@@ -44,6 +44,7 @@
     "./model/tool-messages": { "types": "./src/api/toolMessages.ts", "default": "./dist/api/toolMessages.js" },
     "./cancel": { "types": "./src/utils/cancel.ts", "default": "./dist/utils/cancel.js" },
     "./chat-order": { "types": "./src/utils/chatOrder.ts", "default": "./dist/utils/chatOrder.js" },
+    "./response-order": { "types": "./src/utils/responseOrder.ts", "default": "./dist/utils/responseOrder.js" },
     "./continuation": { "types": "./src/utils/continuation.ts", "default": "./dist/utils/continuation.js" },
     "./folder-scope": { "types": "./src/utils/folderScope.ts", "default": "./dist/utils/folderScope.js" },
     "./artifact-edit": { "types": "./src/utils/artifactEdit.ts", "default": "./dist/utils/artifactEdit.js" },
@@ -66,6 +67,6 @@
     "build": "tsc -p tsconfig.json && npm run test:dist",
     "test:dist": "node --test scripts/check-dist.mjs"
   },
-  "dependencies": { "docx": "^8.5.0", "fflate": "^0.8.3", "ts-fsrs": "^5.4.2" },
+  "dependencies": { "@wangke/contracts": "0.1.0", "docx": "^8.5.0", "fflate": "^0.8.3", "ts-fsrs": "^5.4.2" },
   "devDependencies": { "typescript": "^7.0.2" }
 }

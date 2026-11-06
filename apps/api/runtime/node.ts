@@ -5,6 +5,7 @@ import { taskChatAttachments } from './chat-attachments.js';
 import { sessionSkills, skillHistoryBudget, assertSkillRequestBudget } from './skills.js';
 import { sessionMcp } from './mcp.js';
 import { compareChatRows, nextChatTurnTimes } from '@wangke/study-core/chat-order';
+import { beginResponseSegment, nextResponseRound, type ResponseSegment } from '@wangke/study-core/response-order';
 import { folderCourseScope } from '@wangke/study-core/folder-scope';
 import { CONTINUE_INSTRUCTION, createContinuationFilter } from '@wangke/study-core/continuation';
 import { chatOnce, chatStream, textOf, type ChatMessage, type ChatOptions, type ContentPart, type ToolDef } from '@wangke/study-core/model/client';
@@ -84,6 +85,7 @@ function taskThinkingLevel(context: TaskContext) {
 }
 
 type ServerToolTrace = {
+  id?: string;
   webSearch?: WebSearchResult;
   name: string;
   detail?: string;
@@ -289,6 +291,7 @@ interface ServerAgentResult {
   ask?: AskUserData & { answer?: AskUserAnswer; picked?: string };
   content: string;
   reasoning?: string;
+  responseSegments: ResponseSegment[];
   tools: ServerToolTrace[];
   transcript: ChatMessage[];
   requests: ModelRequestRecord[];
@@ -297,6 +300,10 @@ interface ServerAgentResult {
 
 function widgetFields(result: Pick<ServerAgentResult, 'widgets'>) {
   return result.widgets.length ? { widgets: [...result.widgets], widget: result.widgets.at(-1) } : {};
+}
+
+function responseFields(result: ServerAgentResult) {
+  return { responseSegments: result.responseSegments, ...widgetFields(result) };
 }
 
 /**
@@ -338,18 +345,26 @@ async function runServerAgent(
   const traces: ServerToolTrace[] = resumed?.traces ?? [...initialTraces];
   const widgets: WidgetPayload[] = resumed?.widgets ?? [];
   let widgetPreview: { html: string } | undefined;
-  let ask: ServerAgentResult['ask'];
+  let ask: ServerAgentResult['ask'] = resumed?.ask;
   let pendingAsk = false;
   let reasoning = resumed?.reasoning ?? '';
+  // `answer` is the current protocol message, not the UI transcript. Visible
+  // text is cumulative and may also contain server-delivered widget references.
   let answer = '';
-  let deliveredContent = resumed?.deliveredContent ?? '';
-  const content = () => (deliveredContent + answer) || narration;
-  const freezeAnswer = () => {
-    if (answer.trim()) deliveredContent += `${answer}\n\n`;
-    answer = '';
+  let deliveredContent = resumed?.deliveredContent || resumed?.narration || '';
+  const content = () => deliveredContent;
+  let responseSegments: ResponseSegment[] = resumed?.responseSegments?.length ? resumed.responseSegments
+    : [{ contentOffset: 0, reasoningOffset: 0, toolOffset: 0, startedAt: Date.now() }];
+  const beginProcess = () => {
+    responseSegments = beginResponseSegment(responseSegments, deliveredContent, reasoning, traces);
+  };
+  const appendAnswer = (delta: string) => { answer += delta; deliveredContent += delta; };
+  const finishAnswer = (text: string) => {
+    // Some transports emit a final message as well as deltas. Only its unseen
+    // suffix may be appended; never replace a prefix the user has already seen.
+    if (text.startsWith(answer)) appendAnswer(text.slice(answer.length));
   };
   let streaming = false;
-  let narration = resumed?.narration ?? '';
   const seen = new Set<string>(resumed?.seen ?? []);
   const maxRounds = Math.max(1, Math.min(8, Number(context.configuration.get(context.owner).policy.maxSteps) || 6));
   const stepBudget = new TaskStepBudget(context.store, context.configuration);
@@ -373,7 +388,7 @@ async function runServerAgent(
     // the browser through progress; only crash recovery loses the last second.
     if (force || !rowIdentity || now - lastSnapshotAt >= 1_000) {
       const transcript = [...out.slice(initialCount), ...(streaming && answer.trim() ? [{ role: 'assistant' as const, content: answer }] : [])];
-      const identities = onSnapshot?.({ content: content(), reasoning: reasoning || undefined, tools, transcript, requests, widgets: [...widgets], ...(ask ? { ask } : {}) });
+      const identities = onSnapshot?.({ content: content(), reasoning: reasoning || undefined, responseSegments, tools, transcript, requests, widgets: [...widgets], ...(ask ? { ask } : {}) });
       if (identities) rowIdentity = { rowId: identities.rowId, userRowId: identities.userRowId };
       if (identities?.widgets) widgets.splice(0, widgets.length, ...identities.widgets);
       lastSnapshotAt = now;
@@ -381,7 +396,7 @@ async function runServerAgent(
     context.report({
       // Progress and the saved answer must describe the same text. Clipping here
       // made long answers alternate between a full checkpoint and a short prefix.
-      phase, round, content: content(), reasoning, tools,
+      phase, round, content: content(), reasoning, responseSegments, tools,
       modelRequests: requests,
       ...(ask ? { ask, view: { pendingAsk: pendingAsk ? { messageKey: `row:${rowIdentity?.rowId}` } : null } } : {}),
       ...(rowIdentity ?? {}),
@@ -393,8 +408,11 @@ async function runServerAgent(
   for (let round = resumed?.round ?? 0; round < maxRounds; round++) {
     context.checkActive();
     answer = '';
+    deliveredContent = nextResponseRound(deliveredContent);
+    beginProcess();
     widgetPreview = undefined;
     streaming = true;
+    report('thinking', round + 1, true);
     let message: ChatMessage;
     try {
       const requestMessages = reconcileSkillMessages(out);
@@ -408,9 +426,11 @@ async function runServerAgent(
         signal: context.signal,
         thinkingLevel,
       },
-      delta => { answer += delta; report('answer', round + 1); },
-      delta => { reasoning += delta; report('thinking', round + 1); },
+      delta => { appendAnswer(delta); report('answer', round + 1); },
+      delta => { beginProcess(); reasoning += delta; report('thinking', round + 1); },
       call => {
+        beginProcess();
+        report('tool', round + 1);
         if (call.name !== 'show_widget') return;
         const partial = readPartialWidgetArguments(call.arguments);
         if (partial.format !== 'html' || !partial.code) return;
@@ -447,11 +467,12 @@ async function runServerAgent(
       delete message.providerState;
       if (!textOf(message).trim()) {
         message.content = '模型服务因内容过滤停止了这次回答，请调整提问后重试。';
-        answer += message.content;
+        appendAnswer(message.content);
       }
     }
     out.push(message);
     const text = textOf(message);
+    finishAnswer(text);
 
     // `length` with tool calls means the arguments may be only a valid-looking
     // prefix. Never execute that call (especially show_widget); feed the model
@@ -459,11 +480,14 @@ async function runServerAgent(
     if (message.finish_reason === 'length' && message.tool_calls?.length) {
       for (const call of message.tool_calls) {
         stepBudget.chargeTaskTool(context.owner, context.task.id, `${round}:${message.tool_calls.indexOf(call)}`);
+        beginProcess();
+        const failure = `工具「${call.function.name}」没有执行：这一轮的输出撞到了 max_tokens 上限，参数可能已被截断。请用完整的参数重新调用一次。`;
+        traces.push({ id: `${context.task.id}:${round}:${message.tool_calls.indexOf(call)}`, name: toolLabel(call.function.name), status: 'error', reasoningOffset: reasoning.length, result: failure });
         out.push({
           role: 'tool',
           tool_call_id: call.id,
           name: call.function.name,
-          content: `工具「${call.function.name}」没有执行：这一轮的输出撞到了 max_tokens 上限，参数可能已被截断。请用完整的参数重新调用一次。`,
+          content: failure,
         });
       }
       report('tool', round + 1, true);
@@ -471,7 +495,6 @@ async function runServerAgent(
     }
     if (message.tool_calls?.length) {
       const waitingIds: string[] = [];
-      if (text.trim()) narration = text;
       for (const call of message.tool_calls) {
         context.checkActive();
         // Server round/index identity cannot be reused by a provider-supplied
@@ -485,7 +508,8 @@ async function runServerAgent(
           continue;
         }
         seen.add(signature);
-        const trace: ServerToolTrace = { name: toolLabel(call.function.name), status: 'running', detail: JSON.stringify(args).slice(0, 300), reasoningOffset: reasoning.length };
+        beginProcess();
+        const trace: ServerToolTrace = { id: `${context.task.id}:${round}:${message.tool_calls.indexOf(call)}`, name: toolLabel(call.function.name), status: 'running', detail: JSON.stringify(args).slice(0, 300), reasoningOffset: reasoning.length };
         traces.push(trace);
         const started = Date.now();
         report('tool', round + 1, true);
@@ -506,10 +530,9 @@ async function runServerAgent(
             ? executeServerWidget(args, payload => {
               context.checkActive();
               widgets.push(payload);
-              freezeAnswer();
               // Place it now, not in an end-of-answer fallback that would move
               // and remount an already opened preview when the model echoes ref.
-              deliveredContent += `${widgetReference(payload.ref!)}\n\n`;
+              deliveredContent = nextResponseRound(deliveredContent) + `${widgetReference(payload.ref!)}\n\n`;
             })
              : call.function.name === 'board' && ['chat', 'qa'].includes(context.task.kind) ? executeBoardTool(context, args)
              : call.function.name === 'plugins' && ['chat', 'qa'].includes(context.task.kind) ? await executePluginsTool(context, args)
@@ -535,41 +558,43 @@ async function runServerAgent(
         // All tool results and product writes are settled before releasing the slot.
         // The checkpoint stores protocol-neutral messages; no command is replayed on wake.
         context.store.db.prepare('INSERT INTO task_agent_checkpoints(task_id,payload,wait_ids) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET payload=excluded.payload,wait_ids=excluded.wait_ids').run(context.task.id,
-          JSON.stringify({ out, initialCount, requests, traces, widgets, reasoning, deliveredContent, narration, seen: [...seen], round: round + 1 }), JSON.stringify([...new Set(waitingIds)]));
+          JSON.stringify({ out, initialCount, requests, traces, widgets, reasoning, deliveredContent, responseSegments, ask, seen: [...seen], round: round + 1 }), JSON.stringify([...new Set(waitingIds)]));
         throw new TaskWaitSuspended();
       }
-      // Once a visual has been delivered, later tool rounds must not erase the
-      // explanation/references already shown above it. Retrieval-only narration
-      // keeps the existing replace-on-next-round behavior.
-      if (widgets.length) freezeAnswer();
       continue;
     }
-    if (text.trim()) {
-      answer = text;
+    if (message.finish_reason === 'length') {
+      report('error', round + 1, true);
+      throw new Error('模型输出达到长度上限，可从断点继续回答');
+    }
+    if (answer.trim()) {
       report('answer', round + 1, true);
-      return { content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript: out.slice(initialCount), requests, widgets, ...(ask ? { ask } : {}) };
+      return { content: content(), reasoning: reasoning || undefined, responseSegments, tools: traceResult(traces), transcript: out.slice(initialCount), requests, widgets, ...(ask ? { ask } : {}) };
     }
     // An empty assistant turn is not a successful answer.  Give the model a
     // bounded, tool-free chance to explain what it found.
-    narration = narration || '模型没有返回正文。';
     break;
   }
 
   context.checkActive();
   out.push({ role: 'user', content: '请停止调用工具，只用中文总结已经查到的资料和结论；如果证据不足，请明确说明。' });
   answer = '';
+  deliveredContent = nextResponseRound(deliveredContent);
+  beginProcess();
   streaming = true;
+  report('thinking', maxRounds + 1, true);
   let final: ChatMessage;
   const finalMessages = reconcileSkillMessages(out);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, finalMessages, false);
   try {
     final = await chatStream(target, { messages: finalMessages, cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, max_tokens: 4096, signal: context.signal, thinkingLevel },
-      delta => { answer += delta; report('answer', maxRounds + 1); },
-      delta => { reasoning += delta; report('thinking', maxRounds + 1); },
+      delta => { appendAnswer(delta); report('answer', maxRounds + 1); },
+      delta => { beginProcess(); reasoning += delta; report('thinking', maxRounds + 1); },
       undefined,
       modelFetch(context));
     context.checkActive();
     if (final.finish_reason === 'error' || final.finish_reason === 'aborted') throw new Error('模型或网关没有正常结束这一轮回答');
+    if (final.finish_reason === 'length') throw new Error('模型输出达到长度上限，可从断点继续回答');
   } catch (error) {
     report('error', maxRounds + 1, true);
     streaming = false;
@@ -581,10 +606,14 @@ async function runServerAgent(
     delete final.providerState;
     if (!textOf(final).trim()) final.content = '模型服务因内容过滤停止了这次回答，请调整提问后重试。';
   }
-  answer = textOf(final).trim() || narration || '未获得有效回答。';
+  finishAnswer(textOf(final));
   out.push(final);
+  if (!answer.trim()) {
+    report('error', maxRounds + 1, true);
+    throw new Error('模型没有返回正文，可重试或从断点继续回答');
+  }
   report('answer', maxRounds + 1, true);
-  return { content: content(), reasoning: reasoning || undefined, tools: traceResult(traces), transcript: out.slice(messages.length), requests, widgets, ...(ask ? { ask } : {}) };
+  return { content: content(), reasoning: reasoning || undefined, responseSegments, tools: traceResult(traces), transcript: out.slice(initialCount), requests, widgets, ...(ask ? { ask } : {}) };
 }
 
 function qaSystemPrompt(video: Record<string, any> | null, kind: 'page' | 'para' | undefined, input: Record<string, any>) {
@@ -847,7 +876,7 @@ async function qa(context: TaskContext) {
     // The user row only changes when the turn starts or accumulates a model
     // request. Rewriting it on every checkpoint clones the whole skill prompt.
     const writeUser = !checkpointed || writtenRequests !== result.requests.length;
-    const assistantRow = { id: assistantId, videoId, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
+    const assistantRow = { id: assistantId, videoId, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...responseFields(result) };
     const user = writeUser ? { ...userRow, modelTrace: modelTrace(userRow.content, [...skills.messages, current]), modelRequests: result.requests } : userRow;
     addConversationMutations(context, sessionId, user, assistantRow, checkpointed ? undefined : { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed, writeUser);
     checkpointed = true;
@@ -857,7 +886,7 @@ async function qa(context: TaskContext) {
   };
   const result = await runServerAgent(context, target, messages, [...qaTools(kind), ...mcp.tools], mcp.wrap(skills.wrap(qaExecutor(context, videoId, kind))), persist, [...skills.traces, ...mcp.traces], mcp.label);
   persist(result, false);
-  return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...widgetFields(result) };
+  return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...responseFields(result) };
 }
 
 async function chat(context: TaskContext) {
@@ -896,7 +925,7 @@ async function chat(context: TaskContext) {
     const writeUser = !checkpointed || writtenRequests !== result.requests.length;
     const userRow = { id: userId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'user', explicitSkillIds: skills.ids, content: text, ...(attachments.length ? { attachments } : {}), createdAt: startedAt,
       ...(writeUser ? { modelTrace: modelTrace(text, [...skills.messages, current]), modelRequests: result.requests } : {}) };
-    const assistantRow = { id: assistantId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.ask ? { ask: result.ask } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...widgetFields(result) };
+    const assistantRow = { id: assistantId, videoId: LIBRARY_ASSISTANT_ID, sessionId, role: 'assistant', content: result.content, modelTrace: modelTrace(result.content, result.transcript), createdAt: Date.now(), ...(interrupted ? { interrupted: true } : {}), ...(result.ask ? { ask: result.ask } : {}), ...(result.reasoning ? { reasoning: result.reasoning } : {}), ...(result.tools.length ? { tools: result.tools } : {}), ...responseFields(result) };
     addConversationMutations(context, sessionId, userRow, assistantRow, checkpointed ? undefined : { ...(title ? { title } : {}), ...(recent.checkpoint ? { contextCheckpoint: recent.checkpoint } : {}) }, checkpointed, writeUser);
     checkpointed = true;
     if (writeUser) writtenRequests = result.requests.length;
@@ -905,7 +934,7 @@ async function chat(context: TaskContext) {
   };
   const result = await runServerAgent(context, target, messages, [...libraryTools(courses.length > 0), ...mcp.tools], mcp.wrap(skills.wrap(libraryExecutor(context, session))), persist, [...skills.traces, ...mcp.traces], mcp.label);
   persist(result, false);
-  return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...(result.ask ? { ask: result.ask } : {}), ...widgetFields(result) };
+  return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...(result.ask ? { ask: result.ask } : {}), ...responseFields(result) };
 }
 
 /** Explicit continuation changes one existing answer, never creates another
@@ -935,6 +964,9 @@ async function continueChat(context: TaskContext) {
   let content = String(original.content ?? '');
   let lastContent = content;
   let reasoning = String(original.reasoning ?? '');
+  let responseSegments: ResponseSegment[] = original.responseSegments?.length ? original.responseSegments
+    : [{ contentOffset: 0, reasoningOffset: 0, toolOffset: 0 }];
+  let phase = 'answer';
   let pending = '';
   let final: ChatMessage | undefined;
   let lastReportAt = 0;
@@ -950,7 +982,7 @@ async function continueChat(context: TaskContext) {
     // progress below already carries the new text; persist on boundaries and
     // at most once a second so crash recovery loses no more than that.
     if (force || now - lastCommitAt >= 1_000) {
-      const next: Record<string, any> = { ...current, content, reasoning: reasoning || undefined, taskId: context.task.id,
+      const next: Record<string, any> = { ...current, content, reasoning: reasoning || undefined, responseSegments, taskId: context.task.id,
         modelTrace: modelTrace(content, [...priorTrace, instruction, ...(final ? [final] : pending ? [{ role: 'assistant' as const, content: pending }] : [])]),
         modelRequests: [...(original.modelRequests ?? []), ...requests] };
       delete next.interrupted; delete next.interruptReason;
@@ -959,22 +991,31 @@ async function continueChat(context: TaskContext) {
       lastContent = content;
       lastCommitAt = now;
     }
-    context.report({ phase: interruptReason ? 'error' : 'answer', content, reasoning, rowId, userRowId: userRow?.id,
+    context.report({ phase: interruptReason ? 'error' : phase, content, reasoning, responseSegments, rowId, userRowId: userRow?.id,
       tools: current.tools, widgets: current.widgets, widget: current.widget });
   };
   snapshot(true, undefined, true);
   try {
     const message = await chatStream(target, { messages, signal: context.signal, max_tokens: 8192, thinkingLevel: taskThinkingLevel(context),
       cacheKey: `study:${context.owner}:${sessionId}`, onRequest: request => { requests.push(request); } },
-    delta => { pending += delta; content += filter.push(delta); snapshot(true); },
-    delta => { reasoning += delta; snapshot(true); }, undefined, modelFetch(context));
+    delta => {
+      const changed = phase !== 'answer';
+      pending += delta; content += filter.push(delta); phase = 'answer'; snapshot(true, undefined, changed);
+    },
+    delta => {
+      const previous = responseSegments;
+      responseSegments = beginResponseSegment(responseSegments, content, reasoning, original.tools ?? []);
+      const changed = previous !== responseSegments || phase !== 'thinking';
+      reasoning += delta; phase = 'thinking'; snapshot(true, undefined, changed);
+    }, undefined, modelFetch(context));
     context.checkActive();
     content += filter.flush();
     if (message.finish_reason === 'error' || message.finish_reason === 'aborted') throw new Error('模型或网关没有正常结束这一轮回答');
+    if (message.finish_reason === 'length') throw new Error('模型输出达到长度上限，可从断点继续回答');
     if (message.tool_calls?.length || !textOf(message).trim()) throw new Error('模型未能完成续写，请重试');
     final = message;
     snapshot(false, undefined, true);
-    return { content, reasoning, rowId, userRowId: userRow?.id, tools: original.tools, widgets: original.widgets, widget: original.widget };
+    return { content, reasoning, responseSegments, rowId, userRowId: userRow?.id, tools: original.tools, widgets: original.widgets, widget: original.widget };
   } catch (error) {
     content += filter.flush();
     // Cancellation revokes commit authority. Previously saved checkpoints stay

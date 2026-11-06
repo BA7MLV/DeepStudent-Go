@@ -328,7 +328,6 @@ function ChipDropdown({
           </ListBox>
         </ScrollShadow>
         {!visible.length && <p role="status" className="px-3 py-2 text-xs text-muted">没有匹配的模型</p>}
-        <p className="px-3 py-2 text-xs text-muted">在设置 → 我的模型中添加和编辑模型</p>
 
         {canThink && (
           <>
@@ -375,7 +374,6 @@ function ChipDropdown({
               ) : (
                 <span className="text-xs text-muted">{profile?.mode === 'unknown' ? '此接口未声明可用的思考开关或深度档位' : '此模型始终开启思考，不支持关闭或调节深度'}</span>
               )}
-              {canDepth && !profile?.canDisable && <p className="text-xs text-muted">此模型不支持关闭思考</p>}
               {profile?.mode === 'openai' && target?.protocol === 'openai-chat' && <p className="text-xs text-muted">Chat Completions 通常不返回可读推理；需要推理摘要请使用 Responses API</p>}
             </div>
             {/* 只有开关的模型才需要一句解释（「为什么没有滑块」），且它挂在行**下面**

@@ -6,6 +6,8 @@ import type { ContentPart } from '../api/siliconflow';
 import type { WidgetPayload } from './widgetRuntime';
 import type { UnitKind } from '../materials/units';
 import type { TaskModelSelection } from '@wangke/contracts/cloud';
+import type { ResponseSegment } from '@wangke/contracts/client-runtime';
+import { responsePhase, type ProcessPhase } from '../utils/responseProcess';
 
 export interface QaRunInput {
   videoId: string;
@@ -26,6 +28,8 @@ export interface QaRunInput {
 }
 export type QaCard = { kind: 'quiz'; quiz: QuizState } | { kind: 'widget'; widget: WidgetPayload };
 export interface QaSink {
+  /** Atomic server projection; content, anchors and phase describe one frame. */
+  onProgress?: (progress: { content: string; reasoning: string; responseSegments?: ResponseSegment[]; tools?: ChatToolCall[]; processPhase: ProcessPhase }) => void;
   onPersist?: (rowId: number) => void;
   onWidgetPreview?: (preview: { html: string } | undefined) => void;
   onTools?: (tools: ChatToolCall[]) => void;
@@ -39,6 +43,7 @@ export interface QaSink {
   signal?: AbortSignal;
 }
 export interface QaRunResult {
+  responseSegments?: ResponseSegment[];
   tools?: ChatToolCall[];
   rowId?: number;
   content: string;
@@ -69,6 +74,8 @@ export async function runQa(input: QaRunInput, sink: QaSink = {}): Promise<QaRun
       delivered.add(widget.id);
       sink.onCard?.({ kind: 'widget', widget });
     }
+    sink.onProgress?.({ content, reasoning, responseSegments: p.responseSegments as ResponseSegment[] | undefined,
+      tools: Array.isArray(p.tools) ? p.tools : undefined, processPhase: responsePhase(p.phase) });
   }, sink.signal);
 }
 

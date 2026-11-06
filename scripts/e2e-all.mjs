@@ -58,7 +58,7 @@ const META = {
   'test-bilibili-subtitle': { service: 'none', antd: false, timeout: 120 },
   'test-bilibili-transport': { service: 'none', antd: false, timeout: 120 },
   'test-bilingual': { service: 'none', antd: false, timeout: 120 },
-  // 构建信息纯逻辑：时间补零 / 本地时区（不是 UTC）/ commit 缺失降级 / dev 分支。
+  // 构建信息纯逻辑：时间补零 / 固定北京时间（不是构建机时区、不是 UTC）/ commit 缺失降级 / dev 分支。
   // 「注入有没有真的通到产物与 DOM」由 e2e-build-info 覆盖，两者不重叠。
   'test-build-info': { service: 'none', antd: false, timeout: 120 },
   'test-builtin-skills': { service: 'none', antd: false, timeout: 120 },

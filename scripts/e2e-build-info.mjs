@@ -52,8 +52,8 @@ if (IS_DEV) {
   check(/^v\S+ · 开发模式$/.test(text), 'dev 下显示「开发模式」，不展示配置加载时刻');
 } else {
   check(
-    /^v\S+ · \d{4}-\d{2}-\d{2} \d{2}:\d{2}( · [0-9a-f]{7,40})?$/.test(text),
-    '生产文案形如「v版本 · YYYY-MM-DD HH:mm · commit」',
+    /^v\S+ · \d{4}-\d{2}-\d{2} \d{2}:\d{2} BJT( · [0-9a-f]{7,40})?$/.test(text),
+    '生产文案形如「v版本 · YYYY-MM-DD HH:mm BJT · commit」',
   );
 }
 

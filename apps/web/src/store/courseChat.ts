@@ -6,7 +6,7 @@ import { removeConversationMessages, deleteServerSession, forkServerSession } fr
 import type { CloudTask } from '@wangke/contracts/cloud';
 import { useChatNotifications } from './chatNotifications';
 import { readChatPage, readChatHistory } from './chatHistory';
-import type { ProcessPhase } from '../utils/responseProcess';
+import { responsePhase, type ProcessPhase } from '../utils/responseProcess';
 import { getSettings } from './settings';
 import { taskModelChoice, taskModelKey, useTaskModel } from './taskModel';
 import { db, type AskUserState, type ChatRow, type ChatSessionRow, type ChatToolCall, type FolderPlanState } from './db';
@@ -190,11 +190,12 @@ async function applySessionPage(id: number, page: { rows: ChatRow[]; hasOlder: b
       reasoning: typeof progress.reasoning === 'string' ? progress.reasoning : existing?.reasoning,
       rowId: typeof progress.rowId === 'number' ? progress.rowId : existing?.rowId,
       tools: Array.isArray(progress.tools) ? progress.tools as unknown as ChatToolCall[] : existing?.tools,
+      responseSegments: Array.isArray(progress.responseSegments) ? progress.responseSegments as ResponseSegment[] : existing?.responseSegments,
       ask: (progress.ask as unknown as AskUserState | undefined) ?? existing?.ask,
       folderPlan: (progress.folderPlan as unknown as FolderPlanState | undefined) ?? existing?.folderPlan,
       widgets, widget: widgets?.at(-1), widgetPreview: progress.widgetPreview as unknown as { html: string } | undefined,
       streaming: true, error: false, interrupted: false,
-      processPhase: progress.phase === 'answer' ? 'answering' : progress.phase === 'tool' ? 'tool' : progress.phase === 'thinking' ? 'thinking' : 'preparing',
+      processPhase: responsePhase(progress.phase),
       processStartedAt: Date.parse(task.createdAt) || Date.now() };
     const text = typeof task.input.text === 'string' ? task.input.text.trim() : '';
     messages = timeline(id).progress(messages, task, text && task.input.action !== 'continue'

@@ -1,5 +1,13 @@
 /** JSON is the wire boundary of sandbox-owned state, never arbitrary JS objects. */
 export type RuntimeJson = null | boolean | number | string | RuntimeJson[] | { [key: string]: RuntimeJson };
+/** A process group followed by its delivered text. String offsets are UTF-16;
+ * toolOffset indexes the cumulative tool trace. Anchors are append-only. */
+export type ResponseSegment = {
+  contentOffset: number;
+  reasoningOffset: number;
+  toolOffset: number;
+  startedAt?: number;
+};
 export type RuntimeRead =
   | { kind: 'preferences' }
   | { kind: 'permissions' }
@@ -103,7 +111,7 @@ export interface LearningComment { id: number; videoId: string; time: number; au
 export interface LearningDanmaku { id: number; videoId: string; time: number; text: string }
 export interface LearningCourseState { status?: 'new' | 'transcribing' | 'transcribed' | 'error'; transcriptionPaused?: boolean; unitCount?: number; scanned?: 1; empty?: 1; coverState?: 'pending' | 'done' | 'skipped'; dominantColor?: string }
 export interface LearningSession { id: number; videoId: string; title: string; createdAt: number; contextCourseIds?: string[]; projectFolderId?: number; skillIds?: number[]; pinnedSkillIds?: number[]; mcpServerIds?: string[]; pinned?: boolean; archived?: boolean; promptCacheKey?: string; contextCheckpoint?: { fromId: number; source: string; prefixHash?: string }; contextOmissions?: [number, string][]; defaultModel?: import('./cloud.js').TaskModelSelection | null }
-export interface LearningMessage { id: number; taskId?: string; videoId: string; sessionId: number; role: 'user' | 'assistant'; content: string; createdAt: number; modelTrace?: RuntimeJson; modelRequests?: RuntimeJson[]; explicitSkillIds?: number[]; images?: RuntimeJson[]; attachments?: RuntimeJson[]; reasoning?: string; reasoningMs?: number; tools?: RuntimeJson[]; responseSegments?: RuntimeJson[]; quiz?: RuntimeJson; ask?: RuntimeJson; folderPlan?: RuntimeJson; resume?: RuntimeJson; interrupted?: boolean; interruptReason?: string; widget?: RuntimeJson; widgets?: RuntimeJson[]; legacyHtmlWorks?: RuntimeJson[]; widgetState?: RuntimeJson; widgetStates?: RuntimeJson }
+export interface LearningMessage { id: number; taskId?: string; videoId: string; sessionId: number; role: 'user' | 'assistant'; content: string; createdAt: number; modelTrace?: RuntimeJson; modelRequests?: RuntimeJson[]; explicitSkillIds?: number[]; images?: RuntimeJson[]; attachments?: RuntimeJson[]; reasoning?: string; reasoningMs?: number; tools?: RuntimeJson[]; responseSegments?: ResponseSegment[]; quiz?: RuntimeJson; ask?: RuntimeJson; folderPlan?: RuntimeJson; resume?: RuntimeJson; interrupted?: boolean; interruptReason?: string; widget?: RuntimeJson; widgets?: RuntimeJson[]; legacyHtmlWorks?: RuntimeJson[]; widgetState?: RuntimeJson; widgetStates?: RuntimeJson }
 /** Closed product schemas: no table selector, resource identity/file/folder
  * writes, account preferences, or permit-based escape into arbitrary records. */
 export type LearningProduct =

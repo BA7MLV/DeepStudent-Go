@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 构建信息纯逻辑：时间补零 / 本地时区（不是 UTC）/ commit 缺失降级 / dev 分支 / 注入值被清空时的兜底。
+// 构建信息纯逻辑：时间补零 / 固定北京时间（不是构建机时区、也不是 UTC）/ commit 缺失降级 / dev 分支 / 注入值被清空时的兜底。
 //
 // 为什么这些要单测：它们是页脚文案的全部分支，且都跟「时区」「补零」这类
 // 只在特定时刻才暴露的边界有关 —— 平时看着对，跨月/跨零点/换设备就错。
@@ -39,21 +39,25 @@ const info = (over = {}) => ({ version: '0.1.0', time: '2026-09-18 19:40', commi
 console.log('formatBuildTime');
 
 test('个位数月/日/时/分都补零', () => {
-  assert.equal(formatBuildTime(new Date(2026, 0, 5, 3, 7)), '2026-01-05 03:07');
+  assert.equal(formatBuildTime(new Date('2026-01-05T03:07:00+08:00')), '2026-01-05 03:07');
 });
 
 test('常规值原样输出', () => {
-  assert.equal(formatBuildTime(new Date(2026, 8, 18, 19, 40)), '2026-09-18 19:40');
+  assert.equal(formatBuildTime(new Date('2026-09-18T19:40:00+08:00')), '2026-09-18 19:40');
 });
 
 test('年末最后一分钟不被进位', () => {
-  assert.equal(formatBuildTime(new Date(2026, 11, 31, 23, 59)), '2026-12-31 23:59');
+  assert.equal(formatBuildTime(new Date('2026-12-31T23:59:00+08:00')), '2026-12-31 23:59');
 });
 
-// 这条是刻意的：new Date(y, m, d, h, min) 按**本地时区**构造，
-// 如果实现用了 getUTCMonth 之类，在 GMT+8 下零点会被算成前一天 16:00，这里就会红。
-test('按本地时区取，不按 UTC', () => {
-  assert.equal(formatBuildTime(new Date(2026, 0, 1, 0, 0)), '2026-01-01 00:00');
+// 这条抓的是线上真实问题：部署构建跑在 UTC 的 Docker/CI 里，
+// 06:50Z 必须显示成北京时间的 14:50，而不是构建机的 06:50。
+test('UTC 构建机上的时刻换算成北京时间（UTC+8）', () => {
+  assert.equal(formatBuildTime(new Date('2026-11-06T06:50:00Z')), '2026-11-06 14:50');
+});
+
+test('跨日：UTC 前一天晚上对应北京时间第二天凌晨', () => {
+  assert.equal(formatBuildTime(new Date('2026-11-05T18:30:00Z')), '2026-11-06 02:30');
 });
 
 test('输出格式与 e2e 断言的正则同形', () => {
@@ -63,7 +67,7 @@ test('输出格式与 e2e 断言的正则同形', () => {
 console.log('buildInfoLabel');
 
 test('生产：版本 · 时间 · commit', () => {
-  assert.equal(buildInfoLabel(info(), false), 'v0.1.0 · 2026-09-18 19:40 · 5ffa0c7');
+  assert.equal(buildInfoLabel(info(), false), 'v0.1.0 · 2026-09-18 19:40 BJT · 5ffa0c7');
 });
 
 test('开发模式：不展示注入的时间（那是配置加载时刻，不是构建）', () => {
@@ -71,11 +75,11 @@ test('开发模式：不展示注入的时间（那是配置加载时刻，不�
 });
 
 test('取不到 commit（CI 导出源码包 / 没装 git）：收敛成两段', () => {
-  assert.equal(buildInfoLabel(info({ commit: '' }), false), 'v0.1.0 · 2026-09-18 19:40');
+  assert.equal(buildInfoLabel(info({ commit: '' }), false), 'v0.1.0 · 2026-09-18 19:40 BJT');
 });
 
 test('commit 是空白字符时同样不展示', () => {
-  assert.equal(buildInfoLabel(info({ commit: '   ' }), false), 'v0.1.0 · 2026-09-18 19:40');
+  assert.equal(buildInfoLabel(info({ commit: '   ' }), false), 'v0.1.0 · 2026-09-18 19:40 BJT');
 });
 
 test('时间缺失时保留版本与 commit，不留空行', () => {
@@ -88,11 +92,11 @@ test('注入整体为空：仍给出可读文案，不是空白', () => {
 });
 
 test('版本号不写成 vunknown（那看着像个真版本号，更难发现注入丢了）', () => {
-  assert.equal(buildInfoLabel(info({ version: '' }), false), '未知版本 · 2026-09-18 19:40 · 5ffa0c7');
+  assert.equal(buildInfoLabel(info({ version: '' }), false), '未知版本 · 2026-09-18 19:40 BJT · 5ffa0c7');
 });
 
 test('各段两侧不留多余空白', () => {
-  assert.equal(buildInfoLabel(info({ version: ' 0.2.0 ' }), false), 'v0.2.0 · 2026-09-18 19:40 · 5ffa0c7');
+  assert.equal(buildInfoLabel(info({ version: ' 0.2.0 ' }), false), 'v0.2.0 · 2026-09-18 19:40 BJT · 5ffa0c7');
 });
 
 unlinkSync(tmp);

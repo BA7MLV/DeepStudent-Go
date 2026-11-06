@@ -160,6 +160,9 @@ function pdfjsAssets(): Plugin {
  * 有了短哈希，「页面显示 5ffa0c7 / 仓库是 abc1234」一眼就能得出「dist 是旧的」。
  *
  * 为什么版本号从 package.json 读：避免在源码里再抄一份、随版本升级静默漂移。
+ *
+ * 时间由 formatBuildTime 固定换算成北京时间（UTC+8）：部署构建常跑在 UTC 的
+ * Docker/CI 里，直接用构建机本地时间会显示成早 8 小时。
  */
 function buildInfo() {
   const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')) as {

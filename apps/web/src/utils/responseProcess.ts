@@ -4,6 +4,11 @@ import { toolDisplay } from './toolTrace';
 /** 仅用于流式视图；结束状态由 streaming 决定，不持久化瞬态。 */
 export type ProcessPhase = 'preparing' | 'thinking' | 'tool' | 'answering';
 
+export function responsePhase(phase: unknown): ProcessPhase {
+  return phase === 'answer' ? 'answering' : phase === 'tool' || phase === 'waiting_user' ? 'tool'
+    : phase === 'thinking' ? 'thinking' : 'preparing';
+}
+
 export type ProcessStep =
   | { kind: 'reasoning'; key: string; text: string }
   | { kind: 'tool'; key: string; call: ChatToolCall };

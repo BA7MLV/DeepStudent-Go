@@ -44,8 +44,9 @@ import {
   popconfirm,
 } from '../ui';
 import { StreamParagraph, useMessageEnter } from './motion';
-import ResponseProcess from './ResponseProcess';
-import type { ProcessPhase } from '../utils/responseProcess';
+import ResponseTimeline from './ResponseTimeline';
+import type { ResponseSegment } from '@wangke/contracts/client-runtime';
+import { responsePhase, type ProcessPhase } from '../utils/responseProcess';
 import VirtualMessages, { type VirtualMessagesHandle } from './VirtualMessages';
 import { useMessageDeletion } from './useMessageDeletion';
 import { useChatScroll } from './useChatScroll';
@@ -103,6 +104,7 @@ interface Props {
 }
 
 interface ChatMsg {
+  responseSegments?: ResponseSegment[];
   processPhase?: ProcessPhase;
   /** 本轮启动时刻，切页重挂时不重置过程计时（不落库）。 */
   processStartedAt?: number;
@@ -857,6 +859,7 @@ export default function ChatPanel({
           reasoning: r.reasoning,
           reasoningMs: r.reasoningMs,
           tools: r.tools,
+          responseSegments: r.responseSegments,
           quiz: r.quiz,
           widget: r.widget,
           widgets: r.widgets,
@@ -899,6 +902,8 @@ export default function ChatPanel({
       if (running) messages.push({ key: `cloud-${task.id}`, taskId: task.id, role: 'ai', content: String(task.progress?.content ?? ''), reasoning: String(task.progress?.reasoning ?? ''),
         rowId: typeof task.progress?.rowId === 'number' ? task.progress.rowId : undefined,
         tools: Array.isArray(task.progress?.tools) ? task.progress.tools as ChatToolCall[] : undefined,
+        responseSegments: task.progress?.responseSegments as ResponseSegment[] | undefined,
+        processPhase: responsePhase(task.progress?.phase), processStartedAt: Date.parse(task.createdAt),
         widgets: Array.isArray(task.progress?.widgets) ? task.progress.widgets as WidgetPayload[] : undefined,
         widgetPreview: task.progress?.widgetPreview as { html: string } | undefined, streaming: true });
       else if (task && ['failed', 'interrupted', 'cancelled'].includes(task.status)) messages.push({ key: `cloud-${task.id}`, role: 'ai', content: task.error || '任务已停止，可重新提问。' });
@@ -1159,10 +1164,7 @@ export default function ChatPanel({
         }, { signal: abort.signal,
           onPersist: rowId => patchAi({ rowId }),
           onWidgetPreview: preview => patchAi({ widgetPreview: preview }),
-          onTools: tools => patchAi({ tools, hint: tools.at(-1)?.status === 'running' ? tools.at(-1)?.name : undefined }),
-          onDelta: text => { answer += text; updates.stream({ content: answer, processPhase: 'answering' }); },
-          onReasoning: text => { reasoning += text; updates.stream({ reasoning, processPhase: 'thinking' }); },
-          onRoundStart: () => { answer = ''; patchAi({ content: '' }); },
+          onProgress: progress => { answer = progress.content; reasoning = progress.reasoning; updates.stream(progress); },
           onCard: card => {
             if (card.kind === 'widget') { widgetState = card.widget; widgets.push(card.widget); patchAi({ widgets: [...widgets], widget: card.widget }); }
           },
@@ -1430,16 +1432,13 @@ export default function ChatPanel({
               ) : (
                 <>
                   <ArtifactEditProvider rowId={m.rowId} content={m.content} disabled={loading || !!m.streaming || !!m.error}
-                    onSaved={(row) => setMsgs((prev) => prev.map((item) => item.rowId === row.id ? { ...item, content: row.content, widget: row.widget, widgets: row.widgets } : item))}>
+                    onSaved={(row) => setMsgs((prev) => prev.map((item) => item.rowId === row.id ? { ...item, content: row.content, responseSegments: row.responseSegments, widget: row.widget, widgets: row.widgets } : item))}>
                   <div className="chat-bubble chat-bubble--ai">
-                    <ResponseProcess key={m.key} reasoning={m.reasoning} calls={m.tools} streaming={!!m.streaming}
-                      phase={m.processPhase} hint={m.hint} since={m.processStartedAt ?? m.reasoningStartedAt}
-                      elapsedMs={m.reasoningMs} />
-                    <div aria-hidden="true" data-chat-answer-start={m.content || m.quiz || m.widget || m.widgetPreview ? '' : undefined} />
                         <WidgetMessage message={m} content={m.error ? displayChatFailure(m.content) : m.content} dark={widgetDark} rowId={m.rowId}
                           disabled={loading || !!m.streaming || !!m.error} onPrompt={(text) => void send(text)}>
-                        {(markdown) => !markdown ? null : (
-                          <AssistantContent content={markdown} streaming={!!m.streaming}>
+                        {(markdown) => (
+                          <ResponseTimeline message={m} content={markdown}>
+                          {(content, active) => <AssistantContent content={content} streaming={active}>
                             {(part, streaming) => (
                               <MarkdownStreamingProvider value={streaming}>
                                 <XMarkdown
@@ -1456,7 +1455,8 @@ export default function ChatPanel({
                                 />
                               </MarkdownStreamingProvider>
                             )}
-                          </AssistantContent>
+                          </AssistantContent>}
+                          </ResponseTimeline>
                         )}
                         </WidgetMessage>
                         {m.quiz && (

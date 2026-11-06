@@ -135,7 +135,7 @@ try {
   assert.ok(qaTask.result.rowId);
   const conversation = store.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='chats' AND value IS NOT NULL").all(owner)
     .map(row => JSON.parse(row.value)).sort((a, b) => a.createdAt - b.createdAt);
-  assert.deepEqual(conversation.map(row => row.role), ['user', 'assistant', 'user', 'assistant']);
+  assert.deepEqual(conversation.map(row => row.role), ['user', 'assistant', 'user', 'assistant', 'user', 'assistant'], 'plain chat, retrieval chat and QA each retain their own turn');
   assert.ok(conversation.every((row, index) => !index || row.createdAt > conversation[index - 1].createdAt), 'server commits a strictly ordered timeline for both chat and qa');
   const originalConfig = configuration.get(owner, true);
   configuration.save(owner, { ...originalConfig, providers: [{ ...providers[0], baseUrl: 'https://api.openai.com/v1' }, ...providers.slice(1)], llmModel: { providerId: 'p0', model: 'gpt-4.1' } });

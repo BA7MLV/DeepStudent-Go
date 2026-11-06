@@ -10,25 +10,31 @@
 export interface BuildInfo {
   /** package.json 的 version */
   version: string;
-  /** 构建机本地时间，`YYYY-MM-DD HH:mm`。dev 下是 vite 配置加载的时刻，调用方不展示 */
+  /** 构建时间，固定按北京时间（UTC+8）格式化为 `YYYY-MM-DD HH:mm`。dev 下是 vite 配置加载的时刻，调用方不展示 */
   time: string;
   /** git 短哈希；取不到时为空串（CI 导出源码包 / 本机没装 git） */
   commit: string;
 }
 
+/** 北京时间固定为 UTC+8（中国自 1991 年起不实行夏令时）。 */
+const BJT_OFFSET_MS = 8 * 60 * 60 * 1000;
+
 /**
- * 构建时间 → `YYYY-MM-DD HH:mm`（本地时区）。
+ * 构建时间 → `YYYY-MM-DD HH:mm`（固定北京时间，UTC+8）。
  *
  * 为什么手写补零而不用 dayjs：vite.config.ts 要 import 本模块，而 dayjs 是运行时依赖，
  * 为一个补零把它拉进构建配置的依赖图不划算 —— 这是四行代码的事。
  *
- * 为什么存本地时间而不存 UTC：这是个**事件时刻**（这次构建发生在何时），
- * 构建者与观看者是同一个人。按观看者时区重算，只会在 iPad 时区设错时显示一个
- * 让人困惑的时间。完整取舍见 docs/plans/2026-09-18-build-info-design.md。
+ * 为什么固定按北京时间、而不是构建机本地时间：部署构建常跑在 UTC 的 Docker/CI
+ * 机器上（release 镜像即如此），按构建机本地时间会显示成早 8 小时，和页面里其它
+ * 北京时间（例如模型目录的「更新于 … BJT」）对不上。这是个**事件时刻**，仍不按
+ * 观看者设备时区重算；只是把基准固定为 UTC+8。完整取舍见
+ * docs/plans/2026-09-18-build-info-design.md。
  */
 export function formatBuildTime(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const bjt = new Date(d.getTime() + BJT_OFFSET_MS);
+  return `${bjt.getUTCFullYear()}-${p(bjt.getUTCMonth() + 1)}-${p(bjt.getUTCDate())} ${p(bjt.getUTCHours())}:${p(bjt.getUTCMinutes())}`;
 }
 
 /**
@@ -48,7 +54,8 @@ export function buildInfoLabel(info: BuildInfo | null | undefined, isDev: boolea
   if (isDev) return `${version} · 开发模式`;
   const segments = [version];
   const time = info?.time?.trim();
-  if (time) segments.push(time);
+  // 时间固定是北京时间，标上 BJT，避免和 UTC 混淆（部署构建常发生在 UTC 机器上）。
+  if (time) segments.push(`${time} BJT`);
   const commit = info?.commit?.trim();
   if (commit) segments.push(commit);
   return segments.join(' · ');
