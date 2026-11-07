@@ -322,9 +322,10 @@
     "explicitUnavailable": "{{count}} selected skills are disabled or deleted. Sending will report an error rather than silently skip them.",
     "removeUnavailable": "Remove unavailable",
     "outOfScope": "Outside the allowed scope; update Automatic scope first",
-    "pendingLoad": "Selected · Loads or reuses on send",
+    "pendingLoad": "Selected",
     "available": "Chosen on demand by the assistant",
-    "activationCount": "Selected {{turn}}",
+    "removeSkill": "Remove skill: {{name}}",
+    "unknownSkill": "Skill #{{id}}",
     "title": "Use skills next message",
     "auto": "Automatic",
     "none": "No skills",
@@ -362,13 +363,9 @@
         "title": "Question bank",
         "description": "Extract original questions and images for practice and grading."
       },
-      "diagram": {
+      "visual": {
         "title": "Visual explanations",
-        "description": "Explain with flowcharts, relationship diagrams and function plots."
-      },
-      "interactive": {
-        "title": "Interactive explanations",
-        "description": "Explore what changes with adjustable parameters, algorithm steps and small simulations."
+        "description": "Explain with static diagrams or interactive demos: flows, relationships, functions, parameters, simulations and practice."
       },
       "organize": {
         "title": "Organize materials",

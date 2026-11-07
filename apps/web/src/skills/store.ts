@@ -61,6 +61,7 @@ export async function loadEnabledSkillMeta(context: 'chat' | 'legacy-handout' = 
     .map((s) => ({
       id: s.id!, name: s.name, description: s.description, revision: s.updatedAt,
       builtin: !!s.builtin,
+      ...(s.legacyIds ? { legacyIds: s.legacyIds } : {}),
       ...(s.mcpRequired ? { mcpRequired: s.mcpRequired } : {}),
       ...(context === 'chat' && s.builtin && s.name === COURSE_HANDOUT_SKILL ? { legacyIds } : {}),
     }));

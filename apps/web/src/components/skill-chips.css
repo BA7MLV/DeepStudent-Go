@@ -1,0 +1,7 @@
+.skill-chips { display: flex; flex-wrap: wrap; align-items: center; gap: .375rem; min-width: 0; margin-bottom: .375rem; }
+.skill-chip { display: inline-flex; align-items: center; gap: .375rem; max-width: 100%; padding: .1875rem .5rem; border-radius: var(--radius-chip); background: var(--surface-secondary); color: var(--foreground); font: inherit; font-size: .875rem; line-height: 1.5; }
+.skill-chip > .sym { flex: none; font-size: 1rem; color: var(--muted); }
+.skill-chip__name { min-width: 0; overflow-wrap: anywhere; }
+.skill-chip .skill-chip__remove { flex: none; width: 1.5rem; min-width: 1.5rem; height: 1.5rem; min-height: 1.5rem; margin: -.125rem -.25rem -.125rem 0; padding: 0; border-radius: var(--radius-chip); }
+.skill-chip__remove .sym { font-size: .875rem; }
+.course-chat__composer-body { grid-area: input; min-width: 0; }

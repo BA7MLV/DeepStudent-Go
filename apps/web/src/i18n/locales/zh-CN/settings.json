@@ -322,9 +322,10 @@
     "explicitUnavailable": "有 {{count}} 个指定技能已停用或删除；发送将明确报错，不会静默跳过。",
     "removeUnavailable": "移除失效项",
     "outOfScope": "不在技能范围内，请先调整自动使用范围",
-    "pendingLoad": "本次指定 · 发送时加载或复用",
+    "pendingLoad": "已选择",
     "available": "由助手按需选用",
-    "activationCount": "本次指定 {{turn}}",
+    "removeSkill": "移除技能：{{name}}",
+    "unknownSkill": "技能 #{{id}}",
     "title": "本次使用技能",
     "auto": "自动",
     "none": "不使用技能",
@@ -362,13 +363,9 @@
         "title": "原题题库",
         "description": "从资料提取原题与原图，整理题库、练习和批改。"
       },
-      "diagram": {
-        "title": "讲解配图",
-        "description": "用流程图、关系图或函数图像辅助理解，按需画图。"
-      },
-      "interactive": {
-        "title": "交互式讲解",
-        "description": "通过调参、算法单步与小型模拟，探索“变了会怎样”。"
+      "visual": {
+        "title": "可视化讲解",
+        "description": "按需用静态配图或交互演示讲清楚：流程、关系、函数、调参、模拟与练习。"
       },
       "organize": {
         "title": "资料整理",

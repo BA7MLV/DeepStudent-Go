@@ -24,7 +24,7 @@ function test(name, fn) {
 }
 
 // 目录结构：每个子目录一个 SKILL.md，references/ 可选
-const dirs = readdirSync(DIR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+const dirs = readdirSync(DIR, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(`${DIR}/${d.name}/SKILL.md`)).map((d) => d.name);
 const skills = dirs.map((d) => {
   const mdPath = `${DIR}/${d}/SKILL.md`;
   const skill = parseSkillMarkdown('SKILL.md', readFileSync(mdPath, 'utf8'));
@@ -38,9 +38,9 @@ const skills = dirs.map((d) => {
   return { dir: d, ...skill, refs };
 });
 
-test('六个对话任务入口，六份旧 IR 规范仅作兼容资产', () => {
+test('五个对话任务入口，六份旧 IR 规范仅作兼容资产', () => {
   const active = skills.filter((s) => !isLegacyHandoutSkill({ ...s, builtin: 1 }));
-  assert.deepEqual(active.map((s) => s.name).sort(), ['课程讲义', '原题题库', '讲解配图', '交互式讲解', '资料整理', '创造模式'].sort());
+  assert.deepEqual(active.map((s) => s.name).sort(), ['课程讲义', '原题题库', '可视化讲解', '资料整理', '创造模式'].sort());
   assert.equal(skills.length - active.length, 6);
 });
 
@@ -51,20 +51,20 @@ test('每个 skill 有 name + description（路由依赖 description）', () => 
   }
 });
 
-test('包含必备的七个：公文讲义写作 / 公文版式规格 / 学科样例 / 公考行测 / 公考申论 / 讲解配图 / 资料整理', () => {
+test('包含必备的七个：公文讲义写作 / 公文版式规格 / 学科样例 / 公考行测 / 公考申论 / 可视化讲解 / 资料整理', () => {
   const names = skills.map((s) => s.name);
   assert.ok(names.includes('公文讲义写作'));
   assert.ok(names.includes('公文版式规格'));
   assert.ok(names.some((n) => /数学|编程/.test(n)));
   assert.ok(names.includes('公考行测讲义'));
   assert.ok(names.includes('公考申论讲义'));
-  assert.ok(names.includes('讲解配图'));
+  assert.ok(names.includes('可视化讲解'));
   assert.ok(names.includes('资料整理'));
 });
 
-test('「讲解配图」区分可读性建议与安全上限，保留数学坐标及文件导出边界', () => {
-  const s = skills.find((x) => x.name === '讲解配图');
-  assert.ok(s, '缺讲解配图');
+test('「可视化讲解」的静态参考保留 schema、数学坐标、安全上限与文件导出边界', () => {
+  const s = skills.find((x) => x.name === '可视化讲解').refs.find(r => r.path === 'references/static-diagrams.md');
+  assert.ok(s, '缺静态配图参考');
   // 围栏名是「提示词 ↔ 渲染层」的硬契约（components/mermaid/fence.ts 只认这三个，
   // 但 2026-10-13 起新内容只教 mermaid 与 diagram 两种）
   for (const kw of ['```mermaid', '```diagram']) assert.ok(s.body.includes(kw), `缺围栏名：${kw}`);
@@ -93,21 +93,24 @@ test('「讲解配图」区分可读性建议与安全上限，保留数学坐�
   assert.match(s.body, /讲义/);
 });
 
-test('「讲解配图」的 description 点明适用范围（路由靠它决定选不选）', () => {
-  const s = skills.find((x) => x.name === '讲解配图');
+test('「可视化讲解」的 description 同时覆盖静态图和交互（路由靠它决定选不选）', () => {
+  const s = skills.find((x) => x.name === '可视化讲解');
   assert.match(s.description, /问答|解析/);
   assert.match(s.description, /Markdown.*导出/);
+  assert.match(s.description, /静态配图.*交互演示/);
+  assert.match(s.body, /默认先用静态图/);
+  assert.match(s.body, /同一信息不重复/);
 });
 
-test('「交互式讲解」区分本地调参与确认追问，附带运行时及示例参考', () => {
-  const s = skills.find((x) => x.name === '交互式讲解');
+test('「可视化讲解」区分本地调参与确认追问，附带运行时及示例参考', () => {
+  const s = skills.find((x) => x.name === '可视化讲解');
   assert.ok(s);
   for (const kw of ['show_widget', 'modelContent', 'privateContent', '16 KiB', '用户确认', '本地重绘', 'diagram']) {
     assert.ok(s.body.includes(kw), `缺约定：${kw}`);
   }
   assert.match(s.description, /会话教学/);
   assert.match(s.description, /不把会话组件.*Markdown.*讲义正文/);
-  assert.deepEqual(s.refs.map((r) => r.path).sort(), ['chart', 'explore', 'host-question', 'manipulate', 'practice', 'runtime', 'simulation', 'stepper'].map((n) => `references/${n}.md`));
+  assert.deepEqual(s.refs.map((r) => r.path).sort(), ['chart', 'explore', 'host-question', 'manipulate', 'practice', 'runtime', 'simulation', 'static-diagrams', 'stepper'].map((n) => `references/${n}.md`));
   // SKILL.md is a router: every reference it points to must exist, and every reference must be routed.
   for (const ref of s.refs) assert.ok(s.body.includes(`\`${ref.path}\``), `技能正文未路由到 ${ref.path}`);
   assert.ok(s.body.length < 4000, '正文保持精简，细节放参考文件');

@@ -20,7 +20,6 @@ import ContextUsageButton from './ContextUsageButton';
 import ComposerExpand, { useComposerSize } from './ComposerExpand';
 import { useContextCompression } from './useContextCompression';
 import { explicitSkillIds } from '../skills/activation';
-import { handoutDraft, prepareHandoutPrompt } from '../skills/handout';
 import { captureFrame, resolveVideoEl, type Snapshot } from '../media/snapshot';
 import { type ThinkingLevel } from '../api/siliconflow';
 import { fmtTime } from '../utils/vtt';
@@ -58,6 +57,7 @@ import { MarkdownTable } from './MdTable';
 import { MarkdownStreamingProvider } from './markdown/streaming';
 import TaskModelPicker from './TaskModelPicker';
 import SkillPicker from './SkillPicker';
+import SkillChips from './SkillChips';
 import QuizCard from './QuizCard';
 import { canUpdateQuizPick, type QuizPick } from '../harness/quiz';
 import WidgetMessage from './WidgetMessage';
@@ -111,6 +111,7 @@ interface ChatMsg {
   key: string;
   role: 'user' | 'ai';
   content: string;
+  explicitSkillIds?: number[];
   /** 落库时间：手机端长按用户气泡时显示（与主页对话一致） */
   createdAt?: number;
   /** 用户消息附带的截图缩略图 */
@@ -406,6 +407,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
   return (
     <div className="chat-user-content">
       <div className="chat-bubble chat-bubble--user">
+        <SkillChips ids={message.explicitSkillIds} />
         {!touchMenu ? content : (
           <Dropdown trigger="longPress">
             <Dropdown.Trigger className="chat-user-trigger"
@@ -479,7 +481,7 @@ export default function ChatPanel({
   const { t: chatText } = useTranslation('common');
   const { t: settingsText } = useTranslation('settings');
   const learningPlugin = useMaterialPluginView(videoId);
-  const practiceAvailable = usePluginAvailable('practice'), reviewAvailable = usePluginAvailable('review'), materialToolsAvailable = usePluginAvailable('material-tools');
+  const practiceAvailable = usePluginAvailable('practice'), reviewAvailable = usePluginAvailable('review');
   const openLearningPlugin = (id: string) => { void learningPlugin.open(id).catch(error => toast.error(error instanceof Error ? error.message : 'plugin_view_unavailable')); };
   /** 材料课程（PDF / Word / Markdown / HTML）：没有字幕、没有播放器，检索与引用都走材料那一套 */
   const isMaterial = materialKind !== undefined;
@@ -527,7 +529,6 @@ export default function ChatPanel({
   const [mcpServerIds, setMcpServerIds] = useState<string[] | undefined>();
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const [handoutPreparing, setHandoutPreparing] = useState(false);
   const [shots, setShots] = useState<Snapshot[]>([]);
   /**
    * 划词/框选带进来的引用条（最多 MAX_REFS 条）。
@@ -854,6 +855,7 @@ export default function ChatPanel({
           key: `h-${r.id}`,
           role: r.role === 'user' ? 'user' : 'ai',
           content: r.content,
+          explicitSkillIds: r.explicitSkillIds,
           createdAt: r.createdAt,
           images: r.images,
           reasoning: r.reasoning,
@@ -1027,23 +1029,6 @@ export default function ChatPanel({
       });
   };
 
-  const addHandout = async () => {
-    if (loading || handoutPreparing || activeId == null || activeId !== loadedSessionId) return;
-    setHandoutPreparing(true);
-    try {
-      const prepared = await prepareHandoutPrompt(skillIds);
-      if (historySession.current !== activeId) return;
-      if (prepared.skillIds !== skillIds) updateSkillIds(prepared.skillIds);
-      setTurnSkillIds(ids => [...new Set([...ids, prepared.id])]);
-      setInput((draft) => handoutDraft(draft, prepared.prompt));
-      toast.info('已添加讲义提示词，可修改后发送');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '讲义提示词加载失败，请重试');
-    } finally {
-      setHandoutPreparing(false);
-    }
-  };
-
   /** 新开会话 */
   const createSession = async () => {
     const now = Date.now();
@@ -1149,6 +1134,7 @@ export default function ChatPanel({
           key: userKey,
           role: 'user',
           content: displayContent,
+          explicitSkillIds: selectedSkills,
           createdAt,
           images: userImages.length > 0 ? userImages : undefined,
         },
@@ -1583,6 +1569,7 @@ export default function ChatPanel({
               需要「容器 → textarea」的层级（mdui 时代是自定义元素 + shadow 里的 textarea，
               HeroUI 是单元素，用一层 div 补回同样的结构）。 */}
           <div className="chat-input" data-testid="chat-input">
+            <SkillChips ids={turnSkillIds} disabled={loading} onRemove={removed => setTurnSkillIds(ids => ids.filter(value => !removed.includes(value)))} />
             <TextArea
               fullWidth
               rows={1}
@@ -1612,7 +1599,7 @@ export default function ChatPanel({
           <div className="chat-composer__tools">
           <Dropdown isOpen={addOpen} onOpenChange={setAddOpen}>
             <Button isIconOnly variant="tertiary" size="sm" data-testid="panel-chat-add"
-              aria-label="添加截图、讲义、出题、技能或调整模型" isDisabled={activeId == null || activeId !== loadedSessionId}>
+              aria-label="添加截图、出题、技能或调整模型" isDisabled={activeId == null || activeId !== loadedSessionId}>
               <Sym name="add" />
             </Button>
             <Dropdown.Popover placement="top start">
@@ -1622,10 +1609,8 @@ export default function ChatPanel({
               <Dropdown.Menu aria-label="添加到学习问答"
                 disabledKeys={[
                   ...(!indexReady || loading ? ['shot', 'quiz', 'question-bank', 'bank-practice'] : []),
-                  ...(!indexReady || loading || handoutPreparing ? ['handout'] : []),
                   ...(!practiceAvailable ? ['quiz', 'question-bank', 'bank-practice'] : []),
                   ...(!reviewAvailable ? ['review'] : []),
-                  ...(!materialToolsAvailable ? ['handout'] : []),
                   ...(shots.length >= 4 ? ['shot'] : []),
                 ]}
                 onAction={(key) => {
@@ -1637,7 +1622,6 @@ export default function ChatPanel({
                   else if (key === 'bank-practice') openLearningPlugin('practice');
                   else if (key === 'bank-practice') void send(`请从题库最新版开始做原题。${materialFormat === 'md' ? '先 read 当前 Markdown 原文：若它本身含原题 quiz 数据块，使用 /courses/current/material，否则使用 /courses/current/questions.md。' : '题库路径为 /courses/current/questions.md。'}调用 present_quiz 的 path 参数，每批最多 5 题，不要改写或提前透露答案。若题库尚不存在，请说明并引导先提取原题。`);
                   else if (key === 'review') openLearningPlugin('review');
-                  else if (key === 'handout') void addHandout();
                   else if (key === 'skills') setSkillsOpen(true);
                 }}>
                 {!isMaterial && <Dropdown.Item id="shot" textValue="截取当前画面" data-testid="shot-btn"><Sym name="photo_camera" />截取当前画面</Dropdown.Item>}
@@ -1645,12 +1629,10 @@ export default function ChatPanel({
                 {isMaterial && <Dropdown.Item id="question-bank" textValue="提取原题为题库" data-testid="question-bank-extract"><Sym name="description" />提取原题为题库</Dropdown.Item>}
                 {isMaterial && <Dropdown.Item id="bank-practice" textValue="开始做原题" data-testid="question-bank-practice"><Sym name="quiz" />开始做原题</Dropdown.Item>}
                 {<Dropdown.Item id="review" textValue="错题与复习清单" data-testid="question-bank-review"><Sym name="checklist" />错题与复习清单</Dropdown.Item>}
-                <Dropdown.Item id="handout" textValue="生成讲义" data-testid="handout-prompt"><Sym name="description" />生成讲义</Dropdown.Item>
                 <Dropdown.Item id="skills" textValue={settingsText('skillPicker.title')}><Sym name="extension" />{settingsText('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>
-          {turnSkillIds.length > 0 && <Button size="sm" variant="tertiary" data-testid="panel-active-skills" aria-label={settingsText('skillPicker.activationCount', { turn: turnSkillIds.length })} onPress={() => setSkillsOpen(true)}><Sym name="extension" />{turnSkillIds.length}</Button>}
           {/* 上文用量环：只留环，不再跟一串 `≈2.1k / 131k` 文字 —— 常驻的估值
               在工具行上太吵（详情在环的弹层里），文字还会把发送键从最右侧挤开。
               环排在发送键**前面**，发送键永远占最右那一格。 */}

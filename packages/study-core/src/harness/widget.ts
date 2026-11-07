@@ -108,7 +108,7 @@ const MAX_CODE = 20_000;
  */
 export const MAX_WIDGET_DOC = 320_000;
 /** html 形态的独立上限：它要连 DOM 带脚本，比 SVG 大得多，但仍要卡住 */
-const MAX_HTML = 60_000;
+export const MAX_HTML = 60_000;
 
 /** 校验 show_widget 的入参。任何字段非法都返回**可直接照着改**的错误描述 */
 export function validateWidgetArgs(raw: unknown, legacyDocument = false, resourcePreflight = true): WidgetArgsValidation {
@@ -284,7 +284,7 @@ export function widgetRejectedText(err: unknown): string {
       'fn 表达式写法不对：只支持 x、pi/e/tau、+ - * / ^ %、括号与白名单函数（sin/cos/tan/exp/ln/log/sqrt/abs/min/max/pow 等），支持隐式乘法（2x、2sin(x)）。报错给了字符位置，照着改';
   else if (/不认识的字段/.test(raw))
     fix =
-      'diagram 的 schema 是锁死的：只用了 schema 列出的字段（大小写敏感）。把报错点名的字段改成可用字段或删掉；完整 schema 见「讲解配图」技能';
+      'diagram 的 schema 是锁死的：只用了 schema 列出的字段（大小写敏感）。把报错点名的字段改成可用字段或删掉；完整 schema 见「可视化讲解」技能的 references/static-diagrams.md';
   else if (/引用了不存在的节点/.test(raw))
     fix = 'edge 的 from/to 必须指向 nodes 里已存在的 id；报错消息里列出了全部可用 id，照着改';
   else if (/type 必须是/.test(raw))
@@ -299,7 +299,7 @@ export function widgetRejectedText(err: unknown): string {
     fix = '图中文字过长：标签保留完整术语、移出解释性长句，详细说明写在正文里；按原始报错中的字段与字数上限修改后重试';
   // 其余图种的图元上限：保留信息分图，不用删掉关键内容换取通过。
   else if (/超过 \d+ (?:个|条|项|字)/.test(raw))
-    fix = '超出该图种的数量上限：按内容拆成多张图，保留必要的曲线、几何关系与标注后重试（上限见「讲解配图」技能）';
+    fix = '超出该图种的数量上限：按内容拆成多张图，保留必要的曲线、几何关系与标注后重试（上限见「可视化讲解」技能的 references/static-diagrams.md）';
   else if (/自环/.test(raw))
     fix = '不支持 from 与 to 相同的自环：去掉这条边，或把说明写进节点文案';
   else if (/domain/.test(raw))
@@ -318,7 +318,7 @@ export function widgetRejectedText(err: unknown): string {
     fix = 'direction 只能是 "TB"（纵向）或 "LR"（横向）';
   else if (/必须是非空字符串|必须是有限数字|必须是 \[a, b\]|必须是 true \/ false|必须是数组|不能为空|必须小于/.test(raw))
     fix =
-      '字段类型或取值不对：按 schema 的类型写（字符串加引号、数字不加引号、坐标写 [x, y] 二元组、范围写 [最小值, 最大值]），完整 schema 见「讲解配图」技能';
+      '字段类型或取值不对：按 schema 的类型写（字符串加引号、数字不加引号、坐标写 [x, y] 二元组、范围写 [最小值, 最大值]），完整 schema 见「可视化讲解」技能的 references/static-diagrams.md';
   // —— svg（模型直出裸 SVG，历史兼容路径）——
   else if (/没有找到 <svg/i.test(raw))
     fix = 'code 必须是一段完整的 SVG，以 <svg 开头、以 </svg> 结尾';

@@ -113,7 +113,7 @@ try {
   ]);
   const { ensureBuiltinSkills } = await server.ssrLoadModule('/src/skills/store.ts');
   await ensureBuiltinSkills();
-  const interactive = await library('read', { path: skillPath('交互式讲解') });
+  const interactive = await library('read', { path: skillPath('可视化讲解') });
   assert.match(interactive, /调参/);
   const apiPath = interactive.split('\n').find((line) => line.startsWith('- /skills/') && line.includes('runtime.md')).slice(2);
   assert.match(await library('read', { path: apiPath }), /setWidgetState/);

@@ -11,7 +11,10 @@ type Binding = { skill_id: number; slug: string; builtin_slug: string | null };
 type Snapshot = { skills: Map<number, Row>; refs: Map<number, Row> };
 const builtinRoot = path.resolve(path.dirname(fileURLToPath(import.meta.resolve('@wangke/study-core/skills/assets'))), '..');
 const builtinSlugs = ['gongwen-writing', 'gongwen-format', 'subject-math', 'subject-coding', 'gongkao-xingce', 'gongkao-shenlun',
-  'diagramming', 'interactive-explainer', 'library-organizer', 'course-handout', 'question-bank', 'create-mode'];
+  'interactive-explainer', 'library-organizer', 'course-handout', 'question-bank', 'create-mode'];
+const visualSlug = 'interactive-explainer';
+const visualName = '可视化讲解';
+const legacyVisualNames = ['讲解配图', '交互式讲解'];
 const resource = (slug: string, file: string) => `/system/skills/${slug}/${file}`;
 
 // Same stable identifiers as the existing browser builtin rows and references.
@@ -58,6 +61,12 @@ function builtins() {
   });
 }
 
+function builtinSlug(row: Row) {
+  if (row.builtin !== 1) return undefined;
+  return builtins().find(b => b.skill.name === row.name)?.slug
+    ?? (row.name === '讲解配图' ? 'diagramming' : row.name === '交互式讲解' ? visualSlug : undefined);
+}
+
 /** Compatibility projection: settings rows keep their IDs; package files own the content. */
 export class SystemSkillRecords {
   private syncing = false;
@@ -79,12 +88,12 @@ export class SystemSkillRecords {
     return { skill_id: id, slug, builtin_slug: builtin };
   }
   private chooseSlug(owner: string, row: Row) {
-    const builtin = row.builtin === 1 ? builtins().find(b => b.skill.name === row.name) : undefined;
-    const base = builtin?.slug ?? `${String(row.name).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 35) || 'skill'}-${row.id}`;
+    const builtin = builtinSlug(row);
+    const base = builtin ?? `${String(row.name).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 35) || 'skill'}-${row.id}`;
     let slug = base;
     const root = this.store.systemSkills.directory(owner);
     for (let suffix = 1; this.bindings(owner).some(b => b.slug === slug) || fs.existsSync(path.join(root, slug)); suffix++) slug = `${base.slice(0, 55)}-${suffix}`;
-    return this.bind(owner, row.id, slug, builtin?.slug ?? null);
+    return this.bind(owner, row.id, slug, builtin ?? null);
   }
   private project(owner: string, table: string, id: number, value: Row | null) {
     const existing = this.store.db.prepare('SELECT value FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?').get(owner, table, JSON.stringify(id)) as { value: string | null } | undefined;
@@ -110,6 +119,56 @@ export class SystemSkillRecords {
     return binding;
   }
 
+  /** One package, with historical IDs/names retained only as lookup aliases. */
+  private visualAliases(owner: string, binding: Binding) {
+    if (binding.builtin_slug !== visualSlug) return {};
+    const ids = [...legacyVisualNames.map(builtinId), ...this.bindings(owner)
+      .filter(b => b.builtin_slug === 'diagramming' || b.builtin_slug === visualSlug).map(b => b.skill_id)];
+    return { legacyIds: [...new Set(ids)].filter(id => id !== binding.skill_id), legacyNames: legacyVisualNames };
+  }
+
+  /** Journal the merge once. Existing package edits are archived before replacing
+   * the old router; interactive references stay live, diagram references are copied. */
+  private mergeVisual(owner: string, snapshot: Snapshot) {
+    const bindings = this.bindings(owner);
+    const target = bindings.find(b => b.builtin_slug === visualSlug);
+    if (!target) return;
+    const files = this.store.systemFiles;
+    const metadataPath = resource(target.slug, '.wangke-skill.json');
+    const metadata = JSON.parse(files.read(owner, metadataPath) ?? '{}');
+    if (metadata.visualMerged === 1) return;
+    const current = files.read(owner, resource(target.slug, 'SKILL.md'));
+    if (!current) return; // A user-deleted builtin must not be resurrected.
+    const parsed = parseSkillMarkdown('SKILL.md', current);
+    const bundled = builtins().find(b => b.slug === visualSlug)!;
+    const sources = bindings.filter(b => b.builtin_slug === 'diagramming' || b.skill_id === target.skill_id)
+      .flatMap(binding => {
+        const text = files.read(owner, resource(binding.slug, 'SKILL.md'));
+        if (!text || binding.skill_id === target.skill_id && parsed.name === visualName) return [];
+        const sidecar = JSON.parse(files.read(owner, resource(binding.slug, '.wangke-skill.json')) ?? '{}');
+        return [{ binding, text, skill: parseSkillMarkdown('SKILL.md', text), enabled: sidecar.enabled ?? (snapshot.skills.get(binding.skill_id)?.enabled !== 0) }];
+      });
+    const archives: string[] = [];
+    for (const source of sources) {
+      const archive = `references/legacy-${source.binding.slug}/SKILL.md`;
+      this.stage(owner, target.slug, archive, source.text);
+      archives.push(archive);
+      if (source.binding.skill_id === target.skill_id) continue;
+      const refs = references(path.join(this.store.systemSkills.directory(owner), source.binding.slug));
+      for (const ref of snapshot.refs.values()) if (ref.skillId === source.binding.skill_id && !refs.has(ref.path)) refs.set(ref.path, ref.body);
+      for (const [file, body] of refs) this.stage(owner, target.slug, `references/legacy-${source.binding.slug}/${file}`, body);
+      this.stage(owner, source.binding.slug, 'SKILL.md', null);
+    }
+    let text = parsed.name === visualName ? current : bundled.text;
+    if (archives.length) text += `\n\n## 合并前的规范存档\n\n旧技能正文与用户修改保留在 ${archives.map(file => `\`${file}\``).join('、')}。仅在需要恢复旧偏好时读取；旧技能名称与相互加载规则以本技能的统一入口为准。\n`;
+    const dependencies = [...new Set([...(parsed.mcpRequired ?? []), ...sources.flatMap(source => source.skill.mcpRequired ?? [])])];
+    if (dependencies.length) text = markdown({ ...parseSkillMarkdown('SKILL.md', text), mcpRequired: dependencies }, text);
+    this.stage(owner, target.slug, 'SKILL.md', text);
+    for (const [file, body] of bundled.refs) if (files.read(owner, resource(target.slug, file)) === undefined) this.stage(owner, target.slug, file, body);
+    this.stage(owner, target.slug, '.wangke-skill.json', JSON.stringify({ ...metadata,
+      ...(sources.length ? { enabled: sources.some(source => source.enabled) } : {}), visualMerged: 1 }));
+  }
+
   /** One-time materialization is journaled with the mapping, so restarts cannot duplicate it. */
   sync(owner: string) {
     if (this.syncing) return this.store.systemSkills.list(owner);
@@ -121,15 +180,20 @@ export class SystemSkillRecords {
         const installed = this.store.systemSkills.list(owner);
         for (const row of snapshot.skills.values()) {
           if (known.has(row.id) || !validSkill(row)) continue;
-          const builtin = row.builtin === 1 ? builtins().find(b => b.skill.name === row.name) : undefined;
-          if (builtin && installed.some(s => s.slug === builtin.slug) && !this.bindings(owner).some(b => b.slug === builtin.slug)) {
-            this.bind(owner, row.id, builtin.slug, builtin.slug);
+          const builtin = builtinSlug(row);
+          if (builtin && installed.some(s => s.slug === builtin) && !this.bindings(owner).some(b => b.slug === builtin)) {
+            this.bind(owner, row.id, builtin, builtin);
             continue;
           }
           try { this.store.db.transaction(() => this.create(owner, row, [...snapshot.refs.values()].filter(r => r.skillId === row.id)))(); }
           catch (error) {
             if (!(error instanceof Error) || !['invalid_skill', 'invalid_skill_reference', 'skill_package_too_large'].includes(error.message)) throw error;
           }
+        }
+        for (const skill of installed) {
+          if (this.bindings(owner).some(b => b.slug === skill.slug)) continue;
+          const builtin = builtinSlug({ ...skill, builtin: 1 });
+          if (builtin === skill.slug) this.bind(owner, skill.id, skill.slug, builtin);
         }
         for (const builtin of builtins()) {
           if (this.bindings(owner).some(b => b.builtin_slug === builtin.slug || b.slug === builtin.slug)) continue;
@@ -143,6 +207,7 @@ export class SystemSkillRecords {
           this.project(owner, 'skills', id, row);
           for (const ref of refs) this.project(owner, 'skillRefs', ref.id, ref);
         }
+        this.mergeVisual(owner, snapshot);
       });
       const physical = this.store.systemSkills.list(owner), snapshot = this.snapshot(owner);
       this.store.transaction(() => {
@@ -151,7 +216,8 @@ export class SystemSkillRecords {
           binding ??= this.bind(owner, skill.id, skill.slug, null);
           const previous = snapshot.skills.get(binding.skill_id);
           const next: Row = { ...previous, id: binding.skill_id, name: skill.name, description: skill.description, body: skill.body,
-            enabled: skill.enabled, builtin: binding.builtin_slug ? 1 : previous?.builtin ?? 0, updatedAt: previous?.updatedAt ?? skill.updatedAt };
+            enabled: skill.enabled, builtin: binding.builtin_slug ? 1 : previous?.builtin ?? 0, updatedAt: previous?.updatedAt ?? skill.updatedAt,
+            ...this.visualAliases(owner, binding) };
           if (skill.mcpRequired) next.mcpRequired = skill.mcpRequired; else delete next.mcpRequired;
           if (previous && !isDeepStrictEqual(previous, next)) next.updatedAt = skill.updatedAt;
           this.project(owner, 'skills', binding.skill_id, next);
@@ -176,7 +242,11 @@ export class SystemSkillRecords {
           }
         }
       });
-      return physical;
+      const byId = new Map(this.bindings(owner).map(binding => [binding.skill_id, binding]));
+      return physical.map(skill => {
+        const binding = byId.get(skill.id);
+        return binding ? { ...skill, ...this.visualAliases(owner, binding) } : skill;
+      });
     } finally { this.syncing = false; }
   }
 

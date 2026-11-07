@@ -15,6 +15,9 @@ export class BotSkills {
       const index = builtinAliases.indexOf(b.builtin_slug ?? '');
       return index < 0 ? [] : [[-index - 1, b.skill_id] as const];
     }));
+    for (const skill of physical) for (const id of skill.legacyIds ?? []) aliases.set(id, skill.id);
+    const visual = physical.find(s => s.legacyNames?.includes('讲解配图'));
+    if (visual) { aliases.set(-1, visual.id); aliases.set(-2, visual.id); }
     const legacy = new Set(bindings().filter(b => b.builtin_slug && !chatBuiltins.has(b.builtin_slug)).map(b => b.skill_id));
     const combined = physical.filter(s => s.enabled === 1 && !legacy.has(s.id));
     const scopeIds: number[] | undefined = row.skill_ids === null ? undefined : JSON.parse(row.skill_ids).map((id: number) => aliases.get(id) ?? id);

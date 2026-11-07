@@ -22,7 +22,7 @@ try {
   let materials = new SystemMaterials(store), records = new CloudRecords(store);
   const mutate = (table, before, after, id = before?.id ?? after.id) => records.apply(owner, [{ id: crypto.randomUUID(), table, key: id, before, after }]);
   const listing = materials.list(owner, '/system/skills');
-  assert.equal(listing.directories.length, 13, 'all twelve bundled skills plus the existing settings skill');
+  assert.equal(listing.directories.length, 12, 'all eleven bundled skills plus the existing settings skill');
   const binding = store.db.prepare('SELECT * FROM system_skill_bindings WHERE owner_id=? AND skill_id=73').get(owner);
   const packageRoot = path.join(store.systemSkills.directory(owner), binding.slug);
   const resource = `/system/skills/${binding.slug}/SKILL.md`;
@@ -34,7 +34,7 @@ try {
   assert.deepEqual(records.get(owner, 'skillRefs', 74), ref, 'reference IDs survive migration');
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM mcp_servers').get().n, 0, 'requires-mcp never creates or grants MCP');
   assert.ok(materials.read(owner, '/system/skills/course-handout/references/writing.md').content.length > 100);
-  assert.equal(materials.list(other, '/system/skills').directories.length, 12, 'owner isolation');
+  assert.equal(materials.list(other, '/system/skills').directories.length, 11, 'owner isolation');
   console.log('Skill migration: existing settings, bundled packages, references, disabled state, stable IDs and owner isolation passed');
 
   let current = records.get(owner, 'skills', 73);
@@ -75,7 +75,7 @@ try {
   materials.save(owner, builtin.path, builtin.content.replace(/\s*$/, '\n\n用户保留的内置修改\n'), builtin.content, builtin.revision);
   store.close(); store = new DatabaseStore(filename, files);
   materials = new SystemMaterials(store); records = new CloudRecords(store);
-  assert.equal(materials.list(owner, '/system/skills').directories.length, 13);
+  assert.equal(materials.list(owner, '/system/skills').directories.length, 12);
   assert.match(materials.read(owner, builtin.path).content, /用户保留的内置修改/);
   assert.equal(records.get(owner, 'skills', 73).body, current.body);
   console.log('Skill durability: transaction rollback, path rejection, idempotent restart and builtin edit preservation passed');
@@ -103,7 +103,7 @@ try {
   const customized = '---\nname: 课程讲义\ndescription: Existing package\n---\n\nAlready customized on disk';
   fs.writeFileSync(path.join(installed, 'SKILL.md'), customized);
   store.db.prepare("INSERT INTO cloud_records(owner_id,table_name,record_key,value) VALUES(?,'skills','81',?)").run(upgradeOwner, JSON.stringify({ id: 81, name: '课程讲义', description: 'Old DB', body: 'Old bundled body', enabled: 1, builtin: 1, updatedAt: 0 }));
-  assert.equal(materials.list(upgradeOwner, '/system/skills').directories.length, 12, 'an existing builtin folder is adopted rather than duplicated');
+  assert.equal(materials.list(upgradeOwner, '/system/skills').directories.length, 11, 'an existing builtin folder is adopted rather than duplicated');
   assert.equal(fs.readFileSync(path.join(installed, 'SKILL.md'), 'utf8'), customized);
   assert.equal(records.get(upgradeOwner, 'skills', 81).body, 'Already customized on disk');
   console.log('Skill upgrade: existing physical builtin takes precedence over the old settings copy passed');

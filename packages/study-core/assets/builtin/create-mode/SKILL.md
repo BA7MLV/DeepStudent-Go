@@ -10,7 +10,7 @@ description: 用自然语言创建、修改和放置长期可用的功能、小�
 ## 工作流程
 
 1. **理解并发现**：先看本轮真实工具，调用 `plugins(operation="list")` 和 `plugins(operation="layout")`，需要时 `describe`。从目录取得真实功能、内容和项目/资料归属；优先复用。普通小工具默认账户范围；当前资料/项目限定按用户意图使用真实范围。只有共享内容可能被改动、多个目标同样合理或缺少必要信息时才用自然语言询问。已有明确意图直接执行，不增设泛化审批。
-2. **选择实现**：长期工具用持久插件；只是解释某个概念时用“交互式讲解”，不要把 `show_widget` / `window.__wbw` 当成安装插件。新建或改包前按需读取 `references/tools-and-layout.md`、`references/runtime.md`；界面遵循 `references/design.md`。路径使用宿主返回的技能参考路径（或 Bot 的 `/system/skills/create-mode/references/...`），不要猜工具参数。
+2. **选择实现**：长期工具用持久插件；只是解释某个概念时用“可视化讲解”，不要把 `show_widget` / `window.__wbw` 当成安装插件。新建或改包前按需读取 `references/tools-and-layout.md`、`references/runtime.md`；界面遵循 `references/design.md`。路径使用宿主返回的技能参考路径（或 Bot 的 `/system/skills/create-mode/references/...`），不要猜工具参数。
 3. **先资产，后发布**：新动态包先保存视图及必要 `defaults.json`，最后写有效 `manifest.json` 到同一 `/system/plugins/<id>/`；重新发现，确认无错误且启用后再挂载。`plugins.configure` 只改布局，不会写 HTML 或安装包。更新前读取真实原文，保留用户修改和状态结构；不要重置现有内容。
 4. **合并放置**：布局先读后改，仅合并本次实例、位置和导航，保留其他字段；用完整旧 `content` 作 `expected`，附原 `revision` 做 CAS。冲突重读并重新合并，不能覆盖他人的新改动。共享复用同一实例，独立使用新实例；只改名字/位置不重建内容。侧边栏必须有精确 view 的 `app.page` placement 和引用它的 `navigation`。重复请求先查已有配置，避免重复创建。
 5. **验证交付**：重读目录和布局，核对包状态、实例、目标位置、view 和导航。能调用的读动作可核验实际状态。给真实 `#/plugins/<instanceId>?view=<viewId>&placement=<placementId>` 链接；消息引用仅用工具返回的 `wbw-plugin`。没有浏览器就只说文件/配置已核验，不说视觉或交互验收完成。失败、冲突或权限不足如实说明，不能报“创建成功”；任务受理不等于产物完成，读取持久收据再报告。

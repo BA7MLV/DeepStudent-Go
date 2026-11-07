@@ -68,6 +68,7 @@ try {
   await assertDesktopSetupLayout();
   await page.getByRole('button', { name: '继续', exact: true }).click();
   await page.getByTestId('provider-add-card').waitFor();
+  assert.equal(await page.getByTestId('cloud-models-save').count(), 0, 'clean onboarding hides the save action');
   await page.getByTestId('model-meta-updated-at').locator('time').waitFor();
   assert.equal((await assertDesktopSetupLayout()).sceneScrolls, true, 'long model setup scrolls inside the right column');
   for (const viewport of [{ width: 1280, height: 768 }, { width: 960, height: 600 }, { width: 1280, height: 400 }]) {
@@ -179,7 +180,8 @@ try {
   await page.goto(`${origin}/#/settings/models`);
   await page.reload();
   await page.getByTestId(`provider-summary-${id}`).click();
-  assert.equal(await page.getByTestId('cloud-models-save').isDisabled(), true, 'clean settings retain a stable, disabled save action');
+  assert.equal(await page.getByTestId('cloud-models-save').count(), 0, 'clean settings hide the save action');
+  assert.equal(await page.getByTestId('cloud-models-save-actions').count(), 0, 'clean settings do not reserve an empty save dock');
   assert.equal(await page.getByRole('button', { name: '使用服务器版本…', exact: true }).count(), 0, 'server-version recovery is not a routine action');
   assert.equal(await page.getByTestId(`field-api-key-${id}`).getByTestId(`provider-accounts-${id}`).count(), 1, 'key input and account management belong to the same API Key field');
   assert.equal(await page.getByTestId(`field-api-key-${id}`).locator('input[type="password"]').count(), 0, 'key management has no duplicate always-visible input');
@@ -200,7 +202,7 @@ try {
   await assertSaveDock();
   await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-save-desktop.png') });
   await page.getByTestId(`provider-name-${id}`).fill(saved.providers[0].name);
-  await page.waitForFunction(() => document.querySelector('[data-testid="cloud-models-save"]')?.disabled);
+  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
   await page.getByTestId(`provider-name-${id}`).fill('Renamed connection');
   assert.equal(await page.getByTestId('btn-check-models').innerText(), '保存连接并获取模型', 'display name changes are not mistaken for a saved connection');
   await page.getByTestId('saved-models').getByText('openai/gpt-4o', { exact: true }).waitFor();
@@ -209,7 +211,7 @@ try {
   await page.getByTestId('model-editor').getByRole('button', { name: '取消', exact: true }).click();
   await page.getByTestId('btn-check-models').click();
   await page.getByText(/2 个可用模型/).first().waitFor();
-  await page.waitForFunction(() => document.querySelector('[data-testid="cloud-models-save"]')?.disabled);
+  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
   assert.ok(upstream.every(r => r.headers.authorization === 'Bearer secret-for-server-only'), 'blank editor keys preserve credentials');
   await noBrowserKey();
   await page.mouse.move(0, 0);
@@ -286,7 +288,7 @@ try {
   const account = (await readConfig()).providers[0].accounts[0];
   assert.equal(account.keyHint, '••••only');
   assert.equal(await accounts.getByTestId(`account-key-hint-${account.id}`).innerText(), '••••only', 'named accounts display their identifying suffix in the key list');
-  assert.equal(await page.getByTestId('cloud-models-save').isDisabled(), true, 'immediately saved accounts do not leave a misleading pending save');
+  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
   assert.ok(!(await page.evaluate(() => JSON.stringify(localStorage))).includes('account-secret-for-server-only'));
   await page.getByTestId('field-api-key-' + id).evaluate(element => element.scrollIntoView({ block: 'center' }));
   await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-unified-keys-mobile.png') });
@@ -297,7 +299,7 @@ try {
   await accounts.getByLabel('API Key', { exact: true }).fill('discarded-extra-key');
   await accounts.getByRole('button', { name: '取消', exact: true }).click();
   assert.equal(await accounts.getByLabel('API Key', { exact: true }).count(), 0, 'cancel removes the form and its secret');
-  await page.waitForFunction(() => document.querySelector('[data-testid="cloud-models-save"]')?.disabled);
+  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
   await accounts.getByRole('button', { name: '更换 Key', exact: true }).click();
   await accounts.getByLabel('API Key', { exact: true }).fill('replacement-from-unified-form');
   await accounts.getByRole('button', { name: '保存 Key', exact: true }).click();
@@ -332,6 +334,7 @@ try {
   await page.getByTestId('cloud-models-save').click();
   await page.getByText('模型设置已保存到服务器', { exact: true }).waitFor();
   let presetConfig = await readConfig();
+  await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
   const botPlan = presetConfig.modelPresets.find(p => p.id === presetConfig.modelRoutes.byPurpose.bot);
   assert.deepEqual(botPlan.candidates.map(c => c.ref.model), ['openai/gpt-4o', 'catalog-model']);
   assert.equal(botPlan.policy.allowCrossProvider, false);

@@ -27,11 +27,11 @@ import { commitTask, newRecordId, recordMutation, taskCourseFile, taskRows, type
 import { Document, Paragraph, TextRun, HeadingLevel, Packer } from 'docx';
 import { receiveFile } from '../src/cloud/files';
 import { Readable } from 'node:stream';
-import { SHOW_WIDGET_TOOL, SERVER_WIDGET_RULE } from '@wangke/study-core/widget-tool';
+import { SERVER_WIDGET_RULE } from '@wangke/study-core/widget-tool';
 import { BOARD_TOOL, executeBoardTool, executePluginsTool } from './board.js';
 import { PLUGINS_TOOL } from '@wangke/contracts/plugins';
-import { readPartialWidgetArguments, widgetReference, type WidgetPayload } from '@wangke/study-core/widgets';
-import { executeServerWidget } from './widgets';
+import { widgetReference, type WidgetPayload } from '@wangke/study-core/widgets';
+import { createTaskWidgetExecutor, SERVER_SHOW_WIDGET_TOOL } from './widgets';
 import { parseWebSearchResult, type WebSearchResult } from '@wangke/contracts/web-search';
 import { gatewayTaskTarget, gatewayTaskFetch } from '../src/agent/model-gateway-runtime.js';
 import { ModelFailure } from '../src/agent/model-client.js';
@@ -49,6 +49,8 @@ import { serverQuestionExtraction } from './question-extraction.js';
 import { DELEGATION_TOOLS } from '../src/agent/delegation-tools.js';
 import { delegationTool, TaskWaitSuspended } from './delegation.js';
 import { TaskStepBudget } from '../src/agent/task-step-budget.js';
+import { modelSettings } from '../src/agent/model-settings.js';
+import { chatOutputTokens, truncationRetryTokens } from './chat-output-budget.js';
 
 /** Text-source handouts; video tasks use the server pixel/DOCX pipeline. */
 async function studyHandout(context: TaskContext) {
@@ -337,14 +339,15 @@ async function runServerAgent(
   executeTool = async (name, args) => webNames.has(name) && context.webSearch
     ? JSON.stringify(await context.webSearch.call(context.owner, name, args, context.signal, webPermitted)) : builtin(name, args);
   const isDelegated = Boolean(context.store.db.prepare('SELECT 1 FROM task_delegations WHERE task_id=?').get(context.task.id));
-  tools = stableTools([...tools, ...webTools, SHOW_WIDGET_TOOL, ...(['chat', 'qa'].includes(context.task.kind) ? [BOARD_TOOL, PLUGINS_TOOL, ...(!isDelegated ? DELEGATION_TOOLS : [])] : [])]);
+  tools = stableTools([...tools, ...webTools, SERVER_SHOW_WIDGET_TOOL, ...(['chat', 'qa'].includes(context.task.kind) ? [BOARD_TOOL, PLUGINS_TOOL, ...(!isDelegated ? DELEGATION_TOOLS : [])] : [])]);
+  const executeWidget = createTaskWidgetExecutor();
+  if (resumed) out.push({ role: 'user', content: '任务已恢复；show_widget 分段组装的内存缓存没有保留，revision 重新从0开始；可 read 获取空基线，如需大页面请从 revision=0、offset=0 重新组装，勿重放旧补丁。已交付聊天页面不受影响。' });
   const requests: ModelRequestRecord[] = resumed?.requests ?? [];
   const cacheKey = `study:${context.owner}:${context.task.input.sessionId}`;
   const thinkingLevel = taskThinkingLevel(context);
   const onRequest = (record: ModelRequestRecord) => { requests.push(record); };
   const traces: ServerToolTrace[] = resumed?.traces ?? [...initialTraces];
   const widgets: WidgetPayload[] = resumed?.widgets ?? [];
-  let widgetPreview: { html: string } | undefined;
   let ask: ServerAgentResult['ask'] = resumed?.ask;
   let pendingAsk = false;
   let reasoning = resumed?.reasoning ?? '';
@@ -358,7 +361,11 @@ async function runServerAgent(
   const beginProcess = () => {
     responseSegments = beginResponseSegment(responseSegments, deliveredContent, reasoning, traces);
   };
-  const appendAnswer = (delta: string) => { answer += delta; deliveredContent += delta; };
+  let continuationFilter: ReturnType<typeof createContinuationFilter> | undefined;
+  let textContinuations = 0, truncatedTools = 0, raisedRetries = 0;
+  let nextOutputTokens: number | undefined;
+  let lastOutputTokens = 0;
+  const appendAnswer = (delta: string) => { answer += delta; deliveredContent += continuationFilter ? continuationFilter.push(delta) : delta; };
   const finishAnswer = (text: string) => {
     // Some transports emit a final message as well as deltas. Only its unseen
     // suffix may be appended; never replace a prefix the user has already seen.
@@ -366,7 +373,9 @@ async function runServerAgent(
   };
   let streaming = false;
   const seen = new Set<string>(resumed?.seen ?? []);
-  const maxRounds = Math.max(1, Math.min(8, Number(context.configuration.get(context.owner).policy.maxSteps) || 6));
+  // Large works require more than eight small operations. Existing root task
+  // step/request/time budgets remain authoritative; this is an additional cap.
+  const maxRounds = Math.max(1, Math.min(64, Number(context.configuration.get(context.owner).policy.maxSteps) || 6));
   const stepBudget = new TaskStepBudget(context.store, context.configuration);
   let lastReportAt = 0;
   let lastReportPhase = '';
@@ -400,7 +409,7 @@ async function runServerAgent(
       modelRequests: requests,
       ...(ask ? { ask, view: { pendingAsk: pendingAsk ? { messageKey: `row:${rowIdentity?.rowId}` } : null } } : {}),
       ...(rowIdentity ?? {}),
-      widgets, widget: widgets.at(-1), widgetPreview,
+      widgets, widget: widgets.at(-1), widgetPreview: undefined,
     });
   };
   report('thinking', 0, true);
@@ -408,35 +417,36 @@ async function runServerAgent(
   for (let round = resumed?.round ?? 0; round < maxRounds; round++) {
     context.checkActive();
     answer = '';
-    deliveredContent = nextResponseRound(deliveredContent);
+    if (!continuationFilter) deliveredContent = nextResponseRound(deliveredContent);
     beginProcess();
-    widgetPreview = undefined;
     streaming = true;
     report('thinking', round + 1, true);
     let message: ChatMessage;
     try {
       const requestMessages = reconcileSkillMessages(out);
       assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, requestMessages, false);
-      message = await chatStream(target, {
+      const options: ChatOptions = {
         messages: requestMessages,
         cacheKey, onRequest,
         tools,
         temperature: 0.3,
-        max_tokens: 8192,
         signal: context.signal,
         thinkingLevel,
-      },
+      };
+      if (continuationFilter) { options.tools = undefined; }
+      const available = chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target));
+      options.max_tokens = Math.min(nextOutputTokens ?? available, available);
+      lastOutputTokens = options.max_tokens;
+      nextOutputTokens = undefined;
+      message = await chatStream(target, options,
       delta => { appendAnswer(delta); report('answer', round + 1); },
       delta => { beginProcess(); reasoning += delta; report('thinking', round + 1); },
-      call => {
+      () => {
         beginProcess();
         report('tool', round + 1);
-        if (call.name !== 'show_widget') return;
-        const partial = readPartialWidgetArguments(call.arguments);
-        if (partial.format !== 'html' || !partial.code) return;
-        const first = !widgetPreview;
-        widgetPreview = { html: partial.code.slice(0, 60_000) };
-        report('tool', round + 1, first);
+        // Field order is unknown until the complete envelope arrives. Never
+        // preview raw tool deltas: code may precede action=patch/read/append.
+        // Only a validated final payload can enter the chat preview chain.
       },
       modelFetch(context));
     } catch (error) {
@@ -444,18 +454,18 @@ async function runServerAgent(
       // the current answer/reasoning and any validated widgets before letting
       // the task fail or cancel; otherwise the durable task row can appear to
       // contain no work even though the browser already showed a prefix.
-      widgetPreview = undefined;
+      if (continuationFilter) deliveredContent += continuationFilter.flush();
       report('error', round + 1, true);
       streaming = false;
       throw error;
     }
-    widgetPreview = undefined;
 
     // A provider can encode a broken stream as a terminal assistant message
     // instead of rejecting fetch. Do not put that message back into the next
     // request. Persist the already streamed projection first so the task still
     // leaves a resumable checkpoint, then let the task become interrupted.
     if (message.finish_reason === 'error' || message.finish_reason === 'aborted') {
+      if (continuationFilter) deliveredContent += continuationFilter.flush();
       report('error', round + 1, true);
       streaming = false;
       throw new Error('模型或网关没有正常结束这一轮回答');
@@ -470,27 +480,39 @@ async function runServerAgent(
         appendAnswer(message.content);
       }
     }
+    if (continuationFilter && message.tool_calls?.length) {
+      report('error', round + 1, true);
+      throw new Error('正文续写不允许执行工具；已保存断点');
+    }
     out.push(message);
     const text = textOf(message);
     finishAnswer(text);
+    if (continuationFilter) deliveredContent += continuationFilter.flush();
 
     // `length` with tool calls means the arguments may be only a valid-looking
-    // prefix. Never execute that call (especially show_widget); feed the model
-    // an explicit failed result so it can resend complete arguments.
+    // prefix. Never execute that call; discard its envelope and ask the model
+    // for a smaller complete operation instead of repairing arguments.
     if (message.finish_reason === 'length' && message.tool_calls?.length) {
+      // Discard incomplete arguments/provider continuation, not repair them.
+      // Replaying a huge partial call also needlessly consumes next input budget.
+      out.pop();
+      if (text) out.push({ role: 'assistant', content: text });
+      const limits = modelSettings(context.store, context.owner, context.configuration.get(context.owner), target);
+      const available = chatOutputTokens(target, { messages: reconcileSkillMessages(out), tools, signal: context.signal, thinkingLevel }, limits);
+      const raised = truncationRetryTokens(lastOutputTokens, available, limits.outputSource, raisedRetries);
+      if (raised) { nextOutputTokens = raised; raisedRetries++; }
       for (const call of message.tool_calls) {
         stepBudget.chargeTaskTool(context.owner, context.task.id, `${round}:${message.tool_calls.indexOf(call)}`);
         beginProcess();
-        const failure = `工具「${call.function.name}」没有执行：这一轮的输出撞到了 max_tokens 上限，参数可能已被截断。请用完整的参数重新调用一次。`;
+        const failure = `工具「${call.function.name}」没有执行：这一轮达到 max_tokens 请求预算，参数可能截断。${limits.outputSource === 'fallback' ? '当前预算来自未知模型的保守回退，不代表模型硬上限。' : '当前预算受用户配置、模型声明或剩余上下文估计限制。'}${raised ? '有已知额度余量，下一轮仅提高一次预算，重新提交完整操作。' : '不要按同预算原样重试；show_widget 缩小完整 append 或 patch（search+replace 合计建议1000~2000字符），可 read 定位后提交小补丁，不必重写整页；其他工具缩小操作范围。'}禁止续接或修补截断 JSON；本轮整批未执行，已确认 revision/length 不变，必要时 read 获取基线，最后 complete。`;
         traces.push({ id: `${context.task.id}:${round}:${message.tool_calls.indexOf(call)}`, name: toolLabel(call.function.name), status: 'error', reasoningOffset: reasoning.length, result: failure });
         out.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          name: call.function.name,
+          role: 'user',
           content: failure,
         });
       }
       report('tool', round + 1, true);
+      if (++truncatedTools >= 3) throw new Error('工具输出连续截断，已停止自动重试；已交付聊天页面保留，未完成的内存组装不保留，请缩小操作后重新生成');
       continue;
     }
     if (message.tool_calls?.length) {
@@ -503,7 +525,7 @@ async function runServerAgent(
         stepBudget.chargeTaskTool(context.owner, context.task.id, `${round}:${message.tool_calls.indexOf(call)}`);
         const args = parseArgs(call.function.arguments);
         const signature = `${call.function.name}:${JSON.stringify(args)}`;
-        if (seen.has(signature)) {
+        if (!(call.function.name === 'show_widget' && args.action !== undefined) && seen.has(signature)) {
           out.push({ role: 'tool', tool_call_id: call.id, name: call.function.name, content: '相同参数已执行过，请直接根据已有结果回答。' });
           continue;
         }
@@ -527,7 +549,7 @@ async function runServerAgent(
             try { const answered = await awaitTaskAnswer(context, ask); ask = { ...ask, answer: answered.answer, picked: askAnswerText(answered.answer) }; result = answered.result; }
             finally { pendingAsk = false; }
           } else result = call.function.name === 'show_widget'
-            ? executeServerWidget(args, payload => {
+            ? executeWidget(args, payload => {
               context.checkActive();
               widgets.push(payload);
               // Place it now, not in an end-of-answer fallback that would move
@@ -564,8 +586,14 @@ async function runServerAgent(
       continue;
     }
     if (message.finish_reason === 'length') {
+      if (text.trim() && textContinuations++ < 2 && round + 1 < maxRounds) {
+        continuationFilter = createContinuationFilter(deliveredContent);
+        out.push({ role: 'user', content: CONTINUE_INSTRUCTION });
+        report('answer', round + 1, true);
+        continue;
+      }
       report('error', round + 1, true);
-      throw new Error('模型输出达到长度上限，可从断点继续回答');
+      throw new Error('正文达到本次输出预算；有限自动续写已停止，可从已保存断点继续回答');
     }
     if (answer.trim()) {
       report('answer', round + 1, true);
@@ -587,7 +615,9 @@ async function runServerAgent(
   const finalMessages = reconcileSkillMessages(out);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, finalMessages, false);
   try {
-    final = await chatStream(target, { messages: finalMessages, cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, max_tokens: 4096, signal: context.signal, thinkingLevel },
+    const options: ChatOptions = { messages: finalMessages, cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, signal: context.signal, thinkingLevel };
+    options.max_tokens = Math.min(4096, chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target)));
+    final = await chatStream(target, options,
       delta => { appendAnswer(delta); report('answer', maxRounds + 1); },
       delta => { beginProcess(); reasoning += delta; report('thinking', maxRounds + 1); },
       undefined,
@@ -996,8 +1026,10 @@ async function continueChat(context: TaskContext) {
   };
   snapshot(true, undefined, true);
   try {
-    const message = await chatStream(target, { messages, signal: context.signal, max_tokens: 8192, thinkingLevel: taskThinkingLevel(context),
-      cacheKey: `study:${context.owner}:${sessionId}`, onRequest: request => { requests.push(request); } },
+    const options: ChatOptions = { messages, signal: context.signal, thinkingLevel: taskThinkingLevel(context),
+      cacheKey: `study:${context.owner}:${sessionId}`, onRequest: request => { requests.push(request); } };
+    options.max_tokens = chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target));
+    const message = await chatStream(target, options,
     delta => {
       const changed = phase !== 'answer';
       pending += delta; content += filter.push(delta); phase = 'answer'; snapshot(true, undefined, changed);

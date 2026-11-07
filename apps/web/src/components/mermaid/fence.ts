@@ -11,7 +11,7 @@
  * show_widget 预检（harness/widget.ts）**必须同一份口径** —— 预检通过后回给模型的
  * 围栏里也要带着标题，否则模型「原样贴进正文」时标题就丢了。
  *
- * 三种围栏的分工（提示词侧的口径，细节在「讲解配图」技能）：
+ * 三种围栏的分工（提示词侧的口径，细节在「可视化讲解」技能的 references/static-diagrams.md）：
  * - `mermaid`：标准结构图（flowchart / sequenceDiagram / stateDiagram-v2 / mindmap / pie）；
  * - `diagram`：**JSON 中间层**。函数图像、几何图形、坐标轴，以及需要精确定位的
  *   结构图。模型只写 JSON，布局/坐标/采样由渲染器算（components/mermaid/diagramRender.ts）；

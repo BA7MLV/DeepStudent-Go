@@ -16,6 +16,7 @@ import { MarkdownCode, MarkdownPre } from '../components/mermaid/markdown';
 import { MarkdownTable } from '../components/MdTable';
 import WidgetStreamFrame from '../components/WidgetStreamFrame';
 import ChatAddMenu from '../components/ChatAddMenu';
+import SkillChips from '../components/SkillChips';
 import ChatProjectPicker from '../components/ChatProjectPicker';
 import { projectDisplayName } from '../projects/chatProjects';
 import ComposerExpand, { useComposerSize } from '../components/ComposerExpand';
@@ -260,6 +261,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
     <div className="course-chat__user-content" data-dust-surface>
     <ChatMessageAttachments files={message.attachments} />
     <div className="course-chat__bubble course-chat__bubble--user">
+    <SkillChips ids={message.explicitSkillIds} />
     {!touchMenu ? content : (
     <Dropdown trigger="longPress">
       <Dropdown.Trigger className="course-chat__user-trigger"
@@ -543,6 +545,7 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
   const touch = useMediaQuery('(pointer: coarse)');
   const activeId = useCourseChat(s => s.activeId), loaded = useCourseChat(s => s.loaded), loading = useCourseChat(s => s.loading);
   const draft = useCourseChat(s => s.draft), setDraft = useCourseChat(s => s.setDraft), send = useCourseChat(s => s.send), stop = useCourseChat(s => s.stop);
+  const turnSkillIds = useCourseChat(s => s.turnSkillIds), setTurnSkillIds = useCourseChat(s => s.setTurnSkillIds);
   const pendingAsk = useCourseChat(s => s.pendingAsk), pendingPlan = useCourseChat(s => s.pendingPlan), project = useCourseChat(s => s.project);
   const composerAsk = useCourseChat(s => s.pendingAsk ? s.messages.find(message => message.key === s.pendingAsk!.messageKey)?.ask : undefined);
   const attachmentItems = useChatAttachments(s => s.items);
@@ -577,11 +580,14 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
       <ChatAddMenu disabled={!loaded || !!pendingAsk} onSelectProject={onSelectProject} />
       <ComposerExpand visible={composerOverflow} key={`expand-${activeId ?? 'draft'}`} value={draft} onPaste={handlePaste}
         onChange={value => { setVoiceEditVersion(version => version + 1); setDraft(value); }} />
-      <ChatComposerInput ref={composerRef} className="course-chat__input" aria-label={t('composer.message')}
-        aria-description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')} rows={1} fullWidth value={draft}
-        onChange={event => { setVoiceEditVersion(version => version + 1); setDraft(event.target.value); }} onPaste={handlePaste}
-        enterKeyHint="send" {...ime.compositionProps} onFocus={pinIfSticking} disabled={!loaded} placeholder={t(touch ? 'composer.touchPlaceholder' : 'composer.placeholder')}
-        onKeyDown={event => { if (!ime.isSubmitEnter(event)) return; event.preventDefault(); submit(); }} />
+      <div className="course-chat__composer-body">
+        <SkillChips ids={turnSkillIds} disabled={loading || !loaded} onRemove={ids => setTurnSkillIds(turnSkillIds.filter(value => !ids.includes(value)))} />
+        <ChatComposerInput ref={composerRef} className="course-chat__input" aria-label={t('composer.message')}
+          aria-description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')} rows={1} fullWidth value={draft}
+          onChange={event => { setVoiceEditVersion(version => version + 1); setDraft(event.target.value); }} onPaste={handlePaste}
+          enterKeyHint="send" {...ime.compositionProps} onFocus={pinIfSticking} disabled={!loaded} placeholder={t(touch ? 'composer.touchPlaceholder' : 'composer.placeholder')}
+          onKeyDown={event => { if (!ime.isSubmitEnter(event)) return; event.preventDefault(); submit(); }} />
+      </div>
       <ChatComposerTools className="course-chat__composer-tools" aria-label={t('composer.tools')} orientation="horizontal">
         <PluginActions surface="chat.composer.actions" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} />
         <span className="course-chat__context-usage-slot"><CourseChatContextUsage /></span>

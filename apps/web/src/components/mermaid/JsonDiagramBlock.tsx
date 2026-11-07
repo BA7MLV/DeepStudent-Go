@@ -11,7 +11,7 @@ import type { DiagramShape } from './diagramSchema';
  *
  * 这条链路替代的是「模型直出 SVG」：围栏里放一段 JSON（{"type":"graph"|"plot", …}），
  * 由 diagramRender 确定性算出布局与坐标，再落成 SVG。模型不再手写路径、手算坐标 ——
- * 那些正是「AI 端到端画图」最常漂移的地方。schema 与写法见「讲解配图」技能。
+ * 那些正是「AI 端到端画图」最常漂移的地方。schema 与写法见「可视化讲解」技能的 references/static-diagrams.md。
  *
  * 与 SvgBlock / MermaidBlock 的差别：
  * 1. **流式单位是逻辑图元**：半截 JSON 每多写完一个数组项就多一个 key，

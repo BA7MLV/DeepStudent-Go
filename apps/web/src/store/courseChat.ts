@@ -37,6 +37,7 @@ export interface CourseChatMessage {
   responseSegments?: ResponseSegment[]; processPhase?: ProcessPhase; processStartedAt?: number;
   key: string; rowId?: number; role: 'user' | 'ai'; content: string;
   attachments?: ChatAttachment[]; createdAt?: number; reasoning?: string;
+  explicitSkillIds?: number[];
   reasoningMs?: number; reasoningStartedAt?: number; hint?: string; tools?: ChatToolCall[];
   streaming?: boolean; error?: boolean; interrupted?: boolean; interruptReason?: string;
   ask?: AskUserState; folderPlan?: FolderPlanState; widget?: WidgetPayload; widgets?: WidgetPayload[];
@@ -199,7 +200,7 @@ async function applySessionPage(id: number, page: { rows: ChatRow[]; hasOlder: b
       processStartedAt: Date.parse(task.createdAt) || Date.now() };
     const text = typeof task.input.text === 'string' ? task.input.text.trim() : '';
     messages = timeline(id).progress(messages, task, text && task.input.action !== 'continue'
-      ? { key: `cloud-user-${task.id}`, role: 'user', content: text, taskId: task.id, syncPending: true, createdAt: Date.parse(task.createdAt) } : undefined, answer);
+      ? { key: `cloud-user-${task.id}`, role: 'user', content: text, explicitSkillIds: Array.isArray(task.input.explicitSkillIds) ? task.input.explicitSkillIds as number[] : undefined, taskId: task.id, syncPending: true, createdAt: Date.parse(task.createdAt) } : undefined, answer);
   }
   // Even tasks failing before the first durable row must unlock the composer.
   messages = messages.map(message => {
@@ -408,7 +409,7 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
       }
       pendingCloudSubmissions.set(operationId, id); timeline(id).begin(operationId);
       const messages = [...readView(id).messages];
-      if (!resume && text && !continuing && !messages.some(message => message.key === userKey)) messages.push({ key: userKey, role: 'user', content: text, attachments, createdAt: Date.now() });
+      if (!resume && text && !continuing && !messages.some(message => message.key === userKey)) messages.push({ key: userKey, role: 'user', content: text, attachments, explicitSkillIds: skills, createdAt: Date.now() });
       const index = messages.findIndex(message => message.key === answerKey);
       if (index >= 0) messages[index] = { ...messages[index], streaming: true, error: false, interrupted: false, ...(continuing ? { pendingOperationId: operationId } : { content: '' }) };
       else messages.push({ key: answerKey, operationId, role: 'ai', content: '', streaming: true, processPhase: 'preparing', processStartedAt: Date.now() });
@@ -557,7 +558,7 @@ function toMessage(row: ChatRow): CourseChatMessage {
   if (cached && cached.task === task) return cached.message;
   const message: CourseChatMessage = { key: `stored-${row.id}`, rowId: row.id!, taskId: row.taskId, role: row.role === 'assistant' ? 'ai' : 'user',
     content: row.content, ...(row.role === 'assistant' ? chatTaskState(row, task) : {}),
-    attachments: row.attachments, createdAt: row.createdAt, reasoning: row.reasoning, responseSegments: row.responseSegments,
+    attachments: row.attachments, explicitSkillIds: row.explicitSkillIds, createdAt: row.createdAt, reasoning: row.reasoning, responseSegments: row.responseSegments,
     reasoningMs: row.reasoningMs, tools: row.tools,
     ask: row.ask, folderPlan: row.folderPlan, widget: row.widget, widgets: row.widgets,
     ...(task && chatTaskActive(task) && task.progress?.widgetPreview ? { widgetPreview: task.progress.widgetPreview as unknown as { html: string } } : {}) };

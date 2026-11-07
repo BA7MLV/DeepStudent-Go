@@ -42,7 +42,9 @@ async function run(kind, input, failed) {
 
 try {
   put('chatSessions', 10, { id: 10, videoId: '__library_assistant__', title: '新会话', createdAt: Date.now() });
-  for (const [id, body] of [[1001, 'TURN_BEGIN_' + '完整规范。'.repeat(6000) + '_TURN_END'], [1002, 'PINNED_V1']]) {
+  // Still exceeds the 24k tool-result cap, while leaving room for QA's full
+  // tool envelope under the conservative UTF-8-byte request budget.
+  for (const [id, body] of [[1001, 'TURN_BEGIN_' + '完整规范。'.repeat(5000) + '_TURN_END'], [1002, 'PINNED_V1']]) {
     put('skills', id, { id, name: `test-${id}`, description: '测试技能', body, enabled: 1, builtin: 0, updatedAt: Date.now() });
   }
   put('skillRefs', 1003, { id: 1003, skillId: 1001, path: 'references/guide.md', body: 'REFERENCE_LAZY_ONLY' });

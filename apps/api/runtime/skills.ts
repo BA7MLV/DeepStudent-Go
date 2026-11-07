@@ -56,7 +56,7 @@ export function sessionSkills(context: TaskContext, session: Record<string, any>
         let parts: string[];
         try { parts = args.path.split('/').slice(2).map(decodeURIComponent); }
         catch { return 'Error: 无效技能路径'; }
-        const skill = available.find(s => s.name === parts[0]);
+        const skill = available.find(s => s.name === parts[0]) ?? available.find(s => s.legacyNames?.includes(parts[0]));
         if (!skill) return 'Error: 技能已停用、删除或不在当前会话范围内';
         try {
           check(skill);

@@ -212,7 +212,7 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
     } catch (error) { showError(error); }
     finally { operation.current = false; setBusy(false); }
   }
-  const saveActions = <SettingsSaveBar dirty={dirty} busy={busy} disabled={conflict || (!standalone && !dirty)} error={error || (conflict ? modelSettingsError(new Error('model_settings_conflict')) : '')} message={message}
+  const saveActions = <SettingsSaveBar dirty={dirty} busy={busy} hideWhenClean disabled={conflict} error={error || (conflict ? modelSettingsError(new Error('model_settings_conflict')) : '')} message={message}
     saveLabel="保存模型设置" onSave={() => void save()} testId="cloud-models-save-actions" saveTestId="cloud-models-save" statusTestId="cloud-models-dirty">
     {conflict && <SettingsConflictRecovery busy={busy} onReload={reload} />}
   </SettingsSaveBar>;

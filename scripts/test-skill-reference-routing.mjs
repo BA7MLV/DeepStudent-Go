@@ -14,13 +14,16 @@ try {
   const context = { owner, store, records: new CloudRecords(store) };
   const skills = sessionSkills(context, {});
   const read = skills.wrap(async () => 'downstream');
-  const name = encodeURIComponent('交互式讲解');
+  const name = encodeURIComponent('可视化讲解');
   const body = await read('read', { path: `/skills/${name}` });
   assert.ok(body.includes(`/skills/${name}/references/practice.md`));
   assert.ok(!body.includes('/references/references/'));
   const expected = fs.readFileSync(new URL('../packages/study-core/assets/builtin/interactive-explainer/references/practice.md', import.meta.url), 'utf8');
   assert.equal(await read('read', { path: `/skills/${name}/references/practice.md` }), expected);
   assert.equal(await read('read', { path: '/skills/交互式讲解/references/practice.md' }), expected);
+  const diagrams = fs.readFileSync(new URL('../packages/study-core/assets/builtin/interactive-explainer/references/static-diagrams.md', import.meta.url), 'utf8');
+  assert.equal(await read('read', { path: '/skills/讲解配图/references/static-diagrams.md' }), diagrams);
+  assert.ok(body.includes(`/skills/${name}/references/static-diagrams.md`));
   assert.match(await read('read', { path: `/skills/${name}/references/missing.md` }), /^Error:/);
   assert.match(await read('read', { path: `/skills/${name}/references/..%2FSKILL.md` }), /^Error:/);
   const restricted = sessionSkills(context, { skillIds: [] }).wrap(async () => 'downstream');

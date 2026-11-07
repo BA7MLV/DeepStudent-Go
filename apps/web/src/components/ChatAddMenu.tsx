@@ -8,8 +8,7 @@ import { CHAT_FILE_ACCEPT, CHAT_IMAGE_ACCEPT } from '../chat/attachments';
 import { MAX_COURSE_CONTEXT } from '../harness/courseContext';
 import { folderCourseScope } from '@wangke/study-core/folder-scope';
 import { projectDisplayName } from '../projects/chatProjects';
-import { MODAL_CONTAINER_CLASS, Sym, toast } from '../ui';
-import { handoutDraft, prepareHandoutPrompt } from '../skills/handout';
+import { MODAL_CONTAINER_CLASS, Sym } from '../ui';
 import SkillPicker from './SkillPicker';
 import TaskModelPicker from './TaskModelPicker';
 import './chat-attachments.css';
@@ -30,7 +29,6 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
   const [query, setQuery] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [handoutPreparing, setHandoutPreparing] = useState(false);
   const skillIds = useCourseChat((state) => state.skillIds);
   const setSkillIds = useCourseChat((state) => state.setSkillIds);
   const turnSkillIds = useCourseChat(state => state.turnSkillIds);
@@ -61,24 +59,6 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
     catch { setError(text('chatAdd.saveFailed')); }
     finally { setBusy(false); }
   };
-  const addHandout = async () => {
-    const session = useCourseChat.getState();
-    if (session.loading || handoutPreparing) return;
-    setHandoutPreparing(true);
-    try {
-      const prepared = await prepareHandoutPrompt(session.skillIds);
-      const current = useCourseChat.getState();
-      if (current.activeId !== session.activeId) return;
-      if (prepared.skillIds !== session.skillIds) current.setSkillIds(prepared.skillIds);
-      current.setTurnSkillIds([...new Set([...current.turnSkillIds, prepared.id])]);
-      current.setDraft(handoutDraft(current.draft, prepared.prompt));
-      toast.info(text('chatAdd.handoutAdded'));
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : text('chatAdd.handoutFailed'));
-    } finally {
-      setHandoutPreparing(false);
-    }
-  };
   return <>
     <div className="chat-add-menu">
       <Dropdown isOpen={addOpen} onOpenChange={setAddOpen}>
@@ -87,12 +67,11 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
           {contextCourses.length > 0 && <span className="chat-add-menu__context-dot" data-testid="chat-context-dot" aria-hidden="true" />}
         </Button>
         <Dropdown.Popover placement="top start">
-          <Dropdown.Menu aria-label={text('composer.add')} disabledKeys={[...(loading ? ['handout', 'project'] : []), ...(handoutPreparing ? ['handout'] : [])]} onAction={(key) => {
+          <Dropdown.Menu aria-label={text('composer.add')} disabledKeys={loading ? ['project'] : []} onAction={(key) => {
             if (key === 'courses') void openCourses();
             else if (key === 'images') imageInput.current?.click();
             else if (key === 'files') fileInput.current?.click();
             else if (key === 'skills') setSkillsOpen(true);
-            else if (key === 'handout') void addHandout();
             else if (key === 'project') { setAddOpen(false); onSelectProject?.(); }
           }}>
             {onSelectProject && <Dropdown.Item id="project" textValue={projectLabel} data-testid="chat-select-project"><Sym name="folder" /><Label>{projectLabel}</Label></Dropdown.Item>}
@@ -102,7 +81,6 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
             </Dropdown.Item>
             <Dropdown.Item id="images" textValue={text('composer.images')}><Sym name="image" />{text('composer.images')}</Dropdown.Item>
             <Dropdown.Item id="files" textValue={text('composer.files')}><Sym name="attach_file" />{text('composer.files')}</Dropdown.Item>
-            <Dropdown.Item id="handout" textValue={text('chatAdd.handout')} data-testid="handout-prompt"><Sym name="description" />{text('chatAdd.handout')}</Dropdown.Item>
             <Dropdown.Item id="skills" textValue={t('skillPicker.title')}><Sym name="extension" />{t('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ` · ${text('chatAdd.limited')}` : ''}</Dropdown.Item>
           </Dropdown.Menu>
           <div className="chat-add-menu__model px-2 py-1">
@@ -113,7 +91,6 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
       <input ref={imageInput} type="file" accept={CHAT_IMAGE_ACCEPT} multiple hidden data-testid="chat-image-input" onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
       <input ref={fileInput} type="file" accept={CHAT_FILE_ACCEPT} multiple hidden data-testid="chat-file-input" onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
     </div>
-    {turnSkillIds.length > 0 && <Button size="sm" variant="tertiary" data-testid="chat-active-skills" onPress={() => setSkillsOpen(true)}><Sym name="extension" />{t('skillPicker.activationCount', { turn: turnSkillIds.length })}</Button>}
     <SkillPicker value={skillIds} onChange={setSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={setMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
     <Modal.Root isOpen={coursesOpen} onOpenChange={setCoursesOpen}>
       <Modal.Backdrop><Modal.Container placement="center" size="md" className={MODAL_CONTAINER_CLASS}>

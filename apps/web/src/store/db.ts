@@ -503,6 +503,8 @@ export interface StudyDayRow {
 }
 
 export interface SkillRow {
+  legacyIds?: number[];
+  legacyNames?: string[];
   mcpRequired?: string[];
   id?: number;
   name: string;

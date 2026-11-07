@@ -8,7 +8,7 @@ import subjectCoding from '@wangke/study-core/skills/builtin/subject-coding/SKIL
 import codingWriting from '@wangke/study-core/skills/builtin/subject-coding/references/coding-writing.md?raw';
 import gongkaoXingce from '@wangke/study-core/skills/builtin/gongkao-xingce/SKILL.md?raw';
 import gongkaoShenlun from '@wangke/study-core/skills/builtin/gongkao-shenlun/SKILL.md?raw';
-import diagramming from '@wangke/study-core/skills/builtin/diagramming/SKILL.md?raw';
+import staticDiagrams from '@wangke/study-core/skills/builtin/interactive-explainer/references/static-diagrams.md?raw';
 import interactiveExplainer from '@wangke/study-core/skills/builtin/interactive-explainer/SKILL.md?raw';
 import interactiveApi from '@wangke/study-core/skills/builtin/interactive-explainer/references/runtime.md?raw';
 import interactiveExplore from '@wangke/study-core/skills/builtin/interactive-explainer/references/explore.md?raw';
@@ -56,8 +56,7 @@ export const LEGACY_HANDOUT_SKILLS: BuiltinSkill[] = [
 /** 日常可选任务入口；专题通过参考文档按需加载。 */
 export const BUILTIN_SKILLS: BuiltinSkill[] = [
   // 会话可视化与文件导出是不同交付通道。
-  fromMd(diagramming),
-  fromMd(interactiveExplainer, [ref('references/runtime.md', interactiveApi), ref('references/explore.md', interactiveExplore), ref('references/stepper.md', interactiveStepper), ref('references/simulation.md', interactiveSimulation), ref('references/manipulate.md', interactiveManipulate), ref('references/chart.md', interactiveChart), ref('references/practice.md', interactivePractice), ref('references/host-question.md', interactiveHostQuestion)]),
+  fromMd(interactiveExplainer, [ref('references/static-diagrams.md', staticDiagrams), ref('references/runtime.md', interactiveApi), ref('references/explore.md', interactiveExplore), ref('references/stepper.md', interactiveStepper), ref('references/simulation.md', interactiveSimulation), ref('references/manipulate.md', interactiveManipulate), ref('references/chart.md', interactiveChart), ref('references/practice.md', interactivePractice), ref('references/host-question.md', interactiveHostQuestion)]),
   // 资料目录整理：方法与命名规范；真正的写入仍由 propose_folder_plan 的确认闸门把关
   fromMd(libraryOrganizer),
   fromMd(courseHandout, [

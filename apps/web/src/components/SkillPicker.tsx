@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Sym, MODAL_CONTAINER_CLASS } from '../ui';
 import { loadEnabledSkillMeta, type SkillMeta } from '../skills/store';
 import { intersectSkillMetaIds } from '../skills/scope';
-import { cloud } from '../cloud/state';
+import { BUILTIN_PRESENTATION } from '../skills/presentation';
 import McpScope from '../mcp/McpScope';
 import { openSettings } from './settingsDialogStore';
 import './skill-picker.css';
@@ -23,16 +23,6 @@ interface Props {
   onTurnChange?: (ids: number[]) => void;
   disabled?: boolean;
 }
-
-// 简短名称用于选择；用途说明保留在搜索和无障碍描述中。
-const BUILTIN_PRESENTATION = [
-  { name: '创造模式', key: 'create', icon: 'extension' },
-  { name: '课程讲义', key: 'handout', icon: 'description' },
-  { name: '原题题库', key: 'questions', icon: 'quiz' },
-  { name: '讲解配图', key: 'diagram', icon: 'account_tree' },
-  { name: '交互式讲解', key: 'interactive', icon: 'pointer' },
-  { name: '资料整理', key: 'organize', icon: 'folder_open' },
-] as const;
 
 /** Explicit activation and automatic availability are independent; search never changes selection. */
 export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hideTrigger, mcpValue, onMcpChange, turnValue = [], onTurnChange, disabled }: Props) {
@@ -190,7 +180,7 @@ export default function SkillPicker({ value, onChange, isOpen, onOpenChange, hid
                           <span className="skill-picker__text" title={skill.summary || undefined}>
                             <Label className="skill-picker__name">{skill.title}</Label>
                             <span className="skill-picker__dependency">{explicit ? t(!scope.has(skill.id) ? 'skillPicker.outOfScope' : selected.has(skill.id) ? 'skillPicker.pendingLoad' : 'skillPicker.available') : null}</span>
-                            <span className="sr-only" id={`${id}-desc-${skill.id}`}>{skill.summary}</span>
+                            <span className="skill-picker__dependency" id={`${id}-desc-${skill.id}`}>{skill.summary}</span>
                             {!!skill.mcpRequired?.length && <span className="skill-picker__dependency">{t('skillPicker.requiresMcp', { names: skill.mcpRequired.join(', ') })}</span>}
                           </span>
                           <Checkbox.Control className="skill-picker__control"><Checkbox.Indicator data-testid="skill-scope-check" /></Checkbox.Control>

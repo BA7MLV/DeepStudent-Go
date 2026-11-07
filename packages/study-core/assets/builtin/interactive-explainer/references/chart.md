@@ -1,6 +1,6 @@
 # 交互数据图（Chart.js）
 
-普通柱/折/饼图走「讲解配图」的 diagram JSON，不生成网页。只有需要**调参后重算数据**、悬停读数或多系列切换时才用本文件：调用 show_widget 时传 `libs:["chart.js"]`，使用全局 `Chart`，不引 CDN。
+普通柱/折/饼图按 `references/static-diagrams.md` 用 diagram JSON，不生成网页。只有需要**调参后重算数据**、悬停读数或多系列切换时才用本文件：调用 show_widget 时传 `libs:["chart.js"]`，使用全局 `Chart`，不引 CDN。
 
 ## 要点
 

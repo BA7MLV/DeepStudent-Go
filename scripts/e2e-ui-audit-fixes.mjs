@@ -116,9 +116,9 @@ try {
   evidence.assertions.push('system files and trash are reachable from the menu, not promoted as resources or delete actions');
 
   await page.evaluate(() => { location.hash = '/settings/models'; });
-  await page.getByTestId('cloud-models-save').waitFor();
-  assert.equal(await page.getByTestId('cloud-models-save').isDisabled(), true);
-  assert.equal(await page.getByTestId('cloud-models-dirty').innerText(), '暂无未保存修改');
+  await page.getByTestId('provider-add-card').waitFor();
+  assert.equal(await page.getByTestId('cloud-models-save').count(), 0);
+  assert.equal(await page.getByTestId('cloud-models-save-actions').count(), 0);
   await page.evaluate(() => { location.hash = '/settings/usage'; });
   await page.getByTestId('usage-controls').waitFor();
   // React Aria keeps clipped native controls for browser autofill; only the

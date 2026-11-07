@@ -29,10 +29,11 @@ export function SettingsActionsScope({ children }: { children: ReactNode }) {
   </ActionsContainer.Provider>;
 }
 
-export function SettingsSaveBar({ dirty, busy = false, disabled = false, error, message, saveLabel, onSave, children, testId, saveTestId, statusTestId }: {
+export function SettingsSaveBar({ dirty, busy = false, disabled = false, hideWhenClean = false, error, message, saveLabel, onSave, children, testId, saveTestId, statusTestId }: {
   dirty: boolean;
   busy?: boolean;
   disabled?: boolean;
+  hideWhenClean?: boolean;
   error?: string;
   message?: string;
   saveLabel: string;
@@ -44,6 +45,7 @@ export function SettingsSaveBar({ dirty, busy = false, disabled = false, error, 
 }) {
   const { t } = useTranslation('settings');
   const container = useContext(ActionsContainer);
+  if (hideWhenClean && !dirty && !busy && !error && !message && !children) return null;
   const bar = <section className="settings-save-bar" aria-label={t('saveBar.label')} data-testid={testId} aria-busy={busy}>
     <div className="settings-save-bar__row">
       <p className="settings-save-bar__status text-sm text-muted" role="status" data-testid={statusTestId}>
@@ -51,9 +53,9 @@ export function SettingsSaveBar({ dirty, busy = false, disabled = false, error, 
       </p>
       <div className="settings-save-bar__buttons">
         {children}
-        <LoadingButton variant="primary" loading={busy} isDisabled={disabled || !dirty} onPress={onSave} data-testid={saveTestId}>
+        {(!hideWhenClean || dirty || busy) ? <LoadingButton variant="primary" loading={busy} isDisabled={disabled || !dirty} onPress={onSave} data-testid={saveTestId}>
           {busy ? t('saveBar.saving') : saveLabel}
-        </LoadingButton>
+        </LoadingButton> : null}
       </div>
     </div>
     {!busy && dirty && message && <p className="mt-2 text-sm text-muted" role="status">{message}</p>}

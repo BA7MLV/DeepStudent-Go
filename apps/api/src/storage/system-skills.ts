@@ -6,6 +6,8 @@ import { parseSkillMarkdown } from '@wangke/study-core/skills/parser';
 import { SKILLS_PATH, type SystemDirectory, type SystemDocument } from '@wangke/contracts/system';
 
 export type SystemSkill = {
+  legacyIds?: number[];
+  legacyNames?: string[];
   id: number;
   slug: string;
   name: string;

@@ -3,6 +3,8 @@ import type { WidgetPayload } from '../harness/widgetRuntime';
 import { layoutWidgets, messageWidgets, type WidgetCollection } from '../harness/widgetLayout';
 import ArtifactEditor from './ArtifactEditor';
 import WidgetBlock from './WidgetBlock';
+import CodeBlock from './CodeBlock';
+import type { ArtifactActions } from './ArtifactEditor';
 
 interface Scope { widgets: WidgetPayload[]; dark: boolean; rowId?: number; disabled?: boolean; onPrompt?: (text: string) => void | Promise<void> }
 const WidgetContext = createContext<Scope | null>(null);
@@ -10,9 +12,17 @@ const WidgetContext = createContext<Scope | null>(null);
 function Visual({ payload, scope }: { payload: WidgetPayload; scope: Scope }) {
   if (typeof payload.html !== 'string') return <p role="alert">预览失败：作品源码缺失或格式无效</p>;
   return <ArtifactEditor kind="html" location="widget" source={payload.html} libraries={payload.libs} widgetId={payload.id} widgetRef={payload.ref} widgetIndex={scope.widgets.indexOf(payload)}>
-    {(actions) => <WidgetBlock payload={payload} dark={scope.dark} rowId={scope.rowId} disabled={scope.disabled}
-      onPrompt={scope.onPrompt} editActions={actions} />}
+    {(actions) => <WorkSource key={`${payload.id}:${payload.revision}:${payload.html}`} payload={payload} scope={scope} actions={actions} />}
   </ArtifactEditor>;
+}
+
+function WorkSource({ payload, scope, actions }: { payload: WidgetPayload; scope: Scope; actions: ArtifactActions | null }) {
+  return <div data-testid="widget-work-source">
+    <CodeBlock source={payload.html} language="html" editActions={actions} preview={
+      <WidgetBlock payload={payload} dark={scope.dark} rowId={scope.rowId} disabled={scope.disabled}
+        onPrompt={scope.onPrompt} editActions={actions} />
+    } />
+  </div>;
 }
 
 /** Renders references at their Markdown position; old/missing references retain a safe end-of-answer fallback. */
