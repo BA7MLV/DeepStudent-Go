@@ -214,11 +214,13 @@ try {
   }, stored);
   await page.reload();
   const failed = page.getByTestId('response-process');
-  await failed.locator('.reasoning-chain__failure').waitFor();
   assert.equal(await failed.getByTestId('response-process-toggle').getAttribute('aria-expanded'), 'false');
-  assert.match(await failed.locator('.reasoning-chain__failure').innerText(), /资料暂时无法读取/, '收起时仍露出失败原因');
+  assert.equal(await failed.locator('.reasoning-chain__failure').count(), 0, '折叠态不再额外标出失败');
   await failed.getByTestId('response-process-toggle').click();
   await page.waitForTimeout(450);
+  const errorItem = failed.getByTestId('tool-trace-item').first();
+  assert.equal(await errorItem.getAttribute('data-status'), 'error');
+  assert.match(await errorItem.innerText(), /工具执行失败：资料暂时无法读取/, '失败原因只在思考链内以红色呈现');
   assert.match(await failed.innerText(), /早期记录未保存/);
   assert.match(await failed.getByTestId('tool-trace-item').last().innerText(), /未完成/, '停止后不保留进行中状态');
   await page.setViewportSize({ width: 390, height: 844 });

@@ -68,14 +68,13 @@ export default function ToolTrace({
   const activeCalls = calls.filter((c) => c.status === 'running');
   const acting = activeCalls[0];
   const waitingForUser = acting?.name === 'ask_user';
-  const failed = calls.filter((c) => c.status === 'error').length;
   const displays = calls.map((call) => toolDisplay(call.name, call.detail));
   const loadedSkills = [...new Set(displays.flatMap((display, i) =>
     calls[i].status === 'done' && display.label === '加载技能' && display.detail ? [display.detail] : []))];
   const activeDisplay = acting ? toolDisplay(acting.name, acting.detail) : undefined;
   const title = waitingForUser ? '等待你的回答' : activeCalls.length > 1 ? `正在并行调用 ${activeCalls.length} 个工具…` : activeDisplay
     ? `${activeDisplay.label}${activeDisplay.detail ? `：${activeDisplay.detail}` : '…'}`
-    : `已调用 ${calls.length} 个工具${failed > 0 ? ` · ${failed} 次失败` : ''}${loadedSkills.length ? ` · 已加载技能：${loadedSkills.slice(0, 2).join('、')}${loadedSkills.length > 2 ? ` 等 ${loadedSkills.length} 个` : ''}` : ''}`;
+    : `已调用 ${calls.length} 个工具${loadedSkills.length ? ` · 已加载技能：${loadedSkills.slice(0, 2).join('、')}${loadedSkills.length > 2 ? ` 等 ${loadedSkills.length} 个` : ''}` : ''}`;
 
   return (
     <Disclosure

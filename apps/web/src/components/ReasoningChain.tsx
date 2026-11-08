@@ -83,7 +83,6 @@ export default function ReasoningChain({
   idleTitle = '思考过程',
   summary,
   waiting = false,
-  failure,
   revision,
   children,
 }: {
@@ -95,7 +94,6 @@ export default function ReasoningChain({
   idleTitle?: string;
   summary?: ReactNode;
   waiting?: boolean;
-  failure?: string;
   /** 工具行的追加或结果更新也要触发跟随，不只监听思考 token。 */
   revision?: unknown;
   children?: ReactNode;
@@ -219,12 +217,6 @@ export default function ReasoningChain({
         </div>
         </Disclosure.Body>
       </Disclosure.Content>
-      {failure && !open && (
-        <p className="reasoning-chain__failure" role="status">
-          <Sym name="error" aria-hidden="true" />
-          <span>{failure}</span>
-        </p>
-      )}
     </Disclosure>
   );
 }

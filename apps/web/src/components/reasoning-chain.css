@@ -63,20 +63,11 @@
   white-space: nowrap;
 }
 
-.reasoning-chain__summary,
-.reasoning-chain__errors {
+.reasoning-chain__summary {
   flex: none;
   font-size: 0.75rem;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-}
-
-.reasoning-chain__errors,
-.reasoning-chain__failure {
-  color: var(--danger);
-}
-
-.reasoning-chain__summary {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -85,14 +76,6 @@
 .reasoning-chain__summary > svg {
   width: 14px;
   height: 14px;
-}
-
-.reasoning-chain__failure {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 4px 0;
-  overflow-wrap: anywhere;
 }
 
 .reasoning-chain__elapsed {

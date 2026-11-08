@@ -23,7 +23,6 @@ export default function ResponseProcess({
   elapsedMs?: number;
 }) {
   const title = processTitle({ streaming, phase, calls, hint, waiting });
-  const failures = calls.filter((call) => call.status === 'error');
   const steps = processSteps(reasoning, calls);
   if (!steps.length) {
     return (streaming && phase !== 'answering') || waiting ? <PendingReply label={title} /> : null;
@@ -33,16 +32,12 @@ export default function ResponseProcess({
     <ReasoningChain reasoning={reasoning} active={streaming} title={title}
       idleTitle={reasoning ? '思考过程' : '执行过程'} since={since}
       elapsedMs={calls.length ? undefined : elapsedMs} waiting={waiting} revision={calls}
-      failure={failures.length ? failures[failures.length - 1].result || '工具调用失败，可展开查看。' : undefined}
-      summary={<>
-        {calls.length > 0 && (
-          <span className="reasoning-chain__summary" aria-label={`${calls.length} 次工具调用`}>
-            <Sym name="build" aria-hidden="true" />
-            {calls.length}
-          </span>
-        )}
-        {failures.length > 0 && <span className="reasoning-chain__errors">· {failures.length} 次失败</span>}
-      </>}
+      summary={calls.length > 0 ? (
+        <span className="reasoning-chain__summary" aria-label={`${calls.length} 次工具调用`}>
+          <Sym name="build" aria-hidden="true" />
+          {calls.length}
+        </span>
+      ) : undefined}
     >
       {reasoning && calls.some((call) => call.reasoningOffset == null) && (
         <p className="response-process__note">早期记录未保存分析与工具的交错顺序</p>
