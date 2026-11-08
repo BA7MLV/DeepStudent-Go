@@ -47,7 +47,6 @@
 
 - `apps/web/src/components/settings/UsageModule.tsx`：供应商 / 模型名称。
 - `apps/web/src/components/settings/PromptCacheUsage.tsx`：供应商 / 模型名称。
-- `apps/web/src/components/settings/LiveModule.tsx`：分享链接预览。
 - `apps/web/src/mcp/McpSettings.tsx`：命令 / URL、工具名称（2 处）；工具名称补 `min-w-0`。
 - `apps/web/src/mcp/McpAdvanced.tsx`：诊断消息。
 - `apps/web/src/cloud/BotManagement.tsx`：运行 ID、错误码、请求说明、步骤摘要、步骤预览、产物文本、记忆元信息（7 处）。

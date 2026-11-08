@@ -1,0 +1,11 @@
+.copy-button__label {
+  display: inline-grid;
+}
+
+.copy-button__label > span {
+  grid-area: 1 / 1;
+}
+
+.copy-button__label > [data-visible="false"] {
+  visibility: hidden;
+}

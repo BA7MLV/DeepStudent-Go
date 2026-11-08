@@ -7,8 +7,7 @@ import { openLegacyHtmlWork } from '../store/legacyHtmlWorks';
 import type { WidgetPayload } from '../harness/widgetRuntime';
 import type { HtmlContentType } from '../utils/htmlContent';
 import { Button } from '@heroui/react';
-import { copyText } from '../utils/clipboard';
-import { toast } from '../ui';
+import { copyWithFeedback } from '../utils/copyFeedback';
 import type { ArtifactActions } from './ArtifactEditor';
 import { useArtifactRowId } from './ArtifactEditor';
 import CodeBlock from './CodeBlock';
@@ -56,10 +55,7 @@ function LegacyHtmlAnswer({ source, editActions, allowPopout, persistLegacy }: {
     </div> : !payload ? <p role="status">正在准备预览…</p> : <WidgetBlock payload={payload} dark={dark} disabled allowPopout={allowPopout} editActions={editActions}
       htmlActions={{
         sourceOpen: showSource, sourceId, toggleSource: () => setShowSource((value) => !value),
-        copySource: () => void copyText(source).then((ok) => {
-          if (ok) toast.success('HTML 源码已复制');
-          else toast.error('复制失败');
-        }),
+        copySource: () => void copyWithFeedback(source, '已复制 HTML 源码'),
       }} />}
     {showSource && <pre id={sourceId} aria-label="HTML 源码" className="my-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-default p-3 text-xs" data-testid="html-answer-source"><code>{source}</code></pre>}
   </div>;

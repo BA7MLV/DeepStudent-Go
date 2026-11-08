@@ -13,7 +13,7 @@ import type { ComponentProps } from '@ant-design/x-markdown';
 import { Button, Drawer } from '@heroui/react';
 import SheetChrome from '../ui/SheetChrome';
 import { Sym } from '../ui';
-import { copyText } from '../utils/clipboard';
+import { CopyButton as InlineCopyButton } from '../ui/copy-button';
 import { useIsMobile } from '../utils/useMobile';
 import {
   columnWidthsPx,
@@ -297,34 +297,15 @@ function CopyButton({
   ariaLabel: string;
   getText: () => string;
 }) {
-  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const timer = useRef<number | null>(null);
-
-  useEffect(
-    () => () => {
-      if (timer.current !== null) window.clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  const onPress = async () => {
-    const ok = await copyText(getText());
-    setState(ok ? 'copied' : 'failed');
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setState('idle'), 1600);
-  };
-
   return (
-    <Button
+    <InlineCopyButton
       size="sm"
       variant="tertiary"
       className="md-table-copy"
       aria-label={ariaLabel}
-      onPress={onPress}
-    >
-      <Sym name={state === 'failed' ? 'error' : state === 'copied' ? 'check' : 'content_copy'} />
-      {state === 'failed' ? '复制失败' : state === 'copied' ? '已复制' : label}
-    </Button>
+      text={getText}
+      label={label}
+    />
   );
 }
 

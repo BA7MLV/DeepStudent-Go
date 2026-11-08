@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type ClipboardEventHandler, type RefObject } from 'react';
+import { useLayoutEffect, useState, type ClipboardEventHandler, type RefObject, type ReactNode } from 'react';
 import { Button, Drawer, Modal, TextArea } from '@heroui/react';
 import { Sym } from '../ui';
 import { MODAL_CONTAINER_CLASS } from '../ui/modalContainer';
@@ -40,7 +40,7 @@ export function useComposerSize(ref: RefObject<HTMLTextAreaElement | null>, valu
   return overflow;
 }
 
-export default function ComposerExpand({ value, onChange, onPaste, visible }: { value: string; onChange: (value: string) => void; onPaste?: ClipboardEventHandler<HTMLTextAreaElement>; visible: boolean }) {
+export default function ComposerExpand({ value, onChange, onPaste, visible, renderInput }: { value: string; onChange: (value: string) => void; onPaste?: ClipboardEventHandler<HTMLTextAreaElement>; visible: boolean; renderInput?: (className: string) => ReactNode }) {
   const [open, setOpen] = useState(false);
   const mobile = useMediaQuery('(max-width: 760px)');
   const trigger = <Button className="composer-expand" hidden={!visible && !open} isIconOnly size="sm" variant="tertiary" aria-label="展开输入框" aria-haspopup="dialog" aria-expanded={open} data-testid="composer-expand">
@@ -58,8 +58,8 @@ export default function ComposerExpand({ value, onChange, onPaste, visible }: { 
             <Modal.CloseTrigger aria-label="收起输入框"><Sym name="close" /></Modal.CloseTrigger>
           </Modal.Header>
           <Modal.Body className="composer-dialog__body">
-            <TextArea autoFocus aria-label="完整消息" value={value} onChange={(event) => onChange(event.target.value)} onPaste={onPaste}
-              className="composer-dialog__input" />
+            {renderInput ? renderInput('composer-dialog__input') : <TextArea autoFocus aria-label="完整消息" value={value} onChange={(event) => onChange(event.target.value)} onPaste={onPaste}
+              className="composer-dialog__input" />}
           </Modal.Body>
           <Modal.Footer className="composer-dialog__footer">
             <span className="composer-dialog__hint">更改会同步到输入框，不会发送消息</span>
@@ -83,8 +83,8 @@ export default function ComposerExpand({ value, onChange, onPaste, visible }: { 
             </Drawer.Header>
           </SheetChrome>
           <Drawer.Body className="composer-sheet__body">
-            <TextArea autoFocus aria-label="完整消息" value={value} onChange={(event) => onChange(event.target.value)} onPaste={onPaste}
-              className="composer-sheet__input" />
+            {renderInput ? renderInput('composer-sheet__input') : <TextArea autoFocus aria-label="完整消息" value={value} onChange={(event) => onChange(event.target.value)} onPaste={onPaste}
+              className="composer-sheet__input" />}
           </Drawer.Body>
           <Drawer.Footer className="composer-sheet__footer"><Button slot="close">完成</Button></Drawer.Footer>
         </Drawer.Dialog>

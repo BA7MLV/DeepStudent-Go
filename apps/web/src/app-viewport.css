@@ -1,0 +1,16 @@
+/* 应用外壳跟随视觉视口，软键盘弹出或 Safari 平移视口时只让内容区滚动。 */
+.app-viewport {
+  position: fixed;
+  top: var(--vv-top, 0px);
+  inset-inline: 0;
+  display: flex;
+  flex-direction: column;
+  height: var(--vvh, 100%);
+  overflow: hidden;
+}
+
+.app-viewport > :is(.page, .page-shell, .app-navigation-shell) {
+  height: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button, Input, Label, Spinner, TextField } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
 import { request, serverClient } from '../api/serverClient';
-import { SectionCard, Sym, confirmDialog, toast } from '../ui';
+import { CopyButton, SectionCard, Sym, confirmDialog, toast } from '../ui';
 import { SettingRow, SettingSelect, SettingSwitch } from '../components/settings/controls';
 import { closeSettingsAndClearHash, openSettings } from '../components/settingsDialogStore';
 import { useBotPanel } from '../store/botPanel';
@@ -424,21 +424,16 @@ function ConnectionDetails({ connection }: { connection?: GatewayConnectionDiagn
 
 function PairCode({ pair, channel, renew, busy, codeOnly }: { pair: { command: string; expiresAt: string }; channel: string; renew: () => Promise<void>; busy: boolean; codeOnly: boolean }) {
   const { t } = useTranslation('gateway');
-  const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
-  useEffect(() => { setCopied(false); setNow(Date.now()); }, [pair.command]);
+  useEffect(() => { setNow(Date.now()); }, [pair.command]);
   const minutes = Math.max(0, Math.ceil((Date.parse(pair.expiresAt) - now) / 60_000));
   return (
     <div className="flex flex-col items-center gap-3 py-3 text-center">
       <span className="text-sm text-muted">{t('pairSend', { channel })}</span>
       <code className="select-all rounded-xl bg-background-secondary px-4 py-3 font-mono text-xl tracking-wider" data-testid="gateway-pair-command">{pair.command}</code>
-      <Button variant="secondary" className="min-h-11 min-w-32" isDisabled={minutes === 0} onPress={() => {
-        if (!navigator.clipboard) { toast.error(t('copyFailed')); return; }
-        void navigator.clipboard.writeText(pair.command).then(() => setCopied(true)).catch(() => toast.error(t('copyFailed')));
-      }}>
-        <Sym name={copied ? 'check' : 'content_copy'} />{copied ? t('copied') : t('copy')}
-      </Button>
+      <CopyButton key={pair.command} variant="secondary" className="min-h-11 min-w-32"
+        isDisabled={minutes === 0} text={pair.command} label={t('copy')} />
       <span className="text-xs text-muted">{minutes ? t('pairExpires', { minutes }) : t('pairExpired')}</span>
       <p className="text-sm text-muted">{t(codeOnly ? 'wechatPairWaiting' : 'pairWaiting')}</p>
       <Button variant="ghost" size="sm" isDisabled={busy} onPress={() => void renew()}>{t(codeOnly ? 'wechatPairRenew' : 'pairRenew')}</Button>

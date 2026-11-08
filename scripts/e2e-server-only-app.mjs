@@ -56,10 +56,23 @@ try {
   await page.evaluate(() => { location.hash = '/settings/assistant'; });
   await page.getByRole('dialog').waitFor();
   await page.getByTestId('card-agent-instructions').waitFor();
+  assert.equal(await page.getByTestId('settings-nav-live').count(), 0, 'retired live sharing must not appear in desktop settings');
   evidence.routes.push('assistant settings');
   await page.evaluate(() => { location.hash = '/settings/models'; });
   await page.getByTestId('card-context-compression').waitFor();
   evidence.routes.push('model settings / server compression');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(async () => {
+    const { closeSettings, openSettings } = await import('/src/components/settingsDialogStore.ts');
+    closeSettings();
+    openSettings();
+  });
+  await page.getByTestId('settings-root').waitFor();
+  assert.equal(await page.getByTestId('settings-nav-live').count(), 0, 'retired live sharing must not appear in mobile settings');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => { location.hash = '/settings/live'; });
+  await page.getByTestId('card-context-compression').waitFor();
+  evidence.routes.push('retired settings deep link falls back to models');
   await page.evaluate(() => { location.hash = '/settings/data'; });
   await page.getByTestId('cloud-history-recovery').waitFor();
    assert.deepEqual(historyRequests, [], 'opening data settings must not load recovery');

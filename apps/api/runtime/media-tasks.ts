@@ -81,7 +81,7 @@ export async function serverTranscribe(context: TaskContext) {
   const { id, row: video } = course(context);
   const existing = taskRows(context, 'segments', 'videoId', id).sort((a,b) => a.idx-b.idx);
   if (existing.length && existing.every(s => s.status === 1 && s.text)) { patchCourse(context, { status: 'transcribed' }); return; }
-  if (!existing.length && await importBilibiliSubtitles(context, id, video.biliSource)) { patchCourse(context, { status: 'transcribed' }); return; }
+  if (!existing.length && context.task.input.skipBiliSubtitles !== true && await importBilibiliSubtitles(context, id, video.biliSource)) { patchCourse(context, { status: 'transcribed' }); return; }
   const file = taskCourseFile(context, id);
   if (!file) throw new Error('course_file_unavailable');
   try {

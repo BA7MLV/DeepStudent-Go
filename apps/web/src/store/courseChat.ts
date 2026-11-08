@@ -354,7 +354,9 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
   setDraft: draft => set({ draft }),
   setMcpServerIds: async ids => { const key = activeKey(), current = captureScope(); if (key) await reviseConversationSession(key, row => { if (ids === undefined) delete row.mcpServerIds; else row.mcpServerIds = ids; }); if (current()) writeView(key, { mcpServerIds: ids }); },
   setSkillIds: ids => { const key = activeKey(), current = captureScope(); writeView(key, { skillIds: ids }); if (key) void patchSession(key, row => { if (ids === undefined) delete row.skillIds; else row.skillIds = ids; }).catch(error => { if (current()) writeView(key, { historyError: String(error) }); }); },
-  setTurnSkillIds: ids => { if (!get().loading) set({ turnSkillIds: explicitSkillIds(ids) }); },
+  // Draft edits (cut/paste/undo included) affect the next submission only; a
+  // running task already owns its frozen explicitSkillIds.
+  setTurnSkillIds: ids => set({ turnSkillIds: explicitSkillIds(ids) }),
   clearCourseContext: () => { const key = activeKey(), current = captureScope(); writeView(key, { contextCourses: [] }); if (key) void patchSession(key, row => { delete row.contextCourseIds; }).catch(error => { if (current()) writeView(key, { historyError: String(error) }); }); },
   setCourseContext: async ids => {
     const key = activeKey(), current = captureScope();

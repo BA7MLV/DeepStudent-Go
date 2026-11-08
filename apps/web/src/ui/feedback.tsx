@@ -22,10 +22,13 @@
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Input, Label, Modal, TextField, Toast, toast as heroToast } from '@heroui/react';
+import { Button, Input, Label, Modal, TextField, Toast } from '@heroui/react';
+import { CopyButton } from './copy-button';
 import { Sym } from './icons';
 import { MODAL_CONTAINER_CLASS } from './modalContainer';
 import { ms } from '../components/motion';
+
+export { toast } from './toast';
 
 export interface ConfirmOptions {
   /** 标题 */
@@ -59,21 +62,6 @@ export interface PopconfirmOptions {
   danger?: boolean;
   testId?: string;
 }
-
-/* ── toast ─────────────────────────────────────────────────────────────── */
-
-/**
- * 轻提示（替代 antd 的 message / mdui 的 snackbar）。
- *
- * 停留时长：info/success 3s，warning 5s，error 8s（错误留久一点，方便看清）。
- * 需要常驻的提示不要用 toast，用页面内的 Banner。
- */
-export const toast = {
-  info: (message: string) => heroToast.info(message, { timeout: 3000 }),
-  success: (message: string) => heroToast.success(message, { timeout: 3000 }),
-  warning: (message: string) => heroToast.warning(message, { timeout: 5000 }),
-  error: (message: string) => heroToast.danger(message, { timeout: 8000 }),
-};
 
 /* ── 命令式对话框 ───────────────────────────────────────────────────────── */
 
@@ -134,10 +122,6 @@ function enqueue(command: FeedbackCommand): void {
 function dequeue(): void {
   queue.shift();
   listeners.forEach((listener) => listener());
-}
-
-function copyToClipboard(text: string): void {
-  void navigator.clipboard?.writeText(text).catch(() => {});
 }
 
 /** 确认对话框：resolve(true) = 用户点了确认；其余方式关闭都是 false。 */
@@ -507,13 +491,12 @@ function FeedbackDialog({ command, onOpenChange }: FeedbackDialogProps) {
             </Modal.Body>
             <Modal.Footer>
               {confirmOptions?.copyText && (
-                <Button
+                <CopyButton
                   variant="tertiary"
-                  onPress={() => copyToClipboard(confirmOptions.copyText!)}
+                  text={confirmOptions.copyText}
+                  label="复制详情"
                   data-testid="confirm-dialog-copy"
-                >
-                  复制详情
-                </Button>
+                />
               )}
               {!isPrompt && (
                 <Button

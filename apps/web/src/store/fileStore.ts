@@ -23,11 +23,3 @@ export async function getCourseFile(id: string, _dirName?: string): Promise<Blob
 
 export function getVideoFile(id: string) { return getCourseFile(id); }
 export async function getMaterialFile(id: string) { return (await loadSystemMaterialFile(id)) ?? getCourseFile(id); }
-
-/** Native guest streaming remains a browser capability, not a local file authority. */
-export async function readCourseFileRange(id: string, start: number, len: number, dirName?: string): Promise<ArrayBuffer | null> {
-  const file = await getCourseFile(id, dirName);
-  if (!file) return null;
-  const s = Math.max(0, Math.min(file.size, start));
-  return file.slice(s, Math.min(file.size, s + Math.max(0, len))).arrayBuffer();
-}

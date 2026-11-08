@@ -14,12 +14,13 @@ import TaskModelPicker from './TaskModelPicker';
 import './chat-attachments.css';
 import { useTranslation } from 'react-i18next';
 
-export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: boolean; onSelectProject?: () => void }) {
+export default function ChatAddMenu({ disabled, onSelectProject, onSkillInsert }: { disabled?: boolean; onSelectProject?: () => void; onSkillInsert?: () => void }) {
   const { t } = useTranslation('settings');
   const { t: tp } = useTranslation('projects');
   const { t: text } = useTranslation('interface');
   const navigate = useNavigate();
   const imageInput = useRef<HTMLInputElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -62,7 +63,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
   return <>
     <div className="chat-add-menu">
       <Dropdown isOpen={addOpen} onOpenChange={setAddOpen}>
-        <Button className="chat-add-menu__trigger" isIconOnly size="sm" variant="tertiary" aria-label={`${text('chatAdd.title')}${contextCourses.length ? ` · ${contextLabel}` : ''}`} data-testid="chat-add" isDisabled={disabled}>
+        <Button ref={addButton} className="chat-add-menu__trigger" isIconOnly size="sm" variant="tertiary" aria-label={`${text('chatAdd.title')}${contextCourses.length ? ` · ${contextLabel}` : ''}`} data-testid="chat-add" isDisabled={disabled}>
           <Sym name="add" />
           {contextCourses.length > 0 && <span className="chat-add-menu__context-dot" data-testid="chat-context-dot" aria-hidden="true" />}
         </Button>
@@ -91,7 +92,7 @@ export default function ChatAddMenu({ disabled, onSelectProject }: { disabled?: 
       <input ref={imageInput} type="file" accept={CHAT_IMAGE_ACCEPT} multiple hidden data-testid="chat-image-input" onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
       <input ref={fileInput} type="file" accept={CHAT_FILE_ACCEPT} multiple hidden data-testid="chat-file-input" onChange={(event) => { addFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
     </div>
-    <SkillPicker value={skillIds} onChange={setSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={setMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
+    <SkillPicker onInserted={onSkillInsert} anchorRef={addButton} value={skillIds} onChange={setSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={setMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
     <Modal.Root isOpen={coursesOpen} onOpenChange={setCoursesOpen}>
       <Modal.Backdrop><Modal.Container placement="center" size="md" className={MODAL_CONTAINER_CLASS}>
         <Modal.Dialog data-testid="chat-course-picker">

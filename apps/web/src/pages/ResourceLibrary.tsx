@@ -27,6 +27,7 @@ import { enqueueCover } from '../pipelines/coverQueue';
 import { useIsMobile } from '../utils/useMobile';
 import { useMarqueeSelection } from '../utils/useMarqueeSelection';
 import { canDropResourceInto, createFolderSpringLoader, RESOURCE_DRAG_TYPE } from '../utils/resourceDrag';
+import BiliImportTasks from '../bilibili/ImportTasks';
 import './library.css';
 import '../projects/projects.css';
 import './resources.css';
@@ -277,6 +278,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const retainedKeys = new Set(draggedEntries.filter(entry => !visibleEntries.some(visible => keyOf(visible) === keyOf(entry))).map(keyOf));
   const renderedEntries = [...visibleEntries, ...draggedEntries.filter(entry => retainedKeys.has(keyOf(entry)))];
   return <PageShell title={t('resources')} fill rootClassName="page-library">
+    <BiliImportTasks />
     {trashOpen && <ResourceTrash onClose={() => setTrashOpen(false)} onChange={refresh} />}
     <ImagePreview isOpen={Boolean(image)} onOpenChange={open => { if (!open) setImage(null); }} title={image?.name ?? ''} content={image ? { kind: 'image', src: serverClient.projectDownloadUrl(image.projectId, image.path) } : undefined} onDownload={image ? () => download(image) : undefined} downloadLabel={t('download')} />
     <section className="finder-window resource-window" data-mobile={mobile || undefined} aria-label={t('resources')}

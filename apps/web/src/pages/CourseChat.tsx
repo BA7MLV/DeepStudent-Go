@@ -1,4 +1,4 @@
-import { Suspense, lazy, memo, useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState, type ClipboardEvent } from 'react';
+import { Suspense, lazy, memo, useEffect, useLayoutEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 import { recordChatRender } from '../client/chat-diagnostics';
@@ -16,11 +16,12 @@ import { MarkdownCode, MarkdownPre } from '../components/mermaid/markdown';
 import { MarkdownTable } from '../components/MdTable';
 import WidgetStreamFrame from '../components/WidgetStreamFrame';
 import ChatAddMenu from '../components/ChatAddMenu';
-import SkillChips from '../components/SkillChips';
+import InlineSkillInput, { type ComposerPaste, type InlineSkillInputHandle } from '../components/InlineSkillInput';
+import SkillMessageContent from '../components/SkillMessageContent';
 import ChatProjectPicker from '../components/ChatProjectPicker';
 import { projectDisplayName } from '../projects/chatProjects';
-import ComposerExpand, { useComposerSize } from '../components/ComposerExpand';
-import { ChatComposer, ChatComposerInput, ChatComposerTools } from '../components/ChatComposer';
+import ComposerExpand from '../components/ComposerExpand';
+import { ChatComposer, ChatComposerTools } from '../components/ChatComposer';
 import { ChatAttachmentDraft, ChatMessageAttachments } from '../components/ChatAttachments';
 import { useChatAttachments } from '../store/chatAttachments';
 import { MAX_CHAT_ATTACHMENTS } from '../chat/attachments';
@@ -52,7 +53,8 @@ import { decisionConfigOf, useSettings } from '../store/settings';
 import { estimateTokens } from '../harness/context';
 import { loadSessionSkillMeta, skillMetaBlock } from '../skills/store';
 import { buildSessionMarkdown, exportFileName, markdownToPlainText } from '../utils/chatExport';
-import { copyText } from '../utils/clipboard';
+import { copyWithFeedback } from '../utils/copyFeedback';
+import { CopyButton } from '../ui/copy-button';
 import { extractChatSources, type ChatSource } from '../utils/chatSources';
 import { useMediaQuery } from '../utils/useMobile';
 import { messageTime } from '../utils/messageTime';
@@ -61,7 +63,6 @@ import { PageShell, Sym, toast, useResolvedDark, useSkeletonGate } from '../ui';
 import { useBotPanel } from '../store/botPanel';
 import { PluginSlot } from '../plugins/PluginSlot';
 import { PluginActions } from '../plugins/PluginActions';
-import { useImeEnter } from '../utils/imeEnter';
 import './course-chat.css';
 
 /** Bot 栏按需加载：不开 Bot 的人不下载它。 */
@@ -140,14 +141,6 @@ function MessageActions({
   onExport: () => void;
   onDelete: () => void;
 }) {
-  const copy = (text: string, okMsg: string) => {
-    void (async () => {
-      const ok = await copyText(text);
-      if (ok) toast.success(okMsg);
-      else toast.error('复制失败：剪贴板不可用');
-    })();
-  };
-
   /** 操作行里的一颗图标。外观 / 禁用 / tooltip 三样收在一处，免得四颗按钮各写一遍 */
   const action = (
     label: string,
@@ -181,12 +174,8 @@ function MessageActions({
 
   return (
     <div className="course-chat__actions" data-testid="chat-message-actions">
-      {action(
-        copyLabel,
-        <Sym name="content_copy" />,
-        () => copy(content, `已复制${isUser ? '这条提问' : '这条回答'}（Markdown）`),
-        'chat-copy-message',
-      )}
+      <CopyButton text={content} label={copyLabel} isIconOnly variant="tertiary" size="sm"
+        className="course-chat__action" data-testid="chat-copy-message" />
 
       {/* 重试：中断过的回答是「接着写」，完整的最后一条是「重新生成」，
           提问上则是「重新回答这句话」——
@@ -210,7 +199,7 @@ function MessageActions({
           <Dropdown.Popover placement="bottom start">
             <Dropdown.Menu
               onAction={(key) => {
-                if (key === 'copy-plain') copy(markdownToPlainText(content), '已复制这条回答（纯文本）');
+                if (key === 'copy-plain') void copyWithFeedback(markdownToPlainText(content), '已复制纯文本');
                 else if (key === 'export') onExport();
               }}
             >
@@ -256,12 +245,11 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
     return () => observer.disconnect();
   }, [message.content, touchMenu]);
   const content = <span ref={textRef} id={`user-text-${message.key}`} className="course-chat__user-text"
-    data-collapsed={overflows && !expanded}>{message.content || '图片消息'}</span>;
+    data-collapsed={overflows && !expanded}><SkillMessageContent content={message.content || '图片消息'} ids={message.explicitSkillIds} /></span>;
   return (
     <div className="course-chat__user-content" data-dust-surface>
     <ChatMessageAttachments files={message.attachments} />
     <div className="course-chat__bubble course-chat__bubble--user">
-    <SkillChips ids={message.explicitSkillIds} />
     {!touchMenu ? content : (
     <Dropdown trigger="longPress">
       <Dropdown.Trigger className="course-chat__user-trigger"
@@ -279,10 +267,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
             if (key === 'retry') onRetry();
             else if (key === 'fork') onFork();
             else if (key === 'delete') onDelete();
-            else if (key === 'copy') void copyText(message.content).then((ok) => {
-              if (ok) toast.success('已复制这条提问（Markdown）');
-              else toast.error('复制失败：剪贴板不可用');
-            });
+            else if (key === 'copy') void copyWithFeedback(message.content, '已复制提问');
           }}>
           <Dropdown.Item id="copy" textValue="复制" data-testid="chat-user-copy"><Sym name="content_copy" />复制</Dropdown.Item>
           <Dropdown.Item id="retry" textValue="重试" data-testid="chat-user-retry"><Sym name="refresh" />重试</Dropdown.Item>
@@ -537,7 +522,7 @@ function CourseChatContextUsage() {
 /** Input owns only draft, attachments and task/interaction controls. Ordinary
  * assistant text never changes these selectors. */
 const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef, composerHoldRef, pinIfSticking, onSelectProject }: {
-  composerRef: React.RefObject<HTMLTextAreaElement | null>; composerHoldRef: React.RefObject<HTMLDivElement | null>;
+  composerRef: React.RefObject<InlineSkillInputHandle | null>; composerHoldRef: React.RefObject<HTMLDivElement | null>;
   pinIfSticking: () => void; onSelectProject: () => void;
 }) {
   if (import.meta.env.DEV) recordChatRender('CourseChatInputRegion');
@@ -546,17 +531,17 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
   const activeId = useCourseChat(s => s.activeId), loaded = useCourseChat(s => s.loaded), loading = useCourseChat(s => s.loading);
   const draft = useCourseChat(s => s.draft), setDraft = useCourseChat(s => s.setDraft), send = useCourseChat(s => s.send), stop = useCourseChat(s => s.stop);
   const turnSkillIds = useCourseChat(s => s.turnSkillIds), setTurnSkillIds = useCourseChat(s => s.setTurnSkillIds);
+  const availableSkillIds = useCourseChat(s => s.skillIds);
   const pendingAsk = useCourseChat(s => s.pendingAsk), pendingPlan = useCourseChat(s => s.pendingPlan), project = useCourseChat(s => s.project);
   const composerAsk = useCourseChat(s => s.pendingAsk ? s.messages.find(message => message.key === s.pendingAsk!.messageKey)?.ask : undefined);
   const attachmentItems = useChatAttachments(s => s.items);
   const hasDraft = !!draft.trim() || attachmentItems.length > 0;
   const attachmentsPending = attachmentItems.some(item => !item.value || !!item.error);
   const generating = loading && pendingAsk == null && pendingPlan == null;
-  const composerOverflow = useComposerSize(composerRef, draft, !composerAsk);
+  const [composerOverflow, setComposerOverflow] = useState(false);
   const voiceDraftBase = useRef('');
   const [voiceEditVersion, setVoiceEditVersion] = useState(0);
-  const ime = useImeEnter();
-  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = (event: ComposerPaste) => {
     if (pendingAsk) return;
     const attachments = useChatAttachments.getState(), files = Array.from(event.clipboardData.files);
     if (files.length) { event.preventDefault(); attachments.add(files); return; }
@@ -567,6 +552,7 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
     attachments.add([file]); toast.info('粘贴内容超过 4000 字节，已自动转换为 txt 附件');
   };
   const submit = () => { setVoiceEditVersion(version => version + 1); void send(useCourseChat.getState().draft, 'queue'); };
+  const changeDraft = (value: string) => { setVoiceEditVersion(version => version + 1); setDraft(value); };
   return <ChatComposer className="course-chat__composer" ref={composerHoldRef} data-asking={composerAsk ? 'true' : undefined}
     onDragOver={event => { if (event.dataTransfer.types.includes('Files') && !pendingAsk) event.preventDefault(); }}
     onDrop={event => { if (event.dataTransfer.files.length && !pendingAsk) { event.preventDefault(); useChatAttachments.getState().add(Array.from(event.dataTransfer.files)); } }}>
@@ -577,16 +563,15 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
         await current.answerAsk(answer);
       }} /> : <>
       <div className="course-chat__composer-context"><ChatAttachmentDraft /></div>
-      <ChatAddMenu disabled={!loaded || !!pendingAsk} onSelectProject={onSelectProject} />
-      <ComposerExpand visible={composerOverflow} key={`expand-${activeId ?? 'draft'}`} value={draft} onPaste={handlePaste}
-        onChange={value => { setVoiceEditVersion(version => version + 1); setDraft(value); }} />
+      <ChatAddMenu disabled={!loaded || !!pendingAsk} onSelectProject={onSelectProject} onSkillInsert={() => composerRef.current?.focus()} />
+      <ComposerExpand visible={composerOverflow} key={`expand-${activeId ?? 'draft'}`} value={draft} onChange={changeDraft}
+        renderInput={className => <InlineSkillInput expanded autoFocus className={className} label="完整消息"
+          value={draft} onChange={changeDraft} skillIds={turnSkillIds} availableSkillIds={availableSkillIds} onSkillsChange={setTurnSkillIds} onPaste={handlePaste} />} />
       <div className="course-chat__composer-body">
-        <SkillChips ids={turnSkillIds} disabled={loading || !loaded} onRemove={ids => setTurnSkillIds(turnSkillIds.filter(value => !ids.includes(value)))} />
-        <ChatComposerInput ref={composerRef} className="course-chat__input" aria-label={t('composer.message')}
-          aria-description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')} rows={1} fullWidth value={draft}
-          onChange={event => { setVoiceEditVersion(version => version + 1); setDraft(event.target.value); }} onPaste={handlePaste}
-          enterKeyHint="send" {...ime.compositionProps} onFocus={pinIfSticking} disabled={!loaded} placeholder={t(touch ? 'composer.touchPlaceholder' : 'composer.placeholder')}
-          onKeyDown={event => { if (!ime.isSubmitEnter(event)) return; event.preventDefault(); submit(); }} />
+        <InlineSkillInput ref={composerRef} documentKey={activeId} label={t('composer.message')} description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')}
+          value={draft} onChange={changeDraft} skillIds={turnSkillIds} availableSkillIds={availableSkillIds} onSkillsChange={setTurnSkillIds}
+          onPaste={handlePaste} onFocus={pinIfSticking} disabled={!loaded} placeholder={t(touch ? 'composer.touchPlaceholder' : 'composer.placeholder')}
+          onOverflowChange={setComposerOverflow} onSubmit={submit} />
       </div>
       <ChatComposerTools className="course-chat__composer-tools" aria-label={t('composer.tools')} orientation="horizontal">
         <PluginActions surface="chat.composer.actions" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} />
@@ -620,7 +605,7 @@ export default function CourseChat() {
    *    打三行字就见不着自己写了什么）；
    * ② 聚焦时把消息流吸底（键盘弹出会顶矮面板）。
    */
-  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<InlineSkillInputHandle>(null);
   const welcomeRef = useRef<HTMLDivElement>(null);
   const composerHoldRef = useRef<HTMLDivElement>(null);
   const composerWrapRef = useRef<HTMLDivElement>(null);
@@ -1124,7 +1109,8 @@ export default function CourseChat() {
               ref={jumpBtnRef}
               className="course-chat__scroll-bottom"
               data-testid="chat-scroll-bottom"
-              aria-label="回到底部"
+              data-generating={loading && pendingAsk == null && pendingPlan == null ? 'true' : undefined}
+              aria-label={loading && pendingAsk == null && pendingPlan == null ? '回到底部（正在生成回答）' : '回到底部'}
               onClick={jumpToLatest}
             >
               <Sym name="arrow_downward" />

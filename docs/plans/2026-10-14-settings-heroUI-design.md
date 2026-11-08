@@ -98,8 +98,8 @@ HeroUI 的 `Popover.Trigger` 有个已知坑，本仓库已经踩过并在
 ### 2.5 `#/settings` 改成「打开弹窗」而不是重定向
 
 上一轮把它写成 `<Navigate to="/">`，理由是「旧书签别撞空白页」。但那让
-**9 个已登记脚本**（`e2e-build-info` / `e2e-bili-cookie` / `e2e-storage-card` /
-`e2e-settings-skills` / `e2e-providers` / `e2e-study` / `e2e-livelink` /
+**8 个已登记脚本**（`e2e-build-info` / `e2e-bili-cookie` / `e2e-storage-card` /
+`e2e-settings-skills` / `e2e-providers` / `e2e-study` /
 `e2e-skills-dedupe` / `motion-smoke`）全部进不去设置 —— 它们都靠
 `page.goto('#/settings')` 到达，而弹窗只在用户点按钮时才开。
 
@@ -135,8 +135,8 @@ Card（模型供应商）
 1. **设置面不出现自写类名**：`settings-modal.css` / `models.css` 删除，
    设置相关的 `layout.css` 规则删除。
 2. **`data-testid` 全部保留**，且**读 `.value` 的那些 testid 必须挂在真正的
-   `<input>` 上**（`e2e-providers.fieldValue`、`e2e-bili-cookie`、
-   `e2e-livelink` 都是 `locator('[data-testid=x]').evaluate(el => el.value)`）——
+   `<input>` 上**（`e2e-providers.fieldValue`、`e2e-bili-cookie`
+   都是 `locator('[data-testid=x]').evaluate(el => el.value)`）——
    挂到 `TextField` 包装层上会读到 `undefined`。
 3. **分区标题是原生 `<h2>`**（`probe-app-shell-material` 的断言）。
 4. **一次只渲染一个模块**（「模型」模块会拉能力元数据、「内容源」会探测 B 站
@@ -172,6 +172,5 @@ Card（模型供应商）
     需要单独一轮重写。
   - `e2e-player-enhance.mjs` 的 `[data-testid="rate-input"] input`：testid 现在
     挂在 `<input>` 自身，后代选择器命中 0 个。
-  - `e2e-livelink.mjs` 的 `[data-testid="live-relay"] input` 同理。
 - 设置面**没有截图比对**：`e2e-shots/` 里的设置截图仍是旧版，需要人工看一次
   （`Card` 的默认底色/内边距与旧的 `.section-card` 不完全一致）。

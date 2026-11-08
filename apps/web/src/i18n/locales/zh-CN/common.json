@@ -1,5 +1,9 @@
 {
   "appTitle": "DeepStudent Go",
+  "clipboard": {
+    "copied": "已复制",
+    "failed": "复制失败，请重试"
+  },
   "localHistory": {
     "open": "导出本机历史原稿",
     "close": "收起本机历史导出",
@@ -77,7 +81,8 @@
       "cover": "生成封面",
       "artifactEdit": "编辑作品",
       "handoutEdit": "修改讲义",
-      "modelOnce": "模型请求"
+      "modelOnce": "模型请求",
+      "bilibiliImport": "B 站视频导入"
     },
     "status": {
       "queued": "排队中",

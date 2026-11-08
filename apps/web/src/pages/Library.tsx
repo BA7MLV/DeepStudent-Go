@@ -55,7 +55,6 @@ import { defaultSelectedLangs, type SubtitleBundle } from '../bilibili/subtitle'
 import type { BiliVideoSource } from '../bilibili/source';
 import { saveImportedSubtitles } from '../store/subtitles';
 import { getSettings } from '../store/settings';
-import { describeTransport, isBiliBridgeAvailable, isBridgePostCapable } from '../bilibili/transport';
 import { isJobActive, libraryJobCopy, useJobStore, useTranscribeJob } from '../store/jobs';
 import { cancelTranscription, startTranscription } from '../pipelines/transcribeQueue';
 import { startMaterialJob } from '../pipelines/materialJob';
@@ -400,9 +399,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   /** 勾选的分 P 序号 */
   const [biliPagesSel, setBiliPagesSel] = useState<number[]>([]);
   const [biliImporting, setBiliImporting] = useState(false);
-  const [biliProgress, setBiliProgress] = useState(0);
-  /** 导入中的阶段文案（多 P 时是「P2 … · 2/5」） */
-  const [biliLabel, setBiliLabel] = useState('');
+  /** Retain an admission ID after a lost response; do not silently duplicate jobs. */
+  const biliOperationRef = useRef<string | null>(null);
   const [biliError, setBiliError] = useState<string | null>(null);
   /** 语言列表刷新的竞态计数：只认最后一次请求 */
   const langReqRef = useRef(0);
@@ -693,7 +691,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     setBiliLangPage(null);
     setBiliPagesSel([]);
     setBiliError(null);
-    setBiliLabel('');
+    biliOperationRef.current = null;
   }
 
   /** 选中的分 P 里最靠前的那个（字幕语言按它刷新） */
@@ -707,12 +705,11 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
    * （同理「这集没字幕」也要如实告诉用户）。保留用户已勾、且新列表里仍存在的语言。
    */
   async function refreshLangsForPage(target: BiliTarget, page: number) {
-    const { bilibiliProxy, bilibiliCookie } = getSettings();
     const seq = ++langReqRef.current;
     setBiliSubtitleLoading(true);
     setBiliSubtitleError(null);
     let subtitleError: string | null = null;
-    const items = await fetchPageSubtitles({ proxy: bilibiliProxy, cookie: bilibiliCookie }, target, page, (message) => {
+    const items = await fetchPageSubtitles(target, page, (message) => {
       subtitleError = message;
     });
     if (seq !== langReqRef.current) return; // 又有新的切换，丢弃这次结果
@@ -747,11 +744,6 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
    * 真正下载放到第二步，因为选哪几路字幕要用户先拍板。
    */
   const handleBiliResolve = async () => {
-    const { bilibiliProxy, bilibiliCookie } = getSettings();
-    if (describeTransport({ proxy: bilibiliProxy }).kind === 'none') {
-      toast.warning('请先安装油猴脚本（设置页「安装脚本」），或填写代理地址');
-      return;
-    }
     const raw = biliUrl.trim();
     if (!raw) {
       toast.warning('请粘贴 B 站视频链接或 BV 号');
@@ -760,7 +752,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     setBiliResolving(true);
     setBiliError(null);
     try {
-      const target = await resolveBiliTarget({ proxy: bilibiliProxy, cookie: bilibiliCookie }, raw);
+      const target = await resolveBiliTarget(raw);
       setBiliTarget(target);
       setBiliSubtitleError(target.subtitleError ?? null);
       setBiliPagesSel(target.defaultPages);
@@ -768,12 +760,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       setBiliLangPage(target.defaultPages[0] ?? null);
       setBiliLangs(defaultSelectedLangs(target.subtitles));
       if (target.subtitles.length === 0 && !target.subtitleError) {
-        // 分两种：真没字幕 vs 旧版脚本不支持 POST（否则会误以为「这视频没字幕」）
-        if (isBiliBridgeAvailable() && !isBridgePostCapable()) {
-          toast.warning('油猴脚本版本过旧，读不到 B 站自带字幕；到「设置」重新安装一次脚本即可');
-        } else {
-          toast.info('该视频没有自带字幕，导入后会自动在浏览器中转写，请保持页面打开');
-        }
+        toast.info('该视频没有自带字幕，导入后会安排服务器转写，无需保持页面打开');
       }
     } catch (e) {
       const text = formatCaughtError(e);
@@ -784,7 +771,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     }
   };
 
-  /** B 站导入第二步：逐个分 P 下载，每完成一个立刻入队写盘 */
+  /** Submit a durable server job; closing this dialog never cancels downloads. */
   const handleBiliImport = async () => {
     if (!biliTarget) return;
     const selected = resolveSelectedPages(biliTarget.pages, biliPagesSel);
@@ -803,23 +790,12 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       if (!ok) return;
     }
 
-    const { bilibiliProxy, bilibiliCookie } = getSettings();
     setBiliImporting(true);
-    setBiliProgress(0);
-    setBiliLabel('');
     setBiliError(null);
     try {
-      await importBiliPages(
-        biliTarget,
-        { proxy: bilibiliProxy, cookie: bilibiliCookie, langs: biliLangs, pages: biliPagesSel },
-        // 每下完一个 P 就入队：下一个 P 的下载与上一个 P 的 OPFS 写入并行
-        (item) => void enqueue(item.file, item.subtitles.tracks.length > 0 ? item.subtitles : undefined, item.source),
-        (ratio, label) => {
-          setBiliProgress(Math.round(ratio * 100));
-          setBiliLabel(label);
-        },
-      );
-      await chainRef.current;
+      biliOperationRef.current ??= uuid();
+      await importBiliPages(biliTarget, { langs: biliLangs, pages: biliPagesSel, folderId: importing ? importing.folderId : currentFolder?.folder?.id }, biliOperationRef.current);
+      toast.success('已提交服务器导入，可在任务列表查看进度；关闭页面不影响下载');
       setBiliOpen(false);
       resetBiliDraft();
     } catch (e) {
@@ -828,8 +804,6 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       showError('B 站导入失败', text);
     } finally {
       setBiliImporting(false);
-      setBiliProgress(0);
-      setBiliLabel('');
     }
   };
 
@@ -2109,9 +2083,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   />
                 </TextField>
                 <div className="text-secondary" style={{ marginTop: 8, fontSize: 12 }}>
-                  {isBiliBridgeAvailable()
-                    ? '已连接油猴桥，将从本机直连 B 站。未登录约 360P，设置里贴 SESSDATA 可解锁更高清晰度。'
-                    : '推荐先在「设置」安装油猴脚本（桌面浏览器）；没有脚本则需填写代理。未登录约 360P。'}
+                  由服务器直接下载并保存，无需油猴或代理。需要 B 站登录态时，可在设置中保存 Cookie；提交任务后可关闭页面。
                 </div>
                 {biliTarget && (
                   <div style={{ marginTop: 12 }} data-testid="bili-target">
@@ -2220,31 +2192,14 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       </>
                     ) : (
                       <div className="text-secondary" style={{ fontSize: 12, marginTop: 10 }}>
-                        该视频没有自带字幕，导入后会自动在浏览器中转写，请保持页面打开
+                        该视频没有自带字幕，导入后会安排服务器转写，无需保持页面打开
                       </div>
                     )}
                   </div>
                 )}
                 {biliImporting && (
                   <div className="mt-3 flex flex-col gap-2" data-testid="bili-download-status">
-                    <div className="text-secondary truncate text-sm" data-testid="bili-label" title={biliLabel}>
-                      {biliLabel ? `正在下载 ${biliLabel}` : '正在下载…'}
-                    </div>
-                    <ProgressBar
-                      data-testid="bili-progress"
-                      maxValue={100}
-                      value={biliProgress}
-                      aria-label="总体下载进度"
-                    >
-                      <div className="flex items-center justify-between gap-2 text-sm">
-                        <span>总体进度</span>
-                        <ProgressBar.Output className="tabular-nums" data-testid="bili-progress-value" />
-                      </div>
-                      <ProgressBar.Track>
-                        <ProgressBar.Fill data-testid="bili-progress-fill" />
-                      </ProgressBar.Track>
-                    </ProgressBar>
-                    <p className="text-secondary text-xs">包含所选视频的下载、封装和字幕处理，完成后自动加入资料库。</p>
+                    <p className="text-secondary text-sm">正在提交服务器导入任务…</p>
                   </div>
                 )}
                 {biliError && (
@@ -2258,7 +2213,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                 )}
               </Modal.Body>
               <Modal.Footer>
-                <Button variant="tertiary" data-testid="bili-cancel" onPress={() => setBiliOpen(false)}>
+                <Button variant="tertiary" data-testid="bili-cancel" isDisabled={biliImporting} onPress={() => setBiliOpen(false)}>
                   取消
                 </Button>
                 {biliTarget ? (
@@ -2266,6 +2221,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     variant="primary"
                     data-testid="bili-confirm"
                     loading={biliImporting}
+                    isDisabled={!biliPagesSel.length}
                     onPress={() => void handleBiliImport()}
                   >
                     开始导入

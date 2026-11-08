@@ -17,9 +17,9 @@ P0–P4 实施完成，P5 保留未勾（5/6）。追加收尾已完成可执行
 - 消息/会话：服务端 SQLite `cloud_records`，`conversationProducts`、`courseChat` 的属性/删除/分叉、`ChatPanel` 的交互与会话操作尚有可达本地写，需领域命令分流。生成过程中的消息内存视图不是 committed cache。
 - 技能：服务器技能文件为正文/支持文件权威，SQL 为索引；`SkillsCard`、`skills/store::importSkillFile` 的包操作必须保持整笔领域事务。`ensureBuiltinSkills` 云端分支已经只拉取服务器。
 - 批注：SQLite；`MaterialInk` 的增加/删除/撤销整批提交。
-- 卡片：SQLite；`CardsPanel`、`livelink/ops` 审核/撤销使用 expected status，生成由服务器执行。
+- 卡片：SQLite；`CardsPanel` 审核/撤销使用 expected status，生成由服务器执行。
 - 讲义：服务器文件字节；SQLite 管索引/结构/阅读位置。`handoutEdit` 云端由服务器任务执行；`useReadingPos` 仍本地写。
-- 学习时长：SQLite，`studyTime` 和来宾 `applyStudyAdd` 提交稳定 operation ID 的增量，非整天对象覆盖。
+- 学习时长：SQLite，`studyTime` 提交稳定 operation ID 的增量，非整天对象覆盖。
 - 资源/目录/播放位置：`client/resources` 已是领域命令；上传 Blob 和原始 intent 已持久化，跨文件/SQL 效果未知时不自动重播。
 - 偏好：`cloud/preferences` 已有 DurableCommands，但仍把 pending 值写入 confirmed preferences、按 dirty key 阻止投影，需要分离。
 - `artifactEdit`、`widgetState`、`contextCompression`、`legacyHtmlWorks` 的消息/会话交互修改需经过公共领域适配器；局部静态流程不能因此获取云缓存写权限。
@@ -46,8 +46,8 @@ records revision 是全局分配、按账户过滤，允许间隔；页和 curso
 ### P2：producer 与只读投影
 
 - `installCloudCache` 不再捕获任意表 before/after 写 outbox，改为拒绝业务表写入（`cloud_projection_read_only`）。只有 `sync.ts`、`preferences.ts` 的权威 reducer 可用 `markCloudApply`；本地/静态 DB 不安装该边界。
-- 聊天消息/会话创建、重命名、修改、删除、分叉经 `client/{learning,conversations}.ts`。迁移了 `conversationProducts`、`courseChat`（包括 newSessionRow）、`ChatPanel`、`artifactEdit`、`contextCompression`、`TaskModelPicker`、`widgetState`、`legacyHtmlWorks` 和 livelink 的可达云端入口。分叉的新会话与消息、删除和技能整包保留同一领域事务。
-- `SkillsCard`、`skills/store` 提交技能定义和引用；`CardsPanel`/livelink 提交 expected status 的复习/撤销；`useReadingPos` 提交阅读位置；`studyTime`/来宾增量使用稳定 ID；讲义编辑仍走服务器任务，资源入口复用既有 resource commands。
+- 聊天消息/会话创建、重命名、修改、删除、分叉经 `client/{learning,conversations}.ts`。迁移了 `conversationProducts`、`courseChat`（包括 newSessionRow）、`ChatPanel`、`artifactEdit`、`contextCompression`、`TaskModelPicker`、`widgetState`、`legacyHtmlWorks` 的可达云端入口。分叉的新会话与消息、删除和技能整包保留同一领域事务。
+- `SkillsCard`、`skills/store` 提交技能定义和引用；`CardsPanel` 提交 expected status 的复习/撤销；`useReadingPos` 提交阅读位置；`studyTime` 增量使用稳定 ID；讲义编辑仍走服务器任务，资源入口复用既有 resource commands。
 - `MaterialInk` 从 confirmed+journal+尚未落盘的输入构建 overlay。每笔批注落 journal 后即可接受下一笔，不等待网络；刷新可恢复，UI 区分待提交/冲突/确认，不能把离线稿称为已保存到服务器。
 - widget/旧 HTML 更新使用检查时的原快照 CAS，不再重读后更换基线；WidgetSession 绑定 DB generation，打开后的异步回调也受围栏约束。
 - 偏好 pending 保存在 `_cloudMeta` journal，设置内存是 overlay；confirmed preferences 只接受服务端投影/已确认的 system-file 保存。system files 的读/list/save、remember 及 preference reducer 均检查原数据库/账户。

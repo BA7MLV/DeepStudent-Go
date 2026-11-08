@@ -9,8 +9,9 @@ import { isBudgetBlocked } from '../agent/budget.js';
 import { settleWithin } from '../lifecycle.js';
 import type { WebSearchService } from '../web-search/service.js';
 import { executeDelegatedTask } from './delegation.js';
+import { cleanBiliStaging } from '../bilibili/staging.js';
 
-export const TASK_KINDS: CloudTaskKind[] = ['chat', 'qa', 'transcribe', 'handout', 'cards', 'comments', 'danmaku', 'material', 'cover', 'artifactEdit', 'handoutEdit', 'modelOnce'];
+export const TASK_KINDS: CloudTaskKind[] = ['chat', 'qa', 'transcribe', 'handout', 'cards', 'comments', 'danmaku', 'material', 'cover', 'artifactEdit', 'handoutEdit', 'modelOnce', 'bilibiliImport'];
 /** List/subscription projections are read on every streaming checkpoint. The
  * full projection stays for one-shot reads (HTTP task list, single task).
  * `activity` feeds the global task watcher (status/counters only for chat);
@@ -20,7 +21,7 @@ const ACTIVE_TASK_STATUSES = new Set(['queued', 'running', 'waiting_user', 'wait
 
 function progressSummary(progress: Record<string, unknown>) {
   const summary: Record<string, unknown> = {};
-  for (const key of ['phase', 'message', 'done', 'total']) if (progress[key] !== undefined) summary[key] = progress[key];
+  for (const key of ['phase', 'message', 'done', 'total', 'warnings']) if (progress[key] !== undefined) summary[key] = progress[key];
   return Object.keys(summary).length ? summary : null;
 }
 
@@ -159,6 +160,7 @@ export class CloudTaskRunner {
           this.store.db.prepare("UPDATE cloud_tasks SET executor='node',worker_id=NULL,lease_expires_at=NULL WHERE status='queued'").run();
           this.store.db.prepare("UPDATE cloud_permissions SET status='expired' WHERE status IN ('pending','approved','consumed') AND task_id IN (SELECT id FROM cloud_tasks WHERE status NOT IN ('running','waiting_user'))").run();
         });
+        cleanBiliStaging(this.store, this.options.filesDir ?? process.env.FILES_DIR ?? path.join(process.env.DATA_DIR ?? path.resolve('data'), 'files'));
         this.recovered = true;
       }
       for (const [id, controller] of this.active) {

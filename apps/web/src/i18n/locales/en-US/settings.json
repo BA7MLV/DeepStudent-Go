@@ -135,7 +135,6 @@
     "experience": "Interface & playback",
     "appearance": "Appearance",
     "sources": "Sources",
-    "live": "Live sharing",
     "playback": "Playback",
     "shortcuts": "Shortcuts",
     "study": "Study",
@@ -311,11 +310,13 @@
     }
   },
   "skillPicker": {
+    "options": "Skill options",
+    "shortcut": "Type @ in your message to find a skill",
     "activationMode": "Skill activation mode",
     "turnTab": "Use next message",
     "scopeTab": "Availability (advanced)",
     "backToUse": "Back to invocation",
-    "turnHint": "The assistant chooses relevant skills on demand. Select one to invoke it in your next message. Existing instructions are reused; references load on demand.",
+    "turnHint": "Choose a skill to insert it into your message and use it on the next send.",
     "scopeHint": "Only controls which skills can be discovered and read. Does not load instructions or grant tools. Legacy conversation pins no longer activate skills.",
     "busyHint": "Wait for the reply to finish before changing skills. The current task uses its submitted selection.",
     "clearSelection": "Clear selection",
@@ -326,7 +327,7 @@
     "available": "Chosen on demand by the assistant",
     "removeSkill": "Remove skill: {{name}}",
     "unknownSkill": "Skill #{{id}}",
-    "title": "Use skills next message",
+    "title": "Add skills",
     "auto": "Automatic",
     "none": "No skills",
     "custom": "Custom",
@@ -352,22 +353,27 @@
     "close": "Close skill picker",
     "builtins": {
       "create": {
+        "brief": "Build or adjust features and pages",
         "title": "Create mode",
         "description": "Describe what you need and where it belongs to create or adjust lasting tools and pages."
       },
       "handout": {
+        "brief": "Create handouts and study outlines",
         "title": "Course handouts",
         "description": "Build notes and revision outlines, with math, coding and civil-service exam guidance as needed."
       },
       "questions": {
+        "brief": "Extract questions, practice and grade",
         "title": "Question bank",
         "description": "Extract original questions and images for practice and grading."
       },
       "visual": {
+        "brief": "Explain with diagrams or interactive demos",
         "title": "Visual explanations",
         "description": "Explain with static diagrams or interactive demos: flows, relationships, functions, parameters, simulations and practice."
       },
       "organize": {
+        "brief": "Organize courses and materials",
         "title": "Organize materials",
         "description": "Plan folders for courses and materials, then organize after confirmation."
       }

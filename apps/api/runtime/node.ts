@@ -46,6 +46,7 @@ import { serverCover, serverHandout, serverTranscribe } from './media-tasks.js';
 import { persistHandout } from './handout-edit.js';
 import { effectiveCompressionRows, executeContextCompression } from './context-compression.js';
 import { serverQuestionExtraction } from './question-extraction.js';
+import { serverBilibiliImport } from './bilibili-import.js';
 import { DELEGATION_TOOLS } from '../src/agent/delegation-tools.js';
 import { delegationTool, TaskWaitSuspended } from './delegation.js';
 import { TaskStepBudget } from '../src/agent/task-step-budget.js';
@@ -1163,6 +1164,7 @@ async function generatePluginPractice(context: TaskContext) {
 
 export async function executeNodeTask(context: TaskContext): Promise<unknown> {
   context.checkActive();
+  if (context.task.kind === 'bilibiliImport') return serverBilibiliImport(context);
   if (context.task.kind === 'chat' && context.task.input.action === 'compressContext') return executeContextCompression(context);
   if (context.task.kind === 'chat') return chat(context);
   if (context.task.kind === 'qa' && context.task.input.pluginExtraction === true) return serverQuestionExtraction(context);

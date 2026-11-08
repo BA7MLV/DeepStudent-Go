@@ -8,6 +8,6 @@
 export function focusChatComposer(): void {
   if (typeof window === 'undefined' || !window.matchMedia('(pointer: fine)').matches) return;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    document.querySelector<HTMLTextAreaElement>('.course-chat__input')?.focus();
+    document.querySelector<HTMLElement>('.course-chat__composer-body [contenteditable="true"]')?.focus();
   }));
 }

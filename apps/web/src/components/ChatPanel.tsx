@@ -3,8 +3,7 @@ import { liveQuery } from 'dexie';
 import { appendConversationSession, removeConversationMessage, reviseConversationSession } from '../store/conversationProducts';
 import { deleteServerSession, forkServerSession, removeConversationMessages } from '../client/conversations';
 import { useTranslation } from 'react-i18next';
-import { Button, Dropdown, ListBox, Select, TextArea, Tooltip } from '@heroui/react';
-import { useImeEnter } from '../utils/imeEnter';
+import { Button, Dropdown, ListBox, Select, Tooltip } from '@heroui/react';
 import type { ComponentProps } from '@ant-design/x-markdown';
 import { MaterialImage, SourceImage } from './MaterialImage';
 import { parseMaterialImageHref } from '../materials/imageRefs';
@@ -17,7 +16,7 @@ import { estimateTokens } from '../harness/context';
 import { PROMPTS } from '../harness/prompts';
 import { EMPTY_COMPRESSION, retainedContext, useContextCompressionStore } from '../store/contextCompression';
 import ContextUsageButton from './ContextUsageButton';
-import ComposerExpand, { useComposerSize } from './ComposerExpand';
+import ComposerExpand from './ComposerExpand';
 import { useContextCompression } from './useContextCompression';
 import { explicitSkillIds } from '../skills/activation';
 import { captureFrame, resolveVideoEl, type Snapshot } from '../media/snapshot';
@@ -28,7 +27,8 @@ import { fmtUnitRef, type UnitKind } from '../materials/units.ts';
 import type { MaterialReaderHandle } from '../materials/types';
 import { useSelectionAsk, formatCitation, EXPLAIN_PROMPT, MAX_REFS, type Citation } from '../store/selectionAsk';
 import { buildSessionMarkdown, exportFileName, markdownToPlainText } from '../utils/chatExport';
-import { copyText } from '../utils/clipboard';
+import { copyWithFeedback } from '../utils/copyFeedback';
+import { CopyButton } from '../ui/copy-button';
 import { messageTime } from '../utils/messageTime';
 import { useMediaQuery } from '../utils/useMobile';
 import { useModelMetaRevision } from '../utils/useModelMeta';
@@ -57,7 +57,8 @@ import { MarkdownTable } from './MdTable';
 import { MarkdownStreamingProvider } from './markdown/streaming';
 import TaskModelPicker from './TaskModelPicker';
 import SkillPicker from './SkillPicker';
-import SkillChips from './SkillChips';
+import InlineSkillInput, { type InlineSkillInputHandle } from './InlineSkillInput';
+import SkillMessageContent from './SkillMessageContent';
 import QuizCard from './QuizCard';
 import { canUpdateQuizPick, type QuizPick } from '../harness/quiz';
 import WidgetMessage from './WidgetMessage';
@@ -293,14 +294,6 @@ function MessageActions({
   onExport: () => void;
   onDelete: () => void;
 }) {
-  const copy = (text: string, okMsg: string) => {
-    void (async () => {
-      const ok = await copyText(text);
-      if (ok) toast.success(okMsg);
-      else toast.error('复制失败：剪贴板不可用');
-    })();
-  };
-
   const action = (
     label: string,
     icon: React.ReactNode,
@@ -333,12 +326,8 @@ function MessageActions({
 
   return (
     <div className="chat-message-actions" data-testid="chat-message-actions">
-      {action(
-        copyLabel,
-        <Sym name="content_copy" />,
-        () => copy(content, `已复制${isUser ? '这条提问' : '这条回答'}（Markdown）`),
-        'chat-copy-message',
-      )}
+      <CopyButton text={content} label={copyLabel} isIconOnly variant="tertiary" size="sm"
+        className="chat-action" data-testid="chat-copy-message" />
 
       {action(retryHint, <Sym name="refresh" />, onRetry, 'chat-retry-message', busy || !canRetry)}
 
@@ -358,7 +347,7 @@ function MessageActions({
           <Dropdown.Popover placement="bottom start">
             <Dropdown.Menu
               onAction={(key) => {
-                if (key === 'copy-plain') copy(markdownToPlainText(content), '已复制这条回答（纯文本）');
+                if (key === 'copy-plain') void copyWithFeedback(markdownToPlainText(content), '已复制纯文本');
                 else if (key === 'export') onExport();
               }}
             >
@@ -401,13 +390,12 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
   const content = (
     <span ref={textRef} id={`chat-user-text-${message.key}`} className="chat-user-text"
       data-collapsed={overflows && !expanded}>
-      <UserContent content={message.content || '图片消息'} />
+      <SkillMessageContent content={message.content || '图片消息'} ids={message.explicitSkillIds} renderText={text => <UserContent content={text} />} />
     </span>
   );
   return (
     <div className="chat-user-content">
       <div className="chat-bubble chat-bubble--user">
-        <SkillChips ids={message.explicitSkillIds} />
         {!touchMenu ? content : (
           <Dropdown trigger="longPress">
             <Dropdown.Trigger className="chat-user-trigger"
@@ -428,10 +416,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
                   if (key === 'retry') onRetry();
                   else if (key === 'fork') onFork();
                   else if (key === 'delete') onDelete();
-                  else if (key === 'copy') void copyText(message.content).then((ok) => {
-                    if (ok) toast.success('已复制这条提问（Markdown）');
-                    else toast.error('复制失败：剪贴板不可用');
-                  });
+                  else if (key === 'copy') void copyWithFeedback(message.content, '已复制提问');
                 }}
               >
                 <Dropdown.Item id="copy" textValue="复制" data-testid="chat-user-copy">
@@ -528,6 +513,7 @@ export default function ChatPanel({
   const [turnSkillIds, setTurnSkillIds] = useState<number[]>([]);
   const [mcpServerIds, setMcpServerIds] = useState<string[] | undefined>();
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const addButton = useRef<HTMLButtonElement>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [shots, setShots] = useState<Snapshot[]>([]);
   /**
@@ -543,13 +529,11 @@ export default function ChatPanel({
   useEffect(() => {
     refsRef.current = refs;
   }, [refs]);
-  // 输入框 ref：TextArea 的受控值从 onChange 拿，但「选区提问」那个 effect 要聚焦它。
+  // 行内编辑器值从 onChange 拿；「选区提问」通过句柄聚焦。
   // 声明放在这里（而不是靠近 JSX）是因为那个 effect 在组件体上方就要用到 ——
   // 常量声明在使用之后会被 TS 判为 use-before-declaration。
-  const composerInput = useRef<HTMLTextAreaElement>(null);
-  const composerOverflow = useComposerSize(composerInput, input);
-  /** 输入法选词中的回车不是发送（含 Safari 先 compositionend 再 keydown 的情况，见 utils/imeEnter）。 */
-  const ime = useImeEnter();
+  const composerInput = useRef<InlineSkillInputHandle>(null);
+  const [composerOverflow, setComposerOverflow] = useState(false);
   // 讲义抽帧元数据：决定 list_frames 工具/提示词注入，也供 AI 气泡里的画面引用渲染
   const [framesMeta, setFramesMeta] = useState<FrameMeta[]>([]);
   // 思考能力要按**这家供应商**的能力数据源查（同一模型 id 在别家可能不支持思考）
@@ -813,7 +797,7 @@ export default function ChatPanel({
       void send(EXPLAIN_PROMPT, next);
     } else {
       // compose：引用已进引用条，焦点交给输入框，用户直接补问题。
-      // 复用 composerInput（TextArea 的 ref），不额外造一个 ref。
+      // 复用行内编辑器的聚焦句柄。
       composerInput.current?.focus();
     }
     // send 每轮渲染都是新引用，放进依赖会无限触发；这里只在 pendingAsk 变化时消费一次
@@ -981,14 +965,6 @@ export default function ChatPanel({
         quiz: m.quiz,
       })),
     });
-  };
-
-  /** 一键复制整个会话（Markdown 源码；流式进行中禁用，避免复制到半截回答） */
-  const copySession = async () => {
-    if (msgs.length === 0) return void toast.info('当前会话还没有内容');
-    const ok = await copyText(await sessionMarkdown());
-    if (ok) toast.success('已复制整个会话（Markdown）');
-    else toast.error('复制失败：剪贴板不可用，可改用「导出 .md」');
   };
 
   /** 导出整个会话为 .md 文件（归档/跨设备带走） */
@@ -1354,11 +1330,12 @@ export default function ChatPanel({
           </Select.Popover>
         </Select>
         {iconBtn('chat-new-session', '新开会话', <Sym name="add" />, createSession, loading)}
-        {iconBtn('copy-session-btn', '复制整个会话（Markdown）', <Sym name="content_copy" />, copySession, loading || msgs.length === 0)}
+        <CopyButton key={activeId} text={sessionMarkdown} label="复制整个会话（Markdown）" isIconOnly
+          variant="tertiary" size="sm" data-testid="copy-session-btn" isDisabled={loading || msgs.length === 0} />
         {iconBtn('export-session-btn', '导出 .md 文件', <Sym name="download" />, downloadSession, loading || msgs.length === 0)}
         {iconBtn('chat-delete-session', '删除当前会话', <Sym name="delete" />, confirmDeleteSession, loading)}
       </PanelBar>
-      <SkillPicker value={skillIds} onChange={updateSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={updateMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
+      <SkillPicker onInserted={() => composerInput.current?.focus()} anchorRef={addButton} value={skillIds} onChange={updateSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={updateMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
       {learningPlugin.dialog}
 
       {/* 消息流：AI 靠左、用户靠右。两种气泡的形状差是 MD3 聊天的标志 ——
@@ -1564,41 +1541,29 @@ export default function ChatPanel({
           </div>
         )}
         <div className="chat-composer__row">
-          <ComposerExpand visible={composerOverflow} key={activeId} value={input} onChange={setInput} />
-          {/* testid 挂在外层容器上：e2e 的选择器是 `[data-testid="chat-input"] textarea`，
-              需要「容器 → textarea」的层级（mdui 时代是自定义元素 + shadow 里的 textarea，
-              HeroUI 是单元素，用一层 div 补回同样的结构）。 */}
+          <ComposerExpand visible={composerOverflow} key={activeId} value={input} onChange={setInput}
+            renderInput={className => <InlineSkillInput expanded autoFocus className={className} label="完整消息"
+              value={input} onChange={setInput} skillIds={turnSkillIds} availableSkillIds={skillIds} onSkillsChange={setTurnSkillIds} />} />
           <div className="chat-input" data-testid="chat-input">
-            <SkillChips ids={turnSkillIds} disabled={loading} onRemove={removed => setTurnSkillIds(ids => ids.filter(value => !removed.includes(value)))} />
-            <TextArea
-              fullWidth
-              rows={1}
-              aria-label="给学习助手发送消息"
+            <InlineSkillInput
+              documentKey={activeId}
+              label="给学习助手发送消息"
               placeholder={indexReady ? '输入问题，回车发送' : '等待索引就绪…'}
               disabled={!indexReady}
               value={input}
               ref={composerInput}
-              onChange={(e) => setInput(e.target.value)}
-              /**
-               * 移动端键盘的回车键改成「发送」：Android Chrome 认 enterkeyhint，
-               * 会把按键的文案与语义从「换行」换成「发送」（iOS Safari 暂不认，
-               * 但加上没有副作用）。没有它，手机上要找一颗小小的发送图标，
-               * 而回车键就在拇指底下。
-               */
-              enterKeyHint="send"
-              {...ime.compositionProps}
-              /** 聚焦即吸底：键盘弹出会顶矮面板，先一步把最新消息留在可视区里 */
+              onChange={setInput}
+              skillIds={turnSkillIds}
+              availableSkillIds={skillIds}
+              onSkillsChange={setTurnSkillIds}
+              onOverflowChange={setComposerOverflow}
               onFocus={pinList}
-              onKeyDown={(e) => {
-                if (!ime.isSubmitEnter(e)) return;
-                e.preventDefault();
-                void send(input);
-              }}
+              onSubmit={() => void send(input)}
             />
           </div>
           <div className="chat-composer__tools">
           <Dropdown isOpen={addOpen} onOpenChange={setAddOpen}>
-            <Button isIconOnly variant="tertiary" size="sm" data-testid="panel-chat-add"
+            <Button ref={addButton} isIconOnly variant="tertiary" size="sm" data-testid="panel-chat-add"
               aria-label="添加截图、出题、技能或调整模型" isDisabled={activeId == null || activeId !== loadedSessionId}>
               <Sym name="add" />
             </Button>

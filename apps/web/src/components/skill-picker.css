@@ -1,13 +1,14 @@
-/* HeroUI owns focus, checkbox motion and modal lifecycle; surfaces follow the app theme. */
-.skill-picker-dialog.modal__dialog {
-  width: min(32rem, calc(100% - 2rem));
-  max-width: none;
-  max-height: min(52rem, calc(100% - 2rem));
-  padding: 1.5rem;
+/* Anchor to the composer on every viewport; React Aria handles collision and focus. */
+.skill-picker-popover {
+  width: min(22rem, calc(100vw - 20px));
+  max-height: min(32rem, var(--available-height));
+  padding: 0;
+  overflow: hidden;
 }
-
-.skill-picker__header { flex-shrink: 0; gap: 1rem; }
-.skill-picker__heading { padding-right: 2rem; }
+.skill-picker-dialog { display: flex; flex-direction: column; max-height: inherit; min-height: 0; padding: .75rem; outline: none; }
+.skill-picker__header { display: flex; flex-direction: column; flex-shrink: 0; gap: .75rem; }
+.skill-picker__title-row { display: flex; align-items: center; justify-content: space-between; }
+.skill-picker__heading { font-size: 1rem; font-weight: 600; }
 .skill-picker__icon {
   display: grid;
   place-items: center;
@@ -24,7 +25,7 @@
 .skill-picker__notice { font-size: .8125rem; line-height: 1.5; color: var(--muted); }
 
 /* One scroll region for both skills and MCP; header and actions stay reachable. */
-.skill-picker__body.modal__body { margin-top: .75rem; padding: .25rem; min-height: 0; }
+.skill-picker__body { margin-top: .75rem; padding: .25rem; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .skill-picker { display: flex; flex-direction: column; gap: 1rem; }
 .skill-picker__group-heading { margin: 0 .125rem .5rem; font-size: .75rem; font-weight: 500; color: var(--muted); }
 .skill-picker__list { display: flex; flex-direction: column; gap: .5rem; }
@@ -56,13 +57,29 @@
 .skill-picker__empty { display: flex; min-height: 11rem; flex-direction: column; align-items: center; justify-content: center; gap: .75rem; padding: 1.5rem; text-align: center; color: var(--muted); }
 .skill-picker__empty strong { font-weight: 500; color: var(--foreground); }
 .skill-picker__empty p { max-width: 26rem; line-height: 1.6; }
-.skill-picker__footer.modal__footer { flex-shrink: 0; justify-content: space-between; gap: .5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.skill-picker__footer { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .5rem; padding-top: .5rem; border-top: 1px solid var(--border); }
 
-@media (max-width: 540px) {
-  .skill-picker-dialog.modal__dialog { width: calc(100% - 1.25rem); max-height: calc(100% - 1.25rem); padding: 1rem; }
-  .skill-picker__header { gap: .75rem; }
-  .skill-picker .skill-picker__content { padding: .75rem; gap: .75rem; }
-  .skill-picker__footer.modal__footer { display: grid; grid-template-columns: 1fr auto; margin-top: .75rem; padding-top: .75rem; }
-  .skill-picker__footer [data-testid='skill-picker-manage'] { justify-self: start; }
-  .skill-picker__footer [data-testid='skill-picker-done'] { grid-column: 1 / -1; width: 100%; }
-}
+/* Adding a mention is a small composer action, with a content-sized list. */
+.skill-picker-dialog[data-compact] .skill-picker__header { gap: .5rem; }
+.skill-picker-dialog[data-compact] .skill-picker__heading { font-size: 1rem; padding-right: 0; }
+.skill-picker-dialog[data-compact] .skill-picker__body { margin-top: .5rem; }
+.skill-picker-dialog[data-compact] .skill-picker { gap: .5rem; }
+.skill-picker-dialog[data-compact] .skill-picker__list { gap: .125rem; }
+.skill-picker-dialog[data-compact] .skill-picker__content { min-height: 3.25rem; padding: .375rem .5rem; gap: .625rem; border-color: transparent; background: transparent; }
+.skill-picker-dialog[data-compact] .skill-picker__item[data-selected='true'] .skill-picker__content { background: var(--accent-soft); }
+.skill-picker-dialog[data-compact] .skill-picker__text { gap: 0; }
+.skill-picker-dialog[data-compact] .skill-picker__summary { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.skill-picker-dialog[data-compact] .skill-picker__empty { min-height: 6rem; padding: 1rem; }
+.skill-picker-dialog[data-compact] .skill-picker__footer { display: flex; margin-top: .5rem; padding-top: .5rem; gap: .25rem; }
+.skill-picker-dialog[data-compact] [data-testid='skill-picker-done'] { width: auto; margin-inline-start: auto; }
+.skill-picker__actions { padding: 0; }
+.skill-picker__action { display: flex; align-items: center; gap: .625rem; min-height: 3.25rem; padding: .375rem .5rem; cursor: pointer; border-radius: var(--radius-md); }
+.skill-picker__action[data-focused], .skill-picker__action[data-hovered] { background: var(--surface-secondary); }
+.skill-picker__action[data-disabled] { cursor: default; opacity: .5; }
+.skill-picker__action .skill-picker__icon { width: 1.75rem; height: 1.75rem; background: transparent; }
+.skill-picker__added { color: var(--accent); flex: none; }
+.skill-picker__shortcut { padding: .625rem .5rem .125rem; font-size: .75rem; color: var(--muted); }
+.skill-picker-dialog[data-compact] { position: relative; }
+.skill-picker-dialog[data-compact] .skill-picker__title-row { height: 0; }
+.skill-picker-dialog[data-compact] [data-testid='skill-picker-options'] { position: absolute; right: .75rem; top: .75rem; }
+.skill-picker-dialog[data-compact] [data-testid='skill-picker-search'] { margin-right: 2.75rem; }

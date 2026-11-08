@@ -349,8 +349,8 @@ html[data-keyboard='open'] .chat-composer {
 .chat-composer__row {
   position: relative;
   display: flex;
-  flex-direction: row;
-  align-items: flex-end;
+  flex-direction: column;
+  align-items: stretch;
   gap: 4px;
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -360,7 +360,7 @@ html[data-keyboard='open'] .chat-composer {
 }
 
 .chat-composer__tools {
-  display: contents;
+  display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -392,11 +392,14 @@ html[data-keyboard='open'] .chat-composer {
   box-shadow: none;
 }
 
-/* 输入框占满中段；outlined 变体在深浅两套主题里都是「描边 + 透明底」，
-   与两侧图标按钮放在一起不会出现三层色阶打架 */
+/* 正文独占上方整行，工具集中在下面，不挤占光标左侧空间。 */
 .chat-input {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+.chat-composer__row:has(.composer-expand:not([hidden])) .chat-input {
+  padding-inline-end: 36px;
 }
 
 .chat-send {

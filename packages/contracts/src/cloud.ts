@@ -109,7 +109,7 @@ export interface CloudConfig {
   policy: AgentPolicy;
   trustedAgentIds?: string[];
 }
-export type CloudTaskKind = 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce';
+export type CloudTaskKind = 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce' | 'bilibiliImport';
 export type HandoutEditBlock =
   | { type: 'lead' | 'para' | 'note' | 'h2'; text: string }
   | { type: 'list'; ordered: boolean; items: string[] }

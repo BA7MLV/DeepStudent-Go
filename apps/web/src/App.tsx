@@ -7,7 +7,7 @@ import { useSettings } from './store/settings';
 import { resumePendingTranscriptions } from './pipelines/transcribeQueue';
 import { backfillCovers } from './pipelines/coverQueue';
 import { startStudyTracking } from './store/studyTime';
-import LiveShareBar from './components/LiveShareBar';
+import './app-viewport.css';
 import SettingsModal from './components/SettingsModal';
 import { preloadOnIntent } from './utils/preload';
 import { FeedbackHost, PageLoader } from './ui';
@@ -28,7 +28,6 @@ const pages = {
   player: () => import('./pages/Player'),
   study: () => import('./pages/Study'),
   bot: () => import('./pages/BotWorkspace'),
-  live: () => import('./pages/LiveGuest'),
   widget: () => import('./pages/WidgetPreview'),
   tasks: () => import('./pages/Board'),
 };
@@ -37,7 +36,6 @@ const CourseChat = lazy(pages.chat);
 const Player = lazy(pages.player);
 const Study = lazy(pages.study);
 const BotWorkspace = lazy(pages.bot);
-const LiveGuest = lazy(pages.live);
 const WidgetPreview = lazy(pages.widget);
 const Board = lazy(pages.tasks);
 const PluginPage = lazy(() => import('./plugins/PluginPage'));
@@ -111,12 +109,7 @@ export default function App() {
 
   return (
     <HashRouter>
-      {/* 实时共享指示条：常驻在任意页面上方（隐私不变量，见 LiveShareBar.tsx 文件头）。
-          外面这层 .live-share-host 把它的高度从页面里「扣」出来 —— .page 自身写死
-          var(--vvh) 满高，直接当兄弟节点会把文档撑高一条、body 多出滚动条。
-          完整理由见 components/live-share-bar.css 顶部注释。 */}
-      <div className="live-share-host">
-        <LiveShareBar />
+      <div className="app-viewport">
         <CloudActivity />
         <FeedbackHost />
         {/* 设置是全局弹窗而不是路由：挂在 App 根部一次，任何页面都能唤起，
@@ -145,9 +138,6 @@ export default function App() {
                   这里仍渲染默认首页，让用户「改完设置就能接着用」。 */}
               <Route path="/settings/*" element={<CourseChat />} />
             </Route>
-            {/* guest 镜像页：其他设备打开主机复制的链接进来。刻意不挂左侧导航 ——
-                它读的是主机的内容，与本机导航的目的地不是一回事（见 LiveGuest.tsx 文件头）。 */}
-            <Route path="/live" element={<LiveGuest />} />
             {/* show_widget HTML 的独立预览页；源码通过 BroadcastChannel 传递，不进 URL。 */}
             <Route path="/widget-preview" element={<WidgetPreview />} />
           </Routes>

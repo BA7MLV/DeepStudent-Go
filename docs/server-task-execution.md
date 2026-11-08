@@ -23,6 +23,7 @@
 | transcribe | B站原字幕优先、多语言轨道落库；失败后流式解码/VAD，再逐段 WAV 调用模型 Gateway；保存句级 cues 和已完成段检查点 |
 | handout | 视频真实截图→vision→大纲→分节 IR→含真实 JPEG 的 DOCX；共享封面、目录、页眉页脚、图表排版器；材料为明确标注的文字来源讲义 |
 | pluginExtraction | PDF 正文及真实页图；非 PDF 为已索引正文；共享原题技能和 quiz 验证；逐页审批、题库初始 revision 和逐次 CAS、真实保存收据 |
+| bilibiliImport | 解析分 P / 合集并按选择逐集下载；FFmpeg 本地 fd 合并为 MP4；原字幕与资源目录一起提交；后台安排封面/转写，关闭页面不停止 |
 
 PDF 页图采用现有 `#source-image/{encodedCourseId}/page-N` 引用，Web 阅读器按需加载对应页面。没有原题的页面会明确记为待人工核对，不得把模型宣称“已保存”当成领域保存收据。
 
@@ -43,7 +44,8 @@ ASR 使用 Gateway 统一的超时、重试/Retry-After、预算和路由策略�
 - Node worker 使用显式 V8 heap cap，音频 worker 为 128 MiB；不能设置相同 RLIMIT_AS，否则 V8 地址空间预留会导致启动失败。**heap cap 不等于整个进程的 RSS 硬上限。**
 - 流式音频最长 4 小时；API 不保留整段 PCM。讲义每 25 秒采样、差分阈值 16、最多保留 60 帧、12 节，DOCX 上传限额 32 MiB。figure 按请求时刻重新抽取不超过 1600 宽的图。帧和 DOCX 仍在 API heap 内组装，不应据此声称总内存恒定。
 - 文档输入上限 128 MiB，HTML 16 MiB，DOCX 正文解压限额 32 MiB，文档输出 16 MiB；PDF 原题最多 2000 页。限制触发即失败，不静默宣称处理全文。
-- B站网络仅固定 DmView API 与精确字幕 CDN 白名单，HTTPS、禁止重定向，并限制时间和响应大小；不是通用抓取代理。
+- B站导入网络仅固定元数据/播放/登录 API、DmView、精确字幕 CDN 与 `*.bilivideo.com/cn` 视频 CDN；连接时拒绝非公网 DNS 地址。只允许 b23 短链逐跳白名单跳转，其余重定向拒绝；不是通用抓取代理。Cookie 仅加密保存在账户凭据表，只发送给固定 B 站 API，不进入任务或 CDN。
+- B站每集下载上限 `MAX_FILE_BYTES`（至多 512 MiB）、30 分钟，MP4 输出独立受相同大小上限与 120 秒合并超时约束；单账户最多排队/运行 4 个导入任务。取消/失败清理该任务临时文件，重启不会自动重复下载；已保存分 P 保留。
 
 部署方仍需设置容器/cgroup 的总内存、CPU 和 PID 预算。不能仅凭 V8 heap、单进程 AS 和并发限制推导整机不会 OOM；应在目标 CPU/架构上压测后设置预算。当前未给出实测可用的生产内存规格。
 

@@ -454,6 +454,11 @@ const MIGRATIONS: Array<[number, string]> = [
     project_id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     archived INTEGER NOT NULL, deleted_at TEXT NOT NULL
   );`],
+  // 33 is folder-archive retirement below; 34 belongs to migrateClientRuntime.
+  [35, `CREATE TABLE bilibili_credentials (
+    owner_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    value TEXT NOT NULL
+  );`],
 ];
 
 // These two migrations were already numbered 14 and 15 on the main branch.
@@ -581,6 +586,7 @@ export class DatabaseStore {
            { version: 29, tables: ['run_inputs', 'run_questions', 'run_waits'], extra: [], sql: MIGRATIONS.find(([v]) => v === 29)![1] },
             { version: 31, tables: ['bot_artifact_files'], extra: [], sql: MIGRATIONS.find(([v]) => v === 31)![1] },
             { version: 32, tables: ['resource_trash'], extra: [], sql: MIGRATIONS.find(([v]) => v === 32)![1] },
+            { version: 35, tables: ['bilibili_credentials'], extra: [], sql: MIGRATIONS.find(([v]) => v === 35)![1] },
         ];
         const present = groups.map(group => {
           const markers = [...group.tables.map(table => columns(this.db, table).length > 0), ...group.extra.map(([table, column]) => columns(this.db, table).some(c => c.name === column))];
@@ -630,7 +636,8 @@ export class DatabaseStore {
          apply(26, groups[14], 14);
          apply(29, groups[15], 15);
          apply(31, groups[16], 16);
-         apply(32, groups[17], 17);
+          apply(32, groups[17], 17);
+          apply(35, groups[18], 18);
          // Retire folder archive without interpreting retained folders as deleted.
          // Trashed workspaces must remain locked until explicitly restored.
          if (!this.db.prepare('SELECT 1 FROM schema_migrations WHERE version=33').get()) {

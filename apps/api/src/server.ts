@@ -23,6 +23,7 @@ import { CloudRecords } from './cloud/records.js';
 import { CloudConfiguration } from './cloud/config.js';
 import { receiveFile, byteRange, fileOperationId } from './cloud/files.js';
 import { registerCloudRoutes } from './cloud/routes.js';
+import { registerBilibiliRoutes } from './bilibili/routes.js';
 import { SystemMaterials } from './storage/system-materials.js';
 import { registerSystemRoutes } from './storage/system-routes.js';
 import { BoardFiles } from './board/files.js';
@@ -261,6 +262,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
    const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch, mcp,
      canStart: () => !held && !draining,
    });
+   registerBilibiliRoutes(app, { store, configuration: cloudConfig, requireAuth, checkOrigin, fetch: options.fetch });
    registerResourceRoutes(app, resources, requireAuth, checkOrigin);
    registerSystemRoutes(app, systemMaterials, cloudConfig, requireAuth, checkOrigin);
    registerBoardRoutes(app, boardFiles, cloudRunner, botService, requireAuth, checkOrigin);

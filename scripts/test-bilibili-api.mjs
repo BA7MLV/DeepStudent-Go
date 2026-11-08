@@ -10,7 +10,7 @@ import os from 'node:os';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = path.join(os.tmpdir(), `test-bilibili-api-${Date.now()}.mjs`);
 execSync(
-  `node_modules/.bin/esbuild apps/web/src/bilibili/api.ts --bundle --platform=node --format=esm --outfile=${tmp}`,
+  `node_modules/.bin/esbuild packages/study-core/src/bilibili/api.ts --bundle --platform=node --format=esm --outfile=${tmp}`,
   { cwd: root, stdio: 'inherit' },
 );
 const api = await import(tmp);
@@ -28,8 +28,7 @@ function makeFetch(routes) {
   const calls = [];
   const fetchMock = async (url, init) => {
     calls.push({ url, init });
-    const u = new URL(url);
-    const target = decodeURIComponent(u.searchParams.get('url') ?? '');
+    const target = String(url);
     for (const [match, responder] of routes) {
       if (target.includes(match)) {
         const r = responder(target);
@@ -57,7 +56,7 @@ async function withFetch(fetchMock, fn) {
   }
 }
 
-const proxy = 'https://proxy.example.com';
+const opts = { request: (...args) => globalThis.fetch(...args) };
 
 console.log('fetchVideoView');
 {
@@ -77,7 +76,7 @@ console.log('fetchVideoView');
       },
     })],
   ]);
-  const r = await withFetch(fetchMock, () => api.fetchVideoView({ proxy, cookie: 'SESSDATA=x' }, 'BV1xx411c7mD'));
+  const r = await withFetch(fetchMock, () => api.fetchVideoView(opts, 'BV1xx411c7mD'));
   eq(r, {
     aid: 80433022,
     title: '测试课程',
@@ -87,16 +86,15 @@ console.log('fetchVideoView');
       { page: 2, cid: 222, part: '第二章', duration: 200 },
     ],
   }, '取到全部分 P（多 P 合集要在对话框里挑 P）');
-  ok(calls[0].url.startsWith(proxy + '?url='), '经代理');
-  ok(calls[0].url.includes(encodeURIComponent('bvid=BV1xx411c7mD')), '带 bvid');
-  eq(calls[0].init.headers['X-Bili-Cookie'], 'SESSDATA=x', 'Cookie 透传头');
+  ok(calls[0].url.startsWith('https://api.bilibili.com/'), '直接访问 B 站 API');
+  ok(calls[0].url.includes('bvid=BV1xx411c7mD'), '带 bvid');
 }
 {
   const { fetchMock } = makeFetch([
     ['/x/web-interface/view', () => ({ json: { code: -404, message: '啥都木有' } })],
   ]);
   let msg = '';
-  try { await withFetch(fetchMock, () => api.fetchVideoView({ proxy }, 'BV1xx411c7mD')); } catch (e) { msg = e.message; }
+  try { await withFetch(fetchMock, () => api.fetchVideoView(opts, 'BV1xx411c7mD')); } catch (e) { msg = e.message; }
   ok(msg.includes('code=-404') && msg.includes('啥都木有'), '接口错误码透出');
 }
 
@@ -119,20 +117,20 @@ console.log('fetchPlayStreams');
       },
     })],
   ]);
-  const s = await withFetch(fetchMock, () => api.fetchPlayStreams({ proxy }, 'BV1xx411c7mD', 222));
+  const s = await withFetch(fetchMock, () => api.fetchPlayStreams(opts, 'BV1xx411c7mD', 222));
   eq(s.videoUrl, 'https://upos-sz-mirror08.bilivideo.com/v1080.m4s', '选最高清晰度视频流');
   eq(s.audioUrl, 'https://upos-sz-mirror08.bilivideo.com/a.m4s', '音频流');
   eq(s.qualityLabel, '1080P', '清晰度标签');
   eq(s.duration, 3661, '时长');
-  ok(calls[0].url.includes(encodeURIComponent('fnval=16')), '请求 DASH');
-  ok(calls[0].url.includes(encodeURIComponent('cid=222')), '带 cid');
+  ok(calls[0].url.includes('fnval=16'), '请求 DASH');
+  ok(calls[0].url.includes('cid=222'), '带 cid');
 }
 {
   const { fetchMock } = makeFetch([
     ['/x/player/playurl', () => ({ json: { code: 0, data: { dash: { video: [], audio: null } } } })],
   ]);
   let msg = '';
-  try { await withFetch(fetchMock, () => api.fetchPlayStreams({ proxy }, 'BV1xx411c7mD', 1)); } catch (e) { msg = e.message; }
+  try { await withFetch(fetchMock, () => api.fetchPlayStreams(opts, 'BV1xx411c7mD', 1)); } catch (e) { msg = e.message; }
   ok(msg.includes('未获取到 DASH'), '无 DASH 流报错');
 }
 
@@ -152,7 +150,7 @@ console.log('fetchPlayStreams 浏览器兼容编码优先');
       ],
     } } } })],
   ]);
-  const s = await withFetch(fetchMock, () => api.fetchPlayStreams({ proxy }, 'BV1xx411c7mD', 1));
+  const s = await withFetch(fetchMock, () => api.fetchPlayStreams(opts, 'BV1xx411c7mD', 1));
   eq(s.videoUrl, 'https://cdn.example/avc.m4s', '优先选择最高可用 AVC，避免 HEVC 无法播放');
   eq(s.audioUrl, 'https://cdn.example/aac.m4s', '优先选择 AAC，避免杜比编码不兼容');
 }
@@ -162,15 +160,8 @@ console.log('resolveShortUrl');
   const { fetchMock } = makeFetch([
     ['b23.tv', () => ({ text: '<html><a href="https://www.bilibili.com/video/BV1Ab411c7mD/">go</a></html>' })],
   ]);
-  const bvid = await withFetch(fetchMock, () => api.resolveShortUrl({ proxy }, 'https://b23.tv/abc'));
+  const bvid = await withFetch(fetchMock, () => api.resolveShortUrl(opts, 'https://b23.tv/abc'));
   eq(bvid, 'BV1Ab411c7mD', '短链解析出 BV');
-}
-
-console.log('出口未配置');
-{
-  let msg = '';
-  try { await api.fetchVideoView({ proxy: '', bridge: null }, 'BV1xx411c7mD'); } catch (e) { msg = e.message; }
-  ok(msg.includes('油猴') && msg.includes('代理'), '无桥无代理时报错引导安装油猴');
 }
 
 console.log('fetchPlayStreams 优先选 upos backup');
@@ -200,7 +191,7 @@ console.log('fetchPlayStreams 优先选 upos backup');
       },
     })],
   ]);
-  const s = await withFetch(fetchMock, () => api.fetchPlayStreams({ proxy }, 'BV1xx411c7mD', 1));
+  const s = await withFetch(fetchMock, () => api.fetchPlayStreams(opts, 'BV1xx411c7mD', 1));
   eq(s.videoUrl, 'https://upos-sz-mirrorcoso1.bilivideo.com/v.m4s', '视频跳过 mcdn 选 upos backup');
   eq(s.audioUrl, 'https://upos-sz-estgoss.bilivideo.com/a.m4s', '音频跳过 mcdn 选 upos backup');
 }

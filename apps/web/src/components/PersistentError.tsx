@@ -1,5 +1,5 @@
 import { Button } from '@heroui/react';
-import { Banner, Sym, toast } from '../ui';
+import { Banner, CopyButton, Sym } from '../ui';
 import './subtitle-danmaku.css';
 
 interface Props {
@@ -12,12 +12,6 @@ interface Props {
 export default function PersistentError({ title, text, onClose }: Props) {
   if (!text) return null;
 
-  // 一键复制原文（替 antd Typography.Paragraph copyable）
-  const copy = () => {
-    void navigator.clipboard?.writeText(text);
-    toast.success('报错详情已复制');
-  };
-
   return (
     <Banner
       variant="error"
@@ -27,16 +21,14 @@ export default function PersistentError({ title, text, onClose }: Props) {
       description={<div className="persistent-error__desc">{text}</div>}
       action={
         <>
-          <Button
+          <CopyButton
             isIconOnly
             variant="tertiary"
             size="sm"
-            aria-label="复制报错详情"
+            label="复制报错详情"
+            text={text}
             data-testid="persistent-error-copy"
-            onPress={copy}
-          >
-            <Sym name="content_copy" />
-          </Button>
+          />
           <Button
             isIconOnly
             variant="tertiary"

@@ -1060,6 +1060,32 @@
   transform: none;
 }
 
+/* 模型没有可用的完成百分比：用沿描边循环的光弧表示仍在生成，箭头保持静止。 */
+.course-chat__scroll-bottom[data-generating='true']::before {
+  --scroll-bottom-ring-duration: 1.2s;
+  content: '';
+  position: absolute;
+  inset: -1px;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(from 0deg, transparent 0deg 180deg, var(--accent) 300deg 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: chat-scroll-bottom-ring var(--scroll-bottom-ring-duration) linear infinite;
+  animation-play-state: paused;
+}
+
+.course-chat__scroll-bottom[data-generating='true'][data-show='true']::before {
+  animation-play-state: running;
+}
+
+@keyframes chat-scroll-bottom-ring {
+  to { transform: rotate(1turn); }
+}
+
 /* 悬停反馈只给主色，不换底色：底色一浅就会与画布糊在一起，看着像按钮被抠掉了 */
 .course-chat__scroll-bottom:hover {
   border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
@@ -1079,15 +1105,25 @@
   .course-chat__scroll-bottom {
     transition: none;
   }
+
+  .course-chat__scroll-bottom[data-generating='true']::before {
+    animation: none;
+  }
 }
 
 .course-chat__composer {
   width: min(100%, var(--course-chat-column));
   margin: 0 auto;
+  grid-template-areas: 'context context context' 'input input input' 'add tools tools';
+  row-gap: 4px;
 }
 
 /* Keep attachments and course chips clear of the top-right expand control. */
 .course-chat__composer:has(.composer-expand:not([hidden])) .course-chat__composer-context {
+  padding-inline-end: 36px;
+}
+
+.course-chat__composer:has(.composer-expand:not([hidden])) .course-chat__composer-body {
   padding-inline-end: 36px;
 }
 
@@ -1355,7 +1391,7 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
     border-radius: var(--radius-2xl);
     padding: 8px;
-    gap: 0 4px;
+    gap: 4px;
   }
 
   .course-chat__input {

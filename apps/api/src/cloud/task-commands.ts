@@ -9,6 +9,7 @@ import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
 import { freezeTaskModel, requireNativeTaskModel } from '../agent/task-model.js';
 import { handoutEditBaseline, parseHandoutPersist } from './handout-edit.js';
 import { admitContextCompression } from '../../runtime/context-compression.js';
+import { parseBiliImport } from '../bilibili/input.js';
 
 /** Durable admission shared by HTTP compatibility and generated commands. No
  * model is invoked here; the executor later claims the committed queue row. */
@@ -26,12 +27,18 @@ export function submitOwnerTask(store: DatabaseStore, records: CloudRecords, con
     }
     // Validate the new request after durable nonce lookup: retrying a completed
     // operation must return its old receipt even after history has moved on.
+    if (command.kind === 'bilibiliImport') {
+      const bili = parseBiliImport(input);
+      if (bili.folderId !== undefined && !store.db.prepare('SELECT 1 FROM resource_folders WHERE owner_id=? AND folder_id=?').get(owner, bili.folderId)) throw new Error('invalid_bilibili_folder');
+      const queued = store.db.prepare("SELECT COUNT(*) AS n FROM cloud_tasks WHERE owner_id=? AND kind='bilibiliImport' AND status IN ('queued','running')").get(owner) as { n: number };
+      if (queued.n >= 4) throw new Error('bilibili_import_queue_full');
+    }
     if (command.kind === 'chat' && input.action === 'compressContext') input.compressionBaseline = admitContextCompression(records, owner, command.input).compressionBaseline;
     if (command.kind === 'handoutEdit' && input.action === 'persist') handoutEditBaseline(records, owner, parseHandoutPersist(input));
     const session = ['chat', 'qa'].includes(command.kind) ? records.get(owner, 'chatSessions', Number(input.sessionId)) : undefined;
     if (['chat', 'qa'].includes(command.kind) && (!session || session.archived)) throw new Error('session_not_found');
     const active = store.db.prepare("SELECT * FROM cloud_tasks WHERE owner_id=? AND kind=? AND resource=? AND status IN ('queued','running','waiting_user')").get(owner, command.kind, resource);
-    if (active && !['chat', 'qa', 'modelOnce', 'artifactEdit', 'handoutEdit'].includes(command.kind)) return taskDto(active);
+    if (active && !['chat', 'qa', 'modelOnce', 'artifactEdit', 'handoutEdit', 'bilibiliImport'].includes(command.kind)) return taskDto(active);
     const id = crypto.randomUUID(), now = new Date().toISOString();
     store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at) VALUES(?,?,?,?,?,?,'queued',?,?)").run(id, owner, command.operationId, command.kind, resource, JSON.stringify(input), now, now);
     if (['chat', 'qa', 'modelOnce', 'artifactEdit', 'handoutEdit', 'cards', 'comments', 'danmaku', 'handout'].includes(command.kind) && !(command.kind === 'handoutEdit' && input.action === 'persist')) {

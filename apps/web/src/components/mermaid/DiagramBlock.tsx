@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Button, Skeleton, Dropdown, Label } from '@heroui/react';
-import { Sym, toast } from '../../ui';
-import { copyText } from '../../utils/clipboard';
+import { Sym } from '../../ui';
+import { copyWithFeedback } from '../../utils/copyFeedback';
 import { toStandaloneSvg } from './mermaidRender';
 import type { SvgProgress } from './svgRender';
 import type { DiagramShape } from './diagramSchema';
@@ -97,9 +97,7 @@ export default function DiagramBlock({
   const [zoomOpen, setZoomOpen] = useState(false);
 
   const copySource = useCallback(async () => {
-    const ok = await copyText(source);
-    if (ok) toast.success(copyToast);
-    else toast.error('复制失败');
+    await copyWithFeedback(source, copyToast);
   }, [source, copyToast]);
 
   const download = useCallback(() => {

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@ant-design/x-markdown": "^2.9.0",
+    "@codemirror/autocomplete": "^6.20.4",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",
     "@dagrejs/dagre": "^3.1.1",

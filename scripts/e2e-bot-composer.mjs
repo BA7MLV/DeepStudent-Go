@@ -307,7 +307,7 @@ try {
   for (const offsetTop of [0, 80, 160, 40]) {
     await setVisualViewport({ height: 480, offsetTop, scale: 1 });
     await page.waitForFunction(({ top, height }) => {
-      const host = document.querySelector('.live-share-host').getBoundingClientRect();
+      const host = document.querySelector('.app-viewport').getBoundingClientRect();
       const drawer = document.querySelector('.app-aside-drawer').getBoundingClientRect();
       const composer = document.querySelector('[data-testid="bot-panel"] .imsg-composer').getBoundingClientRect();
       return Math.abs(host.top - top) < 1 && Math.abs(host.height - height) < 1
@@ -319,7 +319,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--vvh')), '480px', 'pinch zoom does not reflow the page');
   await input.blur();
   await setVisualViewport({ height: 900, offsetTop: 80, scale: 1 });
-  assert.equal(await page.evaluate(() => document.querySelector('.live-share-host').getBoundingClientRect().top), 0, 'stale Safari offset is cleared when the keyboard closes');
+  assert.equal(await page.evaluate(() => document.querySelector('.app-viewport').getBoundingClientRect().top), 0, 'stale Safari offset is cleared when the keyboard closes');
   for (const height of [560, 900]) {
     await page.setViewportSize({ width: 390, height });
     await setVisualViewport({ height, offsetTop: 0, scale: 1 });

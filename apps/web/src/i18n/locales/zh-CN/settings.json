@@ -135,7 +135,6 @@
     "experience": "界面与播放",
     "appearance": "外观",
     "sources": "内容源",
-    "live": "实时",
     "playback": "播放",
     "shortcuts": "快捷键",
     "study": "学习",
@@ -315,7 +314,9 @@
     "turnTab": "本次使用",
     "scopeTab": "可用范围（高级）",
     "backToUse": "返回本次使用",
-    "turnHint": "默认由助手按需选用。勾选后，下一次发送会明确使用该技能；已在上下文的正文直接复用，参考资料按需读取。",
+    "turnHint": "点选技能即可插入消息，下一次发送时使用。",
+    "options": "技能选项",
+    "shortcut": "也可在消息中输入 @ 搜索技能",
     "scopeHint": "这里只限定助手可发现和读取哪些技能，不加载正文，也不授权工具。旧版会话固定不再自动激活技能。",
     "busyHint": "回复完成后可修改技能；当前任务使用发送时的选择。",
     "clearSelection": "清空选择",
@@ -326,7 +327,7 @@
     "available": "由助手按需选用",
     "removeSkill": "移除技能：{{name}}",
     "unknownSkill": "技能 #{{id}}",
-    "title": "本次使用技能",
+    "title": "添加技能",
     "auto": "自动",
     "none": "不使用技能",
     "custom": "自定义",
@@ -353,22 +354,27 @@
     "builtins": {
       "create": {
         "title": "创造模式",
+        "brief": "创建或调整功能与页面",
         "description": "说出用途和位置，创建或调整长期可用的功能与页面。"
       },
       "handout": {
         "title": "课程讲义",
+        "brief": "整理讲义与复习提纲",
         "description": "整理讲义与复习提纲；数学、编程、行测、申论规范按需加载。"
       },
       "questions": {
         "title": "原题题库",
+        "brief": "提取原题，生成练习与批改",
         "description": "从资料提取原题与原图，整理题库、练习和批改。"
       },
       "visual": {
         "title": "可视化讲解",
+        "brief": "用配图或交互演示讲清楚",
         "description": "按需用静态配图或交互演示讲清楚：流程、关系、函数、调参、模拟与练习。"
       },
       "organize": {
         "title": "资料整理",
+        "brief": "分类整理课程与资料",
         "description": "为课程和资料规划分类，确认后再整理归档。"
       }
     }

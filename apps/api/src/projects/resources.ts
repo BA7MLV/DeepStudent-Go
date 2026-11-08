@@ -383,6 +383,24 @@ export class ResourceFiles {
     this.remember(owner, id, projectId, entry.path, existing?.source_file ?? null);
     return { ...entry, courseId: id };
   }
+  /** Server import destination is an owned stable folder ID, never a task path.
+   * Missing/deleted folders must fail rather than redirecting to the root. */
+  videoImportDestination(owner: string, folderId?: number) {
+    const folder = folderId === undefined ? undefined : this.folder(owner, folderId);
+    if (folderId !== undefined && !folder) throw new ProjectError('project_file_not_found', 404);
+    const projectId = folder?.project_id ?? this.root(owner), directory = folder?.path ?? '';
+    this.projects.writable(owner, projectId); this.projects.assertNoExecution(projectId);
+    this.projects.files.list(projectId, directory);
+    return { projectId, directory };
+  }
+  /** Called inside the existing resource filesystem journal + SQL transaction. */
+  importServerVideo(owner: string, folderId: number | undefined, name: string, staged: string) {
+    const { projectId, directory } = this.videoImportDestination(owner, folderId);
+    const filename = this.unique(projectId, directory, `${cleanName(name)}.mp4`);
+    this.projects.files.copy(projectId, filename, staged, null);
+    const file = this.projects.files.list(projectId, directory).find(f => f.path === filename)!;
+    return this.index(owner, projectId, { ...file, projectId });
+  }
   list(owner: string, projectId?: string, directory = '', archived = false): ResourceDirectory {
     this.migrate(owner);
     const rootId = this.root(owner), id = projectId ?? rootId;

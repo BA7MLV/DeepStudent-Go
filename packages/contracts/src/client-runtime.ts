@@ -40,7 +40,7 @@ export type RuntimeTask = {
   resourceName?: string;
   executor?: 'node' | 'browser';
   id: string;
-  kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce';
+  kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce' | 'bilibiliImport';
   resource: string;
    status: 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
   input: { [key: string]: RuntimeJson };

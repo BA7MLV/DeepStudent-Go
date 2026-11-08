@@ -1,7 +1,7 @@
 import { useId, useState, type ReactNode } from 'react';
 import { Button, Dropdown, Label } from '@heroui/react';
-import { Sym, toast } from '../ui';
-import { copyText } from '../utils/clipboard';
+import { Sym } from '../ui';
+import { copyWithFeedback } from '../utils/copyFeedback';
 import type { ArtifactActions } from './ArtifactEditor';
 import StickyHeader from './StickyHeader';
 import './code-block.css';
@@ -23,7 +23,7 @@ export default function CodeBlock({ source, language = 'text', preview, editActi
         </Button>
         <Dropdown.Popover placement="bottom end">
           <Dropdown.Menu aria-label="代码操作" disabledKeys={editActions?.busy ? ['edit', 'undo'] : []} onAction={key => {
-            if (key === 'copy') void copyText(source).then(ok => ok ? toast.success('源码已复制') : toast.error('复制失败'));
+            if (key === 'copy') void copyWithFeedback(source, '已复制源码');
             if (key === 'preview') { setPreviewMounted(true); setPreviewOpen(value => !value); }
             if (key === 'edit') editActions?.edit();
             if (key === 'undo') editActions?.undo?.();

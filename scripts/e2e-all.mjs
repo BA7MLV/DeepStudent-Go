@@ -56,7 +56,9 @@ const META = {
   'test-bilibili-pages': { service: 'none', antd: false, timeout: 120 },
   'test-bilibili-parse': { service: 'none', antd: false, timeout: 120 },
   'test-bilibili-subtitle': { service: 'none', antd: false, timeout: 120 },
-  'test-bilibili-transport': { service: 'none', antd: false, timeout: 120 },
+  'test-bilibili-season': { service: 'none', antd: false, timeout: 120, tsx: true },
+  'e2e-bilibili-server': { service: 'none', antd: false, timeout: 180, tsx: true },
+  'test-server-bilibili': { service: 'none', antd: false, timeout: 120, tsx: true },
   'test-bilingual': { service: 'none', antd: false, timeout: 120 },
   // 构建信息纯逻辑：时间补零 / 固定北京时间（不是构建机时区、不是 UTC）/ commit 缺失降级 / dev 分支。
   // 「注入有没有真的通到产物与 DOM」由 e2e-build-info 覆盖，两者不重叠。
@@ -210,41 +212,6 @@ const META = {
   // （src/sync/units.ts 的 ALL_SETTINGS_FIELDS_CLASSIFIED / ALL_VIDEO_FIELDS_CLASSIFIED，
   // `npm run build` 的 tsc 会拦），两者不重叠。
   'test-sync-units': { service: 'none', antd: false, timeout: 120 },
-  // 实时链路协议（最底层，三方共用）：文本/二进制帧往返、坏帧一律 null（gzip 除外）、
-  // 线格式逐字节小端、分片边界。零依赖纯函数（fflate + units 的 PART_BYTES 常量）。
-  'test-livelink-protocol': { service: 'none', antd: false, timeout: 120 },
-  // 实时链路拉流窗口：窗口锚在播放头、与已缓冲区间防重叠、尾部按 size 钳制、
-  // 在途数背压。「pos 锚定」是修掉「首窗填满后永久停摆」（8MB 窗口约 13 秒就饿死）
-  // 后的回归；脏输入安静空转——它跑在 timeupdate 回调里，抛异常会打死整条 socket。
-  'test-livelink-window': { service: 'none', antd: false, timeout: 120 },
-  // 实时链路 P1 全链路：host 设置页 ↔ 桩中继 ↔ guest 镜像页。
-  // 协议级字节边界必断；MSE 真解码只对 video-only webm fixture（mp4 在本机 Chrome
-  // 放不了是实测事实，见脚本文件头），ffmpeg 缺失时该步跳过并打印原因。
-  'e2e-livelink': { service: 'dev', timeout: 300 },
-  // host 侧单元载荷：索引字段白名单（fileDeleted 是唯一进索引的本机事实）、
-  // meta 不发 coverState（guest 按 cover 单元能否拉到判空）、content 段/对照轨
-  // （status 0 的未转写段也发）、cover blob→base64 分片进制可逆且不爆栈。
-  'test-livelink-index': { service: 'none', antd: false, timeout: 120 },
-  // P2 host 侧写 op：apply 的幂等语义（study.add 靠去重表、card.decide 的 gone 分支、
-  // position.set 的 not-found）与 OpQueue 的串行/失败传播。Dexie 靠 fake-indexeddb 自带
-  // （与 test-migration.mjs 同一套），不需要常驻服务。
-  'test-livelink-ops': { service: 'none', antd: false, timeout: 120 },
-  // P2 guest 侧 outbox：入队序、落盘恢复、失败分类（终态丢弃 / internal 退避重试）、
-  // clientOpId 去重、坏落盘不许弄崩页面、position.set 禁止入队。零依赖纯逻辑。
-  'test-livelink-outbox': { service: 'none', antd: false, timeout: 120 },
-  // P2 host 侧接线（握手/版本/op 定向回执/问答流）：跑的是**真 LiveHost** + 进程内桩中继
-  // + 真 WebSocket（用 ws 的客户端当浏览器那个全局），Dexie 靠 fake-indexeddb、模型走假
-  // 网关，不需要常驻服务。守的是「这一帧发给谁」那类只在浏览器里看不出来的事：v1 hello 要
-  // close(4400) 且不发 version.err、两台来宾同时连着时 A 的 ack 不能到 B、未知 from 拒收、
-  // chat.req→ev→done 的帧序列、chat.stop 的 abort 生效、问答全局串行、控制帧无业务响应、
-  // study.add 重放只累加一次。
-  'test-livelink-host-wiring': { service: 'none', antd: false, timeout: 180 },
-  // P2 guest 侧接线：三条 op 路径（进度不入 outbox / 时长与审核入队）、补发**逐条**
-  // （第 2 条不许在第 1 条的 ack 之前发出去）、ack 只认 to=自己、internal 失败退避
-  // 不原地自旋、ack 看门狗原样重发、问答流组装与 to 隔离、稳定 guest id（刷新不新增设备）、
-  // 版本不匹配那句明说。协议细节对着无 socket 的 GuestCore 跑（假时钟精确到毫秒），
-  // 再加几条真桩中继 + 真 ws 的集成用例守 LiveGuest 的 socket 接线。
-  'test-livelink-guest-wiring': { service: 'none', antd: false, timeout: 180 },
   // 供应商注册表：模型引用带 provider、目标解析、报错文案指明是哪一家、
   // 导入合并不覆盖凭据。零依赖纯函数（settings.ts 里的纯函数，不碰 store）。
   'test-providers': { service: 'none', antd: false, timeout: 120 },
@@ -253,8 +220,6 @@ const META = {
 
   // ── preview(4173)：生产构建档 ──
   // 注意：本注释与下面 e2e-mdui-adapter 的说明在 mdui 迁移期间才成立
-  // 需要直连 B 站（地区/网络相关），默认跳过：用 node scripts/e2e-bilibili-subtitle.mjs 单独跑
-  'e2e-bilibili-subtitle': { service: 'dev', antd: false, timeout: 600, skip: '需要直连 B 站' },
   'debug-import-perf': { service: 'preview', antd: true, testFile: true, diagnostic: true, timeout: 300, video: '/tmp/wangke-test.mp4' },
   'e2e-cards': { service: 'preview', antd: true, base: true, timeout: 300 },
   'e2e-chat-export': { service: 'preview', antd: true, base: true, timeout: 300 },
@@ -379,7 +344,6 @@ const META = {
   'e2e-quiz': { service: 'preview', antd: true, key: true, testFile: true, timeout: 300, video: '/tmp/wangke-test.mp4' },
   'e2e-resume': { service: 'preview', antd: true, testFile: true, timeout: 300, video: '/tmp/wangke-test.mp4' },
   'e2e-smoke': { service: 'preview', antd: true, key: true, testFile: true, timeout: 600, video: '/tmp/wangke-test.mp4' },
-  'e2e-bili-cookie': { service: 'preview', antd: false, timeout: 120 },
   'e2e-userscript-charset': { service: 'preview', antd: false, timeout: 60 },
   'e2e-storage-card': { service: 'preview', antd: true, timeout: 300 },
   // 学习时长热力图：网格几何 / 档位 / 悬浮提示 / 区间切换 / 最近 30 天 / **真等 80s 验计时与落库** /

@@ -182,9 +182,7 @@ test('设置白名单与排除项逐项吻合', () => {
   ]);
   assert.deepEqual([...NON_SYNC_SETTINGS_KEYS].sort(), [
     'bilibiliCookie',
-    'bilibiliProxy',
     'jev',
-    'liveRelay',
     'shortcuts',
     'syncEnabled',
     'syncEndpoint',

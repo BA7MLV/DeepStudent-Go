@@ -131,7 +131,6 @@ node scripts/benchmark-client-head.mjs /private/var/folders/2r/zv45t_9d6ljfqfj6l
 - 删除接口/消费者：thread events/stream、Web/native SSE parser/800ms poll、`taskProducts()` row推断桥；通用Worker IDB写继续拒绝。
 - `system-files-changed`剩余消费者：MaterialReader、Library、McpConfigReader均在cloud query/watch分支返回后，仅静态本地使用；catalog listener有 `!cloud.enabled` 门控；sender为 `writeLocalPluginLayout`。保留静态功能。
 - 保留账号失效/visibility/online/storage/abort、受限HTML bridge、模型/MCP SSE、媒体缓冲清理、学习计时、UI日期/耗时/装饰计时器、Worker lease/report。
-- LiveGuest offline索引恢复属于独立LiveLink通道，保留既有语义，不是account records轮询替代。
 - 已删除 browser-chat commands/claim 路由/定时器；新的 executor interactions/authorization stream 不借 account Cookie。未知 callback 效果仍保留 uncertain，不能冒称崩溃后自动续跑。
 
 ## 历史失败与外部未验

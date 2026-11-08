@@ -20,7 +20,6 @@
 | libraryFolders.moveLibraryItems/unpackLibraryItems | moveLibrarySelection整批fresh preflight，SQL索引同事务，文件逆向补偿 | 无效选择整批拒绝；第二rename失败、文件/索引后失败、成功混合移动及undo专项通过；进程死亡/补偿冲突仍uncertain，不拆发 |
 | pipelines/folderPlan | organizeCourses；Worker resourceCommand绑定具体plan及consumed许可 | 同名目录复用、unknown ID回报已测；parent/hash/lease仍由Executor边界校验 |
 | MaterialReader.lastUnit/htmlView与正文 | recordReadingPosition/setReadingView + courseDocument共享watch | 删除两处5秒刷新；静态本地监听保留；真实文件外部修改WS推送/CAS拒绝旧正文已测 |
-| livelink/ops.applyPosition | 云端recordPlayback；clientOpId摘要稳定命令ID | 保留ack/not-found，不对不存在课程put兜底 |
 | HandoutPanel.skillOverride | setCourseSkills，明确课程技能偏好 | 不允许任意videos patch |
 | store/subtitles、reindex、pipelines/{cover,transcribe,transcribeQueue} | Worker封闭LearningProduct；UI字幕导入/暂停转写分别importSubtitles/pauseTranscription | 无wire table selector；未知producer保留原outbox报错；各任务producer故障矩阵仍需核验 |
 | MCP配置、系统目录、Bot审批及任务通知 | systemDocument/systemDirectory/permissions query/watch；TaskList→Zustand投影 | 删除相关5秒/4秒业务轮询与cloud-data/tasks-changed窗口广播；静态UI事件、Worker lease/heartbeat及A仍使用的端点保留 |

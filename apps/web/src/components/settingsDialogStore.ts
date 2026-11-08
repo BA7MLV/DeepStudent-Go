@@ -22,7 +22,6 @@ export type SettingsModule =
   | 'usage'
   | 'appearance'
   | 'sources'
-  | 'live'
   | 'playback'
   | 'shortcuts'
   | 'study'
@@ -84,7 +83,7 @@ export function closeSettings(): void {
 
 const VALID_MODULES: readonly SettingsModule[] = [
   'models', 'assistant', 'experience', 'botChannels', 'agent', 'skills', 'bot', 'gateway',
-  'usage', 'appearance', 'sources', 'live', 'playback', 'shortcuts', 'study', 'data', 'websearch',
+  'usage', 'appearance', 'sources', 'playback', 'shortcuts', 'study', 'data', 'websearch',
 ];
 
 /** 根据当前 URL hash 打开设置弹窗（#/settings 或 #/settings/<module>） */

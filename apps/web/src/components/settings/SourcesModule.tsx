@@ -1,236 +1,60 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Input } from '@heroui/react';
+import { Field, LoadingButton, SectionCard, toast } from '../../ui';
+import { cloudRequest } from '../../cloud/state';
 import { useSettings } from '../../store/settings';
-import { Field, LoadingButton, SectionCard, Sym, toast } from '../../ui';
-import { IconSwap } from '../motion';
-import {
-  getBiliBridgeVersion,
-  isBiliBridgeAvailable,
-  isBridgePostCapable,
-  readBiliCookie,
-} from '../../bilibili/transport';
-import { probeBiliLogin } from '../../bilibili/api';
 
-/**
- * 「内容源」模块：B 站导入的出口配置。
- *
- * 主路径（油猴桥）与备用出口（代理 + Cookie）分层：装了桥还能正常登录时，
- * 代理地址与 Cookie 都是纯噪音（请求自带浏览器 Cookie），所以收进折叠项里，
- * 常驻只留「桥的状态 + 登录态」这一行真正需要盯的信息。
- */
+interface BiliStatus { configured: boolean; login: { isLogin: boolean; uname?: string } | null }
+
 export default function SourcesModule() {
-  const settings = useSettings();
-  const [bridgeTick, setBridgeTick] = useState(0);
-  /** 读取本机 Cookie 的进行中标记 */
-  const [cookieReading, setCookieReading] = useState(false);
-  /** 上一次「读取本机 Cookie」的结果说明（失败时写清是哪一种失败） */
-  const [cookieNote, setCookieNote] = useState('');
-  /** 说明是「问题」（红）还是「只是没法读明细，不影响用」（灰） */
-  const [cookieNoteLevel, setCookieNoteLevel] = useState<'info' | 'warn'>('info');
-  /** 「备用出口」的展开态：null = 跟着主路径（没桥就展开，有桥就收起） */
-  const [advOverride, setAdvOverride] = useState<boolean | null>(null);
-  /** 油猴桥视角的登录态（进设置探测一次；null = 探不到） */
-  const [biliLogin, setBiliLogin] = useState<{ isLogin: boolean; uname?: string } | null>(null);
-
-  const bridgeOk = isBiliBridgeAvailable();
-  const advOpen = advOverride ?? !bridgeOk;
-
-  // 装/卸脚本后「备用出口」回到自动态（有桥就收起）
+  const legacyCookie = useSettings(s => s.bilibiliCookie);
+  const [status, setStatus] = useState<BiliStatus | null>(null);
+  const [cookie, setCookie] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   useEffect(() => {
-    setAdvOverride(null);
-  }, [bridgeTick]);
-
-  // 探测一次 B 站登录态：只做展示，失败静默。
-  // 依赖只跟 bridgeTick 走 —— 带 cookie 进依赖会在输框里每敲一个字发一次请求。
-  const biliProbeRef = useRef({ proxy: '', cookie: '' });
-  biliProbeRef.current = { proxy: settings.bilibiliProxy, cookie: settings.bilibiliCookie };
-  useEffect(() => {
-    if (!bridgeOk) {
-      setBiliLogin(null);
-      return;
-    }
-    let alive = true;
-    void probeBiliLogin(biliProbeRef.current).then((r) => {
-      if (alive) setBiliLogin(r);
+    const controller = new AbortController();
+    void cloudRequest<BiliStatus>('/bilibili/status', { signal: controller.signal }).then(setStatus).catch(() => {
+      if (!controller.signal.aborted) setError('暂时无法检查服务器的 B 站登录状态。');
     });
-    return () => {
-      alive = false;
-    };
-  }, [bridgeTick]);
+    return () => controller.abort();
+  }, []);
 
-  /**
-   * 「读取本机 Cookie」：经油猴桥的 GM_cookie 读 .bilibili.com 全量 Cookie 并填入。
-   * 失败的四种情况分开提示（否则「没读到」这一句话会把「脚本太旧」和「没登录」混在一起，无法对症）。
-   */
-  const readCookieFromBrowser = async () => {
-    setCookieReading(true);
+  async function save(value: string) {
+    setBusy(true); setError('');
     try {
-      const result = await readBiliCookie();
-      if (result.status !== 'ok') {
-        if (result.status === 'empty') {
-          // 「读到 0 项」有两种截然不同的含义，靠桥出口自己问一次登录态来分辨：
-          //   已登录 → 只是扩展不给 GM_cookie 明细，不影响任何功能，别吓唬用户；
-          //   未登录 → 那确实该先去登录。
-          const login = await probeBiliLogin({
-            proxy: settings.bilibiliProxy,
-            cookie: settings.bilibiliCookie,
-          });
-          setBiliLogin(login);
-          const note = login?.isLogin
-            ? `读到 0 项 Cookie，但油猴桥出口已登录${login.uname ? `（${login.uname}）` : ''}：说明扩展没提供 GM_cookie 明细。这不影响导入 —— 桥的请求本来就会带上浏览器自己的 Cookie，这个输入框留空即可`
-            : '能读 Cookie，但本机没有 bilibili.com 的：先在浏览器里登录 B 站（无痕窗口、容器标签页读不到）';
-          setCookieNoteLevel(login?.isLogin ? 'info' : 'warn');
-          setCookieNote(note);
-          if (login?.isLogin) toast.info(note);
-          else toast.warning(note);
-          return;
-        }
-        const note =
-          result.status === 'no-bridge'
-            ? '没检测到油猴桥：先点上面的「安装脚本」装好脚本（装完刷新本页），再点这个按钮'
-            : result.status === 'old-bridge'
-              ? `当前脚本是 ${result.version} 版，没有读 Cookie 的能力：浏览器里的脚本副本不会自动更新，请在左侧重新安装一次`
-              : '脚本读不到 Cookie（浏览器/扩展不支持或未授权 GM_cookie：Safari 的 Userscripts 属于这种）。手动粘贴即可，或者直接留空 —— 装了油猴桥时请求会自动带上浏览器自己的 Cookie';
-        setCookieNoteLevel('warn');
-        setCookieNote(note);
-        toast.warning(note);
-        return;
-      }
-      settings.update({ bilibiliCookie: result.cookie });
-      const hasSess = /(^|;\s*)SESSDATA=/.test(result.cookie);
-      const note = hasSess
-        ? `已读取 ${result.cookie.split(';').length} 项 Cookie（含 SESSDATA）`
-        : '已读取本机 Cookie，但没发现 SESSDATA（可能未登录 B 站）';
-      setCookieNoteLevel(hasSess ? 'info' : 'warn');
-      setCookieNote(note);
-      toast.success(note);
-      const state = await probeBiliLogin({ proxy: settings.bilibiliProxy, cookie: result.cookie });
-      setBiliLogin(state);
-    } finally {
-      setCookieReading(false);
-    }
-  };
+      const saved = await cloudRequest<{ configured: boolean }>('/bilibili/credentials', { method: 'PUT', body: JSON.stringify({ cookie: value }) });
+      setCookie(''); setStatus({ ...saved, login: null });
+      toast.success(saved.configured ? 'B 站 Cookie 已加密保存到服务器' : '已清除服务器的 B 站 Cookie');
+      if (value && legacyCookie === value) useSettings.getState().update({ bilibiliCookie: '' });
+      const next = await cloudRequest<BiliStatus>('/bilibili/status');
+      setStatus(next);
+    } catch (e) { setError(e instanceof Error ? e.message : '保存失败，请重试。'); }
+    finally { setBusy(false); }
+  }
 
   return (
     <SectionCard title="哔哩哔哩导入" testId="card-bilibili">
-      {/* 常驻只有这一行：主路径（油猴桥）状态 + 登录态。备用出口收进下面的折叠项 */}
-      <Field
-        label="油猴桥（推荐）"
-        layout="row"
-        testId="field-bili-bridge"
-      >
-        <div
-          className="flex flex-nowrap items-center gap-2"
-          data-bridge-tick={bridgeTick}
-          data-testid="bili-bridge-status"
-        >
-          <span className="min-w-0 flex-1 text-muted">
-            {!bridgeOk ? (
-              '未检测到油猴脚本'
-            ) : (
-              <>
-                已连接 v{getBiliBridgeVersion()}
-                {isBridgePostCapable() ? '' : '（版本过旧，读不到自带字幕）'} ·{' '}
-                <span data-testid="bili-login-state">
-                  {biliLogin == null
-                    ? '登录态未确认'
-                    : biliLogin.isLogin
-                      ? `已登录${biliLogin.uname ? `：${biliLogin.uname}` : ''}`
-                      : '未登录（B 站只给低清晰度）'}
-                </span>
-              </>
-            )}
-          </span>
-          <Button
-            variant={bridgeOk ? 'tertiary' : 'secondary'}
-            data-testid="bili-bridge-install"
-            onPress={() => window.open('/wangke-bili-bridge.user.js', '_blank')}
-          >
-            {bridgeOk ? '重装脚本' : '安装脚本'}
-          </Button>
+      <Field label="服务器直接导入" layout="row">
+        <span className="text-muted" data-testid="bili-server-status">
+          {!status ? '正在检查服务器登录状态…' : status.login?.isLogin ? `B 站已登录${status.login.uname ? `：${status.login.uname}` : ''}` : status.login === null ? '登录状态未确认' : 'B 站未登录，清晰度和可访问内容可能受限'}
+        </span>
+      </Field>
+      <p className="text-sm text-muted">由服务器解析、下载并保存视频，手机和平板也可直接导入，无需油猴或自建代理。任务提交后可关闭页面。</p>
+      <Field label="B 站 Cookie（可选）" testId="field-bili-cookie">
+        <div className="flex flex-col gap-2">
+          <Input data-testid="bili-cookie" aria-label="B 站 Cookie" type="password" autoComplete="off" value={cookie}
+            placeholder={status?.configured ? '服务器已保存 Cookie；输入新值可替换' : 'SESSDATA=...; bili_jct=...'}
+            onChange={e => setCookie(e.target.value)} disabled={busy} />
+          <div className="flex flex-wrap gap-2">
+            <LoadingButton variant="secondary" data-testid="bili-cookie-save" loading={busy} isDisabled={!cookie.trim()} onPress={() => void save(cookie.trim())}>保存到服务器</LoadingButton>
+            <Button variant="ghost" isDisabled={busy || !status?.configured} onPress={() => void save('')}>清除已保存 Cookie</Button>
+            {legacyCookie ? <Button variant="ghost" isDisabled={busy} onPress={() => void save(legacyCookie)}>将此设备旧 Cookie 保存到服务器</Button> : null}
+          </div>
+          <span className="text-sm text-muted">Cookie 仅加密保存在当前账户的服务器上，不会回显或写入导入任务。登录本应用不等于登录 B 站；仅能访问该 B 站账号有权限的内容。</span>
+          {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
         </div>
       </Field>
-
-      {/* 备用出口：收起时整块**不渲染**（不是 CSS 隐藏）—— 免得一屏文字都在说「不用填」，
-          也避免键盘 Tab 进隐藏输入框（`e2e-bili-cookie` 按 DOM 里有没有 `bili-adv` 断言这条）。
-          所以这里没有用 HeroUI 的 `Disclosure`：它的面板要挂载着才能量高度做展开动画，
-          收起时内容仍在 DOM 里 —— 与上面这条不变量冲突。触发器用 HeroUI 的 `Button`。 */}
-      <Button
-        variant="ghost"
-        className="h-auto min-h-12 w-full justify-start gap-2 px-0 text-sm font-normal text-muted"
-        data-testid="bili-adv-toggle"
-        aria-expanded={advOpen}
-        aria-controls="bili-advanced-settings"
-        onPress={() => setAdvOverride(!advOpen)}
-      >
-        <span className="min-w-0 flex-1 text-left text-sm">备用出口：代理地址 / B 站 Cookie</span>
-        {/* icon-swap：折叠 / 展开两个箭头叠在同一格交叉淡入淡出 */}
-        <IconSwap
-          active={advOpen ? 'b' : 'a'}
-          a={<Sym name="chevron_right" />}
-          b={<Sym name="keyboard_arrow_down" />}
-        />
-      </Button>
-      {advOpen && (
-        <div data-testid="bili-adv" id="bili-advanced-settings">
-          <Field
-            label="代理地址"
-            layout="row"
-            testId="field-bili-proxy"
-          >
-            <Input
-              data-testid="bili-proxy"
-              aria-label="代理地址"
-              className="w-[22rem] max-w-full"
-              value={settings.bilibiliProxy}
-              placeholder="https://bili-proxy.yourname.workers.dev"
-              onChange={(e) =>
-                settings.update({
-                  bilibiliProxy: e.target.value.trim(),
-                })
-              }
-            />
-          </Field>
-          <Field
-            label="B 站 Cookie"
-            testId="field-bili-cookie"
-          >
-            <div>
-              <div className="flex flex-nowrap items-center gap-2">
-                <Input
-                  data-testid="bili-cookie"
-                  aria-label="B 站 Cookie"
-                  type="password"
-                  placeholder="SESSDATA=...; bili_jct=..."
-                  className="min-w-0 flex-1"
-                  value={settings.bilibiliCookie}
-                  onChange={(e) =>
-                    settings.update({
-                      bilibiliCookie: e.target.value.trim(),
-                    })
-                  }
-                />
-                <LoadingButton
-                  variant="secondary"
-                  data-testid="bili-cookie-read"
-                  loading={cookieReading}
-                  onPress={() => void readCookieFromBrowser()}
-                >
-                  读取本机 Cookie
-                </LoadingButton>
-              </div>
-              {cookieNote && (
-                <div
-                  className={`mt-1.5 text-xs ${cookieNoteLevel === 'warn' ? 'text-danger' : 'text-muted'}`}
-                  data-testid="bili-cookie-note"
-                >
-                  {cookieNote}
-                </div>
-              )}
-            </div>
-          </Field>
-        </div>
-      )}
     </SectionCard>
   );
 }

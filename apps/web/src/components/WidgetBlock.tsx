@@ -12,8 +12,8 @@ import './widget-block.css';
 import WidgetStreamFrame from './WidgetStreamFrame';
 import { MAX_WIDGET_DIAGNOSTICS, readWidgetDiagnostic, WIDGET_READY_TIMEOUT_MS, widgetDiagnosticIsError, widgetDiagnosticSummary, widgetRepairInstruction, type WidgetDiagnostic } from '../harness/widgetDiagnostics';
 import { loadWidgetImages, widgetImageReferences } from '../harness/widgetImages';
-import { copyText } from '../utils/clipboard';
-import { toast } from '../ui';
+import { copyWithFeedback } from '../utils/copyFeedback';
+import { CopyButton } from '../ui/copy-button';
 import { validateWidgetPayload, readWidgetAnswerFeedback, acceptsWidgetFeedback, type WidgetAnswerFeedback } from '../harness/widgetProtocol';
 
 /**
@@ -127,7 +127,7 @@ function RejectedWidget({ error, source, retry, editActions }: { error: string; 
       {editActions?.repair && <Button size="sm" variant="secondary" isDisabled={editActions.busy} onPress={() => editActions.repair?.(widgetRepairInstruction([], error))}>修复此块</Button>}
       <Button size="sm" variant="tertiary" onPress={retry}>重试预览</Button>
       <Button size="sm" variant="tertiary" aria-controls={id} aria-expanded={open} onPress={() => setOpen(value => !value)}>{open ? '收起 HTML 源码' : '查看 HTML 源码'}</Button>
-      <Button size="sm" variant="tertiary" onPress={() => void copyText(source).then(ok => ok ? toast.success('HTML 源码已复制') : toast.error('复制失败'))}>复制 HTML</Button>
+      <CopyButton size="sm" variant="tertiary" text={source} label="复制 HTML" />
     </div>
     {open && <pre id={id} aria-label="HTML 源码" className="my-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-default p-3 text-xs" data-testid="widget-source"><code>{source}</code></pre>}
   </div>;
@@ -143,7 +143,7 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
   const sourceId = useId();
   const sourceActions = htmlActions ?? {
     sourceOpen, sourceId, toggleSource: () => setSourceOpen(value => !value),
-    copySource: () => void copyText(payload.html).then(ok => ok ? toast.success('HTML 源码已复制') : toast.error('复制失败')),
+    copySource: () => void copyWithFeedback(payload.html, '已复制 HTML 源码'),
   };
   const hostRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);

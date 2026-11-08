@@ -63,6 +63,7 @@ export { Sym, type SymProps } from './icons';
 export { Hint } from './Hint';
 export { SYMBOL_NAMES, type SymbolName } from './icons';
 export { LoadingButton, type LoadingButtonProps } from './loading-button';
+export { CopyButton } from './copy-button';
 export { PageLoader } from './page-loader';
 export {
   SkeletonReveal,

@@ -34,7 +34,6 @@ const ALL_MODULES: Module[] = [
   { key: 'usage', icon: 'bar_chart', tint: '#d18a19', Component: lazy(() => import('./settings/UsageModule')), cloudOnly: true },
   { key: 'experience', icon: 'style', tint: '#ff9f0a', Component: lazy(() => import('./settings/ExperienceModule')) },
   { key: 'sources', icon: 'cloud_upload', tint: '#607d8b', Component: lazy(() => import('./settings/SourcesModule')) },
-  { key: 'live', icon: 'link', tint: '#d65d7a', Component: lazy(() => import('./settings/LiveModule')) },
   { key: 'study', icon: 'calendar_month', tint: '#ff453a', Component: lazy(() => import('./settings/StudyModule')) },
   { key: 'data', icon: 'folder', tint: '#64d2ff', Component: lazy(() => import('./settings/DataModule')) },
 ];

@@ -272,7 +272,7 @@ export const SYNC_SETTINGS_KEYS = [
   'studyTrackingEnabled',
   'studyIdleMinutes',
   // HTML 材料的联网开关：与 danmakuEnabled / dynamicColor 同类的渲染偏好，不携带凭据，
-  // 也不描述「这台设备怎么出网」（那是 bilibiliProxy 被排除的理由）。同步本身只在用户
+  // 也不描述「这台设备怎么出网」。同步本身只在用户
   // 显式打开云同步后才发生。
   'htmlRemoteAssets',
 ] as const satisfies readonly (keyof Settings)[];
@@ -281,9 +281,6 @@ export const SYNC_SETTINGS_KEYS = [
  * 设置中**明确不参与同步**的字段。必须逐个写明理由，否则下一个人会觉得它只是被忘了。
  *
  * - `bilibiliCookie`：含 `SESSDATA`，是账号登录态。泄漏等于账号被冒用。
- * - `bilibiliProxy`：指向代理部署位置，跟「当前设备怎么出网」绑定，跨设备无意义。
- * - `liveRelay`：与 `bilibiliProxy` 同性质——「当前设备从哪出网」（实时链路的中继）
- *   跨设备无意义；跟着同步过去只会让对面连到一个不属于它的房间。
  * - `syncEnabled` / `syncEndpoint` / `syncToken`：**同步自身的配置必须本机独立** ——
  *   否则「关掉同步」这个动作本身要先同步过去，逻辑上成了先有鸡还是先有蛋。
  *
@@ -298,8 +295,6 @@ export const NON_SYNC_SETTINGS_KEYS = [
   // 决策功能的出网授权必须在每台设备单独确认；凭据已归入供应商。
   'jev',
   'bilibiliCookie',
-  'bilibiliProxy',
-  'liveRelay',
   'syncEnabled',
   'syncEndpoint',
   'syncToken',
