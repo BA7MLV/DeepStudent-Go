@@ -3,7 +3,7 @@ import test from 'node:test';
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { installCloudCache, markCloudApply } from '../apps/web/src/cloud/cache.ts';
-import { cloudTransaction, isLostCloudTransaction } from '../apps/web/src/cloud/transactions.ts';
+import { cloudTransaction, cloudRetry, isLostCloudTransaction } from '../apps/web/src/cloud/transactions.ts';
 import { WangkeDB, cloudDatabaseName, legacyCloudDatabaseName } from '../apps/web/src/store/db.ts';
 import { preserveLegacyCloudData } from '../apps/web/src/cloud/legacy-migration.ts';
 import { cloud } from '../apps/web/src/cloud/state.ts';
@@ -228,4 +228,34 @@ test('permanent storage failures abort immediately, without deleting the outbox'
   }), error => !isLostCloudTransaction(error));
   assert.equal(attempts, 1);
   assert.equal(await database.table('_cloudOutbox').count(), 1);
+});
+
+test('cloudRetry replays reads that lost their backing transaction, without retrying other errors', async t => {
+  const open = async () => {
+    const database = new Dexie(`cloud-retry-${crypto.randomUUID()}`);
+    database.version(1).stores({ _cloudMeta: 'id' });
+    await database.open();
+    t.after(() => database.delete());
+    return database;
+  };
+  let attempts = 0;
+  const value = await cloudRetry(await open(), async () => {
+    attempts++;
+    if (attempts === 1) throw lostTransaction();
+    return 'read';
+  });
+  assert.equal(value, 'read');
+  assert.equal(attempts, 2);
+  let permanent = 0;
+  await assert.rejects(cloudRetry(await open(), async () => {
+    permanent++;
+    throw new DOMException('storage full', 'QuotaExceededError');
+  }), error => !isLostCloudTransaction(error));
+  assert.equal(permanent, 1);
+  let exhausted = 0;
+  await assert.rejects(cloudRetry(await open(), async () => {
+    exhausted++;
+    throw lostTransaction();
+  }), isLostCloudTransaction);
+  assert.equal(exhausted, 3, 'persistent loss stops after three attempts');
 });

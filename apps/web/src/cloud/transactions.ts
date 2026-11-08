@@ -32,6 +32,31 @@ export async function cloudTransaction<T>(database: Dexie, tables: Table[], scop
       if (!isLostCloudTransaction(error) || attempt >= delays.length) throw error;
       // Wait outside the rejected transaction; every retry gets a fresh transaction.
       await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+      // A wedged native connection never heals by itself. Reopen it before the
+      // last attempt so recovery stays automatic instead of asking for a reload.
+      if (attempt === delays.length - 1) await reopenCloudDatabase(database);
     }
   }
+}
+
+/** Reads outside an explicit transaction also lose their backing transaction
+ * after WebKit tab suspension. Each retry reopens a fresh native transaction. */
+export async function cloudRetry<T>(database: Dexie, scope: () => Promise<T>): Promise<T> {
+  const delays = [100, 400];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await scope();
+    } catch (error) {
+      if (!isLostCloudTransaction(error) || attempt >= delays.length) throw error;
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+      if (attempt === delays.length - 1) await reopenCloudDatabase(database);
+    }
+  }
+}
+
+/** Closing and reopening gives the page a fresh native connection. Version
+ * upgrades from other tabs still surface through the database lifecycle notice. */
+export async function reopenCloudDatabase(database: Dexie) {
+  database.close();
+  await database.open();
 }
