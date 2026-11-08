@@ -1,6 +1,7 @@
 import { db } from '../store/db';
 import { normalizeUserName, useSettings, type Settings } from '../store/settings';
 import { cloud } from './state';
+import { cloudTransaction } from './transactions';
 import { normalizeUiLanguage } from '../i18n/locale';
 import { normalizeAgentInstructions } from '../harness/agentInstructions';
 import { markCloudApply, type OutboxRow } from './cache';
@@ -36,7 +37,7 @@ async function preferenceCommands() {
   lifetime.assertCurrent();
   if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
   if (commands?.lifetime === lifetime) return commands.drain;
-  const mutateJournal = (write: () => Promise<unknown>) => database.transaction('rw', database.table('_cloudMeta'), async () => {
+  const mutateJournal = (write: () => Promise<unknown>) => cloudTransaction(database, [database.table('_cloudMeta')], async () => {
     lifetime.assertCurrent();
     await write();
     lifetime.assertCurrent();
@@ -49,7 +50,7 @@ async function preferenceCommands() {
       // Install this command's confirmed values before removing its overlay.
       // Otherwise another quick edit can still read the pre-ack cache as its CAS
       // baseline while the preferences subscription is catching up.
-      await database.transaction('rw', database.table('preferences'), database.table('_cloudMeta'), async () => {
+      await cloudTransaction(database, [database.table('preferences'), database.table('_cloudMeta')], async () => {
         lifetime.assertCurrent();
         const command = (await database.table('_cloudMeta').get(prefix + operationId))?.value as DurableCommand<PreferencesCommand> | undefined;
         const projection = value as PreferencesProjection;
@@ -76,7 +77,7 @@ async function persistPreferences(rows: { id: typeof keys[number]; value: any }[
   lifetime.assertCurrent();
   if (database !== db) throw new Error('client_account_changed');
   const operationId = `preferences-${Date.now()}-${String(commandSequence++).padStart(8, '0')}-${crypto.randomUUID()}`;
-  await database.transaction('rw', database.table('preferences'), database.table('_cloudMeta'), async () => {
+  await cloudTransaction(database, [database.table('preferences'), database.table('_cloudMeta')], async () => {
     lifetime.assertCurrent();
     const changes = [];
     // Queue edits against their predecessor's intended value. Each command
@@ -97,7 +98,7 @@ async function applyProjection(value: PreferencesProjection, database = db) {
   if (database !== db) return;
   // Pending drafts win only in the UI cache, never as server authority. Keep the
   // original expected values and IDs for CAS/reconciliation, including reload.
-  await database.transaction('rw', database.table('preferences'), database.table('_cloudMeta'), async () => {
+  await cloudTransaction(database, [database.table('preferences'), database.table('_cloudMeta')], async () => {
     if (!lifetime.current() || current !== generation || owner !== cloud.userId || database !== db) throw new Error('client_account_changed');
     markCloudApply();
     const pending = (await database.table('_cloudMeta').toArray()).filter(row => row.id.startsWith(prefix));
@@ -114,7 +115,7 @@ async function applyProjection(value: PreferencesProjection, database = db) {
 export async function applySystemAgentInstructions(text: string, database = db) {
   const lifetime = accountLifetime(cloud.userId);
   if (database !== db) throw new Error('client_account_changed');
-  await database.transaction('rw', database.table('preferences'), async () => {
+  await cloudTransaction(database, [database.table('preferences')], async () => {
     lifetime.assertCurrent();
     if (database !== db) throw new Error('client_account_changed');
     markCloudApply();
@@ -253,7 +254,7 @@ export async function resolvePreferenceCommand(operationId: string, inspected: A
   if (inspected.owner !== owner || inspected.generation !== generation || inspected.command.operationId !== operationId || database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
   if (action === 'retry' && (inspected.command.legacy || !['missing', 'completed'].includes(inspected.receipt.status))) throw new Error('preference_command_requires_reconciliation');
   const successor = `preferences-${Date.now()}-${crypto.randomUUID()}`;
-  await database.transaction('rw', database.table('_cloudMeta'), async () => {
+  await cloudTransaction(database, [database.table('_cloudMeta')], async () => {
     if (!current()) throw new Error('client_account_changed');
     const prior = await database.table('_cloudMeta').get(`preferences-resolved:${operationId}`);
     if (prior) return;
@@ -296,7 +297,7 @@ export async function migratePreferenceOutbox() {
     if (!rows.some(row => row.table === 'preferences')) continue;
     const receipt = await runtime.receipt(transaction);
     if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
-    await database.transaction('rw', database.table('_cloudOutbox'), database.table('_cloudMeta'), async () => {
+    await cloudTransaction(database, [database.table('_cloudOutbox'), database.table('_cloudMeta')], async () => {
       const current = await database.table<OutboxRow>('_cloudOutbox').where('transaction').equals(transaction).toArray();
       if (JSON.stringify(current) !== JSON.stringify(rows)) throw new Error('preference_migration_changed');
       if (receipt.status === 'completed') {

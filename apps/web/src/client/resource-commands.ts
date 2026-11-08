@@ -4,6 +4,7 @@ import type { ResourceCommand, ResourceOperation } from '@wangke/contracts/resou
 import type { RuntimeJson } from '@wangke/contracts/client-runtime';
 import { db } from '../store/db';
 import { cloud } from '../cloud/state';
+import { cloudTransaction } from '../cloud/transactions';
 import { request as binaryRequest } from '../api/serverClient';
 import { accountLifetime, type AccountLifetime } from './account-lifecycle';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
@@ -60,7 +61,7 @@ export function startResourceCommands() {
   const guard = () => { if (!current()) throw new Error('client_account_changed'); };
   const update = async (id: string, patch: Partial<ResourceDraft>) => {
     guard();
-    await database.transaction('rw', metadata, async () => {
+    await cloudTransaction(database, [metadata], async () => {
       guard(); const row = await metadata.get(id); if (!row) return;
       await metadata.put({ ...row, value: { ...row.value, ...patch } }); guard();
     });
@@ -68,7 +69,7 @@ export function startResourceCommands() {
   };
   const complete = async (row: Row, result: RuntimeJson) => {
     guard();
-    await database.transaction('rw', metadata, async () => {
+    await cloudTransaction(database, [metadata], async () => {
       guard();
       await metadata.put({ id: `resource-completed:${row.value.request.operationId}`, value: {
         operationId: row.value.request.operationId, kind: row.value.request.operation.kind, result, confirmedAt: Date.now(), state: 'completed',
@@ -90,7 +91,7 @@ export function startResourceCommands() {
     guard();
     // Claim before external IO. A coalescing producer may change only an unsent
     // queued command; its identity/payload become immutable after this commit.
-    const row = await database.transaction('rw', metadata, async () => {
+    const row = await cloudTransaction(database, [metadata], async () => {
       guard(); const row = await metadata.get(id) as Row | undefined;
       if (!row || ['failed', 'conflict', 'review', 'paused'].includes(row.value.state)) return;
       row.value = { ...row.value, state: 'uncertain', attempts: (row.value.attempts ?? 0) + 1 };
@@ -180,7 +181,7 @@ export function startResourceCommands() {
   };
   const wake = async (force = true) => {
     guard();
-    await database.transaction('rw', metadata, async () => {
+    await cloudTransaction(database, [metadata], async () => {
       const rows = await metadata.where('id').startsWith(prefix).toArray() as Row[];
       for (const row of rows) if (row.value.state === 'paused') {
         guard(); await metadata.put({ ...row, value: { ...row.value, state: row.value.sent ? 'uncertain' : 'queued', attempts: 0, nextAttemptAt: 0 } });
@@ -220,7 +221,7 @@ export async function resumeResourceCommands() { startResourceCommands(); await 
  * document/video Blob. Pending/uncertain originals never participate in GC. */
 async function compactCompletedResources(database: typeof db, lifetime: AccountLifetime) {
   const metadata = database.table('_cloudMeta');
-  await database.transaction('rw', metadata, async () => {
+  await cloudTransaction(database, [metadata], async () => {
     lifetime.assertCurrent(); if (database !== db) return;
     const rows = await metadata.where('id').startsWith('resource-completed:').toArray();
     rows.sort((a, b) => (b.value.confirmedAt ?? 0) - (a.value.confirmedAt ?? 0));
@@ -239,7 +240,7 @@ export async function enqueueResourceCommand(operation: ResourceOperation, blob?
   const inputDigest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))), byte => byte.toString(16).padStart(2, '0')).join('');
   lifetime.assertCurrent(); if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
   let id = `${prefix}resource-${stableId}`;
-  await database.transaction('rw', metadata, async () => {
+  await cloudTransaction(database, [metadata], async () => {
     lifetime.assertCurrent();
     const key = group(operation);
     const scope = (await metadata.get('resource-server-scope'))?.value as string | undefined;

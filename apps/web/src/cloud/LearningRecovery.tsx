@@ -3,6 +3,7 @@ import { liveQuery } from 'dexie';
 import { useTranslation } from 'react-i18next';
 import { db } from '../store/db';
 import { cloud } from './state';
+import { cloudTransaction } from './transactions';
 import { drainLearning, type LearningCommandRow } from '../client/learning';
 import { encodeRecoveryValue } from './recovery-export';
 import { confirmDialog } from '../ui/feedback';
@@ -43,7 +44,7 @@ export default function LearningRecovery() {
     if (!current() || row.state !== 'conflict' || !await confirmDialog({ headline: t('archiveTitle'), description: t('archiveDescription'), confirmText: t('archiveConfirm') })) return;
     if (!current()) return;
     const database = scope.database, id = `learning:${row.operationId}`;
-    await database.transaction('rw', database.table('_learningCommands'), database.table('_historyTransactions'), database.table('_historyRecovery'), async () => {
+    await cloudTransaction(database, [database.table('_learningCommands'), database.table('_historyTransactions'), database.table('_historyRecovery')], async () => {
       if (!current()) throw new Error('client_account_changed');
       const saved = await database.table<LearningCommandRow>('_learningCommands').get(row.sequence!);
       if (saved?.state !== 'conflict') return;

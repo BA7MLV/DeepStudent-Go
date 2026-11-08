@@ -2,6 +2,7 @@ import type { ClientLearningCommand, ClientLearningEdit, RuntimeRecordsReceipt }
 import { db, type ChatRow, type ChatSessionRow, type SkillRow, type SkillRefRow } from '../store/db';
 import type { InkStroke } from '../materials/ink';
 import { cloud } from '../cloud/state';
+import { cloudTransaction } from '../cloud/transactions';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
 import { DurableCommands, type DurableCommand } from '@wangke/client-core';
 import { commandDigest } from './command-digest';
@@ -39,7 +40,7 @@ export async function queueLearning(edits: ClientLearningEdit[], entities: strin
     return delta;
   }));
   if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
-  await database.transaction('rw', database.table('_learningCommands'), database.table('_cloudMeta'), async () => {
+  await cloudTransaction(database, [database.table('_learningCommands'), database.table('_cloudMeta')], async () => {
     const old = await database.table<LearningCommandRow>('_learningCommands').where('operationId').equals(operationId).first();
     const completed = await database.table('_cloudMeta').get(`learning-completed:${operationId}`);
     if (old || completed) {

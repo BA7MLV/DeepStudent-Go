@@ -1,5 +1,6 @@
 import { assertPluginAvailable } from '../plugins/availability';
 import { runCloudTask } from '../cloud/tasks';
+import { cloudTransaction } from '../cloud/transactions';
 import { db, type HandoutRow } from '../store/db';
 import { cloud } from '../cloud/state';
 import type { HandoutSection } from '../handout/docx';
@@ -56,7 +57,7 @@ export function persistHandoutEdit(original: HandoutRow, sections: HandoutSectio
       { action: 'persist', videoId: original.videoId, handoutId, sections, summary, expected });
     guard();
     st.baseline = Promise.resolve({ sectionsJson: result.sectionsJson, outlineJson: result.outlineJson, blob: { $file: result.fileId } });
-    await database.transaction('rw', database.table('_cloudMeta'), async () => {
+    await cloudTransaction(database, [database.table('_cloudMeta')], async () => {
       const draft = await database.table('_cloudMeta').get(draftId);
       if (draft?.value.intent === intent) await database.table('_cloudMeta').delete(draftId);
     });

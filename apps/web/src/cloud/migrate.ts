@@ -1,6 +1,7 @@
 import Dexie from 'dexie';
 import { db } from '../store/db';
 import { cloud } from './state';
+import { cloudTransaction } from './transactions';
 import { apiUrl } from '../api/base';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { flushCloud } from './sync';
@@ -161,7 +162,7 @@ export async function mapLibraryFile(id: string, expectedReference: unknown, blo
   const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))].map(n => n.toString(16).padStart(2, '0')).join('');
   return navigator.locks.request(`library-import:${owner}`, async () => {
     if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
-    await database.transaction('rw', database.table('_cloudMeta'), async () => {
+    await cloudTransaction(database, [database.table('_cloudMeta')], async () => {
       const row = await database.table('_cloudMeta').get('library-import'), draft = row?.value;
       const reference = draft?.source.archive?.courseFiles?.find((row: any) => row.id === id);
       if (!reference || JSON.stringify(reference) !== JSON.stringify(expectedReference) || draft.request || draft.state === 'completed') throw new Error('library_file_mapping_changed');
