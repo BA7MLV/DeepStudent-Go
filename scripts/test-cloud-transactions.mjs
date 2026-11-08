@@ -230,9 +230,16 @@ test('permanent storage failures abort immediately, without deleting the outbox'
   assert.equal(await database.table('_cloudOutbox').count(), 1);
 });
 
-test('cloudRetry replays reads that lost their backing transaction, without retrying other errors', async () => {
+test('cloudRetry replays reads that lost their backing transaction, without retrying other errors', async t => {
+  const open = async () => {
+    const database = new Dexie(`cloud-retry-${crypto.randomUUID()}`);
+    database.version(1).stores({ _cloudMeta: 'id' });
+    await database.open();
+    t.after(() => database.delete());
+    return database;
+  };
   let attempts = 0;
-  const value = await cloudRetry(async () => {
+  const value = await cloudRetry(await open(), async () => {
     attempts++;
     if (attempts === 1) throw lostTransaction();
     return 'read';
@@ -240,13 +247,13 @@ test('cloudRetry replays reads that lost their backing transaction, without retr
   assert.equal(value, 'read');
   assert.equal(attempts, 2);
   let permanent = 0;
-  await assert.rejects(cloudRetry(async () => {
+  await assert.rejects(cloudRetry(await open(), async () => {
     permanent++;
     throw new DOMException('storage full', 'QuotaExceededError');
   }), error => !isLostCloudTransaction(error));
   assert.equal(permanent, 1);
   let exhausted = 0;
-  await assert.rejects(cloudRetry(async () => {
+  await assert.rejects(cloudRetry(await open(), async () => {
     exhausted++;
     throw lostTransaction();
   }), isLostCloudTransaction);
