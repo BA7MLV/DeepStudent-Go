@@ -6,7 +6,7 @@ import { CLOUD_TABLES, type CloudRecord, type CloudConfig } from '@wangke/contra
 import { useSettings } from '../store/settings';
 import { flushPreferences, loadPreferences, startPreferences, stopPreferences, migratePreferenceOutbox } from './preferences';
 import { apiUrl } from '../api/base';
-import { cloudTransaction, isLostCloudTransaction } from './transactions';
+import { cloudTransaction, cloudRetry, isLostCloudTransaction } from './transactions';
 import { reasoningProviderOf } from '@wangke/study-core/model/reasoning';
 import Dexie from 'dexie';
 import { serverRuntime, isCurrentServerRuntime, disposeServerRuntime } from '../client/bootstrap';
@@ -63,7 +63,7 @@ export const cloudSyncDiagnostics = () => {
 };
 async function publishCommandDiagnostics(database = db) {
   const lifetime = accountLifetime(cloud.userId);
-  const rows = await database.table<LearningCommandRow>('_learningCommands').toArray();
+  const rows = await cloudRetry(() => database.table<LearningCommandRow>('_learningCommands').toArray());
   if (database !== db || !lifetime.current()) return;
   useCloudSync.setState({ pending: rows.length, queued: rows.filter(row => row.state === 'queued').length,
     uncertain: rows.filter(row => row.state === 'uncertain').length, conflicts: rows.filter(row => row.state === 'conflict').length,
@@ -298,9 +298,11 @@ export function flushCloud(background = false): Promise<void> {
       repeatFlight = false;
       phase('drain:preferences');
       // A preference conflict is local to its draft, never a global feed gate.
-      await flushPreferences().catch(() => {});
+      await cloudRetry(() => flushPreferences()).catch(() => {});
       if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
-       await syncCycle(fullPullRequested, lifetime);
+       await cloudRetry(() => drainLearning());
+      if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
+       await cloudRetry(() => syncCycle(fullPullRequested, lifetime));
       if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
       lifetime.assertCurrent();
       } while (repeatFlight);
@@ -332,7 +334,7 @@ export async function resolveCloudConflict() {
 }
 async function resolveConflictLocked(database: typeof db, lifetime: AccountLifetime) {
   lifetime.assertCurrent();
-  const rows = await database.table('_learningCommands').toArray();
+  const rows = await cloudRetry(() => database.table('_learningCommands').toArray());
   if (!rows.length) return;
   const encoded = await (await import('./recovery-export')).encodeRecoveryValue(rows);
   lifetime.assertCurrent();
@@ -372,7 +374,7 @@ export async function startCloud(owner: string, options: StartCloudOptions = {})
   const databaseAtStart = db;
   const guard = () => { lifetime.assertCurrent(); if (databaseAtStart !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
   await databaseAtStart.open(); guard();
-  await migrateResourceOutbox(); guard(); await migratePreferenceOutbox(); guard();
+  await cloudRetry(() => migrateResourceOutbox()); guard(); await cloudRetry(() => migratePreferenceOutbox()); guard();
   useSettings.persist.setOptions({ name: `wangke-cloud-settings-${owner}` });
   // 登录前的语言不随模型配置重置；有账号语言偏好时，后续 loadPreferences 再覆盖。
   const uiLanguage = useSettings.getState().uiLanguage;
@@ -403,7 +405,7 @@ async function cloudRemotePhase(
   catch (error) {
     // Existing local edits must remain reachable through conflict recovery after reload.
     guard();
-    if (!(await databaseAtStart.table('_learningCommands').count())) throw error;
+    if (!(await cloudRetry(() => databaseAtStart.table('_learningCommands').count()))) throw error;
   }
   guard();
   await startPreferences();
@@ -448,9 +450,9 @@ async function cloudRemotePhase(
     const runtime = await serverRuntime(owner);
     guard(); if (closed) return;
     follow = runtime.followRecords({
-      cursor: async () => (await database.table('_cloudMeta').get('cursor'))?.value ?? 0,
+      cursor: async () => await cloudRetry(async () => (await database.table('_cloudMeta').get('cursor'))?.value ?? 0),
       apply: async (page, signal) => {
-        const apply = async () => {
+        const runApply = async () => {
           guard();
           if (closed || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
           signal.throwIfAborted();
@@ -468,6 +470,9 @@ async function cloudRemotePhase(
             reportSyncHealthy('follow');
             await publishCommandDiagnostics(database);
         };
+        // A lost read/write transaction retries as a whole: the apply is
+        // cursor-driven and idempotent, so replaying it cannot skip a frame.
+        const apply = () => cloudRetry(runApply);
         // Drain local transactions first. Applying under the same lock closes
         // the multi-tab push/remote-echo race without stealing a writer's lock.
         if (navigator.locks) await navigator.locks.request(`cloud-sync:${owner}`, apply);

@@ -35,3 +35,17 @@ export async function cloudTransaction<T>(database: Dexie, tables: Table[], scop
     }
   }
 }
+
+/** Reads outside an explicit transaction also lose their backing transaction
+ * after WebKit tab suspension. Each retry reopens a fresh native transaction. */
+export async function cloudRetry<T>(scope: () => Promise<T>): Promise<T> {
+  const delays = [100, 400];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await scope();
+    } catch (error) {
+      if (!isLostCloudTransaction(error) || attempt >= delays.length) throw error;
+      await new Promise(resolve => setTimeout(resolve, delays[attempt]));
+    }
+  }
+}
