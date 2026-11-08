@@ -122,7 +122,7 @@ async function decode(value: any, database: typeof db, lifetime: AccountLifetime
     const hash = await blobHash(blob);
     lifetime.assertCurrent();
     if (database !== db) throw new Error('client_account_changed');
-    await database.transaction('rw', database.table('_cloudBlobs'), async () => {
+    await cloudTransaction(database, [database.table('_cloudBlobs')], async () => {
       lifetime.assertCurrent();
       await database.table('_cloudBlobs').put({ hash, id: value.$file, origin: 'download' });
       lifetime.assertCurrent();
@@ -194,7 +194,7 @@ async function rebuildRecords(database: typeof db, runtime: Awaited<ReturnType<t
   const guard = () => { lifetime.assertCurrent(); if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed'); };
   const stage = database.table('_projectionStage');
   guard(); useCloudSync.setState({ rebuildReason: reason });
-  await database.transaction('rw', stage, async () => { guard(); await stage.clear(); guard(); });
+  await cloudTransaction(database, [stage], async () => { guard(); await stage.clear(); guard(); });
   let cursor = 0, epoch = '', highWater = 0;
   for (;;) {
     const page = await runtime.recordsPage(cursor); guard();
@@ -204,7 +204,7 @@ async function rebuildRecords(database: typeof db, runtime: Awaited<ReturnType<t
     const records: { id: string; record: CloudRecord }[] = [];
     for (const record of page.records) records.push({ id: `${record.table}:${JSON.stringify(record.key)}`, record: { ...record, value: await decode(record.value, database, lifetime) } });
     guard();
-    await database.transaction('rw', stage, async () => { guard(); await stage.bulkPut(records); guard(); });
+    await cloudTransaction(database, [stage], async () => { guard(); await stage.bulkPut(records); guard(); });
     cursor = page.cursor;
     if (!page.more) break;
   }

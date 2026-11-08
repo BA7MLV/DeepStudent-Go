@@ -3,6 +3,7 @@ import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
 import type { CloudTask } from '@wangke/contracts/cloud';
 import type { ChatAttachment } from '../chat/attachments';
 import { db } from '../store/db';
+import { cloudTransaction } from '../cloud/transactions';
 import { cloud } from '../cloud/state';
 import { createServerChatExecution } from './chat-server-execution';
 import { API_BASE_URL } from '../api/base';
@@ -43,7 +44,7 @@ export function browserChatQueue() {
   const check = () => { if (!current()) throw new Error('client_account_changed'); };
   const table = database.table('_cloudMeta');
   const journal: Journal = {
-    atomic: (operationId, change) => database.transaction('rw', table, async () => {
+    atomic: (operationId, change) => cloudTransaction(database, [table], async () => {
       check();
       const id = prefix + operationId;
       const saved = await table.get(id);
@@ -77,7 +78,7 @@ export function browserChatQueue() {
     current,
     async save(sessionId: number, item: Item) {
       check();
-      await database.transaction('rw', table, async () => {
+      await cloudTransaction(database, [table], async () => {
         const target = sessionId === 0 ? (await table.get(draftId))?.sessionId ?? 0 : sessionId;
         await journal.atomic(item.operationId ?? item.id, old => ({
           record: old && old.state !== 'pending' ? old : { sessionId: target, item: sessionId === 0 ? { ...item, draftOwner: draft } : item, state: 'pending' }, value: undefined,
@@ -85,7 +86,7 @@ export function browserChatQueue() {
       });
     },
     async rekeyDraft(sessionId: number) {
-      await database.transaction('rw', table, async () => {
+      await cloudTransaction(database, [table], async () => {
         check();
         await table.put({ id: draftId, sessionId });
         const rows = await table.where('id').startsWith(prefix).toArray();
@@ -93,7 +94,7 @@ export function browserChatQueue() {
       });
     },
     async remove(sessionId: number, ids: string[]) {
-      await database.transaction('rw', table, async () => {
+      await cloudTransaction(database, [table], async () => {
         check();
         for (const operationId of ids) {
           const id = prefix + operationId, row = await table.get(id);
@@ -151,7 +152,7 @@ export function browserChatQueue() {
      * their lifetime belongs to the authenticated file store, never this queue. */
     async releaseAttachment(file: ChatAttachment) {
       check();
-      await database.transaction('rw', table, database.chats, database.files, async () => {
+      await cloudTransaction(database, [table, database.chats, database.files], async () => {
         check();
         const rows = await table.where('id').startsWith('session-queue:').toArray();
         if (rows.some(row => !row.removed && row.record?.item.attachments?.some((other: ChatAttachment) => other.id === file.id))) return;

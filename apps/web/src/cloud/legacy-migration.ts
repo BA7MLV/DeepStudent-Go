@@ -1,6 +1,7 @@
 import Dexie from 'dexie';
 import { db, legacyCloudDatabaseName } from '../store/db';
 import { cloud } from './state';
+import { cloudTransaction } from './transactions';
 import type { OutboxRow } from './cache';
 import { commandDigest } from '../client/command-digest';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
@@ -25,7 +26,7 @@ export async function preserveLegacyCloudData() {
     for (const row of value.rows) { const group = groups.get(row.transaction) ?? []; group.push(row); groups.set(row.transaction, group); }
     const fingerprints = new Map(await Promise.all([...groups].map(async ([id, rows]) => [id, await commandDigest(rows)] as const)));
     guard();
-    await database.transaction('rw', database.table('_historyRecovery'), database.table('_historyTransactions'), async () => {
+    await cloudTransaction(database, [database.table('_historyRecovery'), database.table('_historyTransactions')], async () => {
       guard();
       for (const [transaction, rows] of groups) {
         const fingerprint = fingerprints.get(transaction)!;
@@ -47,7 +48,7 @@ export async function preserveLegacyCloudData() {
     for (const row of value.meta) {
       if (/^(cursor$|revision:)/.test(row.id)) continue;
       const fingerprint = await commandDigest(row); guard();
-      await database.transaction('rw', database.table('_historyRecovery'), database.table('_historyTransactions'), async () => {
+      await cloudTransaction(database, [database.table('_historyRecovery'), database.table('_historyTransactions')], async () => {
         guard();
         const originalId = `${name}:journal:${row.id}`;
         const previous = await database.table('_historyRecovery').get(originalId);

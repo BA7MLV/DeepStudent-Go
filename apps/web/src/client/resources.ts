@@ -2,6 +2,7 @@ import type { ResourceCommand, ResourceDirectory, ResourceOperation } from '@wan
 import type { ProjectDto } from '@wangke/contracts/projects';
 import { db } from '../store/db';
 import { cloud } from '../cloud/state';
+import { cloudTransaction } from '../cloud/transactions';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
 import { enqueueResourceCommand } from './resource-commands';
 import Dexie from 'dexie';
@@ -27,7 +28,7 @@ export async function migrateResourceOutbox() {
     const receipt = await runtime.receipt(transaction);
     const expected = JSON.stringify(await encodeRecoveryValue(rows));
     if (owner !== cloud.userId || database !== db || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
-    await database.transaction('rw', database.table('_cloudOutbox'), database.table('_cloudMeta'), async () => {
+    await cloudTransaction(database, [database.table('_cloudOutbox'), database.table('_cloudMeta')], async () => {
       const current = await database.table<OutboxRow>('_cloudOutbox').where('transaction').equals(transaction).toArray();
       if (JSON.stringify(await Dexie.waitFor(encodeRecoveryValue(current))) !== expected) throw new Error('resource_migration_changed');
       if (owner !== cloud.userId || database !== db || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
@@ -178,7 +179,7 @@ export async function archiveResourceCommand(detail: Awaited<ReturnType<typeof i
   const database = db;
   const current = inspections.get(detail);
   if (!current?.()) throw new Error('client_account_changed');
-  const archive = () => database.transaction('rw', database.table('_cloudMeta'), async () => {
+  const archive = () => cloudTransaction(database, [database.table('_cloudMeta')], async () => {
     const stored = await database.table('_cloudMeta').get(detail.stored.id);
     if (!current()) throw new Error('client_account_changed');
     if (!stored || JSON.stringify(await Dexie.waitFor(encodeRecoveryValue(stored))) !== JSON.stringify(await Dexie.waitFor(encodeRecoveryValue(detail.stored)))) throw new Error('resource_command_changed');
