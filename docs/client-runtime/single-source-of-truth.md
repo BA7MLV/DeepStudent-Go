@@ -73,7 +73,7 @@ records revision 是全局分配、按账户过滤，允许间隔；页和 curso
 - 恢复入口移至“设置 → 数据 → 历史数据恢复”。Activity 仅展示具体未决证据；本地详情、完整导出与远端收据查询分开，服务端离线仍可保全原稿。独立 handled metadata 只控制提醒，不代表业务完成，不写原 legacy 库。
 - executor 列表按键/数量，不读取所有附件正文；小命令 metadata fingerprint 能使同键新 metadata 再次出现。snapshot 的 keys-based fingerprint 不是附件完整性证明，但 snapshot 不产生 pending 提醒且设置始终可见。
 - 无法完整验证的 grouped executor outbox、含 Blob metadata 禁止 blanket“标记已处理”。其身份收据（无论原 metadata 自带 completed，还是之后查得 completed）也不能关闭提醒；保持待核对，不声称能在惰性列表检测同键同大小字节替换。完整原稿可按需导出。
-- `LearningRecovery` 的“保留原稿并结束此修改”原子归档原 journal 后移除当前冲突，依赖后继重新查证/CAS，不静默丢弃；真实按钮点击已验。新增恢复/数据库/同步/批注状态提供中英资源，综合 E2E 实际切换双语。
+- `LearningRecovery` 不再向用户渲染任何界面：queued/uncertain 命令由后台同步循环重试，conflict 在后台自动原子归档原 journal 后移除当前冲突（与原“保留原稿并结束此修改”同一事务语义），依赖后继重新查证/CAS，不静默丢弃；原稿保留在历史数据恢复中，综合 E2E 已验。新增恢复/数据库/同步/批注状态提供中英资源，综合 E2E 实际切换双语。
 
 ### 实际运行结果（仅本轮，不等于所有历史测试已重跑）
 

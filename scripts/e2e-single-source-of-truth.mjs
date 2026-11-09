@@ -239,17 +239,16 @@ document.body.dataset.ready='true';`;
   await waitForProbe(page,()=>ink.status.includes('已确认'));
   assert.equal(records.get(owner,'materialInk','offline-ink-two').id,'offline-ink-two');
 
-  // Explicit conflict resolution archives the original draft atomically, then
-  // allows its dependent command to be checked (not silently discarded).
+  // Conflict resolution stays invisible: mounting the reconciler archives the
+  // original draft atomically in the background, then allows its dependent
+  // command to be checked (not silently discarded).
   await page.evaluate(()=>probe.showLearning());
-  const conflictDetail=page.locator('details').filter({has:page.getByText(conflict,{exact:true})}).first();
-  await conflictDetail.locator('summary').first().click();
-  await conflictDetail.getByRole('button',{name:'保留原稿并结束此修改',exact:true}).click();
-  await page.getByTestId('confirm-dialog-confirm').click();
   await waitForProbe(page,async id=>!(await probe.commands()).some(row=>row.operationId===id),conflict);
   const archived=await page.evaluate(id=>probe.get('_historyTransactions',`learning:${id}`),conflict);
   assert.equal(archived.command.request.edits[0].value.title,'Stale device A');
-  await waitForProbe(page,async id=>(await probe.commands()).find(row=>row.operationId===id)?.state==='conflict',dependent);
+  await waitForProbe(page,async id=>!(await probe.commands()).some(row=>row.operationId===id),dependent);
+  const dependentArchived=await page.evaluate(id=>probe.get('_historyTransactions',`learning:${id}`),dependent);
+  assert.equal(dependentArchived.command.request.edits[0].value.title,'Dependent');
 
   // Adapters above are not a substitute for clicking the actual producers.
   await verifyTruthProducerUI(second, { records, store, owner, directory });
@@ -275,6 +274,6 @@ document.body.dataset.ready='true';`;
   await page.getByRole('button',{name:'View details',exact:true}).first().click();
   await page.getByRole('button',{name:'Export backup',exact:true}).waitFor();
   assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(directory,'evidence.json'),JSON.stringify({browser:process.env.BROWSER??'chromium',browserVersion:(browser??context.browser()).version(),profileMode:engine===webkit?'isolated-persistent':'isolated-private',narrow:!!process.env.NARROW,passed:true,recovery,producerUI:JSON.parse(fs.readFileSync(path.join(directory,'producer-ui.json'),'utf8')),cases:['two-device-conflict','independent-feed','causal-blocking','lost-response','reload-multi-tab','readonly-cache','generation-rebuild','tombstone','draft-blob','session-fork-delete','atomic-skill-package','card-review','handout-reading','annotation-undo-stable-id','annotation-provider-offline-multiple-strokes-reload-convergence','conflict-ui-archive-dependent-recheck','guest-delta-dedup-and-id-reuse-rejection','pending-blob-rebuild-and-upload','legacy-original-transaction-conversion','legacy-byte-export','same-key-new-metadata-evidence','account-fences','real-chat-skills-cards-ui']},null,2));
+  fs.writeFileSync(path.join(directory,'evidence.json'),JSON.stringify({browser:process.env.BROWSER??'chromium',browserVersion:(browser??context.browser()).version(),profileMode:engine===webkit?'isolated-persistent':'isolated-private',narrow:!!process.env.NARROW,passed:true,recovery,producerUI:JSON.parse(fs.readFileSync(path.join(directory,'producer-ui.json'),'utf8')),cases:['two-device-conflict','independent-feed','causal-blocking','lost-response','reload-multi-tab','readonly-cache','generation-rebuild','tombstone','draft-blob','session-fork-delete','atomic-skill-package','card-review','handout-reading','annotation-undo-stable-id','annotation-provider-offline-multiple-strokes-reload-convergence','conflict-background-archive-dependent-recheck','guest-delta-dedup-and-id-reuse-rejection','pending-blob-rebuild-and-upload','legacy-original-transaction-conversion','legacy-byte-export','same-key-new-metadata-evidence','account-fences','real-chat-skills-cards-ui']},null,2));
   console.log(`PASS single-source production adapters (${process.env.BROWSER??'chromium'}): ${directory}`);
 } finally { for (const context of contexts) await context.close(); await browser?.close(); await web?.close(); store?.close(); await app.close(); }
