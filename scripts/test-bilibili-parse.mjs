@@ -17,7 +17,7 @@ execSync(
   { cwd: root, stdio: 'inherit' },
 );
 
-const { extractBv, extractPage, parseBiliInput, parseBvFromResolved } = await import(tmp);
+const { extractBiliInput, extractBv, extractPage, parseBiliInput, parseBvFromResolved } = await import(tmp);
 
 let passed = 0;
 let failed = 0;
@@ -81,6 +81,25 @@ eq(parseBiliInput('bilibili.com/video/BV1xx411c7mD'), { bvid: 'BV1xx411c7mD', pa
 }
 throws(() => parseBiliInput(''), '请输入', '空输入抛错');
 throws(() => parseBiliInput('https://example.com/foo'), '未识别到 BV', '无 BV 抛错');
+
+console.log('分享文案');
+for (const text of [
+  '【高等数学课程-哔哩哔哩】 https://b23.tv/abc123 复制后打开哔哩哔哩',
+  '分享给你（https://b23.tv/abc123）。',
+  '链接：b23.tv/abc123，快来看看！',
+  '【标题】\nhttps://b23.tv/abc123\n来自哔哩哔哩',
+  '[课程](https://b23.tv/abc123)',
+]) {
+  eq(parseBiliInput(text), { bvid: '', page: 1, isShort: true, shortUrl: 'https://b23.tv/abc123' }, `提取短链：${text}`);
+}
+eq(extractBiliInput('【课程】https://www.bilibili.com/video/BV1xx411c7mD/?p=2&share_source=copy_link。'), 'https://www.bilibili.com/video/BV1xx411c7mD/?p=2&share_source=copy_link', '长链接保留查询参数');
+eq(parseBiliInput('其他网址 https://example.com/?p=9 【课程】https://m.bilibili.com/video/BV1xx411c7mD?p=2 分享'), { bvid: 'BV1xx411c7mD', page: 2, isShort: false }, '分 P 只取所选链接的参数');
+eq(extractBiliInput('https://b23.tv/first https://b23.tv/second'), 'https://b23.tv/first', '多个链接只取第一个');
+eq(extractBiliInput('https://b23.tv/abc123#reply'), 'https://b23.tv/abc123', '片段不发送到服务器');
+eq(extractBiliInput('https://evil.test/b23.tv/abc123'), null, '不提取其他域名路径中的伪短链');
+eq(extractBiliInput('https://b23.tv.evil.test/abc123'), null, '不提取伪域名');
+eq(extractBiliInput('普通文本'), null, '普通文本不识别');
+throws(() => parseBiliInput('BV1xx411c7mDextra'), '未识别到 BV', '不截断超长 BV 标识');
 
 console.log('parseBvFromResolved');
 eq(parseBvFromResolved('<html><a href="/video/BV1xx411c7mD/">x</a>'), 'BV1xx411c7mD', '从页面提 BV');

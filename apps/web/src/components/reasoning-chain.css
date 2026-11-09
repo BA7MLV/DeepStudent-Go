@@ -21,15 +21,15 @@
 }
 
 .reasoning-chain__heading[data-sticky='true'] {
-  background: var(--reasoning-sticky-bg, var(--surface));
+  background: transparent;
 }
 
 .reasoning-chain__heading .reasoning-chain__toggle {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* Only the heading paints a full-width canvas for sticky content below it.
-     Keep the interactive highlight around the label, counts and chevron. */
+  /* Keep the interactive highlight around the label, counts and chevron;
+     the sticky heading itself stays transparent. */
   width: fit-content;
   max-width: calc(100% + 8px);
   min-height: 40px;

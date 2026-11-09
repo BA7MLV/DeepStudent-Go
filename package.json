@@ -138,6 +138,7 @@
     "test:wrongbook": "tsx --test scripts/test-wrongbook.mjs",
     "test:widget-feedback": "tsx scripts/test-widget-feedback.mjs && tsx scripts/test-widget-runtime.mjs",
     "test:widget-feedback:e2e": "node scripts/e2e-widget-feedback.mjs",
+    "test:widget-local:e2e": "tsx scripts/e2e-widget-local-state.mjs && tsx scripts/e2e-widget-ownership.mjs",
     "test:ime": "tsx --test scripts/test-ime-enter.mjs",
     "test:player": "tsx scripts/test-player-shortcuts.mjs && tsx --test scripts/test-preview-seeker.mjs",
     "test:player:e2e": "node scripts/e2e-player-enhance.mjs && node scripts/e2e-player-performance.mjs",

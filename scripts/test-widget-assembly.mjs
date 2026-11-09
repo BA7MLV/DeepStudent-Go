@@ -17,6 +17,26 @@ test('only the native tool declares assembly actions; direct format/code contrac
   assert.deepEqual(SERVER_SHOW_WIDGET_TOOL.function.parameters.properties.action.enum, ['append', 'read', 'patch', 'complete', 'discard']);
 });
 
+test('HTML titles survive direct and assembled delivery; invalid or late metadata is atomic', () => {
+  const run = createTaskWidgetExecutor(), pages = [], accept = page => pages.push(page);
+  run({ format: 'html', code: '<p>直接作品</p>', title: '直接标题' }, accept);
+  assert.equal(pages[0].title, '直接标题');
+  assert.throws(() => run(append('<section>', 0, 0, { title: 42 }), noPage), /title/);
+  assert.equal(snapshot(run).revision, 0);
+  run(append('<section>原内容', 0, 0, { title: '  组装\n标题  ' }), noPage);
+  const initial = snapshot(run);
+  assert.throws(() => run(append('</section>', initial.length, 1, { title: '替换' }), noPage), /title_only_on_first_chunk/);
+  assert.deepEqual(snapshot(run), initial);
+  run(patch(1, [{ search: '原内容', replace: '新内容' }]), noPage);
+  run(append('</section>', initial.length, 2), noPage);
+  run(complete(initial.length + '</section>'.length, 3), accept);
+  assert.equal(pages[1].title, '组装 标题');
+  assert.equal(pages[1].html, '<section>新内容</section>');
+  run(append('<p>无标题</p>', 0, 4), noPage);
+  run(complete('<p>无标题</p>'.length, 5), accept);
+  assert.equal(pages[2].title, undefined, 'completed title cannot leak to the next work');
+});
+
 test('complete small calls assemble only in one task; final uses the existing payload validator', () => {
   const run = createTaskWidgetExecutor(), pages = [];
   const source = '<section>' + '中文😀'.repeat(10000) + '</section>';

@@ -107,7 +107,7 @@ const BRIDGE = `
     schedule();
   }
   var display = { width: 0, height: 560 };
-  var pending = new Map(), sequence = 0, saves = Promise.resolve();
+  var pending = new Map(), sequence = 0, saves = Promise.resolve(), pendingSaves = 0;
   function copy(value) { return JSON.parse(JSON.stringify(value)); }
   var post = function (type, payload) {
     try { parent.postMessage({ __wbw: type, instance: initial.instance, payload: payload }, '*'); } catch (e) {}
@@ -220,6 +220,9 @@ const BRIDGE = `
       }
     }
     if (data.__wbw === ${JSON.stringify(WIDGET_MSG.sync)}) {
+      // A local commit/another window may report an older snapshot while newer
+      // clicks are queued. Never restore over an in-progress local interaction.
+      if (pendingSaves) return;
       if (JSON.stringify(state) === JSON.stringify(value)) return;
       state = copy(value);
       window.dispatchEvent(new CustomEvent('wbw:statechange', { detail: { state: copy(state) } }));
@@ -304,8 +307,14 @@ const BRIDGE = `
         if (new TextEncoder().encode(json).length > 16384) throw new Error('状态超过 16 KiB');
         snapshot = JSON.parse(json);
       } catch (error) { return Promise.reject(error); }
+      // The UI already changed. Keep its API snapshot current too; a save ACK
+      // confirms durability, not a request to repaint this window from the past.
+      state = copy(snapshot);
+      pendingSaves++;
       saves = saves.catch(function () {}).then(function () {
         return request(${JSON.stringify(WIDGET_MSG.state)}, snapshot);
+      }).finally(function () {
+        pendingSaves--;
       });
       return saves;
     },

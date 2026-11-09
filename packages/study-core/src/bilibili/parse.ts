@@ -7,6 +7,7 @@
 //   https://www.bilibili.com/video/BV1xx411c7mD/?spm_id_from=..&p=3
 //   bilibili.com/video/BV1xx411c7mD               无协议
 //   https://b23.tv/xxxx                           短链（需再经一次跳转解析，见 resolveShortUrl）
+//   【视频标题】 https://b23.tv/xxxx 复制后打开       分享文案
 
 export interface ParsedBili {
   /** BV 号（含 BV 前缀），大小写原样保留 */
@@ -20,6 +21,21 @@ export interface ParsedBili {
 }
 
 const BV_RE = /BV[0-9A-Za-z]{10}/;
+// 只提取已知域名，不能将标题、中文标点或 URL 的外层括号送入网络层。
+const LINK_RE = /(?<![\w./:@%-])(?:https?:\/\/)?(?:(?:(?:www|m)\.)?bilibili\.com\/video\/BV[0-9A-Za-z]{10}(?![0-9A-Za-z])|b23\.tv\/[0-9A-Za-z_-]+)(?:[/?#][A-Za-z0-9\-._~:/?#[\]@!$&()*+,;=%]*)?/i;
+
+/** 从分享文案中取第一个 B 站视频链接；没有链接时兼容夹杂文字的 BV 号。 */
+export function extractBiliInput(text: string): string | null {
+  const link = text.match(LINK_RE)?.[0].replace(/[.,!?;:)\]}]+$/, '');
+  if (link) {
+    const url = new URL(/^https?:\/\//i.test(link) ? link : `https://${link}`);
+    url.protocol = 'https:';
+    url.hash = '';
+    return url.href;
+  }
+  const bv = text.match(/BV[0-9A-Za-z]{10}(?![0-9A-Za-z])(?:\/?\?[^\s<>"'，。！？、；：（）【】《》]*)?/);
+  return bv?.[0] ?? null;
+}
 
 /** 从任意字符串里提取第一个 BV 号（不含则返回 null） */
 export function extractBv(text: string): string | null {
@@ -39,14 +55,13 @@ export function extractPage(text: string): number {
  * 解析用户输入。无法识别时抛出带用户可读信息的 Error。
  */
 export function parseBiliInput(raw: string): ParsedBili {
-  const input = raw.trim();
-  if (!input) throw new Error('请输入哔哩哔哩视频链接或 BV 号');
+  if (!raw.trim()) throw new Error('请输入哔哩哔哩视频链接或 BV 号');
+  const input = extractBiliInput(raw);
+  if (!input) throw new Error('未识别到 BV 号，请检查链接是否正确（支持 BV 号、视频页链接、b23.tv 短链）');
 
   // b23.tv 短链：自身不含 BV，标记出来由调用方二次解析
-  if (/b23\.tv\//i.test(input)) {
-    let shortUrl = input;
-    if (!/^https?:\/\//i.test(shortUrl)) shortUrl = 'https://' + shortUrl;
-    return { bvid: '', page: extractPage(input), isShort: true, shortUrl };
+  if (/^https:\/\/b23\.tv\//i.test(input)) {
+    return { bvid: '', page: extractPage(input), isShort: true, shortUrl: input };
   }
 
   const bvid = extractBv(input);

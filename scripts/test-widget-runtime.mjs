@@ -92,4 +92,50 @@ assert.match(shell, /e\.source !== frameRef\.current\.contentWindow/);
 assert.match(shell, /d\.instance !== instance/);
 assert.match(shell, /sandbox="allow-scripts"/);
 assert.doesNotMatch(shell, /onLoad=.*setReady/);
-console.log('PASS: runtime diagnostics (dedupe/bounds/CSP), instance binding, content semantics and sandbox invariants');
+
+// Rapid local interactions must not be restored from an older persistence echo.
+const stateDoc = await buildWidgetDocument({ html: '<p>local state</p>' }, {
+  instance: 'state-run', persistent: true, state: { modelContent: { step: 0 }, privateContent: null },
+});
+const stateHandlers = new Map(), stateMessages = [], stateEvents = [];
+const stateListen = (type, fn) => stateHandlers.set(type, [...(stateHandlers.get(type) ?? []), fn]);
+const stateParent = { postMessage: message => stateMessages.push(message) };
+const stateContext = {
+  ...context, parent: stateParent, TextEncoder,
+  document: { ...context.document, addEventListener: stateListen },
+  window: { addEventListener: stateListen, dispatchEvent: event => stateEvents.push(event) },
+  CustomEvent: class { constructor(type) { this.type = type; } },
+};
+vm.runInNewContext(stateDoc.match(/<script>([\s\S]*?)<\/script>/)[1], stateContext);
+const stateEmit = (type, payload) => stateHandlers.get('message').forEach(fn => fn({
+  isTrusted: true, source: stateParent, data: { __wbw: type, instance: 'state-run', payload },
+}));
+const api = stateContext.window.__wbw;
+const firstSave = api.setWidgetState({ modelContent: { step: 1 }, privateContent: null });
+const secondSave = api.setWidgetState({ modelContent: { step: 2 }, privateContent: null });
+assert.equal(api.widgetState.modelContent.step, 2, 'API immediately reflects the latest local interaction');
+await new Promise(setImmediate);
+assert.equal(stateMessages.filter(message => message.__wbw === WIDGET_MSG.state).length, 1, 'commits remain serialized');
+stateEmit(WIDGET_MSG.sync, { modelContent: { step: 1 }, privateContent: null });
+assert.equal(api.widgetState.modelContent.step, 2, 'old commit cannot roll back a pending click');
+assert.equal(stateEvents.filter(event => event.type === 'wbw:statechange').length, 0);
+stateEmit(WIDGET_MSG.result, { requestId: stateMessages.at(-1).payload.requestId, ok: true });
+await firstSave;
+await new Promise(setImmediate);
+stateEmit(WIDGET_MSG.sync, { modelContent: { step: 1 }, privateContent: null });
+assert.equal(api.widgetState.modelContent.step, 2, 'earlier echo remains ignored while the newer write is pending');
+stateEmit(WIDGET_MSG.result, { requestId: stateMessages.at(-1).payload.requestId, ok: true });
+await secondSave;
+stateEmit(WIDGET_MSG.sync, { modelContent: { step: 2 }, privateContent: null });
+assert.equal(stateEvents.filter(event => event.type === 'wbw:statechange').length, 0, 'own latest commit needs no restore');
+stateEmit(WIDGET_MSG.sync, { modelContent: { step: 3 }, privateContent: null });
+assert.equal(api.widgetState.modelContent.step, 3);
+assert.equal(stateEvents.filter(event => event.type === 'wbw:statechange').length, 1, 'idle widgets can accept another local window update');
+const failedSave = api.setWidgetState({ modelContent: { step: 4 }, privateContent: null });
+const failure = assert.rejects(failedSave, /本机空间不足/);
+await new Promise(setImmediate);
+stateEmit(WIDGET_MSG.result, { requestId: stateMessages.at(-1).payload.requestId, ok: false, error: '本机空间不足' });
+await failure;
+stateEmit(WIDGET_MSG.sync, { modelContent: { step: 3 }, privateContent: null });
+assert.equal(api.widgetState.modelContent.step, 3, 'failed saves release the pending-write guard');
+console.log('PASS: runtime diagnostics, instance/sandbox invariants, immediate local state and no rapid-click ACK rollback');

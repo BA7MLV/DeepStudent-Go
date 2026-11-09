@@ -54,8 +54,8 @@ try {
     assert.equal(await html.locator('pre code').textContent(), source);
     assert.equal(await page.getByTestId('widget-frame').count(), 0, 'code-first delivery does not initialize a runtime');
 
-    // Native bounds plus the promoted header: assert real hit testing over the
-    // blur ramp, not merely the presence of a high z-index declaration.
+    // Native bounds plus the promoted header: it stays operable while remaining
+    // below the app header and its blur ramp.
     const stick = async selector => {
       await page.evaluate(async selector => {
         const scroll = document.querySelector('.course-chat__messages');
@@ -80,9 +80,14 @@ try {
       const state = await overlay.evaluate(header => {
         const blur = document.querySelector('.page-app-bar__blur').getBoundingClientRect();
         const r = header.getBoundingClientRect();
-        return { top: r.top, blurBottom: blur.bottom, z: Number(getComputedStyle(header).zIndex) };
+        const appBar = document.querySelector('[data-testid="top-app-bar"]');
+        const bar = appBar.getBoundingClientRect();
+        return { top: r.top, blurBottom: blur.bottom, z: Number(getComputedStyle(header).zIndex),
+          appBarZ: Number(getComputedStyle(appBar).zIndex),
+          appBarOnTop: document.elementFromPoint(bar.x + bar.width / 2, bar.y + bar.height / 2)?.closest('[data-testid="top-app-bar"]') === appBar };
       });
-      assert.ok(state.z > 5, 'sticky toolbar is above the app bar blur context');
+      assert.ok(state.z < state.appBarZ, 'sticky toolbar stays below the app header');
+      assert.ok(state.appBarOnTop, 'sticky toolbar never covers the app header');
       if (width < 900) assert.ok(state.top < state.blurBottom, 'test exercises overlap with the progressive blur');
     };
     await stick('[data-testid="code-block"]');
@@ -116,6 +121,8 @@ try {
     await page.waitForFunction(() => document.querySelector('.reasoning-chain')?.dataset.mode === 'expanded');
     await stick('.reasoning-chain');
     const reasoningHeading = page.locator('.reasoning-chain__heading.chat-sticky-overlay');
+    assert.equal(await reasoningHeading.evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)',
+      'pinned reasoning heading stays transparent');
     assert.match(await reasoningHeading.innerText(), /已思考用时/);
     assert.equal(await page.locator('.code-block__header.chat-sticky-overlay').count(), 0, 'preceding layout changes clear stale code overlays');
     await page.screenshot({ path: `${out}/${width}-reasoning-sticky.png` });
@@ -126,7 +133,7 @@ try {
     assert.ok(await messages.evaluate(el => el.scrollWidth <= el.clientWidth + 1), 'no horizontal page overflow');
     assert.deepEqual(errors, []);
     assert.ok(resizeNotices.length < 10, 'no sustained ResizeObserver loop');
-    console.log(`PASS ${safari ? 'WebKit' : 'Chrome'} ${width}px: ordinary HTML source-first, explicit validated preview, exact copy, retained sandbox state, code/reasoning sticky above blur and operable collapse.`);
+    console.log(`PASS ${safari ? 'WebKit' : 'Chrome'} ${width}px: ordinary HTML source-first, explicit validated preview, exact copy, retained sandbox state, transparent reasoning sticky below header and operable collapse.`);
     if (resizeNotices.length) console.log(`  WebKit/HeroUI transient ResizeObserver notices: ${resizeNotices.length}`);
     await context.close();
   }

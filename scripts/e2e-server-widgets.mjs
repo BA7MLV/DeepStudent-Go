@@ -54,14 +54,14 @@ const app = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: asyn
     const offset = previous.length, revision = previous.revision;
     const calls = body.messages.filter(message => message.role === 'assistant').flatMap(message => message.tool_calls ?? []).map(call => JSON.parse(call.function.arguments));
     const args = offset < largeSource.length
-      ? { action: 'append', format: 'html', offset, revision, code: largeSource.slice(offset, offset + 2000) }
+      ? { action: 'append', format: 'html', offset, revision, code: largeSource.slice(offset, offset + 2000), ...(offset === 0 ? { title: '计数器可视化' } : {}) }
       : !calls.some(call => call.action === 'read') ? { action: 'read', format: 'html', offset: 0, code: '', limit: 100 }
       : !calls.some(call => call.action === 'patch') ? { action: 'patch', format: 'html', revision, code: '', edits: [{ search: 'var count = saved', replace: 'var count = /* patched */ saved' }] }
       : { action: 'complete', format: 'html', offset, revision, code: '' };
     return Response.json({ choices: [{ message: { role: 'assistant', content: null, tool_calls: [{ id: `chunk-${modelCalls}`, type: 'function', function: { name: 'show_widget', arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }] });
   }
   if (!receipt) {
-    const json = JSON.stringify({ format: 'html', code: source });
+    const json = JSON.stringify({ format: 'html', title: '计数器可视化', code: source });
     const split = Math.floor(json.length / 2);
     const encoder = new TextEncoder();
     return new Response(new ReadableStream({ start(controller) {
@@ -183,11 +183,10 @@ try {
   await page.getByRole('textbox', { name: '给 AI 助手发送消息' }).press('Enter');
   const works = page.getByTestId('widget-block');
   const openWork = async () => {
-    await page.getByTestId('widget-work-source').waitFor({ timeout: 30000 });
-    assert.equal(await page.getByTestId('widget-frame').count(), 0, 'published work still requires a user preview click');
-    await page.getByTestId('widget-work-source').getByTestId('code-block-more').click();
-    await page.getByRole('menuitem', { name: '预览', exact: true }).click();
     await works.waitFor({ timeout: 30000 });
+    await page.getByTestId('widget-title').getByText('计数器可视化', { exact: true }).waitFor();
+    await page.getByTestId('widget-frame').waitFor();
+    assert.equal(await page.getByTestId('code-block').count(), 0, 'saved works render directly, without a manual code preview');
   };
   const partial = page.getByTestId('widget-stream-preview');
   const argsDeadline = Date.now() + 30000;
@@ -199,7 +198,7 @@ try {
   releaseArgs();
   await openWork();
   await partial.waitFor({ state: 'detached' });
-  assert.equal(await page.getByTestId('code-block').count(), 1, 'published works use the existing source-first preview card');
+  assert.equal(await page.getByTestId('code-block').count(), 0, 'published works are distinct from HTML code examples');
   let task = (await (await context.request.get(`${origin}/api/v1/cloud/tasks`)).json()).tasks.find(task => task.kind === 'chat');
   assert.equal(task.executor, 'node'); assert.equal(task.status, 'running');
   assert.equal(task.progress.widgets.length, 1);
@@ -232,9 +231,20 @@ try {
   assert.equal(task.status, 'completed'); assert.equal(task.result.widget.ref, ref);
   const row = (await (await context.request.get(`${origin}/api/v1/cloud/record?table=chats&key=${task.result.rowId}`)).json()).value;
   assert.equal(row.widgets[0].html, source);
+  assert.equal(row.widgets[0].title, '计数器可视化');
+  assert.equal(row.widgetState, undefined, 'interaction state is not written into the server message');
+  assert.equal(row.widgetStates, undefined, 'local widget snapshots are not cloud conversation data');
   await frame.contentFrame().getByRole('button', { name: '1', exact: true }).waitFor({ timeout: 30000 });
   assert.equal(await page.getByTestId('widget-error').count(), 0, (await page.getByTestId('widget-error').allTextContents()).join('\n'));
   assert.equal(await page.getByTestId('widget-save-material').count(), 0, 'no new library source-save feature');
+  await page.getByTestId('widget-more').click();
+  const popupEvent = page.waitForEvent('popup');
+  await page.getByRole('menuitem', { name: '在新窗口展开', exact: true }).click();
+  const popup = await popupEvent;
+  await popup.locator('h1').filter({ hasText: '计数器可视化' }).waitFor();
+  assert.equal(await popup.title(), '计数器可视化');
+  await popup.getByTestId('widget-frame').contentFrame().getByRole('button', { name: '1', exact: true }).waitFor();
+  await popup.close();
   await page.screenshot({ path: path.join(shots, 'chat-reloaded-preview.png') });
 
   await page.getByRole('textbox', { name: '给 AI 助手发送消息' }).fill('测试断线续写');
@@ -270,7 +280,7 @@ try {
   // immediately reloading aborts the Player chunk/CSS preload in WebKit.
   await navigate(() => page.goto(`${origin}/?server-widget-qa=1#/player/widget-course`));
   await page.getByRole('button', { name: '打开学习助手', exact: true }).click();
-  const input = page.locator('textarea').first(); await input.fill('请画一个大型交互式计数器'); await input.press('Enter');
+  const input = page.getByRole('textbox', { name: '给学习助手发送消息', exact: true }); await input.fill('请画一个大型交互式计数器'); await input.press('Enter');
   await openWork();
   assert.equal(await partial.count(), 0, 'assembly chunks never masquerade as completed previews');
   const qaTask = (await (await context.request.get(`${origin}/api/v1/cloud/tasks`)).json()).tasks.find(task => task.kind === 'qa');
@@ -285,8 +295,8 @@ try {
   await frame.contentFrame().getByRole('heading', { name: '服务器生成的交互讲解' }).waitFor();
   assert.equal(await openedQaFrame.evaluate(element => element.isConnected), true, 'completion must not remount an opened preview');
   const callsBeforeEdit = modelCalls;
-  await page.getByTestId('widget-work-source').getByTestId('code-block-more').click();
-  await page.getByRole('menuitem', { name: '修改 HTML', exact: true }).click();
+  await page.getByTestId('widget-more').click();
+  await page.getByRole('menuitem', { name: '修改这幅图', exact: true }).click();
   const editPanel = page.getByTestId('artifact-edit-panel');
   await editPanel.waitFor();
   await editPanel.getByRole('button', { name: '收起', exact: true }).click();
@@ -298,7 +308,7 @@ try {
   if (errors.length) console.error('Failed requests:', failedRequests);
   assert.deepEqual(errors, []);
   assert.ok(resizeNotices.length < 10, 'ResizeObserver notifications must remain bounded');
-  console.log(`Real API/Node chat + QA: direct/assembled pages, final-only chat payloads, click sandbox preview, active reload/state, no library-save addition, same-row continuation/dedup and completion passed. Screenshots: ${shots}`);
+  console.log(`Real API/Node chat + QA: titled direct/assembled works auto-render, final-only chat payloads, active reload/state, no library-save addition, same-row continuation/dedup and completion passed. Screenshots: ${shots}`);
 } catch (error) {
   const context = browser?.contexts()[0];
   const page = context?.pages()[0];

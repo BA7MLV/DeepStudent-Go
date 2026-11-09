@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Button } from '@heroui/react';
+import { Sym } from '../ui';
 import type { WidgetPayload } from '../harness/widgetRuntime';
 import type { WidgetTheme } from '../harness/widgetTheme';
 import { readWidgetAnswerFeedback, acceptsWidgetFeedback, type WidgetAnswerFeedback } from '../harness/widgetProtocol';
@@ -28,6 +30,7 @@ function isWidgetPayload(value: unknown): value is WidgetPayload {
  */
 export default function WidgetPreview() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const token = searchParams.get('token')?.trim() ?? '';
   const channelRef = useRef<BroadcastChannel | null>(null);
   const sequence = useRef(0);
@@ -79,7 +82,8 @@ export default function WidgetPreview() {
       setRowId(Number.isSafeInteger(message.rowId) ? message.rowId : undefined);
       setCanPrompt(message.canPrompt === true);
       setHtmlSurface(message.surface === 'html');
-      document.title = message.surface === 'html' ? 'HTML 预览' : '交互图形';
+      document.title = typeof message.payload.title === 'string' && message.payload.title.trim()
+        ? message.payload.title : message.surface === 'html' ? 'HTML 预览' : '交互图形';
     };
     channel.postMessage({ type: WIDGET_PREVIEW_MSG.ready } satisfies WidgetPreviewMessage);
     return () => {
@@ -106,28 +110,43 @@ export default function WidgetPreview() {
     });
   }, []);
 
+  const title = typeof payload?.title === 'string' ? payload.title.trim() : '';
+  // 移动端式返回：应用内有上一页就后退，否则回到对话主页。
+  const goBack = useCallback(() => {
+    const index = (window.history.state as { idx?: unknown } | null)?.idx;
+    if (typeof index === 'number' && index > 0) navigate(-1);
+    else navigate('/', { replace: true });
+  }, [navigate]);
   return (
     <main className="page widget-preview-page" data-testid="widget-preview-page">
-      <div className="widget-preview-page__inner">
-        <header className="widget-preview-page__header">
-          <div>
-            <h1>{htmlSurface ? 'HTML 预览' : '交互图形'}</h1>
-            <p>{htmlSurface ? '独立页面 · 安全预览 HTML 内容' : '独立预览 · 仍可使用图形内的交互控件'}{feedback ? ' · 题卡反馈只读，作答请回原页面' : ''}</p>
-          </div>
-        </header>
-        {error ? (
-          <div className="widget-preview-page__message" role="alert" data-testid="widget-preview-error">
-            {error}
-          </div>
-        ) : payload ? (
-          <div className="widget-preview-page__widget">
-            <WidgetBlock payload={payload} dark={dark} appearance={appearance} rowId={rowId} disabled={!canPrompt} allowPopout={false} onPrompt={sendPrompt} answerFeedback={feedback} />
-          </div>
-        ) : (
-          <div className="widget-preview-page__message" role="status" data-testid="widget-preview-loading">
-            正在准备图形…
-          </div>
-        )}
+      <header className="widget-preview-page__topbar">
+        <Button isIconOnly variant="ghost" className="widget-preview-page__back"
+          aria-label="返回" data-testid="widget-preview-back" onPress={goBack}>
+          <Sym name="arrow_back" />
+        </Button>
+        <div className="widget-preview-page__titles">
+          <h1 className="widget-preview-page__title">{title || (htmlSurface ? 'HTML 预览' : '交互图形')}</h1>
+          <p className="widget-preview-page__subtitle">
+            {htmlSurface ? '独立页面 · 安全预览 HTML 内容' : '独立预览 · 仍可使用图形内的交互控件'}{feedback ? ' · 题卡反馈只读，作答请回原页面' : ''}
+          </p>
+        </div>
+      </header>
+      <div className="widget-preview-page__body">
+        <div className="widget-preview-page__inner">
+          {error ? (
+            <div className="widget-preview-page__message" role="alert" data-testid="widget-preview-error">
+              {error}
+            </div>
+          ) : payload ? (
+            <div className="widget-preview-page__widget">
+              <WidgetBlock payload={payload} dark={dark} appearance={appearance} rowId={rowId} disabled={!canPrompt} allowPopout={false} hideTitle onPrompt={sendPrompt} answerFeedback={feedback} />
+            </div>
+          ) : (
+            <div className="widget-preview-page__message" role="status" data-testid="widget-preview-loading">
+              正在准备图形…
+            </div>
+          )}
+        </div>
       </div>
     </main>
   );

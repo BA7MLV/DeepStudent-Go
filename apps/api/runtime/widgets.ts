@@ -23,7 +23,7 @@ export const SERVER_SHOW_WIDGET_TOOL = {
 
 /** One bounded buffer per invocation of runServerAgent, never persisted or shared. */
 export function createTaskWidgetExecutor() {
-  let pending: { code: string; libs?: string[] } | undefined;
+  let pending: { code: string; libs?: string[]; title?: string } | undefined;
   let revision = 0;
   const unicode = (text: string) => !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text);
   const receipt = (status: string, extra = {}) => JSON.stringify({ status, revision, length: pending?.code.length ?? 0, offsetUnit: 'UTF-16', ...extra });
@@ -32,7 +32,7 @@ export function createTaskWidgetExecutor() {
       if (Object.keys(args).some(key => !['format', 'code', 'title', 'libs'].includes(key))) throw new Error('invalid_widget_assembly: action required for assembly fields');
       return executeServerWidget(args, accept);
     }
-    const fields: Record<string, string[]> = { append: ['offset', 'libs'], read: ['offset', 'limit'], patch: ['edits'], complete: ['offset'], discard: [] };
+    const fields: Record<string, string[]> = { append: ['offset', 'libs', 'title'], read: ['offset', 'limit'], patch: ['edits'], complete: ['offset'], discard: [] };
     if (args.format !== 'html' || typeof args.action !== 'string' || !Object.hasOwn(fields, args.action)
       || Object.keys(args).some(key => !['format', 'action', 'revision', 'code', ...fields[args.action as string]].includes(key))
       || (args.action !== 'append' && args.code !== '')) throw new Error('invalid_widget_assembly');
@@ -79,9 +79,10 @@ export function createTaskWidgetExecutor() {
       if (!unicode(args.code)) throw new Error('widget_assembly_unicode_boundary: submit whole Unicode characters');
       if (length + args.code.length > MAX_HTML) throw new Error(`widget_assembly_too_large: limit=${MAX_HTML}; simplify or split into separate pages`);
       if (pending && args.libs !== undefined) throw new Error('widget_assembly_libs_only_on_first_chunk');
-      const parsed = validateWidgetArgs({ format: 'html', code: '<div></div>', libs: pending?.libs ?? args.libs });
+      if (pending && args.title !== undefined) throw new Error('widget_assembly_title_only_on_first_chunk');
+      const parsed = validateWidgetArgs({ format: 'html', code: '<div></div>', libs: pending?.libs ?? args.libs, title: pending?.title ?? args.title });
       if (!parsed.ok) throw new Error(parsed.error);
-      pending = { code: (pending?.code ?? '') + args.code, libs: parsed.args.libs };
+      pending = { code: (pending?.code ?? '') + args.code, libs: parsed.args.libs, title: parsed.args.title };
       revision++;
       return receipt('assembling-not-runnable');
     }
@@ -106,6 +107,7 @@ export function executeServerWidget(raw: unknown, accept: (payload: WidgetPayloa
     if (args.format === 'html') {
       const id = randomUUID();
       const payload: WidgetPayload = { kind: 'html', schemaVersion: 1, revision: 1, source: 'tool', id, ref: id, html: args.code,
+        ...(args.title ? { title: args.title } : {}),
         ...(args.libs?.length ? { libs: args.libs } : {}) };
       // The caller commits this payload before a successful receipt reaches the model.
       accept(payload);

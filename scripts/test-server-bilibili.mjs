@@ -26,6 +26,12 @@ const fetcher = async (input, init) => {
   if (url.hostname === 'api.bilibili.com') {
     if (url.pathname.endsWith('/nav')) return Response.json({ code: 0, data: { isLogin: headers.get('cookie') === secretCookie, uname: 'Fixture' } });
     assert.equal(headers.get('cookie'), secretCookie);
+    if (url.pathname.endsWith('/view') && mode === 'risk') return Response.json({ code: -352, message: secretCookie });
+    if (url.pathname.endsWith('/view') && mode === 'expired') return Response.json({ code: -101, message: secretCookie });
+    if (url.pathname.endsWith('/view') && mode === 'missing') return Response.json({ code: -404, message: secretCookie });
+    if (url.pathname.endsWith('/view') && mode === 'http-risk') return new Response(secretCookie, { status: 412 });
+    if (url.pathname.endsWith('/view') && mode === 'timeout') throw new DOMException(secretCookie, 'TimeoutError');
+    if (url.pathname.endsWith('/view') && mode === 'network') throw new TypeError(secretCookie);
     if (url.pathname.endsWith('/view')) return Response.json({ code: 0, data: { aid: 10, title: '服务器课程', duration: 2, pages: [{ page: 1, cid: 100, part: '第一课', duration: 1 }, { page: 2, cid: 200, part: '第二课', duration: 1 }],
       ...(season ? { ugc_season: { title: '课程合集', sections: [{ episodes: [{ bvid, aid: 10, cid: 100, title: '第一集' }, { bvid: second, aid: 20, cid: 300, title: '第二集', arc: { duration: 1 } }] }] } } : {}) } });
     if (url.pathname.endsWith('/playurl')) return Response.json({ code: 0, data: { dash: { duration: 1, video: [{ id: 80, height: 180, codecid: 7, codecs: 'avc1', baseUrl: 'https://upos-fixture.bilivideo.com/video.m4s' }], audio: [{ codecs: 'mp4a', baseUrl: 'https://upos-fixture.bilivideo.com/audio.m4s' }] } } });
@@ -92,6 +98,24 @@ try {
   assert.equal((await raw('PUT', '/cloud/bilibili/credentials', { cookie: 'SESSDATA=x\r\nInjected: yes' })).statusCode, 400);
   const target = await call('POST', '/cloud/bilibili/resolve', { raw: 'https://b23.tv/fixture' });
   assert.equal(target.pages.length, 2); assert.equal(target.subtitles[0].url, '');
+  const share = await call('POST', '/cloud/bilibili/resolve', { raw: '【服务器课程-哔哩哔哩】\n（https://b23.tv/fixture）。复制后打开哔哩哔哩' });
+  assert.equal(share.bvid, bvid);
+  const sharedPage = await call('POST', '/cloud/bilibili/resolve', { raw: `https://example.com/?p=99 【课程】https://www.bilibili.com/video/${bvid}/?p=2。` });
+  assert.deepEqual(sharedPage.defaultPages, [2]);
+  const beforeInvalid = calls.length;
+  assert.equal((await raw('POST', '/cloud/bilibili/resolve', { raw: '不是视频链接' })).statusCode, 400);
+  assert.equal(calls.length, beforeInvalid, 'invalid input rejected without upstream requests');
+  for (const [value, statusCode, message] of [
+    ['risk', 502, /风控/], ['expired', 400, /Cookie/], ['missing', 400, /不存在/],
+    ['http-risk', 502, /风控/], ['timeout', 504, /超时/], ['network', 502, /DNS/],
+  ]) {
+    mode = value;
+    const failedResolve = await raw('POST', '/cloud/bilibili/resolve', { raw: bvid });
+    assert.equal(failedResolve.statusCode, statusCode);
+    assert.match(failedResolve.json().error, message);
+    assert.ok(!failedResolve.body.includes('fixture-secret-only'), 'upstream errors never leak secrets');
+  }
+  mode = 'normal';
   season = true;
   const collection = await call('POST', '/cloud/bilibili/resolve', { raw: bvid });
   assert.equal(collection.kind, 'season'); assert.equal(collection.pages[2].bvid, second);

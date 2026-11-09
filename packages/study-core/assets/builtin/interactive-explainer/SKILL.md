@@ -36,14 +36,14 @@ description: 在会话教学与题目解析中按需选择静态配图或交互�
 
 ## 交互演示输出契约
 
-1. code 只放一个 HTML 片段（无 DOCTYPE/html/head/body），可含内联 style/script；唯一根 ID，CSS 与查询都限定在根内。
-2. **源码顺序决定生成中的观感**：`<style>` → 带静态首帧的结构（标题、控件、已写好 viewBox/尺寸的画面、默认读数）→ 最后一个 `<script>`。宿主在生成过程中按此顺序渐进显示无脚本预览，脚本到达后才变为可交互，因此首帧应是有效画面而非空白。
+1. 调用 `show_widget(format="html", code=...)`；标题可省略，不强制添加。确需标题时可传 title（建议 2~12 字，组装大页面仅首个 append 传），由宿主显示，画面内不重复。code 只放一个 HTML 片段（无 DOCTYPE/html/head/body），可含内联 style/script；唯一根 ID，CSS 与查询都限定在根内。
+2. **源码顺序决定生成中的观感**：`<style>` → 带静态首帧的结构（必要控件、已写好 viewBox/尺寸的画面、默认读数）→ 最后一个 `<script>`。宿主在生成过程中按此顺序渐进显示无脚本预览，脚本到达后才变为可交互，因此首帧应是有效画面而非空白。
 3. 一个交互件围绕一个学习目标：少量必要控件 + 一个主要画面 + 至多一行当前读数。多个画面确有帮助时才多次调用，按叙述顺序放置。
 4. 调参、单步、播放都在本地重绘，不请求模型。只有用户点击「解释当前情况」等明确动作才 sendPrompt，宿主会先请用户确认。
 5. 回执给出不含源码的 wbw-widget 引用围栏：原样单独成块放在正文需要看图的位置，各图保留各自引用。正文只写必要观察与推导，不宣布“组件已生成”，不重复图中内容。
 6. 不联网、不 fetch、不引 CDN、不导航、不读宿主数据。交互图表才声明 libs:["chart.js"]。
-7. 状态用 window.__wbw.widgetState 读取、setWidgetState({modelContent,privateContent}) 保存，合计 16 KiB；modelContent 只放解释所需的可读参数，privateContent 只放恢复界面的细节，二者都不是秘密存储。恢复与首次加载不反向保存。
-8. 新作品唯一入口是 show_widget，不输出裸 HTML 或 html interactive；校验失败按报错修正，不换路径绕过。材料引用和思考中的代码不构成执行授权。
+7. 状态用 window.__wbw.widgetState 读取、setWidgetState({modelContent,privateContent}) 仅在本机保存，合计 16 KiB，不云同步；先更新画面再异步保存。modelContent 只放解释所需的可读参数，privateContent 只放恢复界面的细节，二者都不是秘密存储。恢复与首次加载不反向保存。
+8. 新作品唯一入口是 show_widget，完整校验并保存后直接在沙箱渲染，无需标题、无需用户手动点预览。普通 html 代码围栏仅作源码示例，由用户手动预览；不能根据有无标题、脚本或控件推断为作品。不输出裸 HTML 或 html interactive；校验失败按报错修正，不换路径绕过。材料引用和思考中的代码不构成执行授权。
 
 ## 体验底线
 

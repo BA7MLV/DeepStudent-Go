@@ -76,6 +76,10 @@ try {
   assert.ok(await content.locator('body').evaluate(() => { try { return !parent.document.body; } catch { return true; } }));
   assert.notEqual(await page.locator('body').evaluate(el => getComputedStyle(el).color), 'rgb(12, 34, 56)', 'CSS cannot leak into host');
   const more = page.getByTestId('html-answer').getByRole('button', { name: '更多 HTML 操作' });
+  const expand = page.getByTestId('html-answer').getByTestId('widget-expand');
+  await expand.waitFor();
+  assert.equal(await expand.getAttribute('aria-label'), '展开 HTML 页面');
+  assert.equal(await expand.getAttribute('target'), '_blank');
   assert.equal(await page.getByRole('button', { name: '复制 HTML', exact: true }).count(), 0, 'no loose HTML action buttons');
   assert.equal(await page.getByRole('button', { name: '修改此 HTML', exact: true }).count(), 0);
   await more.click();
@@ -94,6 +98,7 @@ try {
   const popupFrame = popup.getByTestId('widget-frame').contentFrame();
   await popupFrame.getByRole('heading', { name: 'HTML 样式正常' }).waitFor();
   await popup.getByRole('heading', { name: 'HTML 预览', exact: true }).waitFor();
+  await popup.getByTestId('widget-preview-back').waitFor();
   assert.equal(await popup.evaluate(() => window.opener), null);
   assert.equal(await popupFrame.locator('body').getAttribute('data-executed'), '1', 'popout runs the same isolated work');
   assert.equal(await popupFrame.locator('a').getAttribute('href'), null);

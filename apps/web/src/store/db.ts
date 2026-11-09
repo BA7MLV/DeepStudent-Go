@@ -378,7 +378,7 @@ export interface ChatRow {
   widgets?: WidgetPayload[];
   /** Exact-source cache for explicit legacy html interactive fences; never inferred from bare HTML. */
   legacyHtmlWorks?: { source: string; payload: WidgetPayload }[];
-  /** 本机交互快照，绑定此消息及此版 widget；privateContent 不进入模型上下文。 */
+  /** Legacy inline snapshots. New interaction state lives only in _widgetStates. */
   widgetState?: { widgetId: string; value: WidgetState };
   widgetStates?: Record<string, WidgetState>;
 }
@@ -523,6 +523,17 @@ export interface SkillRefRow {
   body: string;
 }
 
+/** Device-local UI state, deliberately outside CLOUD_TABLES and conversation exports. */
+export interface LocalWidgetStateRow {
+  rowId: number;
+  widgetId: string;
+  sessionId: number;
+  videoId: string;
+  html: string;
+  libs: string;
+  state: WidgetState | null;
+}
+
 export class WangkeDB extends Dexie {
   videos!: Table<VideoRow, string>;
   files!: Table<FileRow, string>;
@@ -542,6 +553,7 @@ export class WangkeDB extends Dexie {
   covers!: Table<CoverRow, string>;
   studyDays!: Table<StudyDayRow, string>;
   comments!: Table<CommentRow, number>;
+  _widgetStates!: Table<LocalWidgetStateRow, [number, string]>;
 
   constructor(name = 'wangke', cloudCache = false) {
     super(name);
@@ -643,6 +655,7 @@ export class WangkeDB extends Dexie {
     });
     this.version(17).stores({ preferences: 'id' });
     this.version(18).stores({ _learningCommands: '++sequence, &operationId', _historyRecovery: 'id', _historyTransactions: 'id', _projectionStage: 'id' });
+    this.version(19).stores({ _widgetStates: '[rowId+widgetId], rowId' });
     this.on('blocked', () => { setDatabaseNotice({ database: name, state: 'blocked' }); });
     this.on('ready', () => {
       if (databaseNotice()?.database === name && databaseNotice()?.state === 'blocked') setDatabaseNotice(null);

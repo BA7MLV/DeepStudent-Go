@@ -5,7 +5,7 @@ import './sticky-header.css';
 interface Overlay { target: HTMLElement; style: CSSProperties; height: number }
 
 /** Native sticky owns the bounds. Only its stuck toolbar escapes the chat's
- * clipping/size-container contexts, so the progressive blur cannot cover it. */
+ * clipping/size-container contexts; it still stays below the app header. */
 export default function StickyHeader({ children, className, enabled = true }: {
   children: ReactNode; className: string; enabled?: boolean;
 }) {

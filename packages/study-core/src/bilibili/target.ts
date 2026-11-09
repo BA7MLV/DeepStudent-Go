@@ -1,6 +1,6 @@
 import { fetchVideoView, resolveShortUrl, type BiliApiOptions, type BiliPageInfo } from './api.js';
 import { fetchBiliSubtitleList, type BiliSubtitleItem } from './dmview.js';
-import { parseBiliInput } from './parse.js';
+import { extractBiliInput, parseBiliInput } from './parse.js';
 import { defaultPagesFor } from './pages.js';
 
 export interface BiliTarget {
@@ -18,7 +18,7 @@ export async function resolveBiliTarget(opts: BiliApiOptions, raw: string): Prom
   const parsed = parseBiliInput(raw);
   const bvid = parsed.isShort ? await resolveShortUrl(opts, parsed.shortUrl!) : parsed.bvid;
   const view = await fetchVideoView(opts, bvid);
-  const explicitPage = /[?&]p=\d+/.test(raw) ? parsed.page : null;
+  const explicitPage = /[?&]p=\d+/.test(extractBiliInput(raw) ?? '') ? parsed.page : null;
   const pages = view.season?.pages ?? view.pages;
   const current = view.season?.pages.find(p => p.bvid === bvid && p.sourcePage === (explicitPage ?? 1));
   const defaultPages = view.season ? [current?.page ?? pages.find(p => p.bvid === bvid)!.page] : defaultPagesFor(pages, explicitPage);

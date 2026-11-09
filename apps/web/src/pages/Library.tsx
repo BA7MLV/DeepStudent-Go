@@ -49,6 +49,7 @@ import { useIsMobile } from '../utils/useMobile';
 import { useMarqueeSelection } from '../utils/useMarqueeSelection';
 // 课程/材料 id 的生成（降级实现与理由见 utils/uuid.ts 的文件头，仓库里只有那一份）
 import { fetchPageSubtitles, importBiliPages, resolveBiliTarget, type BiliTarget } from '../bilibili';
+import { extractBiliInput } from '../bilibili/parse';
 import type { BiliSubtitleItem } from '../bilibili/dmview';
 import { formatTotalDuration, pageLabel, resolveSelectedPages, selectedDuration } from '../bilibili/pages';
 import { defaultSelectedLangs, type SubtitleBundle } from '../bilibili/subtitle';
@@ -388,6 +389,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const [biliUrl, setBiliUrl] = useState('');
   const [biliTarget, setBiliTarget] = useState<BiliTarget | null>(null);
   const [biliResolving, setBiliResolving] = useState(false);
+  const biliResolveReqRef = useRef(0);
   /** 勾选的字幕语言（B 站 lan key）；第一路（按优先级）作主字幕 */
   const [biliLangs, setBiliLangs] = useState<string[]>([]);
   /** 已解析出的字幕语言（跟着「第一个选中的分 P」走，切 P 会刷新） */
@@ -681,6 +683,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
 
   /** 清空 B 站导入弹窗的草稿（关弹窗 / 导入成功后都调） */
   function resetBiliDraft() {
+    ++biliResolveReqRef.current;
+    setBiliResolving(false);
     ++langReqRef.current;
     setBiliSubtitleError(null);
     setBiliSubtitleLoading(false);
@@ -743,16 +747,23 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
    * B 站导入第一步：解析链接，拿到标题/时长与「自带字幕」语言列表。
    * 真正下载放到第二步，因为选哪几路字幕要用户先拍板。
    */
-  const handleBiliResolve = async () => {
-    const raw = biliUrl.trim();
+  const handleBiliResolve = async (value = biliUrl) => {
+    const raw = value.trim();
     if (!raw) {
       toast.warning('请粘贴 B 站视频链接或 BV 号');
       return;
     }
+    const seq = ++biliResolveReqRef.current;
+    ++langReqRef.current;
+    setBiliTarget(null);
+    setBiliSubtitleError(null);
+    setBiliSubtitleLoading(false);
+    biliOperationRef.current = null;
     setBiliResolving(true);
     setBiliError(null);
     try {
       const target = await resolveBiliTarget(raw);
+      if (seq !== biliResolveReqRef.current) return;
       setBiliTarget(target);
       setBiliSubtitleError(target.subtitleError ?? null);
       setBiliPagesSel(target.defaultPages);
@@ -763,11 +774,12 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         toast.info('该视频没有自带字幕，导入后会安排服务器转写，无需保持页面打开');
       }
     } catch (e) {
+      if (seq !== biliResolveReqRef.current) return;
       const text = formatCaughtError(e);
       setBiliError(text);
       showError('B 站解析失败', text);
     } finally {
-      setBiliResolving(false);
+      if (seq === biliResolveReqRef.current) setBiliResolving(false);
     }
   };
 
@@ -2070,12 +2082,22 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     data-testid="bili-url"
                     rows={2}
                     value={biliUrl}
-                    placeholder="粘贴 B 站视频链接 / BV 号 / b23.tv 短链"
+                    placeholder="粘贴 B 站分享文案、视频链接或 BV 号，自动解析"
                     aria-label="B 站视频链接"
                     disabled={biliImporting || biliResolving}
+                    onPaste={(e) => {
+                      const input = extractBiliInput(e.clipboardData.getData('text/plain'));
+                      if (!input) return; // 普通文本保留默认粘贴行为。
+                      e.preventDefault();
+                      setBiliUrl(input);
+                      void handleBiliResolve(input);
+                    }}
                     onChange={(e) => {
                       setBiliUrl(e.target.value);
+                      ++biliResolveReqRef.current;
                       setBiliTarget(null); // 改链接后旧的解析结果（含字幕列表）作废
+                      setBiliError(null);
+                      biliOperationRef.current = null;
                       ++langReqRef.current;
                       setBiliSubtitleError(null);
                       setBiliSubtitleLoading(false);
@@ -2083,7 +2105,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   />
                 </TextField>
                 <div className="text-secondary" style={{ marginTop: 8, fontSize: 12 }}>
-                  由服务器直接下载并保存，无需油猴或代理。需要 B 站登录态时，可在设置中保存 Cookie；提交任务后可关闭页面。
+                  支持直接粘贴整段分享文案，自动识别第一个 B 站链接；确认后才开始导入。由服务器下载保存，需要登录态时可在设置中保存 Cookie。
                 </div>
                 {biliTarget && (
                   <div style={{ marginTop: 12 }} data-testid="bili-target">
@@ -2213,7 +2235,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                 )}
               </Modal.Body>
               <Modal.Footer>
-                <Button variant="tertiary" data-testid="bili-cancel" isDisabled={biliImporting} onPress={() => setBiliOpen(false)}>
+                <Button variant="tertiary" data-testid="bili-cancel" isDisabled={biliImporting} onPress={() => { setBiliOpen(false); resetBiliDraft(); }}>
                   取消
                 </Button>
                 {biliTarget ? (

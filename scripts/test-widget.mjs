@@ -242,11 +242,16 @@ test('title：非字符串被拒；两种引号同时出现被拒（围栏参数
   assert.ok(validateWidgetArgs({ format: 'svg', code: SVG, title: '他说"就这样"' }).ok);
 });
 
-test('title：html 形态没有标题栏，传了要拒（不静默丢掉）', () => {
-  const v = validateWidgetArgs({ format: 'html', code: '<div></div>', title: '原型' });
-  assert.ok(!v.ok);
-  assert.match(v.error, /title 只用于/, '要告诉模型该往哪儿写');
-  assert.ok(validateWidgetArgs({ format: 'html', code: '<div></div>' }).ok, '不传 title 不受影响');
+test('title：HTML 作品接受并规范化标题，旧无标题调用仍兼容', () => {
+  const v = validateWidgetArgs({ format: 'html', code: '<div></div>', title: '  函数\n探索  ' });
+  assert.ok(v.ok);
+  assert.equal(v.args.title, '函数 探索');
+  assert.ok(validateWidgetArgs({ format: 'html', code: '<div></div>' }).ok);
+  for (const title of [42, '函'.repeat(MAX_FENCE_TITLE + 1)]) {
+    const invalid = validateWidgetArgs({ format: 'html', code: '<div></div>', title });
+    assert.equal(invalid.ok, false);
+    assert.match(invalid.error, /title/);
+  }
 });
 
 test('通过回执：带 title 时围栏首行写成 ```diagram title="…"', () => {

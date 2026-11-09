@@ -1,39 +1,63 @@
 .widget-preview-page {
   display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0;
-  overflow: auto;
-  padding: clamp(20px, 4vw, 48px);
+  overflow: hidden;
   background: var(--background-secondary);
   color: var(--foreground);
+}
+
+/* 独立的 HTML / 图形页面沿用移动端 push 页的做法：左上角固定返回，
+   原先占位的主页图标在这一层换成返回箭头，标题仍然是页面的。 */
+.widget-preview-page__topbar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  padding-block: max(8px, env(safe-area-inset-top)) 8px;
+  padding-inline: clamp(8px, 2vw, 16px);
+  border-bottom: 1px solid var(--border);
+  background: var(--background-secondary);
+}
+
+.widget-preview-page__back {
+  flex-shrink: 0;
+}
+
+.widget-preview-page__titles {
+  min-width: 0;
+}
+
+.widget-preview-page__title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 1rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget-preview-page__subtitle {
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget-preview-page__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: clamp(16px, 3vw, 32px) clamp(16px, 4vw, 48px) clamp(20px, 4vw, 48px);
 }
 
 .widget-preview-page__inner {
   width: min(100%, 1120px);
   margin: 0 auto;
-}
-
-.widget-preview-page__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.widget-preview-page__header h1 {
-  margin: 0;
-  color: var(--foreground);
-  font-size: clamp(1.25rem, 2vw, 1.5rem);
-  font-weight: 500;
-  text-wrap: balance;
-}
-
-.widget-preview-page__header p {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-  text-wrap: pretty;
 }
 
 .widget-preview-page__widget {
@@ -55,13 +79,8 @@
 }
 
 @media (max-width: 640px) {
-  .widget-preview-page {
-    padding: 16px;
-  }
-
-  .widget-preview-page__header {
-    display: block;
-    margin-bottom: 12px;
+  .widget-preview-page__body {
+    padding: 12px;
   }
 
   .widget-preview-page__widget {

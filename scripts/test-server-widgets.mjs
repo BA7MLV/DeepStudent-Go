@@ -73,7 +73,7 @@ try {
       assert.equal(body.max_tokens ?? body.max_output_tokens ?? body.max_completion_tokens, 32768, 'server widget rounds respect the saved output limit for every protocol');
       const tools = body.tools.map(tool => tool.function?.name ?? tool.name);
       assert.deepEqual(tools, ['ask_user', 'board', 'edit', 'models_discover', 'plugins', 'read', 'show_widget', 'task_delegate'], 'empty libraries use existing native tools; no independent draft tool');
-      return { calls: [widgetCall(`work-${i}`, source)] };
+      return { calls: [widgetCall(`work-${i}`, source, { title: '服务器作品标题' })] };
     }, body => {
       assert.equal(body.max_tokens ?? body.max_output_tokens ?? body.max_completion_tokens, 32768, 'follow-up rounds keep the saved output ceiling when context is available');
       const row = answer(sid);
@@ -81,6 +81,7 @@ try {
       assert.equal(row.widgets[0].html, source);
       assert.equal(row.widget.id, row.widgets[0].id);
       assert.equal(row.widgets[0].source, 'tool');
+      assert.equal(row.widgets[0].title, '服务器作品标题');
       assert.equal(row.interrupted, true);
       assert.ok(JSON.stringify(body).includes(reference(row.widget).split('\n')[1]));
       return { text: `观察交互。\n\n${reference(row.widget)}\n\n继续讲解。` };

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Dexie, { liveQuery } from 'dexie';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../store/db';
+import { databaseNotice } from '../store/database-lifecycle';
 import { useCourseChat } from '../store/courseChat';
 import { popconfirm, promptDialog, Sym, toast } from '../ui';
 import type { RecentItem } from '../ui/layout';
@@ -17,12 +18,14 @@ export function useRecentChats(showActive = false) {
   const awaitingIds = useCourseChat((s) => s.awaitingIds);
   const ready = useCourseChat((s) => s.ready);
   const [activity, setActivity] = useState<Map<number, number> | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+  const failures = useRef(0);
 
   useEffect(() => {
     if (!ready) return;
     // 仅展示发送过消息的会话，后台回答和跨标签页更新也刷新排序。
     // 重试会删除再重建提问；两次读取必须来自同一快照，避免跨过中间的空态。
-    const subscription = liveQuery(() => db.transaction('r', db.chats, async () => new Map(await Promise.all(
+    const readActivity = () => db.transaction('r', db.chats, async () => new Map(await Promise.all(
       sessions.filter((session) => session.id != null).map(async (session) => {
         const query = () => db.chats.where('[sessionId+createdAt+id]').between(
           [session.id!, Dexie.minKey, Dexie.minKey],
@@ -34,15 +37,39 @@ export function useRecentChats(showActive = false) {
         ]);
         return [session.id!, user ? (latest?.createdAt ?? user.createdAt) : 0] as const;
       }),
-    )))).subscribe({
-      next: setActivity,
+    )));
+    let disposed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const subscription = liveQuery(readActivity).subscribe({
+      next: (value) => {
+        failures.current = 0;
+        setActivity(value);
+      },
+      // 这是侧栏的后台查询，失败没有用户能执行的动作，不要弹「请刷新重试」。
+      // WebKit 休眠标签页后会丢掉读事务的底层连接（UnknownError），下一次读取
+      // 通常就恢复；连接本身被关掉（切换账户 / 本机库重开）则先重开再订阅。
+      // liveQuery 出错后订阅即结束，所以这里静默重建，而不是把错误抛给用户。
       error: (error) => {
-        console.error('[useRecentChats] 最近会话查询失败', error);
-        toast.error(t('recent.loadFailed'));
+        console.error('[useRecentChats] 最近会话查询失败，正在自动重试', error);
+        if (disposed) return;
+        const delay = Math.min(500 * 2 ** failures.current, 30_000);
+        failures.current += 1;
+        retryTimer = setTimeout(() => {
+          if (disposed) return;
+          const resume = () => { if (!disposed) setRetryTick((tick) => tick + 1); };
+          // 版本升级（update-required）时由 DatabaseNotice 负责让用户更新，
+          // 这里不要抢着重开旧连接，等提示消失后下一轮自然会接上。
+          if (db.isOpen() || databaseNotice()) resume();
+          else void db.open().then(resume, resume);
+        }, delay);
       },
     });
-    return () => subscription.unsubscribe();
-  }, [sessions, ready, t]);
+    return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      subscription.unsubscribe();
+    };
+  }, [sessions, ready, retryTick]);
 
   // 不改变 store 顺序：bootstrap 和删除后的落脚点依赖原有顺序。
   const recentSessions = useMemo(() => {

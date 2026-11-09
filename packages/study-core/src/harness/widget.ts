@@ -38,6 +38,8 @@ export interface WidgetPayload {
   source?: 'tool' | 'legacy-widget' | 'legacy-html';
   id?: string;
   ref?: string;
+  /** Display metadata only; never authorizes execution or changes source identity. */
+  title?: string;
   html: string;
   libs?: WidgetLib[];
 }
@@ -87,9 +89,9 @@ export interface WidgetArgs {
   format: WidgetFormat;
   code: string;
   /**
-   * 图的标题（```diagram title="抛物线开口方向"）。图块左上角显示，也当下载文件名。
+   * 作品标题。静态图通过围栏传递；HTML 随载荷保存，在宿主标题栏显示。
    *
-   * 它必须由**这里**回执带回围栏（见 widgetAcceptedText）：模型是照着回执「原样贴进正文」的，
+   * 静态图必须由**这里**回执带回围栏（见 widgetAcceptedText）：模型是照着回执「原样贴进正文」的，
    * 回执里不带标题，标题就在这一趟往返里丢掉了 —— 而丢的地方恰恰是模型看不见的。
    */
   title?: string;
@@ -120,15 +122,10 @@ export function validateWidgetArgs(raw: unknown, legacyDocument = false, resourc
 
   const code = typeof a.code === 'string' ? a.code.trim() : '';
   if (!code) return { ok: false, error: 'code 不能为空' };
+  const title = normalizeTitle(a.title);
+  if (!title.ok) return title;
 
   if (format === 'html') {
-    // html 形态渲染成独立图形卡，卡上没有标题栏 —— 收下它就只能悄悄丢掉。
-    // 与其让模型以为「标题写上了」，不如现在说清它该往哪儿写。
-    if (a.title != null)
-      return {
-        ok: false,
-        error: 'html 形态没有标题栏，title 只用于 mermaid / diagram / svg 围栏。图的名字请写进正文那句话里，或不传 title',
-      };
     if (code.length > MAX_HTML)
       return { ok: false, error: `code 过长（${code.length} 字，上限 ${MAX_HTML}）。只画图，不要把正文塞进来` };
     if (/<\s*(?:meta|base|iframe|object|embed)\b/i.test(code))
@@ -174,14 +171,12 @@ export function validateWidgetArgs(raw: unknown, legacyDocument = false, resourc
     if (resourceError) return { ok: false, error: resourceError };
     const libs = normalizeLibs(a.libs);
     if (!libs.ok) return libs;
-    return { ok: true, args: { format, code, libs: libs.libs } };
+    return { ok: true, args: { format, code, libs: libs.libs, ...(title.title ? { title: title.title } : {}) } };
   }
 
   if (code.length > MAX_CODE)
     return { ok: false, error: `code 过长（${code.length} 字，上限 ${MAX_CODE}）。只画图，不要把正文塞进来` };
 
-  const title = normalizeTitle(a.title);
-  if (!title.ok) return title;
   return { ok: true, args: title.title ? { format, code, title: title.title } : { format, code } };
 }
 

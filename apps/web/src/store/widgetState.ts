@@ -1,11 +1,8 @@
 import { liveQuery } from 'dexie';
-import { db, type ChatRow } from './db.ts';
+import { db, type ChatRow, type LocalWidgetStateRow } from './db.ts';
 import type { WidgetPayload } from '../harness/widgetRuntime.ts';
 import { normalizeWidgetState, type WidgetState } from '../harness/widgetState.ts';
-import { uuid } from '../utils/uuid.ts';
 import { messageWidgets } from '../harness/widgetLayout.ts';
-import { versionWidget } from '../harness/widgetProtocol';
-import { editMessage } from '../client/learning';
 import { accountLifecycle, type AccountLifetime } from '../client/account-lifecycle';
 import { WIDGET_READY_TIMEOUT_MS } from '../harness/widgetDiagnostics';
 
@@ -16,6 +13,8 @@ export interface WidgetSession {
   widgetId: string;
   html: string;
   libs: string;
+  /** Id-less historical sources get a stable local slot, without editing the cloud message. */
+  legacyIndex?: number;
 }
 const sessionScopes = new WeakMap<WidgetSession, { database: typeof db; lifetime?: AccountLifetime }>();
 function assertScope(session: WidgetSession) {
@@ -33,7 +32,9 @@ function findSource(row: ChatRow | undefined, payload: WidgetPayload): WidgetPay
 
 function assertSession(row: ChatRow | undefined, session: WidgetSession): asserts row is ChatRow {
   if (!row || row.role !== 'assistant' || row.sessionId !== session.sessionId || row.videoId !== session.videoId
-    || !messageWidgets(row).some((widget) => widget.id === session.widgetId && widget.html === session.html
+    || !messageWidgets(row).some((widget, index) => (session.legacyIndex == null
+      ? widget.id === session.widgetId : !widget.id && index === session.legacyIndex)
+      && widget.html === session.html
       && JSON.stringify(widget.libs ?? []) === session.libs))
     throw new Error('此交互讲解已修改或删除，请回到当前回答重新打开');
 }
@@ -70,7 +71,12 @@ function waitForWidgetSource(database: typeof db, rowId: number, payload: Widget
   });
 }
 
-/** Legacy widgets receive a host-owned ID on first open; model input cannot pick a row or ID. */
+function matchesSnapshot(snapshot: LocalWidgetStateRow | undefined, session: WidgetSession): snapshot is LocalWidgetStateRow {
+  return !!snapshot && snapshot.sessionId === session.sessionId && snapshot.videoId === session.videoId
+    && snapshot.html === session.html && snapshot.libs === session.libs;
+}
+
+/** Admission and persistence are entirely local; opening a legacy widget never edits its message. */
 export async function openWidgetSession(rowId: number, payload: WidgetPayload, options: { waitForSource?: boolean; signal?: AbortSignal } = {}): Promise<WidgetSession> {
   const database = db;
   const lifetime = accountLifecycle.current();
@@ -88,19 +94,26 @@ export async function openWidgetSession(rowId: number, payload: WidgetPayload, o
     guard();
     const source = findSource(row, payload);
     if (!row || !source) throw new Error('此交互讲解已修改或删除，请重新打开');
-    const widgetId = source.id || uuid();
-    const updated = versionWidget(source, widgetId);
-    if (JSON.stringify(updated) !== JSON.stringify(source)) {
-      const patch = row.widgets?.length
-        ? { widgets: row.widgets.map((widget) => widget === source ? updated : widget),
-          ...(row.widgets.at(-1) === source ? { widget: updated } : {}) }
-        : { widget: updated };
-      await editMessage(row, { ...row, ...patch });
-    }
-    guard();
+    const legacyIndex = source.id ? undefined : messageWidgets(row).indexOf(source);
+    const widgetId = source.id || `legacy:${legacyIndex}`;
     const session = { rowId, sessionId: row.sessionId, videoId: row.videoId, widgetId, html: source.html,
-      libs: JSON.stringify(source.libs ?? []) };
+      libs: JSON.stringify(source.libs ?? []), legacyIndex };
     sessionScopes.set(session, { database, lifetime });
+    await database.transaction('rw', database.chats, database._widgetStates, async () => {
+      const current = await database.chats.get(rowId);
+      guard();
+      assertSession(current, session);
+      const previous = await database._widgetStates.get([rowId, widgetId]);
+      guard();
+      if (matchesSnapshot(previous, session)) return;
+      // Import historical inline state once. Later cloud projections must never
+      // overwrite this device's UI. A null marker also prevents repeated imports.
+      const legacy = current.widgetStates?.[widgetId]
+        ?? (current.widgetState?.widgetId === widgetId ? current.widgetState.value : null);
+      await database._widgetStates.put({ ...session, state: previous || legacy == null ? null : normalizeWidgetState(legacy) });
+      guard();
+    });
+    guard();
     return session;
   };
   return run();
@@ -108,13 +121,15 @@ export async function openWidgetSession(rowId: number, payload: WidgetPayload, o
 
 export async function readWidgetState(session: WidgetSession): Promise<WidgetState | null> {
   assertScope(session);
-  const database = db, row = await database.chats.get(session.rowId);
-  if (database !== db) throw new Error('client_account_changed');
-  assertScope(session);
-  assertSession(row, session);
-  const state = row.widgetStates?.[session.widgetId]
-    ?? (row.widgetState?.widgetId === session.widgetId ? row.widgetState.value : null);
-  return state == null ? null : normalizeWidgetState(state);
+  const database = db;
+  return database.transaction('r', database.chats, database._widgetStates, async () => {
+    const row = await database.chats.get(session.rowId);
+    const snapshot = await database._widgetStates.get([session.rowId, session.widgetId]);
+    if (database !== db) throw new Error('client_account_changed');
+    assertScope(session);
+    assertSession(row, session);
+    return matchesSnapshot(snapshot, session) && snapshot.state != null ? normalizeWidgetState(snapshot.state) : null;
+  });
 }
 
 /** The ACK is sent only after this transaction commits. Stale frames cannot recreate deleted rows. */
@@ -122,17 +137,15 @@ export async function saveWidgetState(session: WidgetSession, raw: unknown): Pro
   assertScope(session);
   const database = db;
   const state = normalizeWidgetState(raw);
-  const run = async () => {
+  await database.transaction('rw', database.chats, database._widgetStates, async () => {
     const row = await database.chats.get(session.rowId);
     if (database !== db) throw new Error('client_account_changed');
     assertScope(session);
     assertSession(row, session);
-    const patch = row.widgets?.length
-      ? { widgetStates: { ...row.widgetStates, [session.widgetId]: state } }
-      : { widgetState: { widgetId: session.widgetId, value: state } };
-    await editMessage(row, { ...row, ...patch });
-  };
-  await run();
+    await database._widgetStates.put({ rowId: session.rowId, widgetId: session.widgetId,
+      sessionId: session.sessionId, videoId: session.videoId, html: session.html, libs: session.libs, state });
+    assertScope(session);
+  });
   return state;
 }
 

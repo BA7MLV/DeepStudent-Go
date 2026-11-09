@@ -4,12 +4,12 @@
 .chat-sticky-header[data-sticky='true'] {
   position: sticky;
   top: var(--chat-sticky-top, var(--reasoning-sticky-top, 0px));
-  z-index: 6;
+  z-index: 4;
 }
 
-/* The app toolbar/blur is z=5. Dialogs and portaled menus remain above this. */
+/* Stay below the app toolbar/blur (z=5), including when portaled. */
 .chat-sticky-header.chat-sticky-overlay {
   position: fixed;
-  z-index: 6;
+  z-index: 4;
   margin: 0;
 }

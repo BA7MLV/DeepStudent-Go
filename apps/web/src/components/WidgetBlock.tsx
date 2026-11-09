@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button, Dropdown, Label, Modal, TextArea } from '@heroui/react';
+import { buttonVariants } from '@heroui/styles';
 import { buildWidgetDocument, WIDGET_MSG, type WidgetPayload } from '../harness/widgetRuntime';
 import { normalizeWidgetPrompt, widgetFollowUp, type WidgetState } from '../harness/widgetState';
 import { observeWidgetState, openWidgetSession, readWidgetState, saveWidgetState, type WidgetSession } from '../store/widgetState';
@@ -49,6 +50,8 @@ interface Props {
   disabled?: boolean;
   /** 独立预览页不再显示「在新窗口展开」，避免从新窗口继续打开新窗口。 */
   allowPopout?: boolean;
+  /** 独立预览页的顶栏已经显示标题，卡内不再重复一遍。 */
+  hideTitle?: boolean;
   editActions?: ArtifactActions | null;
   /** Ordinary HTML uses the same sandbox/popout boundary, with source actions owned by its renderer. */
   htmlActions?: { sourceOpen: boolean; sourceId: string; toggleSource(): void; copySource(): void };
@@ -133,7 +136,7 @@ function RejectedWidget({ error, source, retry, editActions }: { error: string; 
   </div>;
 }
 
-function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabled = false, allowPopout = true, editActions, htmlActions, appearance, answerInput, answerFeedback, onRerun }: Props & { onRerun(): void }) {
+function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabled = false, allowPopout = true, hideTitle = false, editActions, htmlActions, appearance, answerInput, answerFeedback, onRerun }: Props & { onRerun(): void }) {
   const [instance] = useState(createPreviewToken);
   const [diagnostics, setDiagnostics] = useState<WidgetDiagnostic[]>([]);
   const diagnosticKeys = useRef(new Set<string>());
@@ -458,10 +461,7 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
             if (!session) throw new Error('请等回答保存完成后再保存参数');
             setStateMessage('正在保存参数…');
             await saveWidgetState(session, request?.value);
-            const state = await readWidgetState(session);
             if (!activeRef.current) return;
-            stateRef.current = state;
-            post(WIDGET_MSG.sync, state);
             setStateMessage('参数已保存在本机');
             setActionError('');
             reply(id);
@@ -571,6 +571,32 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
       className={`md-embedded-ui widget-block${loading ? ' widget-block--loading' : ''}`}
       data-testid={loading ? 'widget-loading' : 'widget-block'} role={loading ? 'status' : undefined}
       aria-busy={!ready && !failed ? true : undefined} data-h={Math.round(height)}>
+      <div className="widget-block__header">
+        {!htmlSurface && !hideTitle && payload.title?.trim() && <h3 className="widget-block__title" data-testid="widget-title">{payload.title}</h3>}
+        <div className="widget-block__tools">
+          {canPopout && <a href={previewHref} target="_blank" rel="noopener noreferrer"
+            className={buttonVariants({ variant: 'tertiary', isIconOnly: true, size: 'sm' })}
+            title={htmlSurface ? '展开 HTML 页面' : '展开交互图形'}
+            aria-label={htmlSurface ? '展开 HTML 页面' : '展开交互图形'} data-testid="widget-expand"><Sym name="open_in_full" size={18} /></a>}
+          <Dropdown>
+            <Button isIconOnly size="sm" variant="tertiary" aria-label={htmlSurface ? '更多 HTML 操作' : '更多交互图形操作'} data-testid="widget-more"><Sym name="more_horiz" size={18} /></Button>
+            <Dropdown.Popover placement="bottom end">
+              <Dropdown.Menu aria-label={htmlSurface ? 'HTML 操作' : '交互图形操作'} disabledKeys={editActions?.busy ? ['edit', 'undo'] : []} onAction={(key) => {
+                if (key === 'edit') editActions?.edit();
+                if (key === 'undo') editActions?.undo?.();
+                if (key === 'copy-html') sourceActions.copySource();
+                if (key === 'source-html') sourceActions.toggleSource();
+              }}>
+                {canPopout ? <Dropdown.Item id="expand" href={previewHref} target="_blank" rel="noopener noreferrer" textValue={htmlSurface ? '在新页面打开' : '在新窗口展开'} data-testid="widget-open"><Sym name={htmlSurface ? 'open_in_new' : 'open_in_full'} /><Label>{htmlSurface ? '在新页面打开' : '在新窗口展开'}</Label></Dropdown.Item> : null}
+                {editActions ? <Dropdown.Item id="edit" textValue={htmlSurface ? '修改 HTML' : '修改这幅图'} data-testid="widget-edit"><Sym name="edit" /><Label>{htmlSurface ? '修改 HTML' : '修改这幅图'}</Label></Dropdown.Item> : null}
+                <Dropdown.Item id="copy-html" textValue="复制 HTML"><Sym name="content_copy" /><Label>复制 HTML</Label></Dropdown.Item>
+                <Dropdown.Item id="source-html" textValue={sourceActions.sourceOpen ? '收起 HTML 源码' : '查看 HTML 源码'} aria-expanded={sourceActions.sourceOpen} aria-controls={sourceActions.sourceId}><Sym name="code" /><Label>{sourceActions.sourceOpen ? '收起 HTML 源码' : '查看 HTML 源码'}</Label></Dropdown.Item>
+                {editActions?.undo ? <Dropdown.Item id="undo" textValue="撤销上次修改"><Sym name="undo" /><Label>撤销上次修改</Label></Dropdown.Item> : null}
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
+        </div>
+      </div>
       {loading && <span className="sr-only">正在准备图形…</span>}
       {(failed || diagnostics.length > 0) && <div className={failed || diagnostics.some(widgetDiagnosticIsError) ? 'widget-block--error' : 'widget-block--notice'}
         role={failed || diagnostics.some(widgetDiagnosticIsError) ? 'alert' : 'status'} data-testid={failed || diagnostics.some(widgetDiagnosticIsError) ? 'widget-error' : 'widget-notice'}>
@@ -592,7 +618,7 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
       {doc && <iframe
         ref={frameRef}
         className="widget-block__frame"
-        title="交互图形"
+        title={payload.title || '交互图形'}
         /* 只有 allow-scripts。**绝不要**加 allow-same-origin：给了就等于把
            IndexedDB / localStorage / 父页面 DOM 一起交出去。 */
         sandbox="allow-scripts"
@@ -615,25 +641,6 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
         <Button size="sm" variant="tertiary" onPress={() => setSelection(null)}>收起</Button>
       </div>}
       {stateMessage && <p className="sr-only" role="status">{stateMessage}</p>}
-      <div className="widget-block__tools">
-        <Dropdown>
-          <Button isIconOnly size="sm" variant="tertiary" aria-label={htmlSurface ? '更多 HTML 操作' : '更多交互图形操作'} data-testid="widget-more"><Sym name="more_horiz" size={18} /></Button>
-          <Dropdown.Popover placement="bottom end">
-            <Dropdown.Menu aria-label={htmlSurface ? 'HTML 操作' : '交互图形操作'} disabledKeys={editActions?.busy ? ['edit', 'undo'] : []} onAction={(key) => {
-              if (key === 'edit') editActions?.edit();
-              if (key === 'undo') editActions?.undo?.();
-              if (key === 'copy-html') sourceActions.copySource();
-              if (key === 'source-html') sourceActions.toggleSource();
-            }}>
-              {canPopout ? <Dropdown.Item id="expand" href={previewHref} target="_blank" rel="noopener noreferrer" textValue={htmlSurface ? '在新页面打开' : '在新窗口展开'} data-testid="widget-open"><Sym name={htmlSurface ? 'open_in_new' : 'open_in_full'} /><Label>{htmlSurface ? '在新页面打开' : '在新窗口展开'}</Label></Dropdown.Item> : null}
-              {editActions ? <Dropdown.Item id="edit" textValue={htmlSurface ? '修改 HTML' : '修改这幅图'} data-testid="widget-edit"><Sym name="edit" /><Label>{htmlSurface ? '修改 HTML' : '修改这幅图'}</Label></Dropdown.Item> : null}
-              <Dropdown.Item id="copy-html" textValue="复制 HTML"><Sym name="content_copy" /><Label>复制 HTML</Label></Dropdown.Item>
-              <Dropdown.Item id="source-html" textValue={sourceActions.sourceOpen ? '收起 HTML 源码' : '查看 HTML 源码'} aria-expanded={sourceActions.sourceOpen} aria-controls={sourceActions.sourceId}><Sym name="code" /><Label>{sourceActions.sourceOpen ? '收起 HTML 源码' : '查看 HTML 源码'}</Label></Dropdown.Item>
-              {editActions?.undo ? <Dropdown.Item id="undo" textValue="撤销上次修改"><Sym name="undo" /><Label>撤销上次修改</Label></Dropdown.Item> : null}
-            </Dropdown.Menu>
-          </Dropdown.Popover>
-        </Dropdown>
-      </div>
       {!htmlActions && sourceOpen && <pre id={sourceId} aria-label="HTML 源码" className="my-2 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-default p-3 text-xs" data-testid="widget-source"><code>{payload.html}</code></pre>}
       {actionError && <p className="m-0 text-sm text-danger" role="alert">{actionError}</p>}
       {followUp && <Modal.Root isOpen onOpenChange={(open) => {

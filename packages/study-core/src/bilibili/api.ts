@@ -73,10 +73,11 @@ interface PlayUrlDash {
   audio: DashStream[] | null;
 }
 
-class BiliHttpError extends Error {
+export class BiliHttpError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    readonly apiCode?: number,
   ) {
     super(message);
     this.name = 'BiliHttpError';
@@ -93,7 +94,7 @@ async function apiGet<T>(opts: BiliApiOptions, target: string): Promise<T> {
   if (!resp.ok) throw new BiliHttpError(`接口请求失败 HTTP ${resp.status}`, resp.status);
   const json = (await resp.json()) as { code: number; message?: string; data?: T };
   if (json.code !== 0) {
-    throw new BiliHttpError(`哔哩哔哩接口返回错误（code=${json.code}）：${json.message ?? '未知'}`);
+    throw new BiliHttpError(`哔哩哔哩接口返回错误（code=${json.code}）：${json.message ?? '未知'}`, undefined, json.code);
   }
   if (json.data == null) throw new BiliHttpError('哔哩哔哩接口返回空数据');
   return json.data;

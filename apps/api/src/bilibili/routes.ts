@@ -6,6 +6,8 @@ import { resolveBiliTarget } from '@wangke/study-core/bilibili/target';
 import { fetchBiliSubtitleList } from '@wangke/study-core/bilibili/dmview';
 import { biliCookie, saveBiliCookie } from './credentials.js';
 import { biliNetwork } from './network.js';
+import { extractBiliInput } from '@wangke/study-core/bilibili/parse';
+import { biliResolveFailure } from './errors.js';
 
 export function registerBilibiliRoutes(app: FastifyInstance, deps: {
   store: DatabaseStore; configuration: CloudConfiguration; fetch?: typeof fetch;
@@ -32,12 +34,18 @@ export function registerBilibiliRoutes(app: FastifyInstance, deps: {
   });
   app.post<{ Body: { raw: string } }>('/api/v1/cloud/bilibili/resolve', async (request, reply) => {
     const user = auth(request, reply); if (!user) return;
-    if (typeof request.body?.raw !== 'string' || request.body.raw.length > 2048 || Object.keys(request.body).some(k => k !== 'raw')) return reply.code(400).send({ error: '请输入有效的 B 站视频链接或 BV 号。' });
+    if (typeof request.body?.raw !== 'string' || request.body.raw.length > 16384 || Object.keys(request.body).some(k => k !== 'raw')) return reply.code(400).send({ error: '请输入有效的 B 站视频链接或 BV 号。' });
+    const input = extractBiliInput(request.body.raw);
+    if (!input) return reply.code(400).send({ error: '未识别到 B 站视频链接，请粘贴视频分享文案、视频链接或 BV 号。' });
     try {
-      const target = await resolveBiliTarget({ request: network(user.id) }, request.body.raw);
+      const target = await resolveBiliTarget({ request: network(user.id) }, input);
       // The browser selects language identifiers, never fetches signed URLs.
       return { ...target, subtitles: target.subtitles.map(item => ({ ...item, url: '' })) };
-    } catch { return reply.code(400).send({ error: '服务器无法解析该 B 站链接，请检查链接、服务器网络和账号权限。' }); }
+    } catch (error) {
+      const failure = biliResolveFailure(error);
+      request.log.warn({ event: 'bilibili_resolve_failed', status: failure.status, reason: failure.error }, 'Bilibili resolve failed');
+      return reply.code(failure.status).send({ error: failure.error });
+    }
   });
   app.post<{ Body: { bvid: string; cid: number } }>('/api/v1/cloud/bilibili/subtitles', async (request, reply) => {
     const user = auth(request, reply); if (!user) return;

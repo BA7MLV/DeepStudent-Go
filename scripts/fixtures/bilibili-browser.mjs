@@ -39,9 +39,16 @@ export async function verifyBiliBrowser({ api, cookie, bvid, secretCookie, folde
     await page.getByRole('button', { name: '更多操作', exact: true }).click();
     await page.getByRole('menuitem', { name: '导入课程 / B 站视频', exact: true }).click();
     await page.getByTestId('btn-bili-import').click();
-    await page.getByTestId('bili-url').fill(bvid);
-    await page.getByTestId('bili-confirm').click();
+    const resolves = [];
+    page.on('request', request => { if (request.url().endsWith('/bilibili/resolve')) resolves.push(request.postDataJSON()); });
+    await page.getByTestId('bili-url').evaluate((element) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/plain', '【服务器课程-哔哩哔哩】\n（https://b23.tv/fixture）。复制后打开哔哩哔哩');
+      element.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }));
+    });
     await page.getByTestId('bili-target').waitFor();
+    assert.equal(await page.getByTestId('bili-url').inputValue(), 'https://b23.tv/fixture');
+    assert.deepEqual(resolves, [{ raw: 'https://b23.tv/fixture' }], 'paste auto-resolves exactly once without clicking');
     assert.equal(await page.getByTestId('bili-page').count(), 2);
     await page.getByTestId('bili-pages-none').click();
     assert.equal(await page.getByTestId('bili-confirm').isDisabled(), true);
