@@ -52,7 +52,7 @@ console.log(`i18n resources OK: ${namespaces.length} namespaces × 2 languages (
  * 中文注释不在引号里，不会被计入。
  */
 const cjk = /[\u{3400}-\u{4dbf}\u{4e00}-\u{9fff}\u{f900}-\u{faff}]/u;
-const quoted = /(["'`])(?:\\.|(?!\1)[^\\])*?\1/g;
+const quoted = /(["'`])(?:\\.|(?!\1)[^\\\n])*?\1/g;
 const srcRoot = new URL('../src/', import.meta.url);
 const baselineUrl = new URL('../src/i18n/cjk-baseline.json', import.meta.url);
 const skip = dir => dir.pathname.includes('/src/i18n/') || dir.pathname.endsWith('.test.') || dir.pathname.includes('/third-party/');
