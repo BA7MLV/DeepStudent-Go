@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import i18n from '../i18n';
 import { persist } from 'zustand/middleware';
 import type { ReasoningEffort } from '../api/siliconflow';
 import { normalizeThinkingEffort } from '../api/modelCaps';
@@ -55,12 +56,16 @@ const SLOT_FIELD = {
 type ModelFieldName = (typeof SLOT_FIELD)[ModelSlot];
 
 /** 槽位的中文名。报错文案与设置页共用，避免同一个槽位在两处叫法不一致。 */
-export const SLOT_LABEL: Record<ModelSlot, string> = {
-  asr: '语音识别',
-  vision: '图片理解',
-  chat: '主模型',
-  decision: '决策模型',
+type SlotLabelKey = 'slots.asr' | 'slots.vision' | 'slots.chat' | 'slots.decision';
+const SLOT_LABEL_KEY: Record<ModelSlot, SlotLabelKey> = {
+  asr: 'slots.asr',
+  vision: 'slots.vision',
+  chat: 'slots.chat',
+  decision: 'slots.decision',
 };
+
+/** 槽位名的当前语言文案；语言切换后随下一次调用生效（不冻结在 import 时）。 */
+export const slotLabel = (slot: ModelSlot): string => i18n.t(SLOT_LABEL_KEY[slot], { ns: 'settings' });
 
 /**
  * 一家模型供应商（连接）。
@@ -603,11 +608,11 @@ export function targetOfSlot(s: Settings, slot: ModelSlot): ModelTarget {
   const p = providerOf(s, ref.providerId);
   if (!p) {
     throw new Error(
-      `「${SLOT_LABEL[slot]}」模型指向的供应商已被删除，请到「设置 → 模型供应商」重新选择`,
+      i18n.t('models.slotProviderGone', { ns: 'settings', slot: slotLabel(slot) }),
     );
   }
   if (!p.apiKey.trim()) {
-    throw new Error(`请先在「设置 → 模型供应商」里填写「${p.name}」的 API Key`);
+    throw new Error(i18n.t('models.slotKeyMissing', { ns: 'settings', name: p.name }));
   }
   return {
     providerId: p.id,

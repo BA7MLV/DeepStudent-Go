@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Button,
   Checkbox,
@@ -14,7 +15,7 @@ import {
 } from '@heroui/react';
 import { Header } from 'react-aria-components';
 import {
-  SLOT_LABEL,
+  slotLabel,
   catalogOf,
   nextProviderId,
   modelOverridesOf,
@@ -77,11 +78,11 @@ const SLOT_ICON: Record<ModelSlot, ReactNode> = {
 };
 
 /** 槽位 → 一句话说明它负责什么。放在槽位名下，替代原来分散在各处的长 hint */
-const SLOT_HINT: Record<ModelSlot, string> = {
-  chat: '负责讲义生成与课程问答，支持视觉时也可直接读图',
-  vision: '主模型可读图时自动复用，否则使用已添加的图片理解模型；也可独立指定',
-  asr: '把视频音轨转成字幕，可以和文本模型不在同一家',
-  decision: '可选：负责技能路由与历史筛选，不生成回答；选择后需单独开启功能',
+const SLOT_HINT_KEY: Record<ModelSlot, 'models.slotHint.chat' | 'models.slotHint.vision' | 'models.slotHint.asr' | 'models.slotHint.decision'> = {
+  chat: 'models.slotHint.chat',
+  vision: 'models.slotHint.vision',
+  asr: 'models.slotHint.asr',
+  decision: 'models.slotHint.decision',
 };
 
 const SLOT_ORDER: readonly ModelSlot[] = ['chat', 'vision', 'asr', 'decision'];
@@ -131,6 +132,7 @@ function ModelOptionRow({
    */
   idPrefix?: string;
 }) {
+  const { t } = useTranslation('settings');
   const favTestId = `fav-${slot}-${providerName}-${model}`;
   const overrides = useModelSettings((s) => modelOverridesOf(s, { providerId, model }));
   // 星标放在 ListBox.Item **内部**：Item 是 React Aria collection 的成员，
@@ -171,7 +173,7 @@ function ModelOptionRow({
         data-testid={favTestId}
         role="button"
         tabIndex={-1}
-        aria-label={favorite ? `取消收藏 ${model}` : `收藏 ${model}`}
+        aria-label={favorite ? t('models.unfavorite', { model }) : t('models.favorite', { model })}
         onClick={(event) => {
           // 星标在 Item 内部，靠阻止冒泡避免顺手把模型也选中
           event.stopPropagation();
@@ -244,6 +246,7 @@ function SlotModelSelect({
   options: Record<string, string[]>;
   issue?: ModelSettingsIssue;
 }) {
+  const { t } = useTranslation('settings');
   const ref = settings[name];
   const update = useModelSettings((s) => s.update);
   const provider = settings.providers.find((p) => p.id === ref.providerId);
@@ -350,8 +353,8 @@ function SlotModelSelect({
           {SLOT_ICON[slot]}
         </span>
         <div className="flex-1 min-w-0">
-          <div id={`model-label-${name}`} className="text-sm font-semibold leading-tight text-foreground">{SLOT_LABEL[slot]}</div>
-          <div id={`model-hint-${name}`} className="mt-1 text-xs leading-relaxed text-muted">{SLOT_HINT[slot]}</div>
+          <div id={`model-label-${name}`} className="text-sm font-semibold leading-tight text-foreground">{slotLabel(slot)}</div>
+          <div id={`model-hint-${name}`} className="mt-1 text-xs leading-relaxed text-muted">{t(SLOT_HINT_KEY[slot])}</div>
         </div>
       </div>
 
@@ -386,7 +389,7 @@ function SlotModelSelect({
             type="button"
              className="model-slot__trigger box-border flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl border border-border bg-background px-3 py-2 text-left font-[inherit] text-foreground hover:border-accent/45 focus-visible:outline-2 focus-visible:outline-focus focus-visible:outline-offset-2 aria-expanded:border-accent/55"
             data-testid={`model-button-${name}`}
-            aria-label={`选择${SLOT_LABEL[slot]}，当前为 ${ref.model || '未设置'}`}
+            aria-label={t('models.pickSlot', { slot: slotLabel(slot), model: ref.model || t('models.unset') })}
             aria-expanded={open}
              aria-haspopup="dialog"
              aria-invalid={Boolean(issue) || undefined}
@@ -398,7 +401,7 @@ function SlotModelSelect({
                 <>
                   <span className="w-full truncate text-sm font-medium" title={ref.model}>{modelLabel(settings, ref)}</span>
                   <span className="flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                    <span className="min-w-0 max-w-full truncate">{provider?.name ?? '原供应商已不存在'}</span>
+                    <span className="min-w-0 max-w-full truncate">{provider?.name ?? t('models.providerGone')}</span>
                     <CapBadges catalogId={catalogId} model={ref.model} overrides={modelOverridesOf(settings, ref)} />
                   </span>
                 </>
@@ -447,21 +450,21 @@ function SlotModelSelect({
               style={{ maxHeight: 'min(28rem, calc(100dvh - 8rem))' }}
             >
               <SearchField
-                aria-label={`筛选${SLOT_LABEL[slot]}模型`}
+                aria-label={t('models.filterSlot', { slot: slotLabel(slot) })}
                 data-testid={`model-search-${name}`}
                 value={kw}
                 onChange={(v) => setKw(v)}
               >
                 <SearchField.Group className="px-3 py-3 pb-2">
                   <SearchField.SearchIcon />
-                  <SearchField.Input placeholder={`搜索 ${candidates.length} 家供应商的模型`} />
+                  <SearchField.Input placeholder={t('models.searchProviders', { count: candidates.length })} />
                   <SearchField.ClearButton />
                 </SearchField.Group>
               </SearchField>
 
               <ListBox
                 className="min-h-0 overflow-y-auto overscroll-contain px-0 py-0"
-                aria-label={`${SLOT_LABEL[slot]}模型候选`}
+                aria-label={t('models.slotCandidates', { slot: slotLabel(slot) })}
                 selectionMode="none"
                 // 这里**刻意不挂** onAction：选中逻辑在每个 ModelOptionRow 上（它手里
                 // 已经有 provider 对象，直接就能拿到 id 与名字）。
@@ -512,14 +515,14 @@ function SlotModelSelect({
                         slot={slot}
                         providerId={f.providerId}
                         providerName={
-                          `（${settings.providers.find((p) => p.id === f.providerId)?.name ?? f.providerId}：已不可用）`
+                          t('models.favoriteUnavailable', { provider: settings.providers.find((p) => p.id === f.providerId)?.name ?? f.providerId })
                         }
                         model={f.model}
                         catalogId=""
                         catalogKnown={false}
                         selected={sameRef(f, ref)}
                         favorite={true}
-                        onSelect={() => toast.warning('请先恢复供应商及其用途配置')}
+                        onSelect={() => toast.warning(t('models.restoreProviderFirst'))}
                         onToggleFavorite={() => toggleFavorite(f.providerId, f.model)}
                         idPrefix="orphan::"
                       />
@@ -559,8 +562,8 @@ function SlotModelSelect({
                 {totalResults === 0 ? (
                   <span className="min-w-0 truncate text-xs text-muted">
                     {Object.keys(options).length === 0
-                      ? '请先进入供应商，添加用于此用途的模型'
-                      : '没有匹配的已添加模型'}
+                      ? t('models.enterProviderFirst')
+                      : t('models.noMatchModels')}
                   </span>
                 ) : (
                   <span className="min-w-0 truncate text-xs text-muted">{totalResults} 个模型</span>
@@ -574,15 +577,15 @@ function SlotModelSelect({
       </>}
       {slot === 'vision' ? <Checkbox
         className="model-slot__auto"
-        aria-label="自动：优先主模型，否则使用读图模型"
+        aria-label={t('models.autoVision')}
         isSelected={!ref.model}
         onChange={(on) => {
           const first = modelsForSlot(settings, 'vision')[0];
-          if (!on && !first) { toast.warning('请先添加用于图片理解的模型'); return; }
+          if (!on && !first) { toast.warning(t('models.addVisionFirst')); return; }
           update({ visionModel: on ? { providerId: '', model: '' } : { providerId: first.providerId, model: first.model } });
         }}
       ><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>自动：优先主模型，否则使用读图模型</Checkbox.Content></Checkbox>
-        : ref.model && <Button variant="tertiary" className="model-slot__clear self-start" onPress={() => update({ [name]: { providerId: '', model: '' } })}>{slot === 'decision' ? '不使用决策模型' : '清除选择，稍后配置'}</Button>}
+        : ref.model && <Button variant="tertiary" className="model-slot__clear self-start" onPress={() => update({ [name]: { providerId: '', model: '' } })}>{slot === 'decision' ? t('models.noDecision') : t('models.clearSelection')}</Button>}
       {issue && <p id={`model-error-${name}`} role="alert" className="text-xs text-danger">{modelIssueMessage(issue)}</p>}
     </div>
   );
@@ -628,6 +631,7 @@ function ProviderRow({
   accountContent?: ReactNode;
   children: ReactNode;
 }) {
+  const { t } = useTranslation('settings');
   const inputRef = useRef<HTMLDivElement>(null);
   const [dupName, setDupName] = useState(false);
   const [showKey, setShowKey] = useState(false);
@@ -654,12 +658,12 @@ function ProviderRow({
     return () => clearTimeout(t);
   }, [shaking]);
 
-  const STATUS_HINT: Record<typeof status, string> = {
-    draft: '未保存',
-    ready: '列表已获取',
-    unchecked: '未获取列表',
-    failed: '列表获取失败',
-    unconfigured: '未配置',
+  const STATUS_HINT: Record<typeof status, 'models.status.draft' | 'models.status.ready' | 'models.status.unchecked' | 'models.status.failed' | 'models.status.unconfigured'> = {
+    draft: 'models.status.draft',
+    ready: 'models.status.ready',
+    unchecked: 'models.status.unchecked',
+    failed: 'models.status.failed',
+    unconfigured: 'models.status.unconfigured',
   };
 
   const preset = getProviderPresets().find((p) => matchesProviderPreset(provider, p));
@@ -690,27 +694,27 @@ function ProviderRow({
             {preset ? <ProviderLogo id={preset.id} /> : <Sym name="dns" />}
           </span>
           {status !== 'ready' && <span className={`max-w-full truncate rounded-full px-3 py-1 text-xs font-medium max-[640px]:px-2 max-[640px]:py-1 max-[640px]:text-[9px] ${removable ? 'mr-10 max-[640px]:mr-9' : ''} ${statusColor} ${status === 'failed' || status === 'unconfigured' ? 'bg-danger/12' : 'bg-foreground/8'}`}>
-            {STATUS_HINT[status]}
+            {t(STATUS_HINT[status])}
           </span>}
         </span>
         <span className="flex min-w-0 flex-1 flex-col justify-end gap-1">
           <span className="flex min-w-0 items-center gap-2 text-lg font-semibold text-foreground max-[640px]:text-xs">
-            <span className="truncate">{provider.name.trim() || '未命名供应商'}</span>
-            {status === 'ready' && <span className="inline-flex shrink-0 items-center text-success" title={STATUS_HINT[status]} data-testid={`provider-ready-${provider.id}`}>
+            <span className="truncate">{provider.name.trim() || t('models.unnamedProvider')}</span>
+            {status === 'ready' && <span className="inline-flex shrink-0 items-center text-success" title={t(STATUS_HINT[status])} data-testid={`provider-ready-${provider.id}`}>
               <Sym name="check_circle" size={18} />
-              <span className="sr-only">{STATUS_HINT[status]}</span>
+              <span className="sr-only">{t(STATUS_HINT[status])}</span>
             </span>}
             {dupName && <Chip size="sm" variant="soft" color="danger" className="h-4 px-1 text-[10px]">重名</Chip>}
           </span>
           {showEndpoint && <span className="truncate font-mono text-xs text-muted max-[640px]:text-[9px]" title={provider.baseUrl}>
-            {provider.baseUrl.trim() || 'API 地址未配置'}
+            {provider.baseUrl.trim() || t('models.baseUrlUnconfigured')}
           </span>}
         </span>
         <span className="flex items-center gap-2 text-sm text-muted max-[640px]:gap-1 max-[640px]:text-[10px]">
           <Sym name="toc" className="max-[640px]:size-3" />
           <span className="tabular-nums">{modelCount ?? 0}</span>
           <span className="max-[640px]:hidden">个模型</span>
-          <span className="ml-auto text-xs text-muted max-[640px]:hidden">{open ? '详情' : '进入'}</span>
+          <span className="ml-auto text-xs text-muted max-[640px]:hidden">{open ? t('models.details') : t('models.enter')}</span>
         </span>
       </button>
       {removable && (
@@ -721,7 +725,7 @@ function ProviderRow({
           className="absolute top-4 right-4 text-muted hover:text-danger max-[640px]:top-2 max-[640px]:right-2"
           data-testid={`provider-remove-${provider.id}`}
           onPress={onRemove}
-          aria-label={`删除供应商 ${provider.name || provider.id}`}
+          aria-label={t('models.deleteProvider', { name: provider.name || provider.id })}
         >
           <Sym name="delete" />
         </Button>
@@ -730,32 +734,32 @@ function ProviderRow({
       {open && (
         <div className="flex flex-col gap-3 border-t border-border/70 px-5 pt-4 pb-5">
           <MotionDisclosure open={showConnection} onOpenChange={setShowConnection}
-            title={showEndpoint ? '连接设置 · 地址、密钥与协议' : '连接设置'} triggerClassName="py-2 text-sm font-medium">
+            title={showEndpoint ? t('models.connectionSettingsFull') : t('models.connectionSettings')} triggerClassName="py-2 text-sm font-medium">
             <div className="flex flex-col gap-3 pt-3">
-          <Field label="名称">
+          <Field label={t('models.name')}>
             <Input
               value={provider.name}
               data-testid={`provider-name-${provider.id}`}
-              aria-label="供应商名称"
-              placeholder="供应商名称，如「硅基流动」"
+              aria-label={t('models.providerNameAria')}
+              placeholder={t('models.providerNamePlaceholder')}
               aria-invalid={dupName || undefined}
               onChange={(e) => onChange({ name: e.target.value })}
               className="w-full"
             />
           </Field>
           {showEndpoint && <>
-          <Field label="API 地址" testId={`field-base-url-${provider.id}`}>
+          <Field label={t('models.apiBaseUrl')} testId={`field-base-url-${provider.id}`}>
             <Input
               value={provider.baseUrl}
               data-testid={`base-url-${provider.id}`}
-              aria-label="API 地址"
+              aria-label={t('models.apiBaseUrl')}
               placeholder="https://api.example.com/v1"
               onChange={(e) => onChange({ baseUrl: e.target.value.trim() })}
             />
           </Field>
-          <Field label="API 协议" hint="选择这家供应商的对话请求格式；模型列表会按所选协议查询">
+          <Field label={t('models.apiProtocol')} hint={t('models.apiProtocolHint')}>
             <Select
-              aria-label={`${provider.name || '供应商'} API 协议`}
+              aria-label={t('models.providerApiProtocol', { name: provider.name || t('models.unnamedProvider') })}
               selectedKey={provider.protocol ?? 'openai-chat'}
               onSelectionChange={(key) => {
                 if (key != null) onChange({ protocol: String(key) as ApiProtocol });
@@ -777,7 +781,7 @@ function ProviderRow({
           </>}
           <Field
             label="API Key"
-            hint={accountContent ? undefined : serverManaged ? '密钥加密保存在服务器；留空保留已保存的密钥，修改后点击“保存连接并获取模型”' : status === 'draft' ? '点击保存后仅存于本机浏览器；不参与云同步与迁移导出' : '仅保存在本机浏览器 localStorage 中；云同步与迁移包都不含它'}
+            hint={accountContent ? undefined : serverManaged ? t('models.keyHintServer') : status === 'draft' ? t('models.keyHintDraft') : t('models.keyHintLocal')}
             testId={`field-api-key-${provider.id}`}
           >
             {accountContent ?? <div>
@@ -789,10 +793,10 @@ function ProviderRow({
                 <div className="flex flex-nowrap items-center gap-2">
                   <Input
                     data-testid={`api-key-${provider.id}`}
-                    aria-label={`${provider.name} 的 API Key`}
+                    aria-label={t('models.providerKey', { name: provider.name })}
                     aria-invalid={shaking || undefined}
                     type={showKey ? 'text' : 'password'}
-                    placeholder={serverManaged && provider.configured ? '已配置，留空保留' : 'sk-...'}
+                    placeholder={serverManaged && provider.configured ? t('models.configuredKeep') : 'sk-...'}
                     autoComplete="new-password"
                     value={provider.apiKey}
                     onChange={(e) => onChange({ apiKey: e.target.value.trim() })}
@@ -802,7 +806,7 @@ function ProviderRow({
                     isIconOnly
                     variant="ghost"
                     size="sm"
-                    aria-label={showKey ? `隐藏 ${provider.name} 的 API Key` : `显示 ${provider.name} 的 API Key`}
+                    aria-label={showKey ? t('models.hideKey', { name: provider.name }) : t('models.showKey', { name: provider.name })}
                     onPress={() => setShowKey((v) => !v)}
                   >
                     <Sym name={showKey ? 'visibility_off' : 'visibility'} />
@@ -851,6 +855,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
   issues?: ModelSettingsIssue[];
   focusIssue?: number;
 } = {}) {
+  const { t } = useTranslation('settings');
   const settings = useModelSettings();
   const settingsStore = useModelSettingsStore();
   useModelMetaRevision();
@@ -937,9 +942,9 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
     try {
       const { count } = await refreshModelMeta(catalogs);
       setMetaInfo(modelMetaInfo());
-      toast.success(`已更新 ${count} 个模型的能力数据`);
+      toast.success(t('models.capsUpdated', { count }));
     } catch (e) {
-      setMetaError(`刷新失败：${e instanceof Error ? e.message : String(e)}`);
+      setMetaError(t('models.refreshFailed', { message: e instanceof Error ? e.message : String(e) }));
     } finally {
       setMetaRefreshing(false);
     }
@@ -979,14 +984,14 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
     if (!provider) return;
     if ((!serverManaged && !provider.apiKey.trim()) || !provider.baseUrl.trim()) {
       triggerKeyError(providerId);
-      toast.warning('请先填写当前供应商的 API 地址与 Key');
+      toast.warning(t('models.fillUrlKeyFirst'));
       return;
     }
     try {
       const ids = await refreshProviderModels(provider);
-      if (ids) toast.success(ids.length ? `已拉取 ${ids.length} 个模型` : '接口返回空模型列表，可手动添加模型');
+      if (ids) toast.success(ids.length ? t('models.fetchedModels', { count: ids.length }) : t('models.emptyModelList'));
     } catch (error) {
-      toast.warning(`拉取失败：${error instanceof Error ? error.message : String(error)}`);
+      toast.warning(t('models.fetchFailed', { message: error instanceof Error ? error.message : String(error) }));
     }
   };
 
@@ -995,7 +1000,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
     if (serverManaged && !discoveryProviders?.some((saved) => saved.id === p.id)) return 'draft';
     if ((!serverManaged && !p.apiKey.trim()) || !p.baseUrl.trim()) return 'unconfigured';
     const note = providerNotes[p.id];
-    if (note?.startsWith('拉取失败')) return 'failed';
+    if (note?.startsWith(t('models.fetchFailedShort'))) return 'failed';
     if (note) return 'ready';
     return 'unchecked';
   };
@@ -1030,18 +1035,18 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
   const saveDraftProvider = async () => {
     if (providerSaving) return;
     if (!draftProvider) return;
-    if (!draftProvider.name.trim()) { setDraftError('请填写供应商名称'); return; }
-    if (!draftProvider.baseUrl.trim()) { setDraftError('请填写 API 地址'); return; }
+    if (!draftProvider.name.trim()) { setDraftError(t('models.nameRequired')); return; }
+    if (!draftProvider.baseUrl.trim()) { setDraftError(t('models.urlRequired')); return; }
     try {
       const url = new URL(draftProvider.baseUrl);
       if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('invalid protocol');
     } catch {
-      setDraftError('请填写有效的 HTTP 或 HTTPS API 地址');
+      setDraftError(t('models.urlInvalid'));
       return;
     }
-    if (draftProvider.name.trim().length > 100) { setDraftError('供应商名称不能超过 100 个字符'); return; }
-    if (draftProvider.apiKey.length > 4096) { setDraftError('API Key 长度超出限制'); return; }
-    if (!serverManaged && !draftProvider.apiKey.trim()) { setDraftError('请填写 API Key 后再保存'); return; }
+    if (draftProvider.name.trim().length > 100) { setDraftError(t('models.nameTooLong')); return; }
+    if (draftProvider.apiKey.length > 4096) { setDraftError(t('models.keyTooLong')); return; }
+    if (!serverManaged && !draftProvider.apiKey.trim()) { setDraftError(t('models.keyRequired')); return; }
     // 保存时才分配正式 id，并基于最新设置追加，不覆盖同时发生的设置变更。
     const current = settingsStore.getState();
     const provider = { ...draftProvider, id: onSaveProvider ? draftIdentity.current ??= `p-${crypto.randomUUID()}` : nextProviderId(current), name: draftProvider.name.trim() };
@@ -1083,16 +1088,16 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
     patch.favorites = favs;
     settings.update(patch);
     if (selectedProviderId === p.id) setSelectedProviderId(null);
-    toast.info(serverManaged ? `已从草稿移除「${p.name || p.id}」，保存后生效；相关默认模型已清空` : rest.length ? `已删除「${p.name || p.id}」，相关槽位改指「${rest[0].name || rest[0].id}」` : `已删除「${p.name || p.id}」，相关默认模型已清空`);
+    toast.info(serverManaged ? t('models.draftRemoved', { name: p.name || p.id }) : rest.length ? t('models.removedSwitched', { name: p.name || p.id, rest: rest[0].name || rest[0].id }) : t('models.removedCleared', { name: p.name || p.id }));
   };
 
   const confirmRemove = async (provider: Provider) => {
     const affected = MODEL_FIELDS.filter((field) => settings[field].providerId === provider.id && settings[field].model)
-      .map((field) => ({ llmModel: '聊天', visionModel: '图片理解', asrModel: '语音转写', decisionModel: '决策' })[field]);
+      .map((field) => ({ llmModel: 'models.fieldChat', visionModel: 'models.fieldVision', asrModel: 'models.fieldAsr', decisionModel: 'models.fieldDecision' } as const)[field]);
     const description = serverManaged
-      ? `移除「${provider.name || provider.id}」及其已添加模型${affected.length ? `，并清空${affected.join('、')}的默认模型` : ''}。保存模型设置后生效，之后可重新选择。`
-      : `删除「${provider.name || provider.id}」及其已添加模型，相关默认模型将切换到其他供应商。`;
-    if (await confirmDialog({ headline: '删除供应商？', description, danger: true, confirmText: '删除' })) removeProvider(provider);
+      ? t('models.removeDescServer', { name: provider.name || provider.id, affected: affected.length ? t('models.affectedSuffix', { slots: affected.map((label) => t(label)).join('、') }) : '' })
+      : t('models.removeDescLocal', { name: provider.name || provider.id });
+    if (await confirmDialog({ headline: t('models.deleteProviderTitle'), description, danger: true, confirmText: t('models.delete') })) removeProvider(provider);
   };
 
   const selectedProvider = selectedProviderId
@@ -1102,7 +1107,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
   return (
     <>
       <SectionCard
-        title={draftProvider ? (draftProvider.name.trim() || '自定义提供商') : selectedProvider ? (selectedProvider.name.trim() || '未命名供应商') : '模型供应商'}
+        title={draftProvider ? (draftProvider.name.trim() || t('models.customProvider')) : selectedProvider ? (selectedProvider.name.trim() || t('models.unnamedProvider')) : t('models.modelProviders')}
         testId="card-api"
       >
         {!draftProvider && !selectedProvider && onAddOpenCodeGo && <div className="mb-4 flex justify-end">
@@ -1134,10 +1139,10 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
                 setDraftError('');
               }}
             >
-              <p className="text-xs text-pretty text-muted">{serverManaged ? '仅保存当前连接并获取模型，不会修改默认模型。密钥加密保存在服务器；本地服务无需密钥时可留空。' : '保存后添加供应商，并自动从 /models 接口获取模型列表；models.dev 仅补充缺失参数。'}</p>
+              <p className="text-xs text-pretty text-muted">{serverManaged ? t('models.saveHintServer') : t('models.saveHintLocal')}</p>
               {draftError && <p role="alert" className="text-sm text-pretty text-danger">{draftError}</p>}
               <div className="flex gap-2">
-                <LoadingButton type="submit" loading={providerSaving} data-testid="provider-draft-save">{onSaveProvider ? '保存连接并获取模型' : '保存供应商'}</LoadingButton>
+                <LoadingButton type="submit" loading={providerSaving} data-testid="provider-draft-save">{onSaveProvider ? t('models.saveConnectionAndFetch') : t('models.saveProvider')}</LoadingButton>
                 <Button type="button" variant="ghost" isDisabled={providerSaving} data-testid="provider-draft-cancel" onPress={discardDraftProvider}>取消</Button>
               </div>
             </ProviderRow>
@@ -1169,7 +1174,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
               onRemove={() => void confirmRemove(selectedProvider)}
               accountContent={renderProviderAccounts?.(selectedProvider)}
             >
-              {serverManaged && <p className="text-xs text-muted">{providerNeedsSave?.(selectedProvider) ? '连接有未保存修改，点击“保存连接并获取模型”后生效。' : '连接已保存。获取模型列表不代表模型调用测试通过。'}</p>}
+              {serverManaged && <p className="text-xs text-muted">{providerNeedsSave?.(selectedProvider) ? t('models.needsSaveNote') : t('models.savedNote')}</p>}
               {providerError && <p role="alert" className="text-sm text-danger">{providerError}</p>}
               <ModelLibrary
                 key={selectedProvider.id}
@@ -1178,7 +1183,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
                 discovered={discoveredModels[selectedProvider.id]}
                 discoveredFromFallback={discoveredModelFallback[selectedProvider.id]}
                 checking={checking || providerSaving}
-                refreshLabel={serverManaged && providerNeedsSave?.(selectedProvider) ? '保存连接并获取模型' : '获取模型列表'}
+                refreshLabel={serverManaged && providerNeedsSave?.(selectedProvider) ? t('models.saveConnectionAndFetch') : t('models.fetchListLabel')}
                 onRefresh={() => void handleCheck(selectedProvider.id)}
                 note={providerNotes[selectedProvider.id]}
               />
@@ -1221,18 +1226,18 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
             className="size-7 min-w-7 text-muted"
             loading={metaRefreshing}
             data-testid="btn-refresh-meta"
-            aria-label={metaRefreshing ? '正在刷新能力数据' : '刷新能力数据'}
+            aria-label={metaRefreshing ? t('models.refreshingCaps') : t('models.refreshCaps')}
             onPress={() => void handleRefreshMeta()}
           ><Sym name="refresh" /></LoadingButton>
           <span className="tabular-nums" data-testid="model-meta-updated-at" aria-live="polite">
-            {metaInfo ? <time dateTime={new Date(metaInfo.updatedAt).toISOString()} title="本机能力目录的最近成功更新时间（北京时间，UTC+8）">更新于 {new Date(metaInfo.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })} BJT</time> : '尚未更新'}
+            {metaInfo ? <time dateTime={new Date(metaInfo.updatedAt).toISOString()} title={t('models.metaUpdatedTitle')}>{t('models.updatedAt')} {new Date(metaInfo.updatedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })} BJT</time> : t('models.notUpdated')}
           </span>
         </div>
         {metaError && <p role="alert" className="mt-1 text-xs text-pretty text-danger">{metaError}</p>}
       </SectionCard>
       {!selectedProvider && !draftProvider && <>
       <SectionCard
-        title="选择模型"
+        title={t('models.pickModel')}
         testId="card-models"
       >
         <div className="flex flex-col gap-3">
@@ -1255,17 +1260,17 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
        </SectionCard>
 
        <SectionCard
-        title="运行参数"
+        title={t('models.runtimeParams')}
         testId="card-tuning"
       >
         <Field
-          label="问答检索轮次上限"
-          hint="每轮检索都会重发已检索内容：轮次越多材料越全，但更慢、更费 token。选「不限」也有几道护栏兜着 —— 同样的调用重复出现会停、单轮读到的材料接近上下文长度会停、模型空回复会被拉回来重说一遍、界面上随时可以按停止生成"
+          label={t('models.retrievalRounds')}
+          hint={t('models.retrievalRoundsHint')}
           testId="field-agent-rounds"
         >
           <ToggleButtonGroup
             data-testid="agent-rounds"
-            aria-label="问答检索轮次上限"
+            aria-label={t('models.retrievalRounds')}
             selectionMode="single"
             disallowEmptySelection
             selectedKeys={[String(settings.agentRounds)]}
@@ -1287,14 +1292,14 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
           </ToggleButtonGroup>
         </Field>
         <Field
-          label={`字幕转写并发（当前 ${settings.asrConcurrency}）`}
-          hint="初始并发数（1-12）；转写中遇限流自动减半，稳定后缓慢提升"
+          label={t('models.asrConcurrency', { count: settings.asrConcurrency })}
+          hint={t('models.asrConcurrencyHint')}
           layout="block"
           testId="field-asr-concurrency"
         >
           <Slider
             data-testid="asr-concurrency"
-            aria-label="字幕转写并发数"
+            aria-label={t('models.asrConcurrencyLabel')}
             minValue={1}
             maxValue={12}
             step={1}

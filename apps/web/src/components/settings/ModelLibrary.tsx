@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { Button, Checkbox, Input, ListBox, SearchField, Select } from '@heroui/react';
-import { catalogOf, SLOT_LABEL, type ModelSlot, type SavedModel, type Settings } from '../../store/settings';
+import { catalogOf, slotLabel, type ModelSlot, type SavedModel, type Settings } from '../../store/settings';
 import { editModelPatch, modelKey, savedModelsOf, suggestedModelSlots } from '../../store/modelLibrary';
 import { Field, Hint, LoadingButton, SectionCard, Sym, toast } from '../../ui';
 import { Collapse } from '../motion';
@@ -175,7 +175,7 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
           for (const field of MODEL_OVERRIDE_FIELDS) delete draft[field];
           setEditor({ ...editor, draft });
         }}>恢复 models.dev 默认能力</Button>
-        <Field label="使用用途" hint="新模型按输入/输出能力预选用途，可按实际接口支持情况调整；不受供应商层限制。"><div className="flex flex-wrap gap-4">{slots.filter((slot) => allowDecision || slot !== 'decision').map((slot) => <Checkbox key={slot} isSelected={selectedSlots.includes(slot)} onChange={(on) => setEditor({ ...editor, slotsEdited: true, draft: { ...editor.draft, slots: on ? [...new Set([...selectedSlots, slot])] : selectedSlots.filter((s) => s !== slot) } })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>{SLOT_LABEL[slot]}</Checkbox.Content></Checkbox>)}</div></Field>
+        <Field label="使用用途" hint="新模型按输入/输出能力预选用途，可按实际接口支持情况调整；不受供应商层限制。"><div className="flex flex-wrap gap-4">{slots.filter((slot) => allowDecision || slot !== 'decision').map((slot) => <Checkbox key={slot} isSelected={selectedSlots.includes(slot)} onChange={(on) => setEditor({ ...editor, slotsEdited: true, draft: { ...editor.draft, slots: on ? [...new Set([...selectedSlots, slot])] : selectedSlots.filter((s) => s !== slot) } })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>{slotLabel(slot)}</Checkbox.Content></Checkbox>)}</div></Field>
         {selectedSlots.includes('decision') && <>
           <Field label="决策接口协议" hint="目录分类不代表接口兼容；请核实供应商支持此端点，不能使用普通聊天协议。">
             <Select aria-label="决策接口协议" placeholder="请选择已确认的协议" selectedKey={editor.draft.decisionProtocol ?? null} onSelectionChange={(key) => setEditor({ ...editor, draft: { ...editor.draft, decisionProtocol: key === 'typesafe-systemone' ? key : undefined } })}>
@@ -195,7 +195,7 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
       <SearchField aria-label="搜索已保存模型" value={query} onChange={setQuery}><SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="搜索已保存模型" /><SearchField.ClearButton /></SearchField.Group></SearchField>
       <div className="flex flex-col divide-y divide-border" data-testid="saved-models">
         {filtered.map((m) => <div key={modelKey(m)} className="flex items-center gap-3 py-3">
-          <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium">{m.name || m.model}</div><div className="truncate text-xs text-muted">{m.name && `${m.model} · `}{m.slots.map((s) => SLOT_LABEL[s]).join(' / ')}{active(m) ? ' · 使用中' : ''}</div></div>
+          <div className="min-w-0 flex-1"><div className="truncate text-sm font-medium">{m.name || m.model}</div><div className="truncate text-xs text-muted">{m.name && `${m.model} · `}{m.slots.map((s) => slotLabel(s)).join(' / ')}{active(m) ? ' · 使用中' : ''}</div></div>
           <Button size="sm" variant="secondary" aria-label={`编辑 ${m.name || m.model}`} onPress={() => openEditor(m)}>编辑</Button>
         </div>)}
         {!filtered.length && <p role="status" className="py-5 text-sm text-muted">{saved.length ? '没有匹配的已保存模型。' : '还没有添加模型，请从下方接口列表选择添加；接口不支持列出模型时，可点击“新模型”手动添加。'}</p>}
@@ -241,7 +241,7 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
                 <div className="min-w-0 flex-1">
                   <Hint className="block truncate text-sm" content={label}>{label}</Hint>
                   <Hint className="block truncate text-xs text-muted" content={m.id}>
-                    {label !== m.id && `${m.id} · `}{draft ? draft.slots.map((s) => SLOT_LABEL[s]).join(' / ') : '需手动选择用途'}
+                    {label !== m.id && `${m.id} · `}{draft ? draft.slots.map((s) => slotLabel(s)).join(' / ') : '需手动选择用途'}
                   </Hint>
                 </div>
                 <Button size="sm" variant="tertiary" aria-label={`${draft ? '添加' : '配置'} ${m.id}`} onPress={() => {
