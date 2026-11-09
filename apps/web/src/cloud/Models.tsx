@@ -80,7 +80,6 @@ function ProviderAccounts({ config, provider, onSaved, onReplaceKey, onChangeKey
       </div>
     </div> : <Button size="sm" variant="secondary" className="self-start" isDisabled={busy} onPress={() => { setEditing('add'); setError(''); }}>添加 Key</Button>}
     {environmentKey && <p className="break-words text-xs text-muted">也可使用服务器环境变量 <code className="break-all">OPENCODE_GO_API_KEY</code>，无需重复添加。</p>}
-    <p className="text-xs text-muted">通过名称和 Key 末 4 位核对；短密钥不显示尾号。完整 Key 加密保存在服务器，保存、启用和删除后立即生效。</p>
     {error && <p className="text-xs text-danger" role="alert">{error}</p>}
   </div>;
 }
