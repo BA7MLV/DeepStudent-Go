@@ -27,17 +27,21 @@ try {
       body { margin: 0; }
       .page-shell__surface { position: relative; }
       [data-testid="top-app-bar"] { position: fixed; inset: 0 0 auto; height: 60px; z-index: 5; }
+      .course-chat__main { position: relative; }
       .course-chat__messages { height: 600px; overflow: auto; padding: 60px 20px 0; }
+      .course-chat__composer-wrap { position: absolute; inset: auto 0 0; height: 90px; z-index: 1; background: #fff; }
     `;
     document.head.append(style);
     const h = React.createElement;
     ReactDOM.createRoot(document.getElementById('root')).render(
       h('div', { className: 'page-shell__surface' },
         h('header', { 'data-testid': 'top-app-bar' }, 'Header'),
-        h('div', { className: 'course-chat__messages' },
-          h(ReasoningChain, { active: false, elapsedMs: 2300,
-            reasoning: Array.from({ length: 100 }, (_, i) => `第 ${i + 1} 步：检查思考过程的透明吸顶标题。`).join('\n\n') }),
-          h('div', { style: { height: 900 } }, '后续回答'))));
+        h('div', { className: 'course-chat__main' },
+          h('div', { className: 'course-chat__messages' },
+            h(ReasoningChain, { active: false, elapsedMs: 2300,
+              reasoning: Array.from({ length: 100 }, (_, i) => `第 ${i + 1} 步：检查思考过程的透明吸顶标题。`).join('\n\n') }),
+            h('div', { style: { height: 900 } }, '后续回答')),
+          h('div', { className: 'course-chat__composer-wrap' }, 'Composer'))));
   });
   const overlay = page.locator('.reasoning-chain__heading.chat-sticky-overlay');
   for (const width of [1280, 390]) {
@@ -61,11 +65,17 @@ try {
       const state = await overlay.evaluate(el => {
         const bar = document.querySelector('[data-testid="top-app-bar"]');
         const r = bar.getBoundingClientRect();
+        const composer = document.querySelector('.course-chat__composer-wrap');
+        const chat = document.querySelector('.course-chat__main');
         return { background: getComputedStyle(el).backgroundColor,
+          position: getComputedStyle(el).position,
           belowHeader: Number(getComputedStyle(el).zIndex) < Number(getComputedStyle(bar).zIndex),
+          belowComposer: Number(getComputedStyle(el).zIndex) < Number(getComputedStyle(composer).zIndex),
+          insideChat: el.parentElement === chat,
           headerOnTop: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === bar };
       });
-      assert.deepEqual(state, { background: 'rgba(0, 0, 0, 0)', belowHeader: true, headerOnTop: true });
+      assert.deepEqual(state, { background: 'rgba(0, 0, 0, 0)', position: 'absolute',
+        belowHeader: true, belowComposer: true, insideChat: true, headerOnTop: true });
       await overlay.getByTestId('response-process-toggle').click();
       await overlay.waitFor({ state: 'detached' });
       assert.equal(await page.getByTestId('response-process-toggle').getAttribute('aria-expanded'), 'false');

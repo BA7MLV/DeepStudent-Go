@@ -4,8 +4,9 @@ import './sticky-header.css';
 
 interface Overlay { target: HTMLElement; style: CSSProperties; height: number }
 
-/** Native sticky owns the bounds. Only its stuck toolbar escapes the chat's
- * clipping/size-container contexts; it still stays below the app header. */
+/** Native sticky owns the bounds. Only its stuck toolbar escapes the message
+ * scrollport; it stays inside the chat column, below both the composer bar and
+ * the app header. */
 export default function StickyHeader({ children, className, enabled = true }: {
   children: ReactNode; className: string; enabled?: boolean;
 }) {
@@ -17,7 +18,10 @@ export default function StickyHeader({ children, className, enabled = true }: {
   useLayoutEffect(() => {
     const slot = slotRef.current;
     const scroll = slot?.closest<HTMLElement>('.course-chat__messages');
-    const target = slot?.closest<HTMLElement>('.page-shell__surface');
+    // Stay inside the chat column: the composer bar (z=1) must keep painting
+    // over the promoted toolbar, while the app bar (z=5) stays above both.
+    const target = slot?.closest<HTMLElement>('.course-chat__main')
+      ?? slot?.closest<HTMLElement>('.page-shell__surface');
     if (!enabled || !slot || !scroll || !target) { setOverlay(null); return; }
     let frame = 0;
     const measure = () => {
@@ -25,7 +29,10 @@ export default function StickyHeader({ children, className, enabled = true }: {
       const rect = slot.getBoundingClientRect();
       const marker = markerRef.current?.getBoundingClientRect();
       const viewport = scroll.getBoundingClientRect();
-      const barBottom = target.querySelector('[data-testid="top-app-bar"]')?.getBoundingClientRect().bottom ?? viewport.top;
+      const targetRect = target.getBoundingClientRect();
+      const bar = target.closest<HTMLElement>('.page-shell__surface')
+        ?.querySelector<HTMLElement>('[data-testid="top-app-bar"]');
+      const barBottom = bar?.getBoundingClientRect().bottom ?? viewport.top;
       if (!marker || rect.top <= marker.top + 1 || rect.bottom <= barBottom || rect.top >= viewport.bottom) {
         setOverlay(previous => previous === null ? previous : null);
         return;
@@ -33,7 +40,9 @@ export default function StickyHeader({ children, className, enabled = true }: {
       const computed = getComputedStyle(slot);
       const height = overlayRef.current?.getBoundingClientRect().height ?? rect.height;
       const style: CSSProperties = {
-        top: rect.top, left: rect.left, width: rect.width,
+        top: rect.top - targetRect.top - target.clientTop,
+        left: rect.left - targetRect.left - target.clientLeft,
+        width: rect.width,
         backgroundColor: computed.backgroundColor, color: computed.color,
         fontSize: computed.fontSize, lineHeight: computed.lineHeight,
         // A containing block pushes native sticky out at its end. Do not let

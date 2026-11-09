@@ -123,6 +123,18 @@ try {
   const sameRound = await complete(enqueue(202));
   assert.deepEqual(timeline(row(sameRound.id)).map(p => [p.reasoning, p.content]), [['', '先说明。'], ['进一步考虑', '再补充。']]);
 
+  // A reasoning delta cannot cut a fenced block in half; the browser parses
+  // each slice as its own Markdown document.
+  session(214); script = [() => new Response(sse({ content: '先说一句。\n\n```html\n<div>' })
+    + sse({ reasoning_content: '检查片段' }) + sse({ content: '</div>\n```\n\n块后结论。' }) + 'data: [DONE]\n\n',
+    { headers: { 'content-type': 'text/event-stream' } })];
+  const fencedAnswer = await complete(enqueue(214));
+  const closedFenceParts = timeline(row(fencedAnswer.id));
+  assert.equal(closedFenceParts.map(part => part.content).join(''), row(fencedAnswer.id).content);
+  assert.equal(closedFenceParts.length, 2);
+  assert.equal(closedFenceParts[1].content, '```html\n<div></div>\n```\n\n块后结论。');
+  for (const part of closedFenceParts) assert.equal((part.content.match(/```/g) ?? []).length % 2, 0);
+
   // No fabricated success when both the empty turn and bounded tool-free wrap-up
   // return no answer. Truncation is resumable and never executes partial calls.
   session(203); script = [() => ({ text: '已交付。', calls: [call('empty')] }), () => ({}), body => {

@@ -34,7 +34,7 @@ const app = buildServer({ dbPath: path.join(directory, 'db.sqlite'), fetch: asyn
   assert.deepEqual(JSON.parse(receipt.content).selectedLabels, ['深入练习']);
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({ start(controller) {
-    controller.enqueue(encoder.encode(sse({ content: '已收到路线，开始深入练习。' })));
+    controller.enqueue(encoder.encode(sse({ reasoning_content: '收到路线，整理深入练习步骤。' }) + sse({ content: '已收到路线，开始深入练习。' })));
     releaseAnswer = () => {
       controller.enqueue(encoder.encode(sse({ content: '\n\n这是后续说明，中文流式内容应当连续显示。' }) + 'data: [DONE]\n\n'));
       controller.close(); releaseAnswer = undefined;
@@ -111,6 +111,20 @@ try {
   assert.equal(requests.length, 2); assert.equal(commands.length, 1);
   assert.equal(requests[1].reasoning_effort, 'low');
   assert.ok(await page.locator('.t-stream-w').count() > 1, 'Chinese streaming segments animate individually');
+  // The answered question card is a chronological anchor: the resumed answer and
+  // its thinking chain must follow it, not be pushed above it by the card.
+  const order = await page.evaluate(() => {
+    const card = document.querySelector('[data-testid="ask-card"][data-answered="true"]');
+    const processes = [...document.querySelectorAll('[data-testid="response-process"]')];
+    const answer = [...document.querySelectorAll('[data-chat-answer-start]')].at(-1);
+    const follows = (before, after) => !!before && !!after && !!(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING);
+    return { processes: processes.length, preBeforeCard: follows(processes[0], card),
+      cardBeforePost: follows(card, processes[1]), cardBeforeAnswer: follows(card, answer) };
+  });
+  assert.equal(order.processes, 2, 'pre-ask and resumed reasoning stay separate groups');
+  assert.ok(order.preBeforeCard, 'ask reasoning precedes the answered card');
+  assert.ok(order.cardBeforePost, 'resumed reasoning follows the answered card');
+  assert.ok(order.cardBeforeAnswer, 'resumed answer follows the answered card');
   releaseAnswer();
   await page.getByText('这是后续说明，中文流式内容应当连续显示。', { exact: false }).first().waitFor();
   await page.getByTestId('chat-stop').waitFor({ state: 'detached' });

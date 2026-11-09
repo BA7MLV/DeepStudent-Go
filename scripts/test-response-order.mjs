@@ -68,4 +68,38 @@ for (const anchors of [undefined, [], [{ contentOffset: 1, reasoningOffset: 0, t
   assert.equal(legacy.length, 1);
   assert.equal(legacy[0].content, content, 'invalid/legacy anchors never lose a prefix');
 }
-console.log('PASS: append-only rounds, ordered process anchors, local-edit rebasing and stable widget deduplication.');
+
+// A reasoning delta cannot cut a fenced block in half: slices are parsed as
+// independent Markdown documents, so an orphan ``` swallows the rest.
+const closedFence = '先说一句。\n\n```html\n<div>内容</div>\n```\n\n块后结论。';
+const fenceAt = closedFence.indexOf('```');
+const insideFence = closedFence.indexOf('<div>') + 4;
+const closedFenceParts = responseTimeline(closedFence, '思考', [], [
+  { contentOffset: 0, reasoningOffset: 0, toolOffset: 0 },
+  { contentOffset: insideFence, reasoningOffset: 2, toolOffset: 0 },
+]);
+assert.equal(closedFenceParts.map(part => part.content).join(''), closedFence);
+assert.equal(closedFenceParts[1].content, closedFence.slice(fenceAt), 'old anchors snap back to the fence opener');
+for (const part of closedFenceParts) assert.equal((part.content.match(/```/g) ?? []).length % 2, 0, 'no slice may end inside a fence');
+
+const openFence = '开头。\n\n```html\n<div>';
+assert.equal(beginResponseSegment(beginResponseSegment([], '', '', []), openFence, '继续', []).at(-1).contentOffset,
+  openFence.indexOf('```'), 'new process anchors prefer the fence opener');
+const fenceFirst = '```html\n<div>';
+assert.equal(beginResponseSegment(beginResponseSegment([], '', '', []), fenceFirst, '继续', []).length, 1,
+  'a fence that already starts at the anchor keeps the process group attached');
+
+// Duplicate widget references are blanked with both fence marker lines; an
+// empty `wbw-widget` block must not survive as an orphan fence.
+const duplicate = `开头\n\n${ref}\n\n${ref}\n\n结尾`;
+const deduped = layoutWidgets(duplicate, [{ ref: 'stable-id', html: '<div>交互</div>' }]);
+assert.equal(deduped.markdown.length, duplicate.length);
+assert.equal(deduped.markdown.split('wbw-widget').length - 1, 1, 'only the placed reference keeps its fence');
+const duplicateCut = duplicate.indexOf(ref, duplicate.indexOf(ref) + ref.length) + 4;
+const duplicateParts = responseTimeline(deduped.markdown, '思考', [], [
+  { contentOffset: 0, reasoningOffset: 0, toolOffset: 0 },
+  { contentOffset: duplicateCut, reasoningOffset: 2, toolOffset: 0 },
+]);
+assert.equal(duplicateParts.map(part => part.content).join(''), deduped.markdown);
+for (const part of duplicateParts) assert.equal((part.content.match(/```/g) ?? []).length % 2, 0);
+console.log('PASS: append-only rounds, ordered process anchors, local-edit rebasing, fence-safe slices and stable widget deduplication.');

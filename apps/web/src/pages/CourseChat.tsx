@@ -851,15 +851,6 @@ export default function CourseChat() {
 
   const renderCards = (message: CourseChatMessage) => (
     <>
-      {message.ask && pendingAsk?.messageKey !== message.key && (
-        <AskCard
-          key={message.key}
-          ask={message.ask}
-          messageKey={message.key}
-          active={false}
-          onPick={answerAsk}
-        />
-      )}
       {message.folderPlan && (
         <FolderPlanCard
           plan={message.folderPlan}
@@ -934,7 +925,16 @@ export default function CourseChat() {
                           disabled={loading || !!message.streaming || !!message.error || !!message.interrupted || !!message.ask && !message.ask.picked}
                           onPrompt={(text) => void send(text)}>
                         {(markdown) => (
-                          <ResponseTimeline message={message} content={markdown}>
+                          <ResponseTimeline message={message} content={markdown}
+                            ask={message.ask && pendingAsk?.messageKey !== message.key ? (
+                              <AskCard
+                                key={message.key}
+                                ask={message.ask}
+                                messageKey={message.key}
+                                active={false}
+                                onPick={answerAsk}
+                              />
+                            ) : null}>
                           {(content, active) => <AssistantContent content={content} streaming={active}>
                             {(part, streaming) => <AnswerMarkdown content={part} streaming={streaming} link={CourseLink} />}
                           </AssistantContent>}
@@ -946,7 +946,8 @@ export default function CourseChat() {
                         )}
                         </ArtifactEditProvider>
                         {!message.content && (message.ask || message.folderPlan) && <div aria-hidden="true" data-chat-answer-start="" />}
-                        {/* 提问/确认在当前输出之后；用户回应后 store 会另起助手消息。 */}
+                        {/* 提问卡在 ResponseTimeline 里按提问 trace 落位：用户回应后的续跑正文与
+                            思考链必须在卡片之后。目录方案卡仍在当前输出之后。 */}
                         {renderCards(message)}
                         {/* 操作行与来源都只在**这一轮写完**之后出现：流式进行中时正文还在变，
                             这两个块的计数与内容每一帧都不一样，闪得人没法读。 */}

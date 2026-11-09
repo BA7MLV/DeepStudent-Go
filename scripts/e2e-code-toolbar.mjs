@@ -82,11 +82,17 @@ try {
         const r = header.getBoundingClientRect();
         const appBar = document.querySelector('[data-testid="top-app-bar"]');
         const bar = appBar.getBoundingClientRect();
+        const composer = document.querySelector('.course-chat__composer-wrap');
+        const chat = document.querySelector('.course-chat__main');
         return { top: r.top, blurBottom: blur.bottom, z: Number(getComputedStyle(header).zIndex),
           appBarZ: Number(getComputedStyle(appBar).zIndex),
+          composerZ: Number(getComputedStyle(composer).zIndex),
+          insideChat: header.parentElement === chat,
           appBarOnTop: document.elementFromPoint(bar.x + bar.width / 2, bar.y + bar.height / 2)?.closest('[data-testid="top-app-bar"]') === appBar };
       });
       assert.ok(state.z < state.appBarZ, 'sticky toolbar stays below the app header');
+      assert.ok(state.z < state.composerZ, 'sticky toolbar stays below the composer bar');
+      assert.ok(state.insideChat, 'sticky toolbar stays inside the chat column');
       assert.ok(state.appBarOnTop, 'sticky toolbar never covers the app header');
       if (width < 900) assert.ok(state.top < state.blurBottom, 'test exercises overlap with the progressive blur');
     };
