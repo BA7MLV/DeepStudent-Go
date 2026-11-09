@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentProps } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -141,11 +143,12 @@ const SHOW_PWA_HINT = isIOS() && !isStandalone();
  * mdui 的 `mdui-chip` 不带语义色变体、标签文字颜色还在 shadow DOM 里，按状态分别上色做不到，
  * 现在用 HeroUI Chip 的静态语义色变体表达状态，不再依赖页面专属 tag 样式。
  */
-const STATUS_TAG: Record<VideoRow['status'], { variant: '' | 'primary' | 'error'; text: string }> = {
-  new: { variant: '', text: '未转写' },
-  transcribing: { variant: 'primary', text: '转写中' },
-  transcribed: { variant: 'primary', text: '已转写' },
-  error: { variant: 'error', text: '出错' },
+type StatusTagKey = 'library.status.new' | 'library.status.transcribing' | 'library.status.transcribed' | 'library.status.error';
+const STATUS_TAG: Record<VideoRow['status'], { variant: '' | 'primary' | 'error'; text: StatusTagKey }> = {
+  new: { variant: '', text: 'library.status.new' },
+  transcribing: { variant: 'primary', text: 'library.status.transcribing' },
+  transcribed: { variant: 'primary', text: 'library.status.transcribed' },
+  error: { variant: 'error', text: 'library.status.error' },
 };
 
 interface ImportTask {
@@ -184,12 +187,13 @@ const LONG_PRESS_MS = 400;
 /** 长按期间允许的抖动上限（px）：超过即判定为滚动/点按，取消长按 */
 const LONG_PRESS_SLOP = 8;
 
-const TASK_STATUS_TEXT: Record<ImportTask['status'], string> = {
-  queued: '排队中',
-  probing: '读取信息',
-  writing: '写入中',
-  done: '已导入',
-  error: '失败',
+type TaskStatusKey = 'library.task.queued' | 'library.task.probing' | 'library.task.writing' | 'library.task.done' | 'library.task.error';
+const TASK_STATUS_TEXT: Record<ImportTask['status'], TaskStatusKey> = {
+  queued: 'library.task.queued',
+  probing: 'library.task.probing',
+  writing: 'library.task.writing',
+  done: 'library.task.done',
+  error: 'library.task.error',
 };
 
 /** 材料写入的提示文案与视频不同（材料不做容器探测，直接就是写文件） */
@@ -203,10 +207,10 @@ const MATERIAL_MIME: Record<'pdf' | 'docx' | 'md' | 'html', string> = {
 /** 「未分类」虚拟组的 key（折叠状态持久化用） */
 const UNCAT_KEY = '__uncat__';
 const LIBRARY_FILTERS = [
-  { value: 'all', label: '全部' },
-  { value: 'video', label: '视频' },
-  { value: 'material', label: '阅读材料' },
-  { value: 'started', label: '继续学习' },
+  { value: 'all', label: 'library.filter.all' },
+  { value: 'video', label: 'library.filter.video' },
+  { value: 'material', label: 'library.filter.material' },
+  { value: 'started', label: 'library.filter.started' },
 ] as const;
 type LibraryFilter = (typeof LIBRARY_FILTERS)[number]['value'];
 
@@ -258,6 +262,7 @@ function LibraryFrame({ bare, ...props }: ComponentProps<typeof PageShell> & { b
 function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose: () => void } }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { t: tr } = useTranslation('projects');
   // 设置与历史聊天中的深链接也进入普通 Markdown 阅读页。
   const agentFileRequested = ['/system/AGENTS.md', 'AGENTS.md'].includes(searchParams.get('file') ?? '');
   const memoryFileRequested = searchParams.get('file')?.startsWith('/system/memory/') ? searchParams.get('file')! : '';
@@ -306,7 +311,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         if (stopped) return;
         off = followDocument<SystemDirectory>({ kind: 'systemDirectory', path: systemPath, offset: systemOffset, query: searchText.trim() }, page => {
           setSystemPage(page); setSystemError(''); setSystemLoading(false);
-        }, error => { setSystemError(error instanceof Error ? error.message : '读取系统文件失败'); setSystemLoading(false); });
+        }, error => { setSystemError(error instanceof Error ? error.message : tr('library.t.readSystemFailed')); setSystemLoading(false); });
       });
       return () => { stopped = true; off?.(); };
     }
@@ -433,7 +438,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
        * 这种情形留一条 toast 就够。
        */
       if (initialLoadSettled.current) {
-        toast.error(`资料刷新失败：${message}`);
+        toast.error(tr('library.t.refreshFailed', { message }));
       } else {
         setLoadState('error');
       }
@@ -444,7 +449,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     void db.files.get('wrongbook.md').then(async (file) => {
       if (file) await (await import('../store/wrongbook')).ensureWrongbookMaterial();
     })
-      .catch((error) => toast.error(`错题本迁移失败：${formatCaughtError(error)}`))
+      .catch((error) => toast.error(tr('library.t.wrongbookMigrateFailed', { message: formatCaughtError(error) })))
       .then(() => reload());
   }, []);
 
@@ -519,7 +524,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         videos: byPinned(byFolder.get(f.id!) ?? []),
         folder: f as FolderRow | null,
       })),
-      { key: UNCAT_KEY, name: '未分类', videos: byPinned(uncat), folder: null },
+      { key: UNCAT_KEY, name: tr('library.t.uncategorized'), videos: byPinned(uncat), folder: null },
     ];
   }, [videos, folders]);
 
@@ -542,7 +547,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     [groups, searchQuery, filter, hasFilters],
   );
   const currentFolder = inSystemFolder ? undefined : groups.find((group) => group.key === folderKey && group.folder != null);
-  const folderTitle = inSystemFolder ? (folderKey?.split('/').at(-1) ?? 'system') : currentFolder?.name ?? '全部资料';
+  const folderTitle = inSystemFolder ? (folderKey?.split('/').at(-1) ?? 'system') : currentFolder?.name ?? tr('library.path.allResources');
   const scopedGroups = currentFolder ? visibleGroups.filter((group) => group.key === currentFolder.key) : visibleGroups;
   const folderTiles = groups.filter((group) => !inSystemFolder && group.folder &&
     (group.folder.parentId ?? null) === (currentFolder?.folder?.id ?? null) &&
@@ -637,7 +642,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     // 大视频拷入 OPFS 要数分钟，持 Wake Lock 防熄屏后 tab 被挂起中断导入
     await acquireWakeLock();
     try {
-      if (isLegacyDocFile(file)) throw new Error('这是旧版 .doc 格式，请另存为 .docx 后导入。');
+      if (isLegacyDocFile(file)) throw new Error(tr('library.t.legacyDoc'));
       {
         const { readResourceFolder, uploadResource, resourceCommand, readResources, recordMediaDuration } = await import('../client/resources');
         patchTask(key, { status: 'writing', percent: 0 });
@@ -647,12 +652,12 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         await uploadResource(projectId, path, file);
         const fresh = await readResources(projectId, directory.path);
         const entry = fresh.entries.find(entry => entry.path === path);
-        if (!entry?.courseId) throw new Error('上传已完成，但资料索引尚未建立，请在资源目录中核对。');
+        if (!entry?.courseId) throw new Error(tr('library.t.uploadIndexPending'));
         const id = entry.courseId;
         await (await import('../cloud/sync')).flushCloud();
         if (isMaterialFile(file)) {
           const format = detectMaterialFormat(file);
-          void startMaterialJob(id, format).catch(error => toast.error(`解析失败：${formatCaughtError(error)}`));
+          void startMaterialJob(id, format).catch(error => toast.error(tr('library.t.parseFailed', { message: formatCaughtError(error) })));
         } else {
           const duration = await probeDuration(file);
           if (duration) await recordMediaDuration(id, duration);
@@ -663,13 +668,13 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         enqueueCover(id);
         await (await import('../cloud/sync')).flushCloud();
         setTasks(previous => previous.filter(task => task.key !== key));
-        toast.success(`已导入《${file.name}》`);
+        toast.success(tr('library.t.imported', { name: file.name }));
         return;
       }
     } catch (e) {
       const text = formatCaughtError(e);
       patchTask(key, { status: 'error', error: text });
-      showError(`导入《${file.name}》失败`, text);
+      showError(tr('library.t.importFailed', { name: file.name }), text);
     } finally {
       await releaseWakeLock();
     }
@@ -750,7 +755,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const handleBiliResolve = async (value = biliUrl) => {
     const raw = value.trim();
     if (!raw) {
-      toast.warning('请粘贴 B 站视频链接或 BV 号');
+      toast.warning(tr('library.t.biliPasteUrl'));
       return;
     }
     const seq = ++biliResolveReqRef.current;
@@ -771,13 +776,13 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       setBiliLangPage(target.defaultPages[0] ?? null);
       setBiliLangs(defaultSelectedLangs(target.subtitles));
       if (target.subtitles.length === 0 && !target.subtitleError) {
-        toast.info('该视频没有自带字幕，导入后会安排服务器转写，无需保持页面打开');
+        toast.info(tr('library.t.biliNoSubs'));
       }
     } catch (e) {
       if (seq !== biliResolveReqRef.current) return;
       const text = formatCaughtError(e);
       setBiliError(text);
-      showError('B 站解析失败', text);
+      showError(tr('library.t.biliResolveFailed'), text);
     } finally {
       if (seq === biliResolveReqRef.current) setBiliResolving(false);
     }
@@ -788,16 +793,16 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     if (!biliTarget) return;
     const selected = resolveSelectedPages(biliTarget.pages, biliPagesSel);
     if (selected.length === 0) {
-      toast.warning('请至少勾选一个分 P');
+      toast.warning(tr('library.t.biliPickOne'));
       return;
     }
     const totalSec = selectedDuration(biliTarget.pages, biliPagesSel);
     // 防手滑：一门课几十 P 几十小时，误点「全选」会很惨
     if (selected.length > 10 || totalSec > 6 * 3600) {
       const ok = await confirmDialog({
-        headline: `确认下载 ${selected.length} ${biliTarget.kind === 'season' ? '集' : '个分 P'}？`,
-        description: `合计约 ${formatTotalDuration(totalSec)}，会逐个写入当前资源文件夹（可随时在任务列表里看到进度）`,
-        confirmText: '开始下载',
+        headline: tr('library.t.biliConfirmDownload', { count: selected.length, unit: tr(biliTarget.kind === 'season' ? 'library.t.biliUnitSeason' : 'library.t.biliUnitPart') }),
+        description: tr('library.t.biliConfirmDescription', { duration: formatTotalDuration(totalSec) }),
+        confirmText: tr('library.t.startDownload'),
       });
       if (!ok) return;
     }
@@ -807,13 +812,13 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     try {
       biliOperationRef.current ??= uuid();
       await importBiliPages(biliTarget, { langs: biliLangs, pages: biliPagesSel, folderId: importing ? importing.folderId : currentFolder?.folder?.id }, biliOperationRef.current);
-      toast.success('已提交服务器导入，可在任务列表查看进度；关闭页面不影响下载');
+      toast.success(tr('library.t.biliSubmitted'));
       setBiliOpen(false);
       resetBiliDraft();
     } catch (e) {
       const text = formatCaughtError(e);
       setBiliError(text);
-      showError('B 站导入失败', text);
+      showError(tr('library.t.biliImportFailed'), text);
     } finally {
       setBiliImporting(false);
     }
@@ -842,15 +847,15 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const handleNativePick = (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (inSystemFolder) { toast.warning('system 仅存放应用系统文件，请返回资料目录导入。'); return; }
+    if (inSystemFolder) { toast.warning(tr('library.t.systemOnly')); return; }
     if (files.length === 0) {
-      toast.warning('系统没有返回任何文件，请改用 Safari 标签页打开后再试');
+      toast.warning(tr('library.t.safariFiles'));
       return;
     }
     const accepted = files.filter(isImportable);
     const skipped = files.filter((f) => !isImportable(f));
-    if (skipped.length > 0) toast.warning(`已跳过 ${skipped.length} 个不支持的文件（只支持视频与 PDF/Word/Markdown）`);
-    if (files.length > 1) toast.info(`已选择 ${accepted.length} 个文件，开始逐个导入`);
+    if (skipped.length > 0) toast.warning(tr('library.t.skippedUnsupported', { count: skipped.length }));
+    if (files.length > 1) toast.info(tr('library.t.acceptedFiles', { count: accepted.length }));
     if (accepted.length > 0) setImportOpen(false);
     for (const f of accepted) enqueue(f);
   };
@@ -860,7 +865,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     e.preventDefault();
     setDropActive(false);
     if (inSystemFolder || (e.target as Element).closest('[data-system-folder]')) {
-      toast.warning('system 仅存放应用系统文件，请返回资料目录导入。');
+      toast.warning(tr('library.t.systemOnly'));
       return;
     }
     const files = Array.from(e.dataTransfer?.files ?? []);
@@ -868,7 +873,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     setImportOpen(false);
     for (const f of files) {
       if (!isImportable(f)) {
-        toast.warning(`《${f.name}》不是支持的格式（只支持视频与 PDF/Word/Markdown），已跳过`);
+        toast.warning(tr('library.t.fileUnsupported', { name: f.name }));
         continue;
       }
       enqueue(f);
@@ -884,17 +889,17 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     if (!renaming) return;
     const name = renameText.trim();
     if (!name) {
-      toast.warning('标题不能为空');
+      toast.warning(tr('library.t.titleEmpty'));
       return;
     }
     if (name !== renaming.name) {
       const { readResourceFolder, resourceCommand } = await import('../client/resources');
       const directory = await readResourceFolder(renaming.folderId);
       const entry = directory.entries.find(entry => entry.courseId === renaming.id);
-      if (!entry?.revision) throw new Error('资料已变化，请刷新后重试。');
+      if (!entry?.revision) throw new Error(tr('library.t.resourceChanged'));
       const parent = entry.path.split('/').slice(0, -1).join('/');
       await resourceCommand({ kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId: entry.projectId, target: parent ? `${parent}/${name}` : name, revision: entry.revision });
-      toast.success('标题已修改');
+      toast.success(tr('library.t.titleRenamed'));
     }
     setRenaming(null);
     await reload();
@@ -908,11 +913,11 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     const { readResourceFolder, resourceCommand } = await import('../client/resources');
     const directory = await readResourceFolder(row.folderId);
     const entry = directory.entries.find(entry => entry.courseId === row.id);
-    if (!entry?.revision) throw new Error('资料已变化，请刷新后重试。');
+    if (!entry?.revision) throw new Error(tr('library.t.resourceChanged'));
     await resourceCommand({ kind: 'remove', projectId: entry.projectId, path: entry.path, revision: entry.revision });
     await (await import('../cloud/sync')).flushCloud();
     invalidateCoverUrl(row.id);
-    toast.success('已删除');
+    toast.success(tr('library.t.deleted'));
     await reload();
   };
 
@@ -920,21 +925,21 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const reparseMaterial = (row: VideoRow) => {
     const format = row.materialFormat ?? 'pdf';
     useJobStore.getState().drop(row.id);
-    toast.info(`开始重新解析《${row.name}》…`);
+    toast.info(tr('library.t.reparseStart', { name: row.name }));
     void startMaterialJob(row.id, format)
       .then(async (res) => {
         toast.success(
           res.scanned
-            ? `《${row.name}》没有文本层（扫描件），只能划词/框选提问`
+            ? tr('library.t.reparseScanned', { name: row.name })
             : res.empty
-              ? `《${row.name}》没有正文，无法参与问答检索`
-              : `《${row.name}》解析完成（${res.parsed} 个文本块）`,
+              ? tr('library.t.reparseNoText', { name: row.name })
+              : tr('library.t.reparseDone', { name: row.name, count: res.parsed }),
         );
         await reload();
       })
       .catch((e) => {
         const text = formatCaughtError(e);
-        showError(`解析《${row.name}》失败`, text);
+        showError(tr('library.t.reparseFailed', { name: row.name }), text);
       });
   };
 
@@ -944,9 +949,9 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
    */
   const askDeleteVideo = (v: VideoRow) => {
     void confirmDialog({
-      headline: '删除该资源？',
-      description: '文件、字幕、讲义、问答记录及其他学习内容会一并删除，不可恢复',
-      confirmText: '删除',
+      headline: tr('library.t.deleteVideoTitle'),
+      description: tr('library.t.deleteVideoDescription'),
+      confirmText: tr('library.menu.delete'),
       danger: true,
     }).then((ok) => {
       if (!ok) return;
@@ -961,7 +966,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const togglePin = async (v: VideoRow) => {
     const next = v.pinned === 1 ? 0 : 1;
     await (await import('../client/resources')).resourceCommand({ kind: 'setCoursePinned', courseId: v.id, pinned: next === 1 });
-    toast.success(next === 1 ? `已置顶《${v.name}》` : `已取消置顶《${v.name}》`);
+    toast.success(tr(next === 1 ? 'library.t.pinnedToast' : 'library.t.unpinnedToast', { name: v.name }));
     await reload();
   };
 
@@ -976,7 +981,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     if (!folderModal) return;
     const name = folderText.trim();
     if (!name) {
-      toast.warning('文件夹名称不能为空');
+      toast.warning(tr('library.t.folderNameEmpty'));
       return;
     }
     if (folderModal.mode === 'create') {
@@ -985,20 +990,20 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         const directory = await readResourceFolder(currentFolder.folder.id);
         await resourceCommand({ kind: 'createDirectory', projectId: directory.project?.id ?? directory.rootId, path: directory.path ? `${directory.path}/${name}` : name });
       } else await resourceCommand({ kind: 'createFolder', name });
-      toast.success(`已创建文件夹「${name}」`);
+      toast.success(tr('library.t.folderCreated', { name }));
     } else if (name !== folderModal.folder.name) {
       const { readResourceFolder, resourceCommand } = await import('../client/resources');
       const directory = await readResourceFolder(folderModal.folder.id!);
-      if (!directory.project) throw new Error('目录已不存在');
+      if (!directory.project) throw new Error(tr('library.t.dirGone'));
       if (!directory.path) await resourceCommand({ kind: 'renameFolder', projectId: directory.project.id, name });
       else {
         const parent = await readResourceFolder(folderModal.folder.parentId);
         const entry = parent.entries.find(entry => entry.folderId === folderModal.folder.id);
-        if (!entry?.revision) throw new Error('目录已变化，请刷新后重试');
+        if (!entry?.revision) throw new Error(tr('library.t.dirChanged'));
         const prefix = entry.path.split('/').slice(0, -1).join('/');
         await resourceCommand({ kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId: entry.projectId, target: prefix ? `${prefix}/${name}` : name, revision: entry.revision });
       }
-      toast.success('文件夹已重命名');
+      toast.success(tr('library.t.folderRenamed'));
     }
     setFolderModal(null);
     await reload();
@@ -1008,25 +1013,25 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const handleDeleteFolder = async (folder: FolderRow) => {
     const { readResourceFolder, resourceCommand } = await import('../client/resources');
     const directory = await readResourceFolder(folder.id);
-    if (!directory.project) throw new Error('目录已不存在');
+    if (!directory.project) throw new Error(tr('library.t.dirGone'));
     if (!directory.path) await resourceCommand({ kind: 'trash', projectId: directory.project.id });
     else {
       const parent = await readResourceFolder(folder.parentId);
       const entry = parent.entries.find(entry => entry.folderId === folder.id);
-      if (!entry?.revision) throw new Error('目录已变化，请刷新后重试');
+      if (!entry?.revision) throw new Error(tr('library.t.dirChanged'));
       await resourceCommand({ kind: 'remove', projectId: entry.projectId, path: entry.path, revision: entry.revision });
     }
     await (await import('../cloud/sync')).flushCloud();
-    toast.success('文件夹已移除');
+    toast.success(tr('library.t.folderRemoved'));
     await reload();
   };
 
   const confirmDeleteFolder = (folder: FolderRow, _count: number) => {
     const row = document.querySelector<HTMLElement>(`[data-group-key="folder:${CSS.escape(String(folder.id))}"]`);
     void popconfirm({
-      headline: `删除文件夹「${folder.name}」？`,
-      description: '此操作会移除文件夹及其中内容，请确认后继续。',
-      confirmText: '删除',
+      headline: tr('library.t.deleteFolderTitle', { name: folder.name }),
+      description: tr('library.t.deleteFolderDescription'),
+      confirmText: tr('library.menu.delete'),
       danger: true,
       testId: 'folder-delete-popconfirm',
     }, row).then((ok) => {
@@ -1055,7 +1060,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     if (!moving) return;
     const target = Number(moveTarget);
     await setVideoFolder(moving.id, target < 0 ? null : target);
-    toast.success('已移动');
+    toast.success(tr('library.t.moved'));
     setMoving(null);
     await reload();
   };
@@ -1064,12 +1069,12 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     try {
       const placements = await moveLibraryItems(keys, target);
       setLastMove(placements);
-      const targetName = target == null ? '全部资料' : folders.find((folder) => folder.id === target)?.name;
-      setMoveNotice({ text: placements.length ? `已将 ${keys.length} 个项目移入「${targetName}」` : '项目已在此文件夹中' });
+      const targetName = target == null ? tr('library.path.allResources') : folders.find((folder) => folder.id === target)?.name;
+      setMoveNotice({ text: placements.length ? tr('library.t.moveCountToast', { count: keys.length, name: targetName }) : tr('library.t.alreadyHere') });
       setSelection(new Set(target === (currentFolder?.folder?.id ?? null) ? keys : target != null ? [`folder:${target}`] : []));
       await reload();
     } catch (error) {
-      setMoveNotice({ text: `移动失败：${formatCaughtError(error)}`, error: true });
+      setMoveNotice({ text: tr('library.t.moveFailed', { message: formatCaughtError(error) }), error: true });
     }
   };
 
@@ -1079,11 +1084,11 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     try {
       await undoLibraryMove(lastMove);
       setLastMove([]);
-      setMoveNotice({ text: '已撤销移动' });
+      setMoveNotice({ text: tr('library.t.moveUndone') });
       setSelection(new Set());
       await reload();
     } catch (error) {
-      setMoveNotice({ text: `撤销失败：${formatCaughtError(error)}`, error: true });
+      setMoveNotice({ text: tr('library.t.undoFailed', { message: formatCaughtError(error) }), error: true });
     } finally { setUndoingMove(false); }
   };
 
@@ -1095,7 +1100,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     dragOrigin.current = folderKey;
     springOpened.current = false;
     finderDropCommitted.current = false;
-    setDropHint('拖到文件夹以移动；停留片刻可打开文件夹');
+    setDropHint(tr('library.t.dragHintIdle'));
     dragImage.current?.remove();
     const preview = document.createElement('div');
     preview.className = 'finder-drag-preview';
@@ -1103,7 +1108,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     if (icon) preview.append(icon);
     const label = document.createElement('span');
     label.className = 'finder-drag-preview__name';
-    label.textContent = event.currentTarget.querySelector('.finder-item__name')?.textContent ?? '资料';
+    label.textContent = event.currentTarget.querySelector('.finder-item__name')?.textContent ?? tr('library.t.ghostFallback');
     preview.append(label);
     if (keys.length > 1) {
       preview.dataset.multiple = 'true';
@@ -1140,8 +1145,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         ? (folders.find((folder) => folder.id === Number(key.slice(7)))?.parentId ?? null) === target
         : (videos.find((video) => video.id === key.slice(5))?.folderId ?? null) === target);
       setDropFolder(valid ? targetKey : null);
-      const name = target == null ? '全部资料' : folders.find((folder) => folder.id === target)?.name;
-      setDropHint(!valid ? '不能移入自身或子文件夹' : sameFolder ? `项目已在「${name}」中` : `将 ${finderDragKeys.current.length} 个项目移入「${name}」${spring ? ' · 停留以打开' : ''}`);
+      const name = target == null ? tr('library.path.allResources') : folders.find((folder) => folder.id === target)?.name;
+      setDropHint(!valid ? tr('library.drag.cannot') : sameFolder ? tr('library.drag.alreadyIn', { name }) : spring ? tr('library.drag.willMoveSpring', { count: finderDragKeys.current.length, name }) : tr('library.drag.willMove', { count: finderDragKeys.current.length, name }));
       if (spring && valid && targetKey !== String(currentFolder?.folder?.id ?? 'root')) {
         if (springTarget.current !== targetKey) {
           clearSpring();
@@ -1153,7 +1158,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
             setSearchText('');
             setFilter('all');
             setDropFolder(null);
-            setDropHint(`已打开「${name}」· 松手放入，或继续拖到子文件夹`);
+            setDropHint(tr('library.drag.opened', { name }));
             if (canvasRef.current) canvasRef.current.scrollTop = 0;
             clearSpring();
           }, FOLDER_SPRING_OPEN_MS);
@@ -1187,7 +1192,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       // Child-to-padding transitions fire dragleave after the new target's
       // dragenter. Do not erase that new highlight; the canvas resolves it.
       const window = event.currentTarget.closest('.finder-window');
-      if (!window?.contains(event.relatedTarget as Node | null)) { clearSpring(); setDropFolder(null); setDropHint('拖到文件夹以移动；停留片刻可打开文件夹'); }
+      if (!window?.contains(event.relatedTarget as Node | null)) { clearSpring(); setDropFolder(null); setDropHint(tr('library.t.dragHintIdle')); }
     },
     onDrop: (event: React.DragEvent) => {
       if (!event.dataTransfer.types.includes('application/x-library-items')) return;
@@ -1265,7 +1270,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       }
       const destination = hit(e.clientX, e.clientY);
       if (destination) pointerDragActions.current.updateFinderDrop(destination.target, destination.spring);
-      else { clearSpring(); setDropFolder(null); setDropHint('拖到文件夹以移动，或按 Esc 取消'); }
+      else { clearSpring(); setDropFolder(null); setDropHint(tr('library.drag.idleEsc')); }
       const canvas = canvasRef.current;
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
@@ -1378,8 +1383,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     const target = d.overKey === UNCAT_KEY ? null : Number(d.overKey);
     if (target === (d.video.folderId ?? null)) return; // 原地放回
     await setVideoFolder(d.video.id, target);
-    const name = target == null ? '未分类' : folders.find((f) => f.id === target)?.name;
-    toast.success(`已移入「${name}」`);
+    const name = target == null ? tr('library.t.uncategorized') : folders.find((f) => f.id === target)?.name;
+    toast.success(tr('library.t.movedInto', { name }));
     await reload();
   };
 
@@ -1456,7 +1461,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
 
   return (
     <LibraryFrame bare={Boolean(importing)}
-      title="资料"
+      title={tr('library.chrome.page')}
       wide
       fill
       rootClassName="page-library"
@@ -1471,9 +1476,9 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
           variant="warning"
           testId="pwa-hint"
           icon={<Sym name="warning" />}
-          title="建议用 Safari 将本页「添加到主屏幕」后使用"
+          title={tr('library.chrome.pwaTitle')}
           help={
-            <HelpTip headline="为什么要添加到主屏幕" label="说明" testId="pwa-hint-help">
+            <HelpTip headline={tr('library.chrome.pwaHelp')} label={tr('library.chrome.pwaHelpLabel')} testId="pwa-hint-help">
               <p>
                 在普通标签页中，若连续 7 天未打开，系统可能自动清除已导入的视频和字幕；
                 从主屏幕打开则不会被清理。
@@ -1509,7 +1514,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
             <span>拖入视频、PDF、Word、Markdown、HTML，保存到服务端真实文件夹</span>
             {/* HelpTip 内部已经 stopPropagation —— 这里整块是可点击的投放区，
                 不拦住会顺手弹出文件选择器。 */}
-            <HelpTip headline="导入说明" label="导入说明" testId="import-help">
+            <HelpTip headline={tr('library.chrome.importHelp')} label={tr('library.chrome.importHelp')} testId="import-help">
               <p>
                 请从「文件」App 中选择视频。从「相册」选择时系统会先转码，大视频可能长时间没有进度；
                 存在 iCloud 里的文件，请先在「文件」App 中下载到本机。
@@ -1550,7 +1555,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
           </Modal.Body>
         </Modal.Dialog></Modal.Container></Modal.Backdrop>
       </Modal.Root>
-      <input ref={nativeInputRef} data-testid="import-input" type="file" multiple tabIndex={-1} aria-label="选择要导入的视频或阅读材料" onChange={handleNativePick} style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' }} />
+      <input ref={nativeInputRef} data-testid="import-input" type="file" multiple tabIndex={-1} aria-label={tr('library.aria.pickFile')} onChange={handleNativePick} style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' }} />
 
       {tasks.length > 0 && (
         <Card.Root variant="secondary" className="import-tasks mt-3 flex flex-col gap-2 p-3" data-testid="import-tasks">
@@ -1570,10 +1575,10 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   title={t.status === 'error' ? t.error : undefined}
                 >
                   {t.status === 'error'
-                    ? (t.error ?? '失败')
+                    ? (t.error ?? tr('library.t.taskFailed'))
                     : t.status === 'writing'
                       ? `${t.percent}%`
-                      : TASK_STATUS_TEXT[t.status]}
+                      : tr(TASK_STATUS_TEXT[t.status])}
                 </span>
                 {t.status === 'error' && (
                   <Button
@@ -1581,7 +1586,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     variant="tertiary"
                     size="sm"
                     data-testid="btn-dismiss-import-error"
-                    aria-label="关掉这条失败提示"
+                    aria-label={tr('library.aria.dismissError')}
                     onPress={() => setTasks((prev) => prev.filter((x) => x.key !== t.key))}
                   >
                     <Sym name="close" />
@@ -1596,7 +1601,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   maxValue={100}
                   value={t.status === 'writing' ? t.percent : 0}
                   isIndeterminate={t.status !== 'writing'}
-                  aria-label="导入进度"
+                  aria-label={tr('library.aria.importProgress')}
                 />
               )}
             </div>
@@ -1604,7 +1609,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         </Card.Root>
       )}
 
-      {!importing && <section className="finder-window" aria-label="资料访达" data-mobile={isMobile || undefined} data-managing={isMobile && mobileManaging || undefined} data-drag-active={finderDragging.length > 0 || undefined}
+      {!importing && <section className="finder-window" aria-label={tr('library.aria.finder')} data-mobile={isMobile || undefined} data-managing={isMobile && mobileManaging || undefined} data-drag-active={finderDragging.length > 0 || undefined}
         onDragOver={(event) => {
           if (inSystemFolder || (event.target as Element).closest('[data-system-folder]')) {
             event.preventDefault();
@@ -1624,38 +1629,38 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       >
         <header className="finder-toolbar">
           <div className="finder-navigation">
-            {isMobile ? <Button isIconOnly variant="ghost" aria-label="返回上一级" isDisabled={!currentFolder && !inSystemFolder} onPress={() => openFolder(currentFolder?.folder?.parentId != null ? String(currentFolder.folder.parentId) : null)}><Sym name="chevron_left" /></Button> : <>
-            <Button isIconOnly variant="ghost" aria-label="后退" isDisabled={folderHistory.index === 0} onPress={() => travelFolder(-1)}><Sym name="chevron_left" /></Button>
-            <Button isIconOnly variant="ghost" aria-label="前进" isDisabled={folderHistory.index === folderHistory.entries.length - 1} onPress={() => travelFolder(1)}><Sym name="chevron_right" /></Button>
+            {isMobile ? <Button isIconOnly variant="ghost" aria-label={tr('library.aria.back')} isDisabled={!currentFolder && !inSystemFolder} onPress={() => openFolder(currentFolder?.folder?.parentId != null ? String(currentFolder.folder.parentId) : null)}><Sym name="chevron_left" /></Button> : <>
+            <Button isIconOnly variant="ghost" aria-label={tr('library.aria.backNav')} isDisabled={folderHistory.index === 0} onPress={() => travelFolder(-1)}><Sym name="chevron_left" /></Button>
+            <Button isIconOnly variant="ghost" aria-label={tr('library.aria.forward')} isDisabled={folderHistory.index === folderHistory.entries.length - 1} onPress={() => travelFolder(1)}><Sym name="chevron_right" /></Button>
             </>}
           </div>
           <h2 className="finder-title">{folderTitle}</h2>
-          {isMobile && <Button className="finder-manage" variant="ghost" isDisabled={inSystemFolder} onPress={() => { setMobileManaging(!mobileManaging); setSelection(new Set()); setActionMenuOpen(false); }}>{mobileManaging ? '完成' : '管理'}</Button>}
+          {isMobile && <Button className="finder-manage" variant="ghost" isDisabled={inSystemFolder} onPress={() => { setMobileManaging(!mobileManaging); setSelection(new Set()); setActionMenuOpen(false); }}>{mobileManaging ? tr('library.chrome.mobileDone') : tr('library.chrome.mobileManageBtn')}</Button>}
           <div className="finder-tools">
-            <ToggleButtonGroup className="finder-view-switch" selectionMode="single" disallowEmptySelection selectedKeys={[view]} onSelectionChange={(keys) => { const key = [...keys][0]; if (key === 'icons' || key === 'list') setView(key); }} aria-label="显示方式">
-              <ToggleButton id="icons" aria-label="图标视图"><Sym name="grid_view" /></ToggleButton>
-              <ToggleButton id="list" aria-label="列表视图"><Sym name="list" /></ToggleButton>
+            <ToggleButtonGroup className="finder-view-switch" selectionMode="single" disallowEmptySelection selectedKeys={[view]} onSelectionChange={(keys) => { const key = [...keys][0]; if (key === 'icons' || key === 'list') setView(key); }} aria-label={tr('library.aria.view')}>
+              <ToggleButton id="icons" aria-label={tr('library.aria.iconsView')}><Sym name="grid_view" /></ToggleButton>
+              <ToggleButton id="list" aria-label={tr('library.aria.listView')}><Sym name="list" /></ToggleButton>
             </ToggleButtonGroup>
             <Dropdown>
-              <Dropdown.Trigger className="finder-tool" aria-label="排序与筛选"><Sym name="sort" /></Dropdown.Trigger>
-              <Dropdown.Popover><Dropdown.Menu aria-label="排序与筛选" onAction={(key) => {
+              <Dropdown.Trigger className="finder-tool" aria-label={tr('library.aria.sortFilter')}><Sym name="sort" /></Dropdown.Trigger>
+              <Dropdown.Popover><Dropdown.Menu aria-label={tr('library.aria.sortFilter')} onAction={(key) => {
                 if (key === 'name' || key === 'recent') setSort(key);
                 else { setFilter(key as LibraryFilter); setSelection(new Set()); }
               }}>
-                <Dropdown.Item id="name" textValue="按名称排序">按名称排序 {sort === 'name' && <Sym name="check" className="size-4" />}</Dropdown.Item>
-                <Dropdown.Item id="recent" textValue="最近导入优先">最近导入优先 {sort === 'recent' && <Sym name="check" className="size-4" />}</Dropdown.Item>
+                <Dropdown.Item id="name" textValue={tr('library.sort.name')}>{tr('library.sort.name')} {sort === 'name' && <Sym name="check" className="size-4" />}</Dropdown.Item>
+                <Dropdown.Item id="recent" textValue={tr('library.sort.recent')}>{tr('library.sort.recent')} {sort === 'recent' && <Sym name="check" className="size-4" />}</Dropdown.Item>
                 <Dropdown.Section>
-                  {LIBRARY_FILTERS.map((item) => <Dropdown.Item key={item.value} id={item.value} textValue={item.label}>{item.label} {filter === item.value && <Sym name="check" className="size-4" />}</Dropdown.Item>)}
+                  {LIBRARY_FILTERS.map((item) => <Dropdown.Item key={item.value} id={item.value} textValue={tr(item.label)}>{tr(item.label)} {filter === item.value && <Sym name="check" className="size-4" />}</Dropdown.Item>)}
                 </Dropdown.Section>
               </Dropdown.Menu></Dropdown.Popover>
             </Dropdown>
             <span className="finder-tool-divider" />
-            <Button isIconOnly variant="ghost" data-testid="btn-new-folder" aria-label="新建文件夹" isDisabled={inSystemFolder} onPress={() => openFolderModal('create')}><Sym name="create_new_folder" /></Button>
-            <Button isIconOnly={!isMobile} className="finder-import" variant="ghost" aria-label="导入资料" isDisabled={inSystemFolder} onPress={() => setImportOpen(true)}><Sym name="upload" />{isMobile && '导入'}</Button>
+            <Button isIconOnly variant="ghost" data-testid="btn-new-folder" aria-label={tr('library.aria.newFolder')} isDisabled={inSystemFolder} onPress={() => openFolderModal('create')}><Sym name="create_new_folder" /></Button>
+            <Button isIconOnly={!isMobile} className="finder-import" variant="ghost" aria-label={tr('library.aria.import')} isDisabled={inSystemFolder} onPress={() => setImportOpen(true)}><Sym name="upload" />{isMobile && tr('library.aria.importShort')}</Button>
             <div className="finder-item-actions">
             <Dropdown isOpen={actionMenuOpen} onOpenChange={(open) => { setActionMenuOpen(open); if (!open) setContextPoint(null); }}>
-              <Dropdown.Trigger className="finder-tool" aria-label="所选项目的操作" isDisabled={!selectedFolder && !selectedVideo}><Sym name="more_horiz" /></Dropdown.Trigger>
-              <Dropdown.Popover {...(contextPoint ? { triggerRef: contextAnchor, placement: 'bottom start' as const } : {})}><Dropdown.Menu aria-label="项目操作" onAction={(key) => {
+              <Dropdown.Trigger className="finder-tool" aria-label={tr('library.aria.selectedActions')} isDisabled={!selectedFolder && !selectedVideo}><Sym name="more_horiz" /></Dropdown.Trigger>
+              <Dropdown.Popover {...(contextPoint ? { triggerRef: contextAnchor, placement: 'bottom start' as const } : {})}><Dropdown.Menu aria-label={tr('library.aria.itemActions')} onAction={(key) => {
                 if (key === 'open' && selectedKey) openItem(selectedKey);
                 if (selectedFolder?.folder) {
                   if (key === 'rename') openFolderModal('rename', selectedFolder.folder);
@@ -1669,11 +1674,11 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   if (key === 'delete') askDeleteVideo(selectedVideo);
                 }
               }}>
-                <Dropdown.Item id="open" textValue="打开">打开</Dropdown.Item>
-                <Dropdown.Item id="rename" textValue="重命名">重命名</Dropdown.Item>
+                <Dropdown.Item id="open" textValue={tr('library.chrome.open')}>{tr('library.chrome.open')}</Dropdown.Item>
+                <Dropdown.Item id="rename" textValue={tr('library.menu.rename')}>{tr('library.menu.rename')}</Dropdown.Item>
                 {selectedFolder?.folder && <Dropdown.SubmenuTrigger>
-                  <Dropdown.Item id="folder-color" textValue="文件夹颜色"><Label>文件夹颜色</Label><Dropdown.SubmenuIndicator /></Dropdown.Item>
-                  <Dropdown.Popover><Dropdown.Menu aria-label="文件夹颜色" selectionMode="single" selectedKeys={[selectedFolder.folder.color ?? 'blue']} onAction={(key) => {
+                  <Dropdown.Item id="folder-color" textValue={tr('library.aria.folderColor')}><Label>{tr('library.aria.folderColor')}</Label><Dropdown.SubmenuIndicator /></Dropdown.Item>
+                  <Dropdown.Popover><Dropdown.Menu aria-label={tr('library.aria.folderColor')} selectionMode="single" selectedKeys={[selectedFolder.folder.color ?? 'blue']} onAction={(key) => {
                     const color = FOLDER_COLORS.find((entry) => entry.id === key)?.id;
                     const folderId = selectedFolder.folder?.id;
                     if (!color || folderId == null) return;
@@ -1684,7 +1689,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                         await resourceCommand({ kind: 'folderColor', projectId: directory.project?.id ?? directory.rootId, path: directory.path, color });
                         await reload();
                       } catch (error) {
-                        toast.error(`修改文件夹颜色失败：${formatCaughtError(error)}`);
+                        toast.error(tr('library.t.folderColorFailed', { message: formatCaughtError(error) }));
                       }
                     })();
                   }}>
@@ -1694,20 +1699,20 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     </Dropdown.Item>)}
                   </Dropdown.Menu></Dropdown.Popover>
                 </Dropdown.SubmenuTrigger>}
-                {selectedVideo && <Dropdown.Item id="move" textValue="移动到文件夹">移动到文件夹</Dropdown.Item>}
-                {selectedVideo && <Dropdown.Item id="pin" textValue="置顶">{selectedVideo.pinned === 1 ? '取消置顶' : '置顶'}</Dropdown.Item>}
-                {selectedVideo && <Dropdown.Item id="details" textValue="显示简介">显示简介</Dropdown.Item>}
-                <Dropdown.Item id="delete" textValue="删除" className="text-danger">删除</Dropdown.Item>
+                {selectedVideo && <Dropdown.Item id="move" textValue={tr('library.menu.move')}>{tr('library.menu.move')}</Dropdown.Item>}
+                {selectedVideo && <Dropdown.Item id="pin" textValue={tr('library.menu.pin')}>{selectedVideo.pinned === 1 ? tr('library.menu.unpin') : tr('library.menu.pin')}</Dropdown.Item>}
+                {selectedVideo && <Dropdown.Item id="details" textValue={tr('library.chrome.details')}>{tr('library.chrome.details')}</Dropdown.Item>}
+                <Dropdown.Item id="delete" textValue={tr('library.menu.delete')} className="text-danger">{tr('library.menu.delete')}</Dropdown.Item>
               </Dropdown.Menu></Dropdown.Popover>
             </Dropdown>
             </div>
           </div>
-          <SearchField className="finder-search" aria-label={currentFolder || inSystemFolder ? '搜索此文件夹' : '搜索全部资料'} value={searchText} onChange={(value) => { setSearchText(value); setSelection(new Set()); }}>
-            <SearchField.Group><SearchField.SearchIcon /><SearchField.Input ref={searchInputRef} data-testid="library-search" placeholder="搜索" /><SearchField.ClearButton /></SearchField.Group>
+          <SearchField className="finder-search" aria-label={currentFolder || inSystemFolder ? tr('library.chrome.searchFolder') : tr('library.chrome.searchAll')} value={searchText} onChange={(value) => { setSearchText(value); setSelection(new Set()); }}>
+            <SearchField.Group><SearchField.SearchIcon /><SearchField.Input ref={searchInputRef} data-testid="library-search" placeholder={tr('library.chrome.searchPlaceholder')} /><SearchField.ClearButton /></SearchField.Group>
           </SearchField>
         </header>
-        {projectLibrary.error && <Banner variant="error" title="项目目录加载失败" description={projectLibrary.error} action={<Button size="sm" onPress={projectLibrary.retry}>重试</Button>} />}
-        {hasFilters && <div className="finder-search-scope"><span>搜索范围：{folderTitle}{filter !== 'all' ? ` · ${LIBRARY_FILTERS.find((item) => item.value === filter)?.label}` : ''}</span><Button variant="ghost" size="sm" onPress={clearFilters}>清除筛选</Button></div>}
+        {projectLibrary.error && <Banner variant="error" title={tr('library.t.projectsLoadFailed')} description={projectLibrary.error} action={<Button size="sm" onPress={projectLibrary.retry}>{tr('retry')}</Button>} />}
+        {hasFilters && <div className="finder-search-scope"><span>{tr('library.search.scope', { scope: folderTitle })}{filter !== 'all' ? ` · ${tr(LIBRARY_FILTERS.find((item) => item.value === filter)!.label)}` : ''}</span><Button variant="ghost" size="sm" onPress={clearFilters}>{tr('library.search.clearFilters')}</Button></div>}
       <div className="finder-canvas" data-testid="video-list" onClick={(event) => { if (event.target === event.currentTarget) setSelection(new Set()); }}
         ref={canvasRef}
         data-folder-id={currentFolder?.folder?.id ?? ''}
@@ -1749,8 +1754,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
               variant="error"
               testId="library-load-error"
               icon={<Sym name="error" />}
-              title="资料读取失败"
-              description={loadError ?? '本机数据库打不开，课程与资料暂时读不出来。'}
+              title={tr('library.t.libraryLoadFailed')}
+              description={loadError ?? tr('library.t.libraryLoadFailedDesc')}
               action={
                 <Button
                   variant="secondary"
@@ -1768,18 +1773,18 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
            ) : !inSystemFolder && videos.length === 0 && folders.length === 0 && !projectTiles.length && !systemFiles.length && !systemDirectories.length && !showSystemFolder && !hasFilters ? (
             // 不再给 description：上面那条投放区已经把「点哪儿导入 / 从 B 站导入 / 只存本机不上传」
             // 全说完了，这里再铺一句等于让手机端多占三行重复文案。
-            <EmptyState testId="empty-state" icon={<Sym name="folder_open" />} title="还没有资料" action={<Button variant="secondary" onPress={() => setImportOpen(true)}>导入文件</Button>} />
+            <EmptyState testId="empty-state" icon={<Sym name="folder_open" />} title={tr('library.empty.title')} action={<Button variant="secondary" onPress={() => setImportOpen(true)}>{tr('library.empty.import')}</Button>} />
              ) : hasFilters && visibleCount === 0 && !systemLoading && !systemError ? (
             <EmptyState
               testId="library-no-results"
               icon={<Sym name="search" />}
-              title="没有找到匹配的内容"
-              description={searchQuery ? '试试其他名称，或清除筛选查看全部内容。' : '当前筛选下没有内容，可以切换到全部查看。'}
-              action={<Button variant="secondary" onPress={clearFilters}>清除搜索和筛选</Button>}
+              title={tr('library.empty.noMatch')}
+              description={searchQuery ? tr('library.t.noMatchSearchDesc') : tr('library.t.noMatchFilterDesc')}
+              action={<Button variant="secondary" onPress={clearFilters}>{tr('library.chrome.clearSearchFilters')}</Button>}
             />
           ) : (
             <>
-              {view === 'list' && <div className="finder-list-heading" aria-hidden="true"><span>名称</span><span>项目 / 大小</span><span>添加日期</span><span>种类</span></div>}
+              {view === 'list' && <div className="finder-list-heading" aria-hidden="true"><span>{tr('library.chrome.listName')}</span><span>{tr('library.chrome.listSize')}</span><span>{tr('library.chrome.listDate')}</span><span>{tr('library.chrome.listKind')}</span></div>}
               <ListBox aria-label={folderTitle} className={`finder-items finder-items--${view}`} layout={view === 'icons' ? 'grid' : 'stack'} selectionMode={isMobile ? mobileManaging ? 'single' : 'none' : 'multiple'} selectionBehavior={isMobile ? 'toggle' : 'replace'} selectedKeys={selection} onSelectionChange={(keys) => setSelection(new Set([...keys].map(String)))} onAction={isMobile && mobileManaging ? undefined : (key) => openItem(String(key))} onClick={(event) => { if (event.target === event.currentTarget) setSelection(new Set()); }}>
                 {showSystemFolder && <ListBox.Item id="system:folder" textValue="system" className="finder-item finder-item--folder" data-testid="system-folder" data-system-folder="true" data-selection-key="system:folder">
                   <span className="finder-item__content">
@@ -1787,7 +1792,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     <span className="finder-item__name" title="/system">system</span>
                     <span className="finder-item__meta">系统配置与 Bot 资源</span>
                     <span className="finder-item__date">应用系统文件</span>
-                    <span className="finder-item__kind">系统文件夹</span>
+                    <span className="finder-item__kind">{tr('library.chrome.systemFolder')}</span>
                   </span>
                 </ListBox.Item>}
                  {systemDirectories.map(directory => {
@@ -1798,9 +1803,9 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                    <span className="finder-item__content">
                      <span className="finder-item__icon"><FolderIcon color="gray" /></span>
                      <span className="finder-item__name" title={directory}>{name}</span>
-                     <span className="finder-item__meta">{isMemory ? 'Bot 长期记忆' : '可由 Bot 安装和管理'}</span>
-                     <span className="finder-item__date">{isMemory ? '与 Bot 共用内容' : '真实目录资源'}</span>
-                     <span className="finder-item__kind">系统文件夹</span>
+                     <span className="finder-item__meta">{isMemory ? tr('library.chrome.botMemory') : tr('library.chrome.botInstallable')}</span>
+                     <span className="finder-item__date">{isMemory ? tr('library.chrome.botShared') : tr('library.chrome.realFolder')}</span>
+                     <span className="finder-item__kind">{tr('library.chrome.systemFolder')}</span>
                    </span>
                  </ListBox.Item>;
                  })}
@@ -1811,9 +1816,9 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                    <span className="finder-item__content">
                      <span className="finder-item__icon">{isAgent ? <AgentInstructionsIcon /> : <Sym name="description" className="text-6xl text-accent" />}</span>
                      <span className="finder-item__name" title={file.path}>{file.name}</span>
-                     <span className="finder-item__meta" title={`${file.kind ?? 'system'} · r${file.revision} · ${file.sha256 ?? ''} · ${file.source ?? ''}`}>{isAgent ? '全局 Agent 指令' : file.summary ?? `${file.kind ?? '系统文件'} · r${file.revision}`}{file.kind === 'skill' && file.version ? ` · v${file.version}` : ''}</span>
+                     <span className="finder-item__meta" title={`${file.kind ?? 'system'} · r${file.revision} · ${file.sha256 ?? ''} · ${file.source ?? ''}`}>{isAgent ? tr('library.chrome.agentDirective') : file.summary ?? `${file.kind ?? tr('library.chrome.systemFile')} · r${file.revision}`}{file.kind === 'skill' && file.version ? ` · v${file.version}` : ''}</span>
                      <span className="finder-item__date">{file.updatedAt ? new Date(file.updatedAt).toLocaleDateString() : ''}</span>
-                       <span className="finder-item__kind">{isAgent ? '系统 Markdown' : file.kind === 'board' ? '看板插件文件' : file.kind === 'mcp' ? 'MCP 配置 JSON' : file.kind === 'skill' ? 'Skill 文件' : file.kind === 'diary' ? '日记 Markdown' : file.kind === 'note' ? '笔记 Markdown' : '记忆 Markdown'}</span>
+                       <span className="finder-item__kind">{isAgent ? tr('library.chrome.kindSystemMarkdown') : file.kind === 'board' ? tr('library.chrome.kindBoard') : file.kind === 'mcp' ? tr('library.chrome.kindMcp') : file.kind === 'skill' ? tr('library.chrome.kindSkill') : file.kind === 'diary' ? tr('library.chrome.kindDiary') : file.kind === 'note' ? tr('library.chrome.kindNote') : tr('library.chrome.kindMemory')}</span>
                    </span>
                  </ListBox.Item>;
                  })}
@@ -1839,33 +1844,33 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   <span className="finder-item__name" title={video.name}>{video.name}{video.kind === 'material' && video.materialFormat && !video.name.toLowerCase().endsWith(`.${video.materialFormat}`) ? `.${video.materialFormat}` : ''}</span>
                   <span className="finder-item__meta" title={formatSize(video.size)}>{finderProgressText(video) ?? formatSize(video.size)}</span>
                   <span className="finder-item__date">{new Date(video.createdAt).toLocaleDateString()}</span>
-                   <span className="finder-item__kind">{video.kind === 'material' ? video.materialFormat?.toUpperCase() ?? '文档' : '视频'}</span>
+                   <span className="finder-item__kind">{video.kind === 'material' ? video.materialFormat?.toUpperCase() ?? tr('library.chrome.kindDoc') : tr('library.chrome.kindVideo')}</span>
                   </span>
                 </ListBox.Item>)}
               </ListBox>
-               {inSystemFolder && systemError && <p role="alert" className="text-danger">系统文件读取失败：{systemError}</p>}
-               {inSystemFolder && systemLoading && !systemFiles.length && !systemDirectories.length && <p role="status">正在读取系统文件…</p>}
-               {inMemoryFolder && !systemLoading && !systemError && !systemFiles.length && !systemDirectories.length && !hasFilters && <EmptyState icon={<Sym name="folder_open" />} title="还没有 Bot 记忆" description="Bot 保存的长期记忆会显示在这里，与 Bot 记忆管理共用同一份内容。" />}
-               {inSystemFolder && (systemOffset > 0 || systemPage.nextOffset !== null) && <div className="flex gap-2 p-3"><Button variant="secondary" isDisabled={systemLoading || systemOffset === 0} onPress={() => setSystemOffset(Math.max(0, systemOffset - 50))}>上一页</Button><Button variant="secondary" isDisabled={systemLoading || systemPage.nextOffset === null} onPress={() => setSystemOffset(systemPage.nextOffset!)}>下一页</Button></div>}
-              {currentFolder && visibleCount === 0 && <EmptyState icon={<Sym name="folder_open" />} title="文件夹还是空的" description="通过资料的更多菜单，将已有资料移动到这里。" action={<Button variant="secondary" onPress={() => openFolder(null)}>浏览全部资料</Button>} />}
+               {inSystemFolder && systemError && <p role="alert" className="text-danger">{tr('library.system.readError', { message: systemError })}</p>}
+               {inSystemFolder && systemLoading && !systemFiles.length && !systemDirectories.length && <p role="status">{tr('library.system.reading')}</p>}
+               {inMemoryFolder && !systemLoading && !systemError && !systemFiles.length && !systemDirectories.length && !hasFilters && <EmptyState icon={<Sym name="folder_open" />} title={tr('library.empty.botTitle')} description={tr('library.empty.botDescription')} />}
+               {inSystemFolder && (systemOffset > 0 || systemPage.nextOffset !== null) && <div className="flex gap-2 p-3"><Button variant="secondary" isDisabled={systemLoading || systemOffset === 0} onPress={() => setSystemOffset(Math.max(0, systemOffset - 50))}>{tr('library.system.prevPage')}</Button><Button variant="secondary" isDisabled={systemLoading || systemPage.nextOffset === null} onPress={() => setSystemOffset(systemPage.nextOffset!)}>{tr('library.system.nextPage')}</Button></div>}
+              {currentFolder && visibleCount === 0 && <EmptyState icon={<Sym name="folder_open" />} title={tr('library.empty.folderTitle')} description={tr('library.empty.folderDescription')} action={<Button variant="secondary" onPress={() => openFolder(null)}>{tr('library.empty.browseAll')}</Button>} />}
             </>
           )}
         </SkeletonReveal>
         {marquee.box && <div className="finder-selection-box" data-testid="selection-box" aria-hidden="true" style={marquee.box} />}
       </div>
         <footer className="finder-footer">
-          {isMobile && mobileManaging && <div className="finder-mobile-actions" aria-label="资料管理">
-            <span role="status">{selectedVideo?.name ?? selectedFolder?.name ?? '轻点一个资料或文件夹进行管理'}</span>
+          {isMobile && mobileManaging && <div className="finder-mobile-actions" aria-label={tr('library.aria.mobileManage')}>
+            <span role="status">{selectedVideo?.name ?? selectedFolder?.name ?? tr('library.mobile.manageHint')}</span>
             <div>
-              <Button variant="ghost" isDisabled={!selectedVideo && !selectedFolder} onPress={() => { if (selectedVideo) openRename(selectedVideo); else if (selectedFolder?.folder) openFolderModal('rename', selectedFolder.folder); }}><Sym name="edit" />重命名</Button>
-              <Button variant="ghost" isDisabled={!selectedVideo} onPress={() => { if (selectedVideo) openMove(selectedVideo); }}><Sym name="folder" />移动</Button>
-              <Button variant="ghost" className="text-danger" isDisabled={!selectedVideo && !selectedFolder} onPress={() => { if (selectedVideo) askDeleteVideo(selectedVideo); else if (selectedFolder?.folder) void confirmDeleteFolder(selectedFolder.folder, selectedFolder.videos.length); }}><Sym name="delete" />删除</Button>
+              <Button variant="ghost" isDisabled={!selectedVideo && !selectedFolder} onPress={() => { if (selectedVideo) openRename(selectedVideo); else if (selectedFolder?.folder) openFolderModal('rename', selectedFolder.folder); }}><Sym name="edit" />{tr('library.menu.rename')}</Button>
+              <Button variant="ghost" isDisabled={!selectedVideo} onPress={() => { if (selectedVideo) openMove(selectedVideo); }}><Sym name="folder" />{tr('library.mobile.moveShort')}</Button>
+              <Button variant="ghost" className="text-danger" isDisabled={!selectedVideo && !selectedFolder} onPress={() => { if (selectedVideo) askDeleteVideo(selectedVideo); else if (selectedFolder?.folder) void confirmDeleteFolder(selectedFolder.folder, selectedFolder.videos.length); }}><Sym name="delete" />{tr('library.menu.delete')}</Button>
             </div>
           </div>}
-          {moveNotice && !finderDragging.length && <div className="finder-move-notice" data-error={moveNotice.error || undefined} role={moveNotice.error ? 'alert' : 'status'}><span>{moveNotice.text}</span>{lastMove.length > 0 && <Button size="sm" variant="ghost" onPress={() => void undoFinderMove()} isDisabled={undoingMove}>撤销移动</Button>}<Button size="sm" isIconOnly variant="ghost" aria-label="关闭移动提示" onPress={() => setMoveNotice(null)}>×</Button></div>}
-            <nav aria-label="资料路径" className="finder-path"><span className="finder-path-target" data-drop-target={dropFolder === 'root' || undefined} {...pathDropProps(null)}><Button variant="ghost" size="sm" onPress={() => openFolder(null)}><Sym name="folder" />全部资料</Button></span>{inSystemFolder && systemPath.split('/').filter(Boolean).map((part, index, parts) => { const key = parts.slice(0, index + 1).join('/'); return <span key={key}><Sym name="chevron_right" /><Button variant="ghost" size="sm" aria-current={key === folderKey ? 'page' : undefined} onPress={() => openFolder(key)}>{part}</Button></span>; })}{folderPath.map((folder) => <span key={folder.id} className="finder-path-target" data-folder-id={folder.id} data-drop-target={dropFolder === String(folder.id) || undefined} {...pathDropProps(folder.id!)}><Sym name="chevron_right" /><Button variant="ghost" size="sm" aria-current={folder.id === currentFolder?.folder?.id ? 'page' : undefined} onPress={() => openFolder(String(folder.id))}>{folder.name}</Button></span>)}{!finderDragging.length && (selectedVideo || selectedFolder) && <><Sym name="chevron_right" /><span>{selectedVideo?.name ?? selectedFolder?.name}</span></>}</nav>
-          {finderDragging.length > 0 && <div className="finder-drag-status" role="status"><Sym name={dropHint.startsWith('不能') ? 'block' : 'folder_open'} /><span>{dropHint}</span><kbd>Esc 取消</kbd></div>}
-          <div className="finder-status"><span role="status">{selection.size > 0 ? `已选择 ${selection.size} 项，共 ${visibleCount} 项` : `${visibleCount} 个项目`}</span><span className="finder-interaction-hint">{isMobile ? '轻点打开 · 长按选择' : '拖动空白处框选 · 双击打开'}</span>{selectedVideo && <Button isIconOnly size="sm" variant="ghost" aria-label="显示简介" onPress={() => setDetails(selectedVideo)}><Sym name="info" /></Button>}</div>
+          {moveNotice && !finderDragging.length && <div className="finder-move-notice" data-error={moveNotice.error || undefined} role={moveNotice.error ? 'alert' : 'status'}><span>{moveNotice.text}</span>{lastMove.length > 0 && <Button size="sm" variant="ghost" onPress={() => void undoFinderMove()} isDisabled={undoingMove}>{tr('library.mobile.moveUndo')}</Button>}<Button size="sm" isIconOnly variant="ghost" aria-label={tr('library.aria.closeMove')} onPress={() => setMoveNotice(null)}>×</Button></div>}
+            <nav aria-label={tr('library.aria.path')} className="finder-path"><span className="finder-path-target" data-drop-target={dropFolder === 'root' || undefined} {...pathDropProps(null)}><Button variant="ghost" size="sm" onPress={() => openFolder(null)}><Sym name="folder" />{tr('library.path.allResources')}</Button></span>{inSystemFolder && systemPath.split('/').filter(Boolean).map((part, index, parts) => { const key = parts.slice(0, index + 1).join('/'); return <span key={key}><Sym name="chevron_right" /><Button variant="ghost" size="sm" aria-current={key === folderKey ? 'page' : undefined} onPress={() => openFolder(key)}>{part}</Button></span>; })}{folderPath.map((folder) => <span key={folder.id} className="finder-path-target" data-folder-id={folder.id} data-drop-target={dropFolder === String(folder.id) || undefined} {...pathDropProps(folder.id!)}><Sym name="chevron_right" /><Button variant="ghost" size="sm" aria-current={folder.id === currentFolder?.folder?.id ? 'page' : undefined} onPress={() => openFolder(String(folder.id))}>{folder.name}</Button></span>)}{!finderDragging.length && (selectedVideo || selectedFolder) && <><Sym name="chevron_right" /><span>{selectedVideo?.name ?? selectedFolder?.name}</span></>}</nav>
+          {finderDragging.length > 0 && <div className="finder-drag-status" role="status"><Sym name={dropHint === tr('library.drag.cannot') ? 'block' : 'folder_open'} /><span>{dropHint}</span><kbd>{tr('library.chrome.escCancel')}</kbd></div>}
+          <div className="finder-status"><span role="status">{selection.size > 0 ? tr('library.statusBar.selectedCount', { selected: selection.size, total: visibleCount }) : tr('library.statusBar.itemCount', { count: visibleCount })}</span><span className="finder-interaction-hint">{isMobile ? tr('library.statusBar.tapHint') : tr('library.statusBar.dragHint')}</span>{selectedVideo && <Button isIconOnly size="sm" variant="ghost" aria-label={tr('library.aria.showIntro')} onPress={() => setDetails(selectedVideo)}><Sym name="info" /></Button>}</div>
         </footer>
         {dropActive && <div className="finder-drop-overlay">松开以导入资料</div>}
       </section>}
@@ -1881,7 +1886,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         <div className="drag-ghost pointer-events-none fixed z-50 flex w-56 max-w-[70vw] flex-col gap-2 rounded-2xl border border-accent bg-surface p-4 text-sm text-foreground shadow-lg -translate-x-1/2" style={{ left: drag.x, top: drag.y + 20 }} aria-hidden="true">
           <Sym name={drag.zone === 'delete' ? 'delete' : 'drag_indicator'} className={`text-2xl ${drag.zone === 'delete' ? 'text-danger' : 'text-accent'}`} />
           <span className="line-clamp-2 font-medium">{drag.video.name}</span>
-          <span className="text-xs text-muted">{drag.zone === 'delete' ? '松手后确认删除' : drag.zone === 'pin' ? '松手完成置顶操作' : drag.overKey ? '松手移入此文件夹' : '拖到上方操作区或文件夹'}</span>
+          <span className="text-xs text-muted">{drag.zone === 'delete' ? tr('library.chrome.zoneDeleteConfirm') : drag.zone === 'pin' ? tr('library.chrome.zonePin') : drag.overKey ? tr('library.chrome.zoneMove') : tr('library.chrome.zoneIdle')}</span>
         </div>
       )}
 
@@ -1897,7 +1902,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
             data-testid="drag-zone-pin"
           >
             <Sym name={drag.video.pinned === 1 ? 'pin_off' : 'pin'} className="drag-zone__icon" />
-            <span>{drag.zone === 'pin' ? '松手即可' : '拖到这里'}{drag.video.pinned === 1 ? '取消置顶' : '置顶'}</span>
+            <span>{drag.zone === 'pin' ? tr('library.chrome.dropHere') : tr('library.chrome.dragHere')}{drag.video.pinned === 1 ? tr('library.menu.unpin') : tr('library.menu.pin')}</span>
           </div>
           <div
             ref={deleteZoneRef}
@@ -1905,7 +1910,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
             data-testid="drag-zone-delete"
           >
             <Sym name="delete" className="drag-zone__icon" />
-            <span className="flex flex-col gap-1"><span>{drag.zone === 'delete' ? '松手删除' : '拖到这里删除'}</span><span className="text-xs font-normal">松手后仍需确认</span></span>
+            <span className="flex flex-col gap-1"><span>{drag.zone === 'delete' ? tr('library.chrome.zoneDelete') : tr('library.chrome.zoneDeleteHint')}</span><span className="text-xs font-normal">{tr('library.chrome.releaseConfirm')}</span></span>
           </div>
         </div>
       )}
@@ -1926,8 +1931,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   <Input
                     value={renameText}
                     maxLength={100}
-                    placeholder="输入视频标题"
-                    aria-label="视频标题"
+                    placeholder={tr('library.aria.renameTitlePlaceholder')}
+                    aria-label={tr('library.aria.videoTitle')}
                     autoFocus
                     onChange={(e) => setRenameText(e.target.value)}
                     onKeyDown={(e) => {
@@ -1938,10 +1943,10 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="tertiary" data-testid="rename-cancel" onPress={() => setRenaming(null)}>
-                  取消
+                  {tr('cancel')}
                 </Button>
                 <Button variant="primary" data-testid="rename-save" onPress={() => void confirmRename()}>
-                  保存
+                  {tr('save')}
                 </Button>
               </Modal.Footer>
             </Modal.Dialog>
@@ -1955,7 +1960,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
             <Modal.Dialog data-testid="folder-dialog">
               <Modal.Header>
                 <Modal.Heading>
-                  {folderModal?.mode === 'rename' ? '重命名文件夹' : '新建文件夹'}
+                  {folderModal?.mode === 'rename' ? tr('library.chrome.folderModalRename') : tr('library.chrome.folderModalCreate')}
                 </Modal.Heading>
               </Modal.Header>
               <Modal.Body>
@@ -1963,8 +1968,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   <Input
                     value={folderText}
                     maxLength={50}
-                    placeholder="如：行测、申论、面试"
-                    aria-label="文件夹名称"
+                    placeholder={tr('library.aria.folderNamePlaceholder')}
+                    aria-label={tr('library.aria.folderName')}
                     autoFocus
                     onChange={(e) => setFolderText(e.target.value)}
                     onKeyDown={(e) => {
@@ -1975,10 +1980,10 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="tertiary" data-testid="folder-cancel" onPress={() => setFolderModal(null)}>
-                  取消
+                  {tr('cancel')}
                 </Button>
                 <Button variant="primary" data-testid="folder-save" onPress={() => void confirmFolderModal()}>
-                  保存
+                  {tr('save')}
                 </Button>
               </Modal.Footer>
             </Modal.Dialog>
@@ -1991,7 +1996,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
           <Modal.Container placement="center" size="md" className={MODAL_CONTAINER_CLASS}>
             <Modal.Dialog data-testid="move-dialog">
               <Modal.Header>
-                <Modal.Heading>{moving ? `移动《${moving.name}》到` : ''}</Modal.Heading>
+                <Modal.Heading>{moving ? tr('library.chrome.moveTitle', { name: moving.name }) : ''}</Modal.Heading>
               </Modal.Header>
               <Modal.Body>
                 {/* mdui-radio-group/-radio → RadioGroup/Radio；选中值走 value + onChange。
@@ -2000,14 +2005,14 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   value={moveTarget}
                   onChange={(key) => setMoveTarget(String(key))}
                   data-testid="move-radio-group"
-                  aria-label="移动到文件夹"
+                  aria-label={tr('library.aria.moveTarget')}
                 >
                   <Radio value="-1">
                     <Radio.Content>
                       <Radio.Control>
                         <Radio.Indicator />
                       </Radio.Control>
-                      未分类
+                      {tr('library.t.uncategorized')}
                     </Radio.Content>
                   </Radio>
                   {folders.map((f) => (
@@ -2026,8 +2031,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     <Input
                       value={moveNewName}
                       maxLength={50}
-                      placeholder="新建文件夹名称"
-                      aria-label="新建文件夹名称"
+                      placeholder={tr('library.aria.newFolderName')}
+                      aria-label={tr('library.aria.newFolderName')}
                       onChange={(e) => setMoveNewName(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') void createFolderInMove();
@@ -2040,13 +2045,13 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     isDisabled={!moveNewName.trim()}
                     onPress={() => void createFolderInMove()}
                   >
-                    新建并选中
+                    {tr('library.chrome.moveCreateFolder')}
                   </Button>
                 </div>
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="tertiary" data-testid="move-cancel" onPress={() => setMoving(null)}>
-                  取消
+                  {tr('cancel')}
                 </Button>
                 <Button variant="primary" data-testid="move-confirm" onPress={() => void confirmMove()}>
                   移动
@@ -2082,8 +2087,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     data-testid="bili-url"
                     rows={2}
                     value={biliUrl}
-                    placeholder="粘贴 B 站分享文案、视频链接或 BV 号，自动解析"
-                    aria-label="B 站视频链接"
+                    placeholder={tr('library.chrome.biliPlaceholder')}
+                    aria-label={tr('library.chrome.biliLinkLabel')}
                     disabled={biliImporting || biliResolving}
                     onPaste={(e) => {
                       const input = extractBiliInput(e.clipboardData.getData('text/plain'));
@@ -2117,7 +2122,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       </strong>
                       <span className="text-secondary" style={{ fontSize: 12 }} data-testid="bili-summary">
                         {multiPage
-                          ? `共 ${biliTarget.pages.length} ${biliTarget.kind === 'season' ? '集' : 'P'} · 已选 ${biliPagesSel.length} · 合计 ${formatTotalDuration(selectedSec)}`
+                          ? tr('library.chrome.biliSummary', { count: biliTarget.pages.length, unit: tr(biliTarget.kind === 'season' ? 'library.chrome.biliUnitSeason' : 'library.chrome.biliUnitPart'), selected: biliPagesSel.length, duration: formatTotalDuration(selectedSec) })
                           : formatTotalDuration(selectedSec)}
                       </span>
                     </div>
@@ -2125,10 +2130,10 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       <>
                         <div className="row row--nowrap" style={{ gap: 8, marginTop: 10 }}>
                           <span className="text-secondary" style={{ flex: 1, fontSize: 12 }}>
-                            {biliTarget.kind === 'season' ? '合集选集（可多选，默认仅选当前视频）' : '分 P（每个 P 是一条独立视频，可多选）'}
+                            {biliTarget.kind === 'season' ? tr('library.chrome.biliSeasonHint') : tr('library.chrome.biliPartHint')}
                           </span>
                           <Button variant="tertiary" data-testid="bili-pages-all" onPress={() => selectAllPages(true)}>
-                            全选
+                            {tr('library.chrome.biliSelectAll')}
                           </Button>
                           <Button
                             variant="tertiary"
@@ -2146,7 +2151,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                           selectionMode="multiple"
                           selectedKeys={biliPagesSel.map(String)}
                           onSelectionChange={(keys) => selectPages([...keys].map(String))}
-                          aria-label={biliTarget.kind === 'season' ? '选择合集视频' : '选择分 P'}
+                          aria-label={biliTarget.kind === 'season' ? tr('library.chrome.biliSeasonLabel') : tr('library.chrome.biliPartLabel')}
                         >
                           <TagGroup.List
                             className="row"
@@ -2175,7 +2180,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       <p className="text-secondary mt-2 text-sm" role="status">正在读取字幕…</p>
                     ) : biliSubtitleError ? (
                       <div className="mt-2 flex flex-col gap-2" data-testid="bili-subtitle-error">
-                        <Banner variant="warning" title="字幕读取失败，并非已确认没有字幕" description={biliSubtitleError} />
+                        <Banner variant="warning" title={tr('library.chrome.biliSubtitleWarn')} description={biliSubtitleError} />
                         <Button variant="tertiary" isDisabled={biliImporting} onPress={() => {
                           const page = firstSelectedPage(biliTarget, biliPagesSel);
                           if (page != null) void refreshLangsForPage(biliTarget, page);
@@ -2184,14 +2189,14 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     ) : biliLangItems.length > 0 ? (
                       <>
                         <div className="text-secondary" style={{ fontSize: 12, marginTop: 10 }}>
-                          {multiPage ? `字幕语言（按${biliTarget.kind === 'season' ? `第${biliLangPage ?? ''}集` : ` P${biliLangPage ?? ''}`}上可用的语言）` : '自带字幕'}
+                          {multiPage ? tr('library.chrome.biliLangTitleMulti', { scope: biliTarget.kind === 'season' ? tr('library.chrome.biliLangScopeSeason', { page: biliLangPage ?? '' }) : tr('library.chrome.biliLangScopePart', { page: biliLangPage ?? '' }) }) : tr('library.chrome.biliLangTitle')}
                           ：优先使用所选语言，其余可做对照；未选择或无匹配时自动选择可用字幕
                         </div>
                         <TagGroup
                           selectionMode="multiple"
                           selectedKeys={biliLangs}
                           onSelectionChange={(keys) => selectLangs([...keys].map(String))}
-                          aria-label="选择字幕语言"
+                          aria-label={tr('library.aria.subtitleLang')}
                         >
                           <TagGroup.List
                             className="row"
@@ -2229,14 +2234,14 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     variant="error"
                     testId="bili-error"
                     icon={<Sym name="error" />}
-                    title="导入失败"
-                    description="详情见上方的错误弹窗，可一键复制"
+                    title={tr('library.t.importFailedTitle')}
+                    description={tr('library.t.importFailedDesc')}
                   />
                 )}
               </Modal.Body>
               <Modal.Footer>
                 <Button variant="tertiary" data-testid="bili-cancel" isDisabled={biliImporting} onPress={() => { setBiliOpen(false); resetBiliDraft(); }}>
-                  取消
+                  {tr('cancel')}
                 </Button>
                 {biliTarget ? (
                   <LoadingButton
@@ -2320,10 +2325,11 @@ function useThumb(videoId: string): string | null {
 function finderProgressText(video: VideoRow): string | null {
   const ratio = progressRatio(video);
   if (ratio == null) return null;
-  return video.finished === 1 ? '已看完' : `已看 ${Math.round(ratio * 100)}%`;
+  return video.finished === 1 ? i18n.t('library.t.watched', { ns: 'projects' }) : i18n.t('library.t.watchedPercent', { ns: 'projects', percent: Math.round(ratio * 100) });
 }
 
 function FinderFileIcon({ video }: { video: VideoRow }) {
+  const { t: tr } = useTranslation('projects');
   const cover = useThumb(video.id);
   const isMaterial = video.kind === 'material';
   const ratio = progressRatio(video);
@@ -2335,13 +2341,13 @@ function FinderFileIcon({ video }: { video: VideoRow }) {
       {ratio != null && <span
         className="finder-video-progress"
         role="progressbar"
-        aria-label={`${video.name}观看进度`}
+        aria-label={tr('library.t.watchProgressAria', { name: video.name })}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(ratio * 100)}
         aria-valuetext={finderProgressText(video) ?? undefined}
       ><span style={{ width: `${ratio * 100}%` }} /></span>}
-      {video.pinned === 1 && <span className="finder-file-pin" aria-label="已置顶"><Sym name="pin" /></span>}
+      {video.pinned === 1 && <span className="finder-file-pin" aria-label={tr('library.aria.pinned')}><Sym name="pin" /></span>}
     </span>
   );
 }
@@ -2377,14 +2383,15 @@ function VideoRow({
   onDragEnd: () => void;
   onDragCancel: () => void;
 }) {
+  const { t: tr } = useTranslation('projects');
   const isMaterial = v.kind === 'material';
   const matKind: 'page' | 'para' = v.materialFormat === 'pdf' || !v.materialFormat ? 'page' : 'para';
-  const noun = matKind === 'page' ? '页' : '段';
+  const noun = tr(matKind === 'page' ? 'library.material.pageNoun' : 'library.material.paraNoun');
   const unitText = v.unitCount
     ? `${v.unitCount} ${noun}`
     : v.empty === 1
-      ? '无正文'
-      : '未解析';
+      ? tr('library.material.noText')
+      : tr('library.material.unparsed');
   /**
    * 材料的状态标签与视频不是一套语义：
    * 已解析 / 待解析 / 扫描件（不可检索）/ 无正文（不可检索）/ 文件已删。
@@ -2393,13 +2400,13 @@ function VideoRow({
    */
   const status = isMaterial
     ? v.scanned === 1
-      ? { variant: 'error' as const, text: '扫描件·不可检索' }
+      ? { variant: 'error' as const, text: tr('library.material.scanned') }
       : v.empty === 1
-        ? { variant: 'error' as const, text: '无正文·不可检索' }
+        ? { variant: 'error' as const, text: tr('library.material.empty') }
         : v.unitCount
-          ? { variant: 'primary' as const, text: `已解析 ${v.unitCount} ${noun}` }
-          : { variant: '' as const, text: '待解析' }
-    : STATUS_TAG[v.status];
+          ? { variant: 'primary' as const, text: tr('library.material.parsed', { count: v.unitCount, noun }) }
+          : { variant: '' as const, text: tr('library.material.pending') }
+    : { ...STATUS_TAG[v.status], text: tr(STATUS_TAG[v.status].text) };
   const meta = `${isMaterial ? unitText : formatDuration(v.duration)} · ${formatSize(v.size)} · ${new Date(v.createdAt).toLocaleDateString()}`;
   const cover = useThumb(v.id);
   /**
@@ -2521,7 +2528,7 @@ function VideoRow({
         type="button"
         className={`${THUMB_CLS} mb-2 overflow-hidden transition-shadow hover:shadow-md`}
         data-testid="video-thumb"
-        aria-label={`${isMaterial ? '阅读' : '学习'} ${v.name}${ratio == null ? '' : v.finished === 1 ? '，已看完' : `，已观看 ${Math.round(ratio * 100)}%`}`}
+        aria-label={`${isMaterial ? tr('library.chrome.read') : tr('library.chrome.study')} ${v.name}${ratio == null ? '' : v.finished === 1 ? tr('library.chrome.ariaFinishedSuffix') : tr('library.chrome.ariaWatchedSuffix', { percent: Math.round(ratio * 100) })}`}
         onClick={onPlay}
         onDragStart={(e) => e.preventDefault()}
       >
@@ -2583,7 +2590,7 @@ function VideoRow({
             {/* 与导入进度条同一套映射：算得出百分比就定量显示，算不出走不确定态。 */}
             <ProgressBar
               maxValue={100}
-              aria-label={jobCopy?.detail ?? '后台任务进度'}
+              aria-label={jobCopy?.detail ?? tr('library.t.jobProgressAria')}
               value={
                 // 只有「按份数推进」的任务才有确定百分比：转写（按段）与材料解析（按页/段）。
                 // 其余（排队/抽取/VAD）走不确定态。
@@ -2602,8 +2609,8 @@ function VideoRow({
         )}
       </div>
       <div className={TAGS_CLS}>
-        {v.pinned === 1 && <Chip size="sm" color="accent" variant="soft">已置顶</Chip>}
-        {v.fileDeleted === 1 && <Chip size="sm" color="default" variant="soft">文件已删</Chip>}
+        {v.pinned === 1 && <Chip size="sm" color="accent" variant="soft">{tr('library.aria.pinned')}</Chip>}
+        {v.fileDeleted === 1 && <Chip size="sm" color="default" variant="soft">{tr('library.material.deleted')}</Chip>}
         <Chip size="sm" color={status.variant === 'error' ? 'danger' : status.variant ? 'accent' : 'default'} variant="soft">
           {jobCopy ? jobCopy.tag : status.text}
         </Chip>
@@ -2612,7 +2619,7 @@ function VideoRow({
       <div className={ACTIONS_CLS}>
         <Button data-testid="btn-play" variant="secondary" onPress={onPlay}>
           <Sym name="play_circle" />
-          {isMaterial ? '阅读' : '学习'}
+          {isMaterial ? tr('library.chrome.read') : tr('library.chrome.study')}
         </Button>
         {isMobile ? (
           // 手机端：图标按钮 + Dropdown 菜单（菜单项用 id + onAction 分发）
@@ -2620,13 +2627,13 @@ function VideoRow({
             <Dropdown.Trigger
               className={buttonVariants({ isIconOnly: true, variant: 'tertiary', size: 'sm' })}
               data-testid="btn-more"
-              aria-label="更多操作"
+              aria-label={tr('library.aria.more')}
             >
               <Sym name="more_vert" />
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end">
               <Dropdown.Menu
-                aria-label="更多操作"
+                aria-label={tr('library.aria.more')}
                 onAction={(key) => {
                   if (key === 'rename') onRename();
                   else if (key === 'move') onMove();
@@ -2635,36 +2642,36 @@ function VideoRow({
                   else if (key === 'delete') onDelete();
                 }}
               >
-                <Dropdown.Item id="rename" textValue="重命名" data-testid="menu-rename">
+                <Dropdown.Item id="rename" textValue={tr('library.menu.rename')} data-testid="menu-rename">
                   <Sym name="edit" />
-                  重命名
+                  {tr('library.menu.rename')}
                 </Dropdown.Item>
-                <Dropdown.Item id="move" textValue="移动到文件夹" data-testid="menu-move">
+                <Dropdown.Item id="move" textValue={tr('library.menu.move')} data-testid="menu-move">
                   <Sym name="folder_open" />
-                  移动到文件夹
+                  {tr('library.menu.move')}
                 </Dropdown.Item>
                 <Dropdown.Item
                   id="pin"
-                  textValue={v.pinned === 1 ? '取消置顶' : '置顶'}
+                  textValue={tr(v.pinned === 1 ? 'library.menu.unpin' : 'library.menu.pin')}
                   data-testid="menu-pin"
                 >
                   <Sym name={v.pinned === 1 ? 'pin_off' : 'pin'} />
-                  {v.pinned === 1 ? '取消置顶' : '置顶'}
+                  {tr(v.pinned === 1 ? 'library.menu.unpin' : 'library.menu.pin')}
                 </Dropdown.Item>
                 {/* 解析失败/想换索引重来时用得上；参数化重试比隐式后台扫描可控 */}
                 {isMaterial && onReparse && (
-                  <Dropdown.Item id="reparse" textValue="重新解析" data-testid="menu-reparse">
+                  <Dropdown.Item id="reparse" textValue={tr('library.menu.reparse')} data-testid="menu-reparse">
                     <Sym name="refresh" />
-                    重新解析
+                    {tr('library.menu.reparse')}
                   </Dropdown.Item>
                 )}
                 <Dropdown.Item
                   id="delete"
-                  textValue="删除"
+                  textValue={tr('library.menu.delete')}
                   data-testid="menu-delete"
                 >
                   <Sym name="delete" />
-                  删除
+                  {tr('library.menu.delete')}
                 </Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
@@ -2676,7 +2683,7 @@ function VideoRow({
               variant="tertiary"
               size="sm"
               data-testid="btn-rename"
-              aria-label="重命名"
+              aria-label={tr('library.aria.rename')}
               onPress={onRename}
             >
               <Sym name="edit" />
@@ -2686,7 +2693,7 @@ function VideoRow({
               variant="tertiary"
               size="sm"
               data-testid="btn-move"
-              aria-label="移动到文件夹"
+              aria-label={tr('library.aria.moveTarget')}
               onPress={onMove}
             >
               <Sym name="folder_open" />
@@ -2696,7 +2703,7 @@ function VideoRow({
               variant="tertiary"
               size="sm"
               data-testid="btn-pin"
-              aria-label={v.pinned === 1 ? '取消置顶' : '置顶'}
+              aria-label={v.pinned === 1 ? tr('library.menu.unpin') : tr('library.menu.pin')}
               onPress={onTogglePin}
             >
               <Sym name={v.pinned === 1 ? 'pin_off' : 'pin'} />
@@ -2707,7 +2714,7 @@ function VideoRow({
                 variant="tertiary"
                 size="sm"
                 data-testid="btn-reparse"
-                aria-label="重新解析"
+                aria-label={tr('library.aria.reparse')}
                 onPress={onReparse}
               >
                 <Sym name="refresh" />
@@ -2718,7 +2725,7 @@ function VideoRow({
               variant="tertiary"
               size="sm"
               data-testid="btn-delete"
-              aria-label="删除"
+              aria-label={tr('library.aria.delete')}
               onPress={onDelete}
             >
               <Sym name="delete" />

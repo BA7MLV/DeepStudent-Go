@@ -36,7 +36,8 @@ import { useChatScroll } from '../components/useChatScroll';
 import ChatHistorySkeleton from '../components/ChatHistorySkeleton';
 import ChatSyncStatus from '../components/ChatSyncStatus';
 import { db } from '../store/db';
-import { displayChatError, displayChatFailure } from '../utils/chatError';
+import { displayChatError, displayChatFailure, isModelConfigError } from '../utils/chatError';
+import { openSettings } from '../components/settingsDialogStore';
 import AskCard from '../components/AskCard';
 import FolderPlanCard from '../components/FolderPlanCard';
 import { ArtifactEditProvider } from '../components/ArtifactEditor';
@@ -141,6 +142,7 @@ function MessageActions({
   onExport: () => void;
   onDelete: () => void;
 }) {
+  const { t: chatText } = useTranslation('common');
   /** 操作行里的一颗图标。外观 / 禁用 / tooltip 三样收在一处，免得四颗按钮各写一遍 */
   const action = (
     label: string,
@@ -170,7 +172,7 @@ function MessageActions({
     </Tooltip>
   );
 
-  const copyLabel = isUser ? '复制这条提问' : '复制这条回答';
+  const copyLabel = isUser ? chatText('chatPanel.copyQuestion') : chatText('chatPanel.copyAnswer');
 
   return (
     <div className="course-chat__actions" data-testid="chat-message-actions">
@@ -182,8 +184,8 @@ function MessageActions({
           三种语义由调用方给出不同的说法（见 retryHint），一颗图标两种消息共用 */}
       {action(retryHint, <Sym name="refresh" />, onRetry, 'chat-retry-message', busy || !canRetry)}
 
-      {action('从这条消息分叉出新会话', <Sym name="fork" />, onFork, 'chat-fork-message', busy)}
-      {action('删除这条消息', <Sym name="delete" />, onDelete, 'chat-delete-message', busy)}
+      {action(chatText('chatPanel.fork'), <Sym name="fork" />, onFork, 'chat-fork-message', busy)}
+      {action(chatText('chatPanel.deleteMessage'), <Sym name="delete" />, onDelete, 'chat-delete-message', busy)}
 
       {!isUser && (
         <Dropdown>
@@ -191,7 +193,7 @@ function MessageActions({
               里面不能再套 HeroUI 的 Button（会产出 `<button><button>`）。外观直接挂类名。 */}
           <Dropdown.Trigger
             className="course-chat__action"
-            aria-label="更多操作"
+            aria-label={chatText('chatPanel.more')}
             data-testid="chat-message-more"
           >
             <Sym name="more_horiz" />
@@ -199,16 +201,16 @@ function MessageActions({
           <Dropdown.Popover placement="bottom start">
             <Dropdown.Menu
               onAction={(key) => {
-                if (key === 'copy-plain') void copyWithFeedback(markdownToPlainText(content), '已复制纯文本');
+                if (key === 'copy-plain') void copyWithFeedback(markdownToPlainText(content), chatText('chatPanel.copiedPlain'));
                 else if (key === 'export') onExport();
               }}
             >
-              <Dropdown.Item id="copy-plain" textValue="复制纯文本" data-testid="chat-copy-plain">
+              <Dropdown.Item id="copy-plain" textValue={chatText('chatPanel.copyPlain')} data-testid="chat-copy-plain">
                 <span className="course-chat__menu-item">
                   复制纯文本
                 </span>
               </Dropdown.Item>
-              <Dropdown.Item id="export" textValue="导出本次会话" data-testid="chat-export-session">
+              <Dropdown.Item id="export" textValue={chatText('chatPanel.exportSession')} data-testid="chat-export-session">
                 <span className="course-chat__menu-item">
                   导出本次会话
                 </span>
@@ -230,6 +232,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
   onFork: () => void;
   onDelete: () => void;
 }) {
+  const { t: chatText } = useTranslation('common');
   const touchMenu = useMediaQuery('(hover: none), (pointer: coarse), (max-width: 640px)');
   const isNarrow = useMediaQuery('(max-width: 900px)');
   const textRef = useRef<HTMLSpanElement>(null);
@@ -245,7 +248,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
     return () => observer.disconnect();
   }, [message.content, touchMenu]);
   const content = <span ref={textRef} id={`user-text-${message.key}`} className="course-chat__user-text"
-    data-collapsed={overflows && !expanded}><SkillMessageContent content={message.content || '图片消息'} ids={message.explicitSkillIds} /></span>;
+    data-collapsed={overflows && !expanded}><SkillMessageContent content={message.content || chatText('chatPanel.imageMessage')} ids={message.explicitSkillIds} /></span>;
   return (
     <div className="course-chat__user-content" data-dust-surface>
     <ChatMessageAttachments files={message.attachments} />
@@ -253,7 +256,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
     {!touchMenu ? content : (
     <Dropdown trigger="longPress">
       <Dropdown.Trigger className="course-chat__user-trigger"
-        aria-label="用户消息，长按查看时间和操作" data-testid="chat-user-message-trigger">
+        aria-label={chatText('chatPanel.userMessageAria')} data-testid="chat-user-message-trigger">
         {content}
       </Dropdown.Trigger>
       <Dropdown.Popover placement="bottom end" className="course-chat__message-menu">
@@ -262,17 +265,17 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
             {messageTime(message.createdAt)}
           </time>
         )}
-        <Dropdown.Menu aria-label="提问操作" disabledKeys={busy || message.rowId == null ? ['retry', 'fork', 'delete'] : canRetry ? [] : ['retry']}
+        <Dropdown.Menu aria-label={chatText('chatPanel.askActions')} disabledKeys={busy || message.rowId == null ? ['retry', 'fork', 'delete'] : canRetry ? [] : ['retry']}
           onAction={(key) => {
             if (key === 'retry') onRetry();
             else if (key === 'fork') onFork();
             else if (key === 'delete') onDelete();
-            else if (key === 'copy') void copyWithFeedback(message.content, '已复制提问');
+            else if (key === 'copy') void copyWithFeedback(message.content, chatText('chatPanel.copiedQuestion'));
           }}>
-          <Dropdown.Item id="copy" textValue="复制" data-testid="chat-user-copy"><Sym name="content_copy" />复制</Dropdown.Item>
-          <Dropdown.Item id="retry" textValue="重试" data-testid="chat-user-retry"><Sym name="refresh" />重试</Dropdown.Item>
-          <Dropdown.Item id="fork" textValue="分支出新会话" data-testid="chat-user-fork"><Sym name="fork" />分支出新会话</Dropdown.Item>
-          <Dropdown.Item id="delete" textValue="删除这条消息" data-testid="chat-user-delete"><Sym name="delete" />删除这条消息</Dropdown.Item>
+          <Dropdown.Item id="copy" textValue={chatText('courseChat.copy')} data-testid="chat-user-copy"><Sym name="content_copy" />{chatText('courseChat.copy')}</Dropdown.Item>
+          <Dropdown.Item id="retry" textValue={chatText('chatPanel.retry')} data-testid="chat-user-retry"><Sym name="refresh" />{chatText('chatPanel.retry')}</Dropdown.Item>
+          <Dropdown.Item id="fork" textValue={chatText('courseChat.forkMenu')} data-testid="chat-user-fork"><Sym name="fork" />{chatText('courseChat.forkMenu')}</Dropdown.Item>
+          <Dropdown.Item id="delete" textValue={chatText('chatPanel.deleteMessage')} data-testid="chat-user-delete"><Sym name="delete" />{chatText('chatPanel.deleteMessage')}</Dropdown.Item>
         </Dropdown.Menu>
       </Dropdown.Popover>
     </Dropdown>
@@ -280,7 +283,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
     {overflows && <Button size="sm" variant="tertiary" className="course-chat__user-expand"
       aria-expanded={expanded} aria-controls={`user-text-${message.key}`}
       data-testid="chat-user-expand" onPress={() => setExpanded((value) => !value)}>
-      {expanded ? '收起' : '展开'}<Sym name="keyboard_arrow_down" />
+      {expanded ? chatText('chatPanel.collapse') : chatText('chatPanel.expand')}<Sym name="keyboard_arrow_down" />
     </Button>}
     </div>
     </div>
@@ -295,16 +298,17 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
  * 之外的失败模式：解析不到就不渲染这一行。
  */
 function SourceList({ sources }: { sources: ChatSource[] }) {
+  const { t: chatText } = useTranslation('common');
   const navigate = useNavigate();
   if (sources.length === 0) return null;
 
   return (
-    <div className="course-chat__sources" data-testid="chat-sources" aria-label="来源文件">
+    <div className="course-chat__sources" data-testid="chat-sources" aria-label={chatText('courseChat.sources')}>
           {sources.map((source) => (
             <div key={source.courseId} className="course-chat__source" data-testid="chat-source-item">
               <a
                 className="course-chat__source-link"
-                title={`打开原文：${source.courseName}`}
+                title={chatText('courseChat.openSource', { name: source.courseName })}
                 href={`#/player/${encodeURIComponent(source.courseId)}`}
                 onClick={(event) => {
                   // 与正文里的课程链接同一套跳转：HashRouter 拥有 hash，别让浏览器重新加载
@@ -337,8 +341,9 @@ function SourceList({ sources }: { sources: ChatSource[] }) {
  */
 /** 数课程期间只显示欢迎标题的骨架。 */
 function CourseCountSkeleton() {
+  const { t: chatText } = useTranslation('common');
   return (
-    <div className="course-chat__empty-skel t-skel" role="status" aria-label="正在准备聊天">
+    <div className="course-chat__empty-skel t-skel" role="status" aria-label={chatText('courseChat.preparing')}>
       <div className="t-skel-skeleton is-pulsing" aria-hidden="true">
         <div className="course-chat__empty-skel__head" />
       </div>
@@ -406,6 +411,7 @@ function QueueBar({
   onSendNow: (id: string) => void;
   onClear: () => void;
 }) {
+  const { t: chatText } = useTranslation('common');
   if (items.length === 0) return null;
   return (
     <div className="course-chat__queue" data-testid="chat-queue">
@@ -421,7 +427,7 @@ function QueueBar({
               variant="tertiary"
               size="sm"
               className="course-chat__queue-clear"
-              aria-label="清空排队"
+              aria-label={chatText('courseChat.clearQueue')}
               data-testid="chat-queue-clear"
               onPress={onClear}
             >
@@ -441,7 +447,7 @@ function QueueBar({
             </span>
             <Input
               className="course-chat__queue-input"
-              aria-label={`第 ${index + 1} 条排队消息`}
+              aria-label={chatText('courseChat.queueItem', { index: index + 1 })}
               data-testid="chat-queue-input"
               value={item.text}
               onChange={(event) => onEdit(item.id, event.target.value)}
@@ -453,7 +459,7 @@ function QueueBar({
                   variant="tertiary"
                   size="sm"
                   className="course-chat__queue-btn"
-                  aria-label="立刻插入这条，不等这一轮答完"
+                  aria-label={chatText('courseChat.insertNow')}
                   data-testid="chat-queue-send-now"
                   onPress={() => onSendNow(item.id)}
                 >
@@ -471,7 +477,7 @@ function QueueBar({
                   variant="tertiary"
                   size="sm"
                   className="course-chat__queue-btn"
-                  aria-label="删掉这条排队消息"
+                  aria-label={chatText('courseChat.deleteQueued')}
                   data-testid="chat-queue-remove"
                   onPress={() => onRemove(item.id)}
                 >
@@ -527,6 +533,7 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
 }) {
   if (import.meta.env.DEV) recordChatRender('CourseChatInputRegion');
   const { t } = useTranslation('interface');
+  const { t: chatText } = useTranslation('common');
   const touch = useMediaQuery('(pointer: coarse)');
   const activeId = useCourseChat(s => s.activeId), loaded = useCourseChat(s => s.loaded), loading = useCourseChat(s => s.loading);
   const draft = useCourseChat(s => s.draft), setDraft = useCourseChat(s => s.setDraft), send = useCourseChat(s => s.send), stop = useCourseChat(s => s.stop);
@@ -548,8 +555,8 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
     const file = pastedTextAttachment(event.clipboardData.getData('text/plain'));
     if (!file) return;
     event.preventDefault();
-    if (attachments.items.length >= MAX_CHAT_ATTACHMENTS) { toast.error(`每条消息最多 ${MAX_CHAT_ATTACHMENTS} 个附件，请移除附件后重新粘贴`); return; }
-    attachments.add([file]); toast.info('粘贴内容超过 4000 字节，已自动转换为 txt 附件');
+    if (attachments.items.length >= MAX_CHAT_ATTACHMENTS) { toast.error(chatText('courseChat.tooManyAttachments', { count: MAX_CHAT_ATTACHMENTS })); return; }
+    attachments.add([file]); toast.info(chatText('courseChat.pastedAsFile'));
   };
   const submit = () => { setVoiceEditVersion(version => version + 1); void send(useCourseChat.getState().draft, 'queue'); };
   const changeDraft = (value: string) => { setVoiceEditVersion(version => version + 1); setDraft(value); };
@@ -559,13 +566,13 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
     {composerAsk && pendingAsk ? <AskCard key={`${activeId}:${pendingAsk.messageKey}`} ask={composerAsk} messageKey={pendingAsk.messageKey}
       active restored={pendingAsk.restored} onPick={async answer => {
         const current = useCourseChat.getState();
-        if (current.activeId !== activeId || current.pendingAsk?.messageKey !== pendingAsk.messageKey) throw new Error('本次提问已结束，请使用当前问题卡');
+        if (current.activeId !== activeId || current.pendingAsk?.messageKey !== pendingAsk.messageKey) throw new Error(chatText('courseChat.askEnded'));
         await current.answerAsk(answer);
       }} /> : <>
       <div className="course-chat__composer-context"><ChatAttachmentDraft /></div>
       <ChatAddMenu disabled={!loaded || !!pendingAsk} onSelectProject={onSelectProject} onSkillInsert={() => composerRef.current?.focus()} />
       <ComposerExpand visible={composerOverflow} key={`expand-${activeId ?? 'draft'}`} value={draft} onChange={changeDraft}
-        renderInput={className => <InlineSkillInput expanded autoFocus className={className} label="完整消息"
+        renderInput={className => <InlineSkillInput expanded autoFocus className={className} label={chatText('chatPanel.fullMessage')}
           value={draft} onChange={changeDraft} skillIds={turnSkillIds} availableSkillIds={availableSkillIds} onSkillsChange={setTurnSkillIds} onPaste={handlePaste} />} />
       <div className="course-chat__composer-body">
         <InlineSkillInput ref={composerRef} documentKey={activeId} label={t('composer.message')} description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')}
@@ -577,14 +584,14 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
         <PluginActions surface="chat.composer.actions" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} />
         <span className="course-chat__context-usage-slot"><CourseChatContextUsage /></span>
         {generating ? <Tooltip><Tooltip.Trigger><Button isIconOnly variant="tertiary" size="sm"
-          aria-label={hasDraft ? '排队发送' : '停止生成（已写出的内容会保留）'}
+          aria-label={hasDraft ? chatText('courseChat.queueSend') : chatText('courseChat.stopKeep')}
           className={hasDraft ? 'course-chat__send' : 'course-chat__stop'} data-testid={hasDraft ? 'chat-send' : 'chat-stop'}
           isDisabled={hasDraft && (!loaded || attachmentsPending)} onPress={hasDraft ? submit : stop}>
           <Sym name={hasDraft ? 'arrow_upward' : 'stop'} filled={!hasDraft} />
-        </Button></Tooltip.Trigger><Tooltip.Content><p>{hasDraft ? '排队发送' : '停止生成（已写出的内容会保留）'}</p></Tooltip.Content></Tooltip>
+        </Button></Tooltip.Trigger><Tooltip.Content><p>{hasDraft ? chatText('courseChat.queueSend') : chatText('courseChat.stopKeep')}</p></Tooltip.Content></Tooltip>
         : <VoiceInput key={activeId ?? 'draft'} holdTargetRef={composerHoldRef} disabled={!loaded || attachmentsPending}
           hasText={hasDraft} editVersion={voiceEditVersion} onStart={() => { voiceDraftBase.current = useCourseChat.getState().draft; }}
-          onText={text => { const base = voiceDraftBase.current; setDraft(base ? `${base} ${text}` : text); }} onSend={submit} sendLabel={loading ? '排队发送' : '发送'} />}
+          onText={text => { const base = voiceDraftBase.current; setDraft(base ? `${base} ${text}` : text); }} onSend={submit} sendLabel={loading ? chatText('courseChat.queueSend') : chatText('courseChat.send')} />}
       </ChatComposerTools>
     </>}
   </ChatComposer>;
@@ -695,7 +702,7 @@ export default function CourseChat() {
 
   const onPlanConfirm = async () => {
     const result = await confirmPlan();
-    if (result.error) toast.error(`整理方案执行失败：${result.error}`);
+    if (result.error) toast.error(chatText('courseChat.handoutFailed', { message: result.error }));
   };
 
   /**
@@ -708,7 +715,7 @@ export default function CourseChat() {
     const id = activeId;
     if (id == null || message.rowId == null) return;
     const newId = await forkSession(id, message.rowId);
-    if (newId != null) toast.success('已从这条消息分支出新会话');
+    if (newId != null) toast.success(chatText('chatPanel.forkedToast'));
   };
 
   const CourseLink = useCallback(
@@ -807,7 +814,7 @@ export default function CourseChat() {
       顶栏毫无反应，分不清自己看的是哪一段对话。 */
   const activeSession = sessions.find((session) => session.id === activeId);
   // 草稿态的主页不显示标题；已有会话仍显示自己的标题。
-  const activeTitle = messages.length > 0 ? activeSession?.title ?? 'AI 助手' : '';
+  const activeTitle = messages.length > 0 ? activeSession?.title ?? chatText('courseChat.assistant') : '';
   /**
    * 本轮循环是否还活着（或卡片是否**从断点恢复**成了可答）：两张卡的 `active` 由
    * `pendingAsk` / `pendingPlan` 的 `messageKey` 是否对上这条消息决定。刷新后从库里读回的卡
@@ -824,7 +831,7 @@ export default function CourseChat() {
    * 写死成当前选中的那门课会在文件头留下一句假话。
    */
   const exportSession = async () => {
-    if (messages.length === 0) return void toast.info('当前会话还没有内容');
+    if (messages.length === 0) return void toast.info(chatText('chatPanel.sessionEmpty'));
     const rows = activeId == null ? [] : await readChatHistory(activeId);
     const savedIds = new Set(rows.map((row) => row.id));
     const exportMessages = [
@@ -832,8 +839,8 @@ export default function CourseChat() {
       ...messages.filter((message) => !savedIds.has(message.rowId)),
     ];
     const markdown = buildSessionMarkdown({
-      title: activeSession?.title ?? '新会话',
-      videoName: '资料',
+      title: activeSession?.title ?? chatText('courseChat.newSession'),
+      videoName: chatText('courseChat.material'),
       messages: exportMessages.map((message) => ({
         role: message.role === 'user' ? ('user' as const) : ('assistant' as const),
         content: message.content,
@@ -843,10 +850,10 @@ export default function CourseChat() {
     const url = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = exportFileName('资料', activeSession?.title ?? '新会话');
+    anchor.download = exportFileName(chatText('courseChat.material'), activeSession?.title ?? chatText('courseChat.newSession'));
     anchor.click();
     URL.revokeObjectURL(url);
-    toast.success('已导出 Markdown 文件');
+    toast.success(chatText('chatPanel.exportedMarkdown'));
   };
 
   const renderCards = (message: CourseChatMessage) => (
@@ -906,6 +913,17 @@ export default function CourseChat() {
                           <div className="course-chat__failed" data-testid="chat-answer-failed" role="alert">
                             <Sym name="error" aria-hidden="true" />
                             <span className="course-chat__failed-text">{displayChatFailure(message.content)}</span>
+                            {isModelConfigError(message.content) && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="course-chat__failed-continue"
+                                data-testid="chat-error-open-settings"
+                                onPress={() => openSettings('models')}
+                              >
+                                {chatText('chat.openModelSettings')}
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"
@@ -942,7 +960,7 @@ export default function CourseChat() {
                         )}
                         </WidgetMessage>
                         {message.widgetPreview && (
-                           <WidgetStreamFrame html={message.widgetPreview.html} dark={widgetDark} status="正在生成交互图形" />
+                           <WidgetStreamFrame html={message.widgetPreview.html} dark={widgetDark} status={chatText('chatPanel.generatingWidget')} />
                         )}
                         </ArtifactEditProvider>
                         {!message.content && (message.ask || message.folderPlan) && <div aria-hidden="true" data-chat-answer-start="" />}
@@ -979,7 +997,7 @@ export default function CourseChat() {
                             busy={loading || deleting}
                             canRetry={canRetry}
                             /* 两种语义必须说得不一样，否则用户不知道点下去会得到什么 */
-                            retryHint={message.interrupted ? '接着写（从断点继续，不重复已写内容）' : '重新生成这条回答'}
+                            retryHint={message.interrupted ? chatText('courseChat.continueWriting') : chatText('chatPanel.regenerate')}
                             onRetry={() => void retryMessage(message.key)}
                             onFork={() => void onForkMessage(message)}
                             onExport={exportSession}
@@ -1003,7 +1021,7 @@ export default function CourseChat() {
                       isUser
                       busy={loading || deleting}
                       canRetry={canRetryAsk}
-                      retryHint="重新回答这句话（删掉这一问一答，用同样的问题重跑一次）"
+                      retryHint={chatText('chatPanel.retryFull')}
                       onRetry={() => void retryMessage(message.key)}
                       onFork={() => void onForkMessage(message)}
                       onExport={exportSession}
@@ -1024,7 +1042,7 @@ export default function CourseChat() {
           isIconOnly
           variant="tertiary"
           className="page-shell__toolbar-button course-chat__new-chat"
-          aria-label="新会话"
+          aria-label={chatText('courseChat.newSession')}
           data-testid="chat-new-session"
           onPress={() => { void createSession(); }}
         >
@@ -1034,7 +1052,7 @@ export default function CourseChat() {
       aside={{
         open: botOpen,
         onOpenChange: setBotOpen,
-        label: auxiliary === 'plugins' ? '学习组件' : 'Bot',
+        label: auxiliary === 'plugins' ? chatText('courseChat.studyWidgets') : 'Bot',
         content: (
           <Suspense fallback={<div className="bot-center" aria-busy="true" />}>
             {auxiliary === 'plugins' ? <div className="plugin-panel"><header><Button variant="tertiary" onPress={() => setAuxiliary('bot')}>Bot</Button><Button variant="tertiary" onPress={() => setBotOpen(false)}>关闭组件</Button></header><PluginSlot name="chat.sidepanel" manage={false} projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} /></div> : <BotPanel onClose={() => setBotOpen(false)} />}
@@ -1044,7 +1062,7 @@ export default function CourseChat() {
     >
       {projectPickerOpen && <ChatProjectPicker key={activeId ?? 'draft'} value={project} onClose={() => setProjectPickerOpen(false)}
         onSelect={async selected => {
-          if (useCourseChat.getState().activeId !== activeId) throw new Error('会话已切换，请重新选择项目');
+          if (useCourseChat.getState().activeId !== activeId) throw new Error(chatText('courseChat.sessionSwitched'));
           await useCourseChat.getState().setProject(selected);
         }} />}
       <div
@@ -1052,7 +1070,7 @@ export default function CourseChat() {
         ref={welcomeRef}
         data-testid="course-chat-page"
       >
-        <section className="course-chat__main" aria-label="AI 助手聊天">
+        <section className="course-chat__main" aria-label={chatText('courseChat.chatAria')}>
           <div className="course-chat__timeline">
           <div className="course-chat__messages" ref={listRef} tabIndex={-1} data-testid="course-chat-messages">
             {!loaded && <ChatHistorySkeleton />}
@@ -1111,7 +1129,7 @@ export default function CourseChat() {
               className="course-chat__scroll-bottom"
               data-testid="chat-scroll-bottom"
               data-generating={loading && pendingAsk == null && pendingPlan == null ? 'true' : undefined}
-              aria-label={loading && pendingAsk == null && pendingPlan == null ? '回到底部（正在生成回答）' : '回到底部'}
+              aria-label={loading && pendingAsk == null && pendingPlan == null ? chatText('courseChat.toBottomGenerating') : chatText('courseChat.toBottom')}
               onClick={jumpToLatest}
             >
               <Sym name="arrow_downward" />
@@ -1136,13 +1154,13 @@ export default function CourseChat() {
                   data-testid="chat-go-import"
                 >
                   <Sym name="folder" aria-hidden="true" />
-                  <span>{project ? projectDisplayName(project.name) : '选择项目'}</span>
+                  <span>{project ? projectDisplayName(project.name) : chatText('courseChat.pickProject')}</span>
                 </Button>
                 <Button
                   isIconOnly
                   className="course-chat__import-close"
                   variant="ghost"
-                  aria-label="关闭项目入口"
+                  aria-label={chatText('courseChat.closeProjectEntry')}
                   data-testid="chat-import-close"
                   onPress={() => {
                     setImportDismissed(true);

@@ -1,7 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Dropdown, ListBox, ScrollShadow, SearchField, Separator, Switch, Tooltip } from '@heroui/react';
 import { Sym } from '../ui';
-import { catalogOf as settingsCatalogOf, useSettings, sameRef, modelOverridesOf, targetOrNull, type ModelRef, type ModelSlot } from '../store/settings';
+import { slotLabel,
+  catalogOf as settingsCatalogOf, useSettings, sameRef, modelOverridesOf, targetOrNull, type ModelRef, type ModelSlot } from '../store/settings';
 import { guessContextWindow } from '../api/modelCaps';
 import { effectiveThinkingLevel, reasoningChoices, reasoningProfile } from '@wangke/study-core/model/reasoning';
 import { useModelMetaRevision } from '../utils/useModelMeta';
@@ -54,12 +56,7 @@ const SLOT_ICON: Record<ModelSlot, ReactNode> = {
 };
 
 /** 槽位 → 中文名：不内联展示模型 id 之后，这个信息缺口由 tooltip 补上 */
-const SLOT_LABEL: Record<ModelSlot, string> = {
-  asr: '转写模型',
-  vision: '视觉模型',
-  chat: '主模型',
-  decision: '决策模型',
-};
+
 
 /**
  * 药丸上只留模型自己那一段名字。
@@ -91,6 +88,7 @@ export default function ModelPicker({
   value: controlledValue,
   onChange,
 }: Props) {
+  const { t: pickerText } = useTranslation('settings');
   const settings = useSettings();
   const value = controlledValue ?? settings[field];
   const favs = settings.favorites[slot];
@@ -104,7 +102,7 @@ export default function ModelPicker({
   ];
   if (slot === 'vision') candidates.unshift({ providerId: '', model: '' });
   /** 供应商被删掉的收藏项：仍列出但标出来，否则用户会以为菜单漏了东西 */
-  const nameOf = (id: string) => settings.providers.find((p) => p.id === id)?.name ?? '（已删除的供应商）';
+  const nameOf = (id: string) => settings.providers.find((p) => p.id === id)?.name ?? pickerText('modelPicker.providerDeleted');
   const catalogOf = (id: string) => settingsCatalogOf(settings, id);
 
   const pick = (ref: ModelRef) => {
@@ -124,9 +122,9 @@ export default function ModelPicker({
   const currentKey = keyOf(value);
 
   const tooltip =
-    slot === 'vision' && !value.model ? '图片理解：自动复用主模型的视觉能力' : candidates.length <= 1
-      ? `${SLOT_LABEL[slot]}：${nameOf(value.providerId)} · ${value.model}（在设置 → 我的模型中添加更多模型）`
-      : `${SLOT_LABEL[slot]}：${nameOf(value.providerId)} · ${value.model}（点击切换）`;
+    slot === 'vision' && !value.model ? pickerText('modelPicker.visionAuto') : candidates.length <= 1
+      ? `${slotLabel(slot)}：${nameOf(value.providerId)} · ${value.model}（${pickerText('modelPicker.addMore')}）`
+      : `${slotLabel(slot)}：${nameOf(value.providerId)} · ${value.model}（${pickerText('modelPicker.clickToSwitch')}）`;
 
   /** 列表行内那一块：勾 + 供应商 + 模型 id + 能力标记。下拉菜单与弹层共用 */
   const rowContent = (ref: ModelRef) => {
@@ -159,7 +157,7 @@ export default function ModelPicker({
                 触发器的外观直接用 className 挂到 Trigger 上即可（见 model-picker__trigger）。 */}
             <Dropdown.Trigger
               className="model-picker__trigger"
-              aria-label={`切换${SLOT_LABEL[slot]}：当前 ${value.model}`}
+              aria-label={pickerText('modelPicker.switchCurrent', { slot: slotLabel(slot), model: value.model })}
               data-testid="model-picker"
             >
               {SLOT_ICON[slot]}
@@ -180,7 +178,7 @@ export default function ModelPicker({
               <Dropdown.Item
                 key={keyOf(ref)}
                 id={keyOf(ref)}
-                textValue={ref.model || '自动：复用主模型'}
+                textValue={ref.model || pickerText('modelPicker.autoReuse')}
                 data-testid={`model-picker-item-${keyOf(ref)}`}
               >
                 {rowContent(ref)}
@@ -253,6 +251,7 @@ function ChipDropdown({
   nameOf: (id: string) => string;
   catalogOf: (id: string) => string;
 }) {
+  const { t: pickerText } = useTranslation('settings');
   const settings = useSettings();
 
   const [query, setQuery] = useState('');
@@ -281,14 +280,14 @@ function ChipDropdown({
         {/* 标题行写全「谁 + 现在哪个」：面板是贴着输入卡底部浮起来的，
             只列模型名的话分不清自己开的是哪一个槽位的面板 */}
         <div className="model-picker__panel-head">
-          <span className="shrink-0 text-sm font-semibold">{SLOT_LABEL[slot]}</span>
+          <span className="shrink-0 text-sm font-semibold">{slotLabel(slot)}</span>
           <span className="min-w-0 truncate text-xs text-muted" {...overflowTitleProps}>
             {nameOf(value.providerId)} · {value.model}
           </span>
         </div>
 
-        <SearchField aria-label="搜索已添加模型" value={query} onChange={setQuery} className="px-3 py-2">
-          <SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder="搜索模型或供应商" /><SearchField.ClearButton /></SearchField.Group>
+        <SearchField aria-label={pickerText('modelPicker.searchSaved')} value={query} onChange={setQuery} className="px-3 py-2">
+          <SearchField.Group><SearchField.SearchIcon /><SearchField.Input placeholder={pickerText('modelPicker.searchModelOrProvider')} /><SearchField.ClearButton /></SearchField.Group>
         </SearchField>
         {/* min-h-0 必需：flex 子项默认 min-height:auto，不设的话
             ScrollShadow 会按内容撑开、把下面的思考区顶出面板。 */}
@@ -300,7 +299,7 @@ function ChipDropdown({
           orientation="vertical"
         >
           <ListBox
-            aria-label={SLOT_LABEL[slot]}
+            aria-label={slotLabel(slot)}
             selectionMode="single"
             /* 再点一次已选中项不该把高亮弄没 —— 选完模型是要继续待在这个
                面板里调思考的，那一下「取消选中」看起来就像面板坏了 */
@@ -361,7 +360,7 @@ function ChipDropdown({
                      `SwitchField`（一个 div），testid 挂上去就落在这个壳上 ——
                      它的可访问名与 aria-checked 都在里面的 button 上，
                      探针读状态会读到 null。 */
-                  aria-label="开启思考"
+                  aria-label={pickerText('modelPicker.enableThinking')}
                   isSelected={thinking}
                   onChange={(on) => settings.update({ thinkingEnabled: on })}
                 >
@@ -372,7 +371,7 @@ function ChipDropdown({
                   </Switch.Content>
                 </Switch>
               ) : (
-                <span className="text-xs text-muted">{profile?.mode === 'unknown' ? '此接口未声明可用的思考开关或深度档位' : '此模型始终开启思考，不支持关闭或调节深度'}</span>
+                <span className="text-xs text-muted">{profile?.mode === 'unknown' ? pickerText('modelPicker.noThinkingSwitch') : pickerText('modelPicker.alwaysThinking')}</span>
               )}
               {profile?.mode === 'openai' && target?.protocol === 'openai-chat' && <p className="text-xs text-muted">Chat Completions 通常不返回可读推理；需要推理摘要请使用 Responses API</p>}
             </div>
@@ -391,7 +390,7 @@ function ChipDropdown({
         <Tooltip.Trigger>
           <Dropdown.Trigger
             className="model-picker__trigger model-picker__trigger--chip"
-            aria-label={`切换${SLOT_LABEL[slot]}：当前 ${value.model}`}
+            aria-label={pickerText('modelPicker.switchCurrent', { slot: slotLabel(slot), model: value.model })}
             data-testid="model-picker"
           >
             {SLOT_ICON[slot]}

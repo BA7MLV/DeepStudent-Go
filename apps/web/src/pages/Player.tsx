@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import i18n from '../i18n';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MediaPlayer, MediaProvider, Track, type MediaPlayerInstance, type MediaStorage } from '@vidstack/react';
 import { DefaultVideoLayout } from '@vidstack/react/player/layouts/default';
@@ -50,20 +51,55 @@ const SUBS_TRACK_ID = 'live-subs';
 /** 把被替换掉的旧 cue 挪到这个时间点：远超任何媒体时长，等于永久失效（不能删，见 syncTrack 注释） */
 const CUE_DISABLED_TIME = 1e9;
 
-const PLAYER_TRANSLATIONS = {
-  Play: '播放', Pause: '暂停', Replay: '重新播放', Mute: '静音', Unmute: '取消静音',
-  Volume: '音量', Seek: '播放进度', Settings: '设置', Speed: '播放速度', Normal: '正常',
-  Fullscreen: '全屏', 'Enter Fullscreen': '进入全屏', 'Exit Fullscreen': '退出全屏',
-  PiP: '画中画', 'Enter PiP': '进入画中画', 'Exit PiP': '退出画中画',
-  Captions: '字幕', 'Closed-Captions On': '开启字幕', 'Closed-Captions Off': '关闭字幕',
-  'Caption Styles': '字幕样式', 'Captions look like this': '字幕将以这样的样式显示',
-  Accessibility: '辅助功能', Announcements: '语音提示', 'Keyboard Animations': '按键反馈',
-  Playback: '播放', Audio: '音频', Boost: '增强', Quality: '画质', Auto: '自动',
-  Chapters: '章节', Off: '关闭', Default: '默认', Disabled: '已禁用', Continue: '继续',
-  Loop: '循环播放', Reset: '重置', Font: '字体', Family: '字体', Size: '大小',
-  Color: '颜色', Opacity: '不透明度', Shadow: '阴影', Text: '文字', Track: '轨道',
-  'Text Background': '文字背景', 'Display Background': '显示背景',
-};
+/** vidstack 文案走 locale：语言切换后随下一次渲染生效。 */
+const playerTranslations = () => ({
+  "Play": i18n.t('player.ui.Play'),
+  "Pause": i18n.t('player.ui.Pause'),
+  "Replay": i18n.t('player.ui.Replay'),
+  "Mute": i18n.t('player.ui.Mute'),
+  "Unmute": i18n.t('player.ui.Unmute'),
+  "Volume": i18n.t('player.ui.Volume'),
+  "Seek": i18n.t('player.ui.Seek'),
+  "Settings": i18n.t('player.ui.Settings'),
+  "Speed": i18n.t('player.ui.Speed'),
+  "Normal": i18n.t('player.ui.Normal'),
+  "Fullscreen": i18n.t('player.ui.Fullscreen'),
+  "Enter Fullscreen": i18n.t('player.ui.Enter Fullscreen'),
+  "Exit Fullscreen": i18n.t('player.ui.Exit Fullscreen'),
+  "PiP": i18n.t('player.ui.PiP'),
+  "Enter PiP": i18n.t('player.ui.Enter PiP'),
+  "Exit PiP": i18n.t('player.ui.Exit PiP'),
+  "Captions": i18n.t('player.ui.Captions'),
+  "Closed-Captions On": i18n.t('player.ui.Closed-Captions On'),
+  "Closed-Captions Off": i18n.t('player.ui.Closed-Captions Off'),
+  "Caption Styles": i18n.t('player.ui.Caption Styles'),
+  "Captions look like this": i18n.t('player.ui.Captions look like this'),
+  "Accessibility": i18n.t('player.ui.Accessibility'),
+  "Announcements": i18n.t('player.ui.Announcements'),
+  "Keyboard Animations": i18n.t('player.ui.Keyboard Animations'),
+  "Playback": i18n.t('player.ui.Playback'),
+  "Audio": i18n.t('player.ui.Audio'),
+  "Boost": i18n.t('player.ui.Boost'),
+  "Quality": i18n.t('player.ui.Quality'),
+  "Auto": i18n.t('player.ui.Auto'),
+  "Chapters": i18n.t('player.ui.Chapters'),
+  "Off": i18n.t('player.ui.Off'),
+  "Default": i18n.t('player.ui.Default'),
+  "Disabled": i18n.t('player.ui.Disabled'),
+  "Continue": i18n.t('player.ui.Continue'),
+  "Loop": i18n.t('player.ui.Loop'),
+  "Reset": i18n.t('player.ui.Reset'),
+  "Font": i18n.t('player.ui.Font'),
+  "Family": i18n.t('player.ui.Family'),
+  "Size": i18n.t('player.ui.Size'),
+  "Color": i18n.t('player.ui.Color'),
+  "Opacity": i18n.t('player.ui.Opacity'),
+  "Shadow": i18n.t('player.ui.Shadow'),
+  "Text": i18n.t('player.ui.Text'),
+  "Track": i18n.t('player.ui.Track'),
+  "Text Background": i18n.t('player.ui.Text Background'),
+  "Display Background": i18n.t('player.ui.Display Background'),
+});
 
 /** 把任意 MIME 映射到 vidstack 支持的联合类型，未知则按 mp4 处理 */
 function toPlayerMime(mime: string): 'video/mp4' | 'video/webm' | 'video/ogg' | 'audio/mpeg' | 'audio/ogg' {
@@ -252,13 +288,13 @@ function PlayerResource({ id }: { id: string | undefined }) {
     setPlaybackError('');
     setFileMissing(false);
     setVideoUrl('');
-    const timeout = setTimeout(() => controller.abort(new DOMException('视频加载超时，请检查网络后重试', 'TimeoutError')), 20_000);
+    const timeout = setTimeout(() => controller.abort(new DOMException(i18n.t('player.loadTimeout'), 'TimeoutError')), 20_000);
     (async () => {
       if (!id) return;
       const row = getSystemMaterial(id) ?? await db.videos.get(id);
       if (cancelled) return;
       if (!row) {
-        toast.error('视频不存在');
+        toast.error(i18n.t('player.missing'));
         navigate('/library');
         return;
       }
@@ -277,7 +313,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
     })().catch((error: unknown) => {
       if (cancelled) return;
       setPlaybackError(error instanceof VideoPlaybackError || (error instanceof DOMException && error.name === 'TimeoutError')
-        ? error.message : '视频加载失败，请检查网络后重试');
+        ? error.message : i18n.t('player.loadFailed'));
     }).finally(() => {
       clearTimeout(timeout);
       if (!cancelled) { setLoading(false); setSourcePending(false); }
@@ -295,7 +331,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
     const signal = playbackAbort.current?.signal;
     if (!signal || signal.aborted || playbackFailureDetected.current) return;
     playbackFailureDetected.current = true;
-    setPlaybackError('视频加载失败，正在检查原因…');
+    setPlaybackError(i18n.t('player.diagnosing'));
     void describeVideoPlaybackError(error.code ?? 2, videoUrl, signal).then(message => {
       if (!signal.aborted) setPlaybackError(message);
     }).catch(() => { /* Leaving/retrying cancels the diagnostic probe. */ });
@@ -305,7 +341,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
     if (!videoUrl || sourcePending || playbackError) return;
     const timeout = setTimeout(() => {
       if (playerRef.current && !playerRef.current.state.canPlay) {
-        setPlaybackError('视频连接超时，请检查网络后重新加载');
+        setPlaybackError(i18n.t('player.connectTimeout'));
       }
     }, 30_000);
     return () => clearTimeout(timeout);
@@ -501,8 +537,8 @@ function PlayerResource({ id }: { id: string | undefined }) {
   if (!video || !id) {
     return (
       <div className="page player-fallback">
-        <EmptyState testId="player-empty" title={playbackError ? '资料加载失败' : '视频不存在'}
-          description={playbackError || '这条记录可能已被删除'}
+        <EmptyState testId="player-empty" title={playbackError ? i18n.t('player.materialLoadFailed') : i18n.t('player.missing')}
+          description={playbackError || i18n.t('player.maybeDeleted')}
           action={playbackError ? <Button onPress={() => setPlaybackAttempt(attempt => attempt + 1)}>重新加载</Button> : undefined} />
       </div>
     );
@@ -603,13 +639,13 @@ function PlayerResource({ id }: { id: string | undefined }) {
               <EmptyState
                 testId="player-file-missing"
                 icon={<Sym name="error" />}
-                title="视频文件已删除"
-                description="字幕 / 讲义 / 问答仍可使用"
+                title={i18n.t('player.fileDeleted')}
+                description={i18n.t('player.stillUsable')}
               />
             </div>
           ) : playbackError ? (
             <div className="video-pane__missing" role="alert">
-              <EmptyState testId="player-playback-error" icon={<Sym name="error" />} title="无法播放视频"
+              <EmptyState testId="player-playback-error" icon={<Sym name="error" />} title={i18n.t('player.cannotPlay')}
                 description={playbackError}
                 action={<Button onPress={() => setPlaybackAttempt(attempt => attempt + 1)}>重新加载</Button>} />
             </div>
@@ -671,7 +707,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
                 onPlaybackError({ code: media?.error?.code ?? 2 });
               }}>
                 {/* 常驻单轨、不设 src：挂载即 ready，之后由 syncTrack 增量 addCue */}
-                {trackReady && <Track id={SUBS_TRACK_ID} kind="subtitles" label="中文字幕" default />}
+                {trackReady && <Track id={SUBS_TRACK_ID} kind="subtitles" label={i18n.t('player.subsLabel')} default />}
               </MediaProvider>
               {/* 中央大播放按钮：必须挂在 <MediaProvider> 之外 —— 手势层是在 provider 元素上
                   监听 pointerup 的（单击暂停 / 双击全屏），挂在里面会被它连点两下。 */}
@@ -682,7 +718,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
               {/* 滑块方向键跟随小幅跳转步长。映射改变时重挂布局，刷新 vidstack 在控件
                   挂载时生成的 aria-keyshortcuts，避免旧映射反向覆盖新配置。只重挂控制栏，不重载视频。 */}
               <DefaultVideoLayout key={JSON.stringify(shortcuts.bindings)} icons={playerLayoutIcons} slots={layoutSlots}
-                translations={PLAYER_TRANSLATIONS} colorScheme="dark" showTooltipDelay={350} seekStep={shortcuts.arrowSeek}
+                translations={playerTranslations()} colorScheme="dark" showTooltipDelay={350} seekStep={shortcuts.arrowSeek}
                 smallLayoutWhen={isSmallPlayerLayout} />
             </MediaPlayer>
           )}

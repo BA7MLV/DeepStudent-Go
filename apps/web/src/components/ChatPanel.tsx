@@ -294,6 +294,7 @@ function MessageActions({
   onExport: () => void;
   onDelete: () => void;
 }) {
+  const { t: chatText } = useTranslation('common');
   const action = (
     label: string,
     icon: React.ReactNode,
@@ -322,7 +323,7 @@ function MessageActions({
     </Tooltip>
   );
 
-  const copyLabel = isUser ? '复制这条提问' : '复制这条回答';
+  const copyLabel = isUser ? chatText('chatPanel.copyQuestion') : chatText('chatPanel.copyAnswer');
 
   return (
     <div className="chat-message-actions" data-testid="chat-message-actions">
@@ -331,7 +332,7 @@ function MessageActions({
 
       {action(retryHint, <Sym name="refresh" />, onRetry, 'chat-retry-message', busy || !canRetry)}
 
-      {action('从这条消息分叉出新会话', <Sym name="fork" />, onFork, 'chat-fork-message', busy)}
+      {action(chatText('chatPanel.fork'), <Sym name="fork" />, onFork, 'chat-fork-message', busy)}
       {action('删除这条消息', <Sym name="delete" />, onDelete, 'chat-delete-message', busy)}
 
       {!isUser && (
@@ -339,7 +340,7 @@ function MessageActions({
           {/* Dropdown.Trigger 自己渲染 <button>，不能在里面再套 HeroUI Button */}
           <Dropdown.Trigger
             className="chat-action"
-            aria-label="更多操作"
+            aria-label={chatText('chatPanel.more')}
             data-testid="chat-message-more"
           >
             <Sym name="more_horiz" />
@@ -347,14 +348,14 @@ function MessageActions({
           <Dropdown.Popover placement="bottom start">
             <Dropdown.Menu
               onAction={(key) => {
-                if (key === 'copy-plain') void copyWithFeedback(markdownToPlainText(content), '已复制纯文本');
+                if (key === 'copy-plain') void copyWithFeedback(markdownToPlainText(content), chatText('chatPanel.copiedPlain'));
                 else if (key === 'export') onExport();
               }}
             >
-              <Dropdown.Item id="copy-plain" textValue="复制纯文本" data-testid="chat-copy-plain">
+              <Dropdown.Item id="copy-plain" textValue={chatText('chatPanel.copyPlain')} data-testid="chat-copy-plain">
                 <span className="chat-menu-item">复制纯文本</span>
               </Dropdown.Item>
-              <Dropdown.Item id="export" textValue="导出本次会话" data-testid="chat-export-session">
+              <Dropdown.Item id="export" textValue={chatText('chatPanel.exportSession')} data-testid="chat-export-session">
                 <span className="chat-menu-item">导出本次会话</span>
               </Dropdown.Item>
             </Dropdown.Menu>
@@ -374,6 +375,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
   onFork: () => void;
   onDelete: () => void;
 }) {
+  const { t: chatText } = useTranslation('common');
   const touchMenu = useMediaQuery('(hover: none), (pointer: coarse), (max-width: 640px)');
   const textRef = useRef<HTMLSpanElement>(null);
   const [expanded, setExpanded] = useState(false);
@@ -390,7 +392,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
   const content = (
     <span ref={textRef} id={`chat-user-text-${message.key}`} className="chat-user-text"
       data-collapsed={overflows && !expanded}>
-      <SkillMessageContent content={message.content || '图片消息'} ids={message.explicitSkillIds} renderText={text => <UserContent content={text} />} />
+      <SkillMessageContent content={message.content || chatText('chatPanel.imageMessage')} ids={message.explicitSkillIds} renderText={text => <UserContent content={text} />} />
     </span>
   );
   return (
@@ -399,7 +401,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
         {!touchMenu ? content : (
           <Dropdown trigger="longPress">
             <Dropdown.Trigger className="chat-user-trigger"
-              aria-label="用户消息，长按查看时间和操作" data-testid="chat-user-message-trigger">
+              aria-label={chatText('chatPanel.userMessageAria')} data-testid="chat-user-message-trigger">
               {content}
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end" className="chat-message-menu">
@@ -410,25 +412,25 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
                 </time>
               )}
               <Dropdown.Menu
-                aria-label="提问操作"
+                aria-label={chatText('chatPanel.askActions')}
                 disabledKeys={busy || message.rowId == null ? ['retry', 'fork', 'delete'] : canRetry ? [] : ['retry']}
                 onAction={(key) => {
                   if (key === 'retry') onRetry();
                   else if (key === 'fork') onFork();
                   else if (key === 'delete') onDelete();
-                  else if (key === 'copy') void copyWithFeedback(message.content, '已复制提问');
+                  else if (key === 'copy') void copyWithFeedback(message.content, chatText('chatPanel.copiedQuestion'));
                 }}
               >
                 <Dropdown.Item id="copy" textValue="复制" data-testid="chat-user-copy">
                   <Sym name="content_copy" />复制
                 </Dropdown.Item>
-                <Dropdown.Item id="retry" textValue="重试" data-testid="chat-user-retry">
+                <Dropdown.Item id="retry" textValue={chatText('chatPanel.retry')} data-testid="chat-user-retry">
                   <Sym name="refresh" />重试
                 </Dropdown.Item>
                 <Dropdown.Item id="fork" textValue="分支出新会话" data-testid="chat-user-fork">
                   <Sym name="fork" />分支出新会话
                 </Dropdown.Item>
-                <Dropdown.Item id="delete" textValue="删除这条消息" data-testid="chat-user-delete">
+                <Dropdown.Item id="delete" textValue={chatText('chatPanel.deleteMessage')} data-testid="chat-user-delete">
                   <Sym name="delete" />删除这条消息
                 </Dropdown.Item>
               </Dropdown.Menu>
@@ -439,7 +441,7 @@ function UserMessageBubble({ message, busy, canRetry, onRetry, onFork, onDelete 
           <Button size="sm" variant="tertiary" className="chat-user-expand"
             aria-expanded={expanded} aria-controls={`chat-user-text-${message.key}`}
             data-testid="chat-user-expand" onPress={() => setExpanded((value) => !value)}>
-            {expanded ? '收起' : '展开'}<Sym name="keyboard_arrow_down" />
+            {expanded ? chatText('chatPanel.collapse') : chatText('chatPanel.expand')}<Sym name="keyboard_arrow_down" />
           </Button>
         )}
       </div>
@@ -586,10 +588,10 @@ export default function ChatPanel({
   const addShot = () => {
     const video = resolveVideoEl(playerRef);
     const t = playerRef.current?.currentTime ?? 0;
-    if (!video) return toast.warning('视频未就绪');
+    if (!video) return toast.warning(chatText('chatPanel.videoNotReady'));
     const snap = captureFrame(video, t);
-    if (!snap) return toast.warning('截图失败，请稍候重试');
-    if (shots.length >= 4) return toast.info('最多附带 4 张截图');
+    if (!snap) return toast.warning(chatText('chatPanel.shotFailed'));
+    if (shots.length >= 4) return toast.info(chatText('chatPanel.maxShots'));
     setShots((prev) => [...prev, snap]);
   };
 
@@ -611,10 +613,10 @@ export default function ChatPanel({
     try {
       const row = await database.chats.get(message.rowId);
       if (database !== db || lifetime && !lifetime.current()) return;
-      if (!row || JSON.stringify(row.quiz) !== JSON.stringify(message.quiz)) throw new Error('题卡已变化，请重新打开当前版本');
+      if (!row || JSON.stringify(row.quiz) !== JSON.stringify(message.quiz)) throw new Error(chatText('chatPanel.quizChanged'));
       await editMessage(row, { ...row, quiz });
       if (database === db && (!lifetime || lifetime.current())) setMsgs(prev => prev.map(item => item.key === key ? { ...item, quiz } : item));
-    } catch (error) { if (database === db && (!lifetime || lifetime.current())) toast.error(error instanceof Error ? error.message : '作答保存失败'); }
+    } catch (error) { if (database === db && (!lifetime || lifetime.current())) toast.error(error instanceof Error ? error.message : chatText('chatPanel.answerSaveFailed')); }
   };
 
   /** 自定义链接渲染：#seek-N 跳播放器、#unit-N 跳材料对应页/段，其余外链新窗口打开 */
@@ -745,8 +747,8 @@ export default function ChatPanel({
         if (blockCount === 0) {
           setIndexNote(
             materialKind === 'page'
-              ? '这份材料没有可检索文字；可以让助手展示页面图，或在阅读区框选图片提问'
-              : '这份材料没有可检索正文；可以让助手查找并展示文件里的图片',
+              ? chatText('chatPanel.noSearchText')
+              : chatText('chatPanel.noSearchBody'),
           );
           setIndexReady(true);
           return;
@@ -763,7 +765,7 @@ export default function ChatPanel({
         .count();
       if (cancelled) return;
       setIndexNote(segCount === 0
-        ? '尚未生成字幕，暂时无法检索课程正文；可以直接聊天或附带截图提问'
+        ? chatText('chatPanel.noSubtitlesYet')
         : null);
       setIndexReady(true);
     })();
@@ -892,7 +894,7 @@ export default function ChatPanel({
         processPhase: responsePhase(task.progress?.phase), processStartedAt: Date.parse(task.createdAt),
         widgets: Array.isArray(task.progress?.widgets) ? task.progress.widgets as WidgetPayload[] : undefined,
         widgetPreview: task.progress?.widgetPreview as { html: string } | undefined, streaming: true });
-      else if (task && ['failed', 'interrupted', 'cancelled'].includes(task.status)) messages.push({ key: `cloud-${task.id}`, role: 'ai', content: task.error || '任务已停止，可重新提问。' });
+      else if (task && ['failed', 'interrupted', 'cancelled'].includes(task.status)) messages.push({ key: `cloud-${task.id}`, role: 'ai', content: task.error || chatText('chatPanel.taskStopped') });
       // Reconciliation must not remount an already opened iframe when the
       // in-flight message becomes a synced history row.
       setMsgs(current => messages.map(message => {
@@ -969,14 +971,14 @@ export default function ChatPanel({
 
   /** 导出整个会话为 .md 文件（归档/跨设备带走） */
   const downloadSession = async () => {
-    if (msgs.length === 0) return void toast.info('当前会话还没有内容');
+    if (msgs.length === 0) return void toast.info(chatText('chatPanel.sessionEmpty'));
     const url = URL.createObjectURL(new Blob([await sessionMarkdown()], { type: 'text/markdown;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url;
     a.download = exportFileName(videoName, activeTitle);
     a.click();
     URL.revokeObjectURL(url);
-    toast.success('已导出 Markdown 文件');
+    toast.success(chatText('chatPanel.exportedMarkdown'));
   };
 
   /**
@@ -1027,7 +1029,7 @@ export default function ChatPanel({
       setSessions(rest);
       setActiveId(rest[rest.length - 1].id!);
     }
-    toast.success('已删除会话');
+    toast.success(chatText('chatPanel.sessionDeleted'));
   };
 
   /**
@@ -1042,7 +1044,7 @@ export default function ChatPanel({
     // 引用也算内容：只划了词没打字也应能发送
     if ((!q && shots.length === 0 && curRefs.length === 0) || loading || activeId == null) return;
     if (!indexReady) {
-      toast.warning('问答索引尚未就绪');
+      toast.warning(chatText('chatPanel.indexNotReady'));
       return;
     }
     const sessionId = activeId;
@@ -1224,7 +1226,7 @@ export default function ChatPanel({
       ...(source.mcpServerIds !== undefined ? { mcpServerIds: [...source.mcpServerIds] } : {}),
     }]);
     setActiveId(newId);
-    toast.success('已从这条消息分支出新会话');
+    toast.success(chatText('chatPanel.forkedToast'));
   };
 
   /** 停止生成：断掉当前的 LLM 请求与 agent 循环（已流出的内容保留） */
@@ -1266,9 +1268,9 @@ export default function ChatPanel({
   /** 删除当前会话前确认（危险操作：确认按钮上错误色，文案写清动作） */
   const confirmDeleteSession = async () => {
     const ok = await popconfirm({
-      headline: '删除当前会话？',
-      description: '会话里的全部问答记录都会被删除，无法恢复。',
-      confirmText: '删除',
+      headline: chatText('chatPanel.deleteSessionTitle'),
+      description: chatText('chatPanel.deleteSessionDesc'),
+      confirmText: chatText('chatPanel.delete'),
       danger: true,
       testId: 'session-delete-popconfirm',
     });
@@ -1313,7 +1315,7 @@ export default function ChatPanel({
           onSelectionChange={selectSession}
           isDisabled={loading}
           data-testid="chat-session"
-          aria-label="切换会话"
+          aria-label={chatText('chatPanel.switchSession')}
         >
           <Select.Trigger>
             <Select.Value className="chat-session-title" title={activeTitle} />
@@ -1329,11 +1331,11 @@ export default function ChatPanel({
             </ListBox>
           </Select.Popover>
         </Select>
-        {iconBtn('chat-new-session', '新开会话', <Sym name="add" />, createSession, loading)}
+        {iconBtn('chat-new-session', chatText('chatPanel.newChat'), <Sym name="add" />, createSession, loading)}
         <CopyButton key={activeId} text={sessionMarkdown} label="复制整个会话（Markdown）" isIconOnly
           variant="tertiary" size="sm" data-testid="copy-session-btn" isDisabled={loading || msgs.length === 0} />
-        {iconBtn('export-session-btn', '导出 .md 文件', <Sym name="download" />, downloadSession, loading || msgs.length === 0)}
-        {iconBtn('chat-delete-session', '删除当前会话', <Sym name="delete" />, confirmDeleteSession, loading)}
+        {iconBtn('export-session-btn', chatText('chatPanel.exportMd'), <Sym name="download" />, downloadSession, loading || msgs.length === 0)}
+        {iconBtn('chat-delete-session', chatText('chatPanel.deleteSession'), <Sym name="delete" />, confirmDeleteSession, loading)}
       </PanelBar>
       <SkillPicker onInserted={() => composerInput.current?.focus()} anchorRef={addButton} value={skillIds} onChange={updateSkillIds} turnValue={turnSkillIds} onTurnChange={setTurnSkillIds} disabled={loading} mcpValue={mcpServerIds} onMcpChange={updateMcpServerIds} isOpen={skillsOpen} onOpenChange={setSkillsOpen} hideTrigger />
       {learningPlugin.dialog}
@@ -1384,7 +1386,7 @@ export default function ChatPanel({
                       isUser
                       busy={loading || deleting}
                       canRetry={canRetryAsk}
-                      retryHint="重新回答这句话（删掉这一问一答，用同样的问题重跑一次）"
+                      retryHint={chatText('chatPanel.retryFull')}
                       onRetry={() => void retryMessage(m.key)}
                       onFork={() => void forkMessage(m)}
                       onExport={downloadSession}
@@ -1435,7 +1437,7 @@ export default function ChatPanel({
                           />
                         )}
                         {m.widgetPreview && (
-                          <WidgetStreamFrame html={m.widgetPreview.html} dark={widgetDark} status="正在生成交互图形" />
+                          <WidgetStreamFrame html={m.widgetPreview.html} dark={widgetDark} status={chatText('chatPanel.generatingWidget')} />
                         )}
                   </div>
                   </ArtifactEditProvider>
@@ -1453,7 +1455,7 @@ export default function ChatPanel({
                       isUser={false}
                       busy={loading || deleting}
                       canRetry={canRetry}
-                      retryHint="重新生成这条回答"
+                      retryHint={chatText('chatPanel.regenerate')}
                       onRetry={() => void retryMessage(m.key)}
                       onFork={() => void forkMessage(m)}
                       onExport={downloadSession}
@@ -1504,7 +1506,7 @@ export default function ChatPanel({
                   variant="tertiary"
                   size="sm"
                   className="chat-ref__remove"
-                  aria-label="移除引用"
+                  aria-label={chatText('chatPanel.removeQuote')}
                   data-testid="ref-chip-remove"
                   onPress={() => {
                     const next = refs.filter((_, j) => j !== i);
@@ -1531,7 +1533,7 @@ export default function ChatPanel({
                   variant="tertiary"
                   size="sm"
                   className="chat-shot__remove"
-                  aria-label="移除截图"
+                  aria-label={chatText('chatPanel.removeShot')}
                   onPress={() => setShots((prev) => prev.filter((_, j) => j !== i))}
                 >
                   <Sym name="close" />
@@ -1542,13 +1544,13 @@ export default function ChatPanel({
         )}
         <div className="chat-composer__row">
           <ComposerExpand visible={composerOverflow} key={activeId} value={input} onChange={setInput}
-            renderInput={className => <InlineSkillInput expanded autoFocus className={className} label="完整消息"
+            renderInput={className => <InlineSkillInput expanded autoFocus className={className} label={chatText('chatPanel.fullMessage')}
               value={input} onChange={setInput} skillIds={turnSkillIds} availableSkillIds={skillIds} onSkillsChange={setTurnSkillIds} />} />
           <div className="chat-input" data-testid="chat-input">
             <InlineSkillInput
               documentKey={activeId}
-              label="给学习助手发送消息"
-              placeholder={indexReady ? '输入问题，回车发送' : '等待索引就绪…'}
+              label={chatText('chatPanel.composerLabel')}
+              placeholder={indexReady ? chatText('chatPanel.inputReady') : chatText('chatPanel.inputWaiting')}
               disabled={!indexReady}
               value={input}
               ref={composerInput}
@@ -1564,14 +1566,14 @@ export default function ChatPanel({
           <div className="chat-composer__tools">
           <Dropdown isOpen={addOpen} onOpenChange={setAddOpen}>
             <Button ref={addButton} isIconOnly variant="tertiary" size="sm" data-testid="panel-chat-add"
-              aria-label="添加截图、出题、技能或调整模型" isDisabled={activeId == null || activeId !== loadedSessionId}>
+              aria-label={chatText('chatPanel.addMenuAria')} isDisabled={activeId == null || activeId !== loadedSessionId}>
               <Sym name="add" />
             </Button>
             <Dropdown.Popover placement="top start">
               <div className="px-2 py-1">
                 <TaskModelPicker sessionId={activeId} />
               </div>
-              <Dropdown.Menu aria-label="添加到学习问答"
+              <Dropdown.Menu aria-label={chatText('chatPanel.addToQA')}
                 disabledKeys={[
                   ...(!indexReady || loading ? ['shot', 'quiz', 'question-bank', 'bank-practice'] : []),
                   ...(!practiceAvailable ? ['quiz', 'question-bank', 'bank-practice'] : []),
@@ -1589,12 +1591,12 @@ export default function ChatPanel({
                   else if (key === 'review') openLearningPlugin('review');
                   else if (key === 'skills') setSkillsOpen(true);
                 }}>
-                {!isMaterial && <Dropdown.Item id="shot" textValue="截取当前画面" data-testid="shot-btn"><Sym name="photo_camera" />截取当前画面</Dropdown.Item>}
-                <Dropdown.Item id="quiz" textValue="出题考我" data-testid="quiz-btn"><Sym name="quiz" />出题考我</Dropdown.Item>
-                {isMaterial && <Dropdown.Item id="question-bank" textValue="提取原题为题库" data-testid="question-bank-extract"><Sym name="description" />提取原题为题库</Dropdown.Item>}
-                {isMaterial && <Dropdown.Item id="bank-practice" textValue="开始做原题" data-testid="question-bank-practice"><Sym name="quiz" />开始做原题</Dropdown.Item>}
-                {<Dropdown.Item id="review" textValue="错题与复习清单" data-testid="question-bank-review"><Sym name="checklist" />错题与复习清单</Dropdown.Item>}
-                <Dropdown.Item id="skills" textValue={settingsText('skillPicker.title')}><Sym name="extension" />{settingsText('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? ' · 已限定' : ''}</Dropdown.Item>
+                {!isMaterial && <Dropdown.Item id="shot" textValue={chatText('chatPanel.shot')} data-testid="shot-btn"><Sym name="photo_camera" />{chatText('chatPanel.shot')}</Dropdown.Item>}
+                <Dropdown.Item id="quiz" textValue={chatText('chatPanel.quizMe')} data-testid="quiz-btn"><Sym name="quiz" />{chatText('chatPanel.quizMe')}</Dropdown.Item>
+                {isMaterial && <Dropdown.Item id="question-bank" textValue={chatText('chatPanel.extractQuestions')} data-testid="question-bank-extract"><Sym name="description" />{chatText('chatPanel.extractQuestions')}</Dropdown.Item>}
+                {isMaterial && <Dropdown.Item id="bank-practice" textValue={chatText('chatPanel.startQuiz')} data-testid="question-bank-practice"><Sym name="quiz" />{chatText('chatPanel.startQuiz')}</Dropdown.Item>}
+                {<Dropdown.Item id="review" textValue={chatText('chatPanel.reviewList')} data-testid="question-bank-review"><Sym name="checklist" />{chatText('chatPanel.reviewList')}</Dropdown.Item>}
+                <Dropdown.Item id="skills" textValue={settingsText('skillPicker.title')}><Sym name="extension" />{settingsText('skillPicker.title')}{skillIds !== undefined || mcpServerIds !== undefined ? chatText('chatPanel.restrictedSuffix') : ''}</Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
           </Dropdown>
@@ -1619,7 +1621,7 @@ export default function ChatPanel({
                   size="sm"
                   className="chat-send"
                   data-testid="chat-stop"
-                  aria-label="停止生成"
+                  aria-label={chatText('chatPanel.stop')}
                   onPress={stopGenerating}
                 >
                   <Sym name="stop" />
@@ -1638,7 +1640,7 @@ export default function ChatPanel({
                   size="sm"
                   className="chat-send"
                   data-testid="chat-send"
-                  aria-label="发送"
+                  aria-label={chatText('chatPanel.send')}
                   isDisabled={!indexReady}
                   onPress={() => send(input)}
                 >

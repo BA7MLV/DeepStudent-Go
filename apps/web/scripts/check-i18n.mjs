@@ -44,3 +44,40 @@ for (const locale of ['zh-CN', 'en-US']) {
   }
 }
 console.log(`i18n resources OK: ${namespaces.length} namespaces × 2 languages (${fileURLToPath(root)})`);
+
+/*
+ * 硬编码中文棘轮：扫描 src 里的字符串字面量与 JSX 属性中的 CJK 字符，按文件与
+ * src/i18n/cjk-baseline.json 的基线比对。基线只允许向下改——新增硬编码中文会直接失败；
+ * 迁移一批后请把对应文件的数字调小（清零的条目直接删除）。
+ * 中文注释不在引号里，不会被计入。
+ */
+const cjk = /[\u{3400}-\u{4dbf}\u{4e00}-\u{9fff}\u{f900}-\u{faff}]/u;
+const quoted = /(["'`])(?:\\.|(?!\1)[^\\\n])*?\1/g;
+const srcRoot = new URL('../src/', import.meta.url);
+const baselineUrl = new URL('../src/i18n/cjk-baseline.json', import.meta.url);
+const skip = dir => dir.pathname.includes('/src/i18n/') || dir.pathname.endsWith('.test.') || dir.pathname.includes('/third-party/');
+const files = [];
+const walk = async dir => {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const next = new URL(`${entry.name}/`, dir);
+    if (entry.isDirectory()) { if (!skip(next)) await walk(next); continue; }
+    if (/\.[cm]?[jt]sx?$/.test(entry.name) && !skip(dir)) files.push(new URL(entry.name, dir));
+  }
+};
+await walk(srcRoot);
+const baseline = JSON.parse(await readFile(baselineUrl, 'utf8'));
+let violations = 0;
+const entries = [];
+for (const file of files) {
+  const relative = decodeURIComponent(file.pathname.split('/src/')[1]);
+  const text = await readFile(file, 'utf8');
+  let count = 0;
+  for (const match of text.matchAll(quoted)) if (cjk.test(match[0])) count += 1;
+  // JSX 属性采用 {...} 形式时不算字面量；裸属性值已包含在上面的引号匹配里。
+  entries.push([relative, count]);
+  const allowed = baseline[relative] ?? 0;
+  if (count > allowed) { violations += 1; console.error(`cjk-baseline: ${relative} has ${count} hardcoded CJK strings, baseline allows ${allowed}. Migrate them to locale files or raise the number only if this is not user-facing.`); }
+}
+entries.sort((a, b) => b[1] - a[1]);
+console.log(`cjk strings under src: ${entries.reduce((sum, [, count]) => sum + count, 0)} across ${files.length} files (ratchet vs src/i18n/cjk-baseline.json)`);
+if (violations > 0) { console.error(`${violations} file(s) exceed the CJK baseline`); process.exitCode = 1; }

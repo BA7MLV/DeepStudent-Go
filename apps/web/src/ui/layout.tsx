@@ -49,6 +49,8 @@ export type NavItem = {
   /** 与 `NavConfig.value` 比对来决定哪一项高亮 */
   value: string;
   label: string;
+  /** 悬停提示；不填时用 label。用于「看起来是页面、实际是动作」的项（如机器人）。 */
+  hint?: string;
   /** 图标（放 <Sym>） */
   icon: ReactNode;
   testId?: string;
@@ -207,6 +209,7 @@ function NavigationItem({ item, active, compact = false, onNavigate }: {
     'aria-current': !item.isAction && active ? 'page' as const : undefined,
     'aria-label': compact ? item.label : undefined,
     'data-testid': item.testId,
+    title: item.hint ?? item.label,
   };
   const content = compact ? item.icon : <>
     <span className="page-shell__nav-icon" aria-hidden="true">{item.icon}</span>
@@ -574,7 +577,7 @@ export function NavigationShell({
             </div>
             {railCollapsed ? <>
               {rail.items.map(item => (
-                <span key={item.value} title={item.label}>
+                <span key={item.value} title={item.hint ?? item.label}>
                   <NavigationItem item={item} active={item.value === rail.value} compact />
                 </span>
               ))}
