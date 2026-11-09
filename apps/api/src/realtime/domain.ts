@@ -30,6 +30,7 @@ import type { FileIntent } from '../storage/system-files.js';
 import { SystemMaterials } from '../storage/system-materials.js';
 import type { ClientLearningCommand } from '@wangke/contracts/client-runtime';
 import { clientLearningMutations } from './client-learning.js';
+import { cleanupBotJournal } from './journal-retention.js';
 import { TaskDelegationService } from '../cloud/delegation.js';
 import { CloudConfiguration } from '../cloud/config.js';
 import type { DelegationCommand } from '@wangke/contracts/client-runtime';
@@ -120,6 +121,9 @@ export class ClientRuntimeDomain implements RuntimeDomain {
           this.store.db.prepare(`DELETE FROM client_session_events WHERE cursor <= (SELECT floor FROM client_session_cursors c
             WHERE c.owner_id=client_session_events.owner_id AND c.session_id=client_session_events.session_id)`).run();
         });
+        // The Bot journal is replay bandwidth, not storage. Advancing floors keeps
+        // reconnect replay bounded; stale cursors resync from the messages table.
+        cleanupBotJournal(this.store, new Set([...this.journals].map(observer => observer.thread)));
         this.retainedAt = now;
       }
       const changes = this.store.db.prepare('SELECT * FROM client_changes WHERE revision>? ORDER BY revision LIMIT 512').all(this.cursor) as Change[];
