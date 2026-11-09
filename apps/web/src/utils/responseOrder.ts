@@ -1,1 +1,1 @@
-export { beginResponseSegment, nextResponseRound, rebaseResponseSegments, responseTimeline, type ResponseSegment } from '@wangke/study-core/response-order';
+export { beginResponseSegment, fenceStartAt, nextResponseRound, rebaseResponseSegments, responseTimeline, type ResponseSegment } from '@wangke/study-core/response-order';

@@ -168,6 +168,16 @@ try {
   assert.match(bounded.result.content, /受限轮次的说明。[\s\S]*受限后的总结/);
   configuration.save(owner, { ...configuration.get(owner, true), policy });
 
+  // Reasoning arriving after a partial fence opening never splits the fence:
+  // every slice keeps its fences paired and the answer stays normal Markdown.
+  session(213); script = [() => new Response(sse({ content: '前言。\n\n```' }) + sse({ reasoning_content: '围栏中补充考虑' })
+    + sse({ content: 'js\ncode\n```\n\n收尾。' }) + 'data: [DONE]\n\n', { headers: { 'content-type': 'text/event-stream' } })];
+  const fenced = await complete(enqueue(213));
+  const fencedParts = timeline(row(fenced.id));
+  assert.deepEqual(fencedParts.map(part => part.content), ['前言。\n\n', '```js\ncode\n```\n\n收尾。']);
+  assert.equal(fencedParts.at(-1).reasoning, '围栏中补充考虑');
+  for (const part of fencedParts) assert.equal((part.content.match(/```/g) ?? []).length % 2, 0, 'fences never straddle a segment boundary');
+
   session(207); script = [() => ({ text: '取消前说明。', calls: [call('cancel')] }), (_body, init) => stream(sse({ content: '正在回答' }), init.signal).response];
   const cancelled = enqueue(207); await until(() => get(cancelled).progress?.content.endsWith('正在回答'));
   const cancelPrefix = get(cancelled).progress.content;

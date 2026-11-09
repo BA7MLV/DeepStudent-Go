@@ -1,11 +1,41 @@
 import type { ResponseSegment } from '@wangke/contracts/client-runtime';
 export type { ResponseSegment } from '@wangke/contracts/client-runtime';
 
+/** Opening line of the Markdown fence covering `offset`, when slicing there would split it. */
+export function fenceStartAt(content: string, offset: number): number | null {
+  if (offset <= 0 || offset > content.length) return null;
+  const lines = content.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  let at = 0;
+  let open: { start: number; marker: string } | undefined;
+  for (const line of lines) {
+    const text = line.replace(/\r?\n$/, '');
+    const lineStart = at;
+    at += line.length;
+    if (open) {
+      if (new RegExp(`^ {0,3}${open.marker[0]}{${open.marker.length},}[ \t]*$`).test(text)) {
+        if (offset > open.start && offset < at) return open.start;
+        open = undefined;
+      } else if (offset > open.start && offset <= at) return open.start;
+      continue;
+    }
+    const match = /^ {0,3}(`{3,}|~{3,})\s*([^\s`~]*)[^\r\n]*$/.exec(text);
+    if (match) {
+      open = { start: lineStart, marker: match[1] };
+      if (offset > lineStart && offset <= at) return lineStart;
+    }
+  }
+  return open && offset > open.start ? open.start : null;
+}
+
 /** New activity never moves above text that has already been delivered. */
 export function beginResponseSegment(segments: ResponseSegment[], content: string, reasoning: string, tools: readonly unknown[], now = Date.now()): ResponseSegment[] {
   const last = segments.at(-1);
   if (last && !content.slice(last.contentOffset).trim()) return segments;
-  return [...segments, { contentOffset: content.length, reasoningOffset: reasoning.length, toolOffset: tools.length, startedAt: now }];
+  // Anchors must land on Markdown block boundaries: an open fence stays whole.
+  const fence = fenceStartAt(content, content.length);
+  const contentOffset = fence ?? content.length;
+  if (last && contentOffset <= last.contentOffset) return segments;
+  return [...segments, { contentOffset, reasoningOffset: reasoning.length, toolOffset: tools.length, startedAt: now }];
 }
 
 /** Preserve the exact rendered prefix, including Markdown indentation. */
@@ -34,7 +64,17 @@ export function responseTimeline<T extends { reasoningOffset?: number }>(content
       && segment[key] <= [content.length, reasoning.length, tools.length][dimension]
       && (index !== 0 || segment[key] === 0));
   });
-  const anchors = valid ? segments : [{ contentOffset: 0, reasoningOffset: 0, toolOffset: 0 }];
+  const raw = valid ? segments : [{ contentOffset: 0, reasoningOffset: 0, toolOffset: 0 }];
+  // Legacy anchors may sit inside a fence; fall back to its opening line and
+  // merge any anchor that no longer advances into the previous process group.
+  const safe: ResponseSegment[] = [];
+  for (const segment of raw) {
+    const fence = fenceStartAt(content, segment.contentOffset);
+    const anchor = fence == null ? segment : { ...segment, contentOffset: fence };
+    if (safe.length && anchor.contentOffset <= safe[safe.length - 1].contentOffset) continue;
+    safe.push(anchor);
+  }
+  const anchors = safe;
   return anchors.map((segment, index) => {
     const next = anchors[index + 1];
     return {
