@@ -18,6 +18,21 @@ export function displayChatError(reason?: string): string {
   return text;
 }
 
+/**
+ * 判断失败文本是不是「模型/密钥没配好」这一类：这类错误的下一步是去设置里配置模型，
+ * 而不是原地重试。匹配保持保守，只收编常见的供应商与本地网关措辞。
+ */
+export function isModelConfigError(reason?: string): boolean {
+  const text = reason?.toLowerCase() ?? '';
+  if (!text) return false;
+  return /api[ _-]?key/.test(text)
+    || /unauthorized|forbidden|\b401\b|\b403\b/.test(text)
+    || /invalid[ _-]?credentials/.test(text)
+    || /no model|model not found|missing model/.test(text)
+    || /未配置|没有配置|无可用模型|密钥/.test(reason!)
+    || /provider/.test(text) && /not configured|missing/.test(text);
+}
+
 /** Translate the stable failure prefix without rewriting provider details. */
 export function displayChatFailure(content?: string): string {
   const text = content?.trim() ?? '';

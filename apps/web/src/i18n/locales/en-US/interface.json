@@ -1,5 +1,5 @@
 {
-  "nav": { "home": "Home", "resources": "Resources", "bot": "Bot" },
+  "nav": { "home": "Home", "resources": "Resources", "bot": "Bot", "botHint": "Opens the Bot panel beside the chat home" },
   "composer": {
     "attach": "Add attachment", "add": "Add to conversation", "images": "Upload images", "files": "Upload files", "scope": "Tool scope", "settings": "Models and permissions",
     "tools": "Message tools", "sending": "Sending", "queue": "Queue message", "stop": "Stop", "message": "Message the AI assistant",
@@ -15,6 +15,7 @@
     "compressing": "Compressing…", "compress": "Compress context", "disabled": "Wait until the conversation is ready and the reply has finished to compress."
   },
   "resources": { "advanced": "Advanced tools", "system": "System files", "systemHint": "Instructions and skills", "trash": "Open trash", "discardTitle": "Discard unsaved changes?", "discardDescription": "Closing will not save these edits to the file.", "discard": "Discard changes" },
+  "errors": { "openModelSettings": "Open model settings" },
   "plugins": { "context": "Project context", "all": "Everywhere", "reconnecting": "Connection lost. Restoring plugin state…", "loading": "Loading plugins…", "open": "Expand", "openNamed": "Open the full {{name}} page", "empty": "No tools here yet." },
   "assistant": { "title": "Study tools", "open": "Open study tools", "close": "Close study tools", "drag": "Drag to move study tools", "move": "Drag to move", "panels": "Study panels", "subs": "Subtitles", "chat": "Q&A", "dm": "Live comments", "cards": "Cards", "plugins": "Tools", "resize": "Resize study tools: {{edge}}", "resizeHelp": "Drag to resize, use arrow keys for small adjustments, or Home to reset", "edges": { "n": "top edge", "e": "right edge", "s": "bottom edge", "w": "left edge", "nw": "top left corner", "ne": "top right corner", "sw": "bottom left corner", "se": "bottom right corner" } },
   "comments": { "unavailable": "Enable Material tools on the board before generating discussions.", "subtitles": "Discussions will be available when subtitles are ready.", "loading": "Checking subtitles…", "ready": "Generate discussions from this course" },

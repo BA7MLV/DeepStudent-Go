@@ -36,7 +36,8 @@ import { useChatScroll } from '../components/useChatScroll';
 import ChatHistorySkeleton from '../components/ChatHistorySkeleton';
 import ChatSyncStatus from '../components/ChatSyncStatus';
 import { db } from '../store/db';
-import { displayChatError, displayChatFailure } from '../utils/chatError';
+import { displayChatError, displayChatFailure, isModelConfigError } from '../utils/chatError';
+import { openSettings } from '../components/settingsDialogStore';
 import AskCard from '../components/AskCard';
 import FolderPlanCard from '../components/FolderPlanCard';
 import { ArtifactEditProvider } from '../components/ArtifactEditor';
@@ -906,6 +907,17 @@ export default function CourseChat() {
                           <div className="course-chat__failed" data-testid="chat-answer-failed" role="alert">
                             <Sym name="error" aria-hidden="true" />
                             <span className="course-chat__failed-text">{displayChatFailure(message.content)}</span>
+                            {isModelConfigError(message.content) && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="course-chat__failed-continue"
+                                data-testid="chat-error-open-settings"
+                                onPress={() => openSettings('models')}
+                              >
+                                {chatText('chat.openModelSettings')}
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"

@@ -144,7 +144,7 @@
     },
     "errors": {
       "invalid_credentials": "Wrong username or password",
-      "invalid_or_expired_bootstrap_secret": "That key is wrong or has expired",
+      "invalid_or_expired_bootstrap_secret": "The secret is wrong or has expired. To renew it, stop the API on the server, delete data/config/bootstrap-secret in the install directory, then start the API again.",
       "admin_password_must_be_12_to_256_characters": "Use at least 12 characters",
       "bootstrap_closed": "Already set up. Sign in instead.",
       "passkey_verification_failed": "Passkey check failed",
@@ -281,6 +281,7 @@
     "errors": {
       "loadFailed": "The connection failed to load. Please retry",
       "networkFailed": "The network connection failed. Please retry"
-    }
+    },
+    "openModelSettings": "Open model settings"
   }
 }

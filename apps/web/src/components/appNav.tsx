@@ -53,6 +53,7 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
     {
       value: 'bot',
       label: text('nav.bot'),
+      hint: text('nav.botHint'),
       icon: <Sym name="smart_toy" />,
       onClick: () => {
         useBotPanel.getState().setOpen(true);

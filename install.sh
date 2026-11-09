@@ -252,7 +252,7 @@ if [ "$NO_START" -eq 0 ]; then
         console.log("Setup link expires at: " + status.expiresAt);
       } else {
         console.log("Setup URL: " + url.href);
-        if (!status.initialized) console.log("Bootstrap secret expired. Stop api, remove data/config/bootstrap-secret, then start api to renew it.");
+        if (!status.initialized) console.log("Bootstrap secret expired. Renew it with:\n  docker compose stop api && rm -f " + (process.env.BOOTSTRAP_SECRET_FILE || "<install-dir>/data/config/bootstrap-secret") + " && docker compose start api");
       }
     })().catch(error => { console.error("Cannot read setup link: " + error.message); process.exitCode = 1; });
   ' "${url:-http://localhost:$PORT}"

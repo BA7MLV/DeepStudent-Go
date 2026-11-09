@@ -1,5 +1,5 @@
 {
-  "nav": { "home": "主页", "resources": "资源", "bot": "机器人" },
+  "nav": { "home": "主页", "resources": "资源", "bot": "机器人", "botHint": "在对话主页右侧打开机器人面板" },
   "composer": {
     "attach": "添加附件", "add": "添加到对话", "images": "上传图片", "files": "上传文件", "scope": "工具范围", "settings": "模型与权限",
     "tools": "输入区工具", "sending": "正在发送", "queue": "排队发送", "stop": "停止", "message": "给 AI 助手发送消息",
@@ -15,6 +15,7 @@
     "compressing": "正在压缩…", "compress": "压缩上下文", "disabled": "当前暂不可压缩，请在会话就绪且回复结束后重试。"
   },
   "resources": { "advanced": "高级工具", "system": "系统文件", "systemHint": "提示词与技能", "trash": "打开回收站", "discardTitle": "放弃未保存的修改？", "discardDescription": "关闭后本次编辑不会写入文件。", "discard": "放弃修改" },
+  "errors": { "openModelSettings": "去设置模型" },
   "plugins": { "context": "项目上下文", "all": "所有地方", "reconnecting": "连接中断，正在恢复插件状态…", "loading": "加载插件…", "open": "展开", "openNamed": "打开{{name}}完整页", "empty": "此处还没有功能。" },
   "assistant": { "title": "学习助手", "open": "打开学习助手", "close": "收起学习助手", "drag": "拖动移动学习助手", "move": "拖动可移动", "panels": "学习面板", "subs": "字幕", "chat": "问答", "dm": "弹幕", "cards": "卡片", "plugins": "组件", "resize": "调整学习助手{{edge}}", "resizeHelp": "拖动调整尺寸，方向键微调，Home 恢复默认", "edges": { "n": "上边缘", "e": "右边缘", "s": "下边缘", "w": "左边缘", "nw": "左上角", "ne": "右上角", "sw": "左下角", "se": "右下角" } },
   "comments": { "unavailable": "请先在看板中启用「资料处理」组件，再生成讨论。", "subtitles": "字幕就绪后即可生成讨论。", "loading": "正在检查字幕…", "ready": "按课程内容生成多轮讨论" },
