@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { beginResponseSegment, nextResponseRound, rebaseResponseSegments, responseTimeline } from '../apps/web/src/utils/responseOrder.ts';
+import { beginResponseSegment, fenceStartAt, nextResponseRound, rebaseResponseSegments, responseTimeline } from '../apps/web/src/utils/responseOrder.ts';
 import { layoutWidgets, widgetReference } from '../apps/web/src/harness/widgetLayout.ts';
 import { splitAssistantContent } from '../apps/web/src/utils/streamingHtml.ts';
 
@@ -21,6 +21,36 @@ assert.equal(result.markdown.length, content.length, 'deduplication preserves ti
 assert.equal(result.markdown.indexOf('<section>'), content.indexOf('<section>'), 'later HTML retains its render identity');
 assert.equal(splitAssistantContent(result.markdown).filter(block => block.kind === 'widget' && block.source.trim()).length, 1);
 assert.deepEqual(result.unplaced, []);
+// Duplicate references are blanked whole, fence markers included: a leftover
+// opening or closing marker could pair with unrelated backticks and swallow
+// the rest of the answer as a code block.
+assert.equal((result.markdown.match(/```/g) ?? []).length, 2, 'deduplication blanks fence markers too');
+
+// Anchors never split a Markdown fence: the boundary defers to its opening line.
+const fencePrefix = '前言\n\n';
+let fenceSegments = beginResponseSegment([], '', '', []);
+fenceSegments = beginResponseSegment(fenceSegments, fencePrefix + '```', '围栏中思考', []);
+assert.equal(fenceSegments.at(-1).contentOffset, fencePrefix.length, 'anchors defer to the fence opening line');
+assert.equal(beginResponseSegment(fenceSegments, fencePrefix + '```js\ncode', '再想', []), fenceSegments, 'no new anchor while the same fence stays open');
+assert.equal(fenceStartAt(fencePrefix + '```js\ncode\n```\n\n收尾', fencePrefix.length), null, 'the fence opening line itself is a safe boundary');
+assert.equal(fenceStartAt('~~~\n内容\n~~~\n结尾', 2), 0, 'tilde fences are covered too');
+
+// Legacy anchors that landed inside a fence fall back to its start and merge.
+const fenced = '前言\n\n```js\ncode\n```\n\n收尾';
+const legacyFence = responseTimeline(fenced, '先想后说', [], [
+  { contentOffset: 0, reasoningOffset: 0, toolOffset: 0 },
+  { contentOffset: 9, reasoningOffset: 2, toolOffset: 0 },
+]);
+assert.deepEqual(legacyFence.map(part => part.content), [fencePrefix, '```js\ncode\n```\n\n收尾']);
+assert.deepEqual(legacyFence.map(part => part.reasoning), ['先想', '后说']);
+const mergedFence = responseTimeline('```js\ncode\n```\n\n收尾', '思考', [], [
+  { contentOffset: 0, reasoningOffset: 0, toolOffset: 0 },
+  { contentOffset: 2, reasoningOffset: 1, toolOffset: 0 },
+  { contentOffset: 6, reasoningOffset: 2, toolOffset: 0 },
+]);
+assert.equal(mergedFence.length, 1, 'anchors inside one fence merge into a single process group');
+assert.equal(mergedFence[0].content, '```js\ncode\n```\n\n收尾');
+assert.equal(mergedFence[0].reasoning, '思考');
 
 const tools = [{ id: 'first', reasoningOffset: 2 }, { id: 'second', reasoningOffset: 5 }];
 const ordered = responseTimeline('说明😀\n\n结论', '先想再想了', tools, [

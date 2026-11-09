@@ -25,9 +25,16 @@ export function layoutWidgets(content: string, widgets: WidgetPayload[]) {
     if (seen.has(ref)) duplicates.push(fence);
     seen.add(ref);
   }
-  // Blank duplicates without shifting persisted process/content offsets or later block keys.
+  // Blank duplicates whole, fence markers included, without shifting persisted
+  // process/content offsets or later block keys. A leftover opening or closing
+  // marker could pair with unrelated backticks and swallow following Markdown.
   let markdown = content;
-  for (const { start, end } of duplicates.reverse()) markdown = markdown.slice(0, start)
-    + markdown.slice(start, end).replace(/[^\r\n]/g, ' ') + markdown.slice(end);
+  for (const fence of duplicates.reverse()) {
+    const openStart = markdown.lastIndexOf('\n', Math.max(0, fence.start - 2)) + 1;
+    const newline = markdown.indexOf('\n', fence.end);
+    const closeEnd = newline < 0 ? markdown.length : newline + 1;
+    markdown = markdown.slice(0, openStart)
+      + markdown.slice(openStart, closeEnd).replace(/[^\r\n]/g, ' ') + markdown.slice(closeEnd);
+  }
   return { markdown, unplaced: widgets.filter((widget) => !widget.ref || !seen.has(widget.ref)) };
 }
