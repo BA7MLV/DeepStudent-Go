@@ -25,7 +25,15 @@
   "noProjectsMatch": "No matching projects",
   "clearProject": "No project",
   "projectHint": "A project groups resources in a folder; a course is one study resource. New projects create a resource folder named “项目：project name”.",
-  "colors": { "blue": "Default blue", "green": "Green", "yellow": "Yellow", "orange": "Orange", "red": "Red", "purple": "Purple", "gray": "Gray" },
+  "colors": {
+    "blue": "Default blue",
+    "green": "Green",
+    "yellow": "Yellow",
+    "orange": "Orange",
+    "red": "Red",
+    "purple": "Purple",
+    "gray": "Gray"
+  },
   "more": "More actions",
   "changeView": "Change view",
   "searchFolder": "Search this folder",
@@ -117,5 +125,119 @@
     "invalid_project_name": "Enter a folder name of 1–100 characters.",
     "agent_name_taken": "This BOT name is already in use.",
     "agent_not_found": "BOT not found or disabled."
+  },
+  "library": {
+    "status": {
+      "new": "Not transcribed",
+      "transcribing": "Transcribing",
+      "transcribed": "Transcribed",
+      "error": "Error"
+    },
+    "task": {
+      "queued": "Queued",
+      "probing": "Reading info",
+      "writing": "Writing",
+      "done": "Imported",
+      "error": "Failed"
+    },
+    "filter": {
+      "all": "All",
+      "video": "Videos",
+      "material": "Reading materials",
+      "started": "Continue learning"
+    },
+    "material": {
+      "scanned": "Scanned · not searchable",
+      "empty": "No text · not searchable",
+      "parsed": "Parsed {{count}} {{noun}}",
+      "pending": "Not parsed",
+      "noText": "No text",
+      "unparsed": "Unparsed",
+      "pageNoun": "pages",
+      "paraNoun": "sections",
+      "deleted": "File deleted"
+    },
+    "sort": {
+      "name": "Sort by name",
+      "recent": "Recent imports first"
+    },
+    "menu": {
+      "rename": "Rename",
+      "move": "Move to folder",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "reparse": "Re-parse",
+      "delete": "Delete"
+    },
+    "aria": {
+      "pickFile": "Choose videos or reading materials to import",
+      "dismissError": "Dismiss this error",
+      "importProgress": "Import progress",
+      "finder": "Resources",
+      "back": "Go up one level",
+      "backNav": "Back",
+      "forward": "Forward",
+      "view": "View",
+      "iconsView": "Icon view",
+      "listView": "List view",
+      "sortFilter": "Sort and filter",
+      "newFolder": "New folder",
+      "import": "Import",
+      "importShort": "Import",
+      "selectedActions": "Actions for the selection",
+      "itemActions": "Item actions",
+      "folderColor": "Folder color",
+      "mobileManage": "Manage resources",
+      "closeMove": "Close move notice",
+      "path": "Resource path",
+      "showIntro": "Show details",
+      "videoTitle": "Video title",
+      "renameTitlePlaceholder": "Enter a video title",
+      "folderName": "Folder name",
+      "folderNamePlaceholder": "e.g. aptitude tests, essays, interviews",
+      "moveTarget": "Move to folder",
+      "newFolderName": "New folder name",
+      "subtitleLang": "Choose subtitle languages",
+      "pinned": "Pinned",
+      "more": "More actions",
+      "rename": "Rename",
+      "move": "Move to folder",
+      "reparse": "Re-parse",
+      "delete": "Delete"
+    },
+    "statusBar": {
+      "selectedCount": "{{selected}} selected of {{total}}",
+      "itemCount": "{{count}} items",
+      "tapHint": "Tap to open · hold to select",
+      "dragHint": "Drag empty space to select · double-click to open"
+    },
+    "path": {
+      "allResources": "All resources"
+    },
+    "search": {
+      "scope": "Search scope: {{scope}}",
+      "clearFilters": "Clear filters"
+    },
+    "empty": {
+      "title": "Nothing here yet",
+      "import": "Import files",
+      "noMatch": "No matching content",
+      "folderTitle": "This folder is empty",
+      "folderDescription": "Use a resource's more menu to move items here.",
+      "browseAll": "Browse all resources",
+      "botTitle": "No Bot memory yet",
+      "botDescription": "Bot long-term memory appears here, shared with Bot memory management."
+    },
+    "system": {
+      "readError": "Failed to read system files: {{message}}",
+      "reading": "Reading system files…",
+      "prevPage": "Previous",
+      "nextPage": "Next"
+    },
+    "mobile": {
+      "manageHint": "Tap a resource or folder to manage it",
+      "moveShort": "Move",
+      "moveUndo": "Undo move"
+    }
   }
 }

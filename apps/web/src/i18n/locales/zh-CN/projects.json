@@ -25,7 +25,15 @@
   "noProjectsMatch": "没有匹配的项目",
   "clearProject": "不选择项目",
   "projectHint": "项目用文件夹组织多份资料，课程是一份可学习的资料。新建后会在资源中创建「项目：项目名」文件夹。",
-  "colors": { "blue": "默认蓝色", "green": "绿色", "yellow": "黄色", "orange": "橙色", "red": "红色", "purple": "紫色", "gray": "灰色" },
+  "colors": {
+    "blue": "默认蓝色",
+    "green": "绿色",
+    "yellow": "黄色",
+    "orange": "橙色",
+    "red": "红色",
+    "purple": "紫色",
+    "gray": "灰色"
+  },
   "more": "更多操作",
   "changeView": "切换显示方式",
   "searchFolder": "搜索当前文件夹",
@@ -116,5 +124,119 @@
     "invalid_project_name": "请输入 1–100 字的文件夹名称。",
     "agent_name_taken": "BOT 名称已存在。",
     "agent_not_found": "BOT 不存在或已停用。"
+  },
+  "library": {
+    "status": {
+      "new": "未转写",
+      "transcribing": "转写中",
+      "transcribed": "已转写",
+      "error": "出错"
+    },
+    "task": {
+      "queued": "排队中",
+      "probing": "读取信息",
+      "writing": "写入中",
+      "done": "已导入",
+      "error": "失败"
+    },
+    "filter": {
+      "all": "全部",
+      "video": "视频",
+      "material": "阅读材料",
+      "started": "继续学习"
+    },
+    "material": {
+      "scanned": "扫描件·不可检索",
+      "empty": "无正文·不可检索",
+      "parsed": "已解析 {{count}} {{noun}}",
+      "pending": "待解析",
+      "noText": "无正文",
+      "unparsed": "未解析",
+      "pageNoun": "页",
+      "paraNoun": "段",
+      "deleted": "文件已删"
+    },
+    "sort": {
+      "name": "按名称排序",
+      "recent": "最近导入优先"
+    },
+    "menu": {
+      "rename": "重命名",
+      "move": "移动到文件夹",
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "reparse": "重新解析",
+      "delete": "删除"
+    },
+    "aria": {
+      "pickFile": "选择要导入的视频或阅读材料",
+      "dismissError": "关掉这条失败提示",
+      "importProgress": "导入进度",
+      "finder": "资料访达",
+      "back": "返回上一级",
+      "backNav": "后退",
+      "forward": "前进",
+      "view": "显示方式",
+      "iconsView": "图标视图",
+      "listView": "列表视图",
+      "sortFilter": "排序与筛选",
+      "newFolder": "新建文件夹",
+      "import": "导入资料",
+      "importShort": "导入",
+      "selectedActions": "所选项目的操作",
+      "itemActions": "项目操作",
+      "folderColor": "文件夹颜色",
+      "mobileManage": "资料管理",
+      "closeMove": "关闭移动提示",
+      "path": "资料路径",
+      "showIntro": "显示简介",
+      "videoTitle": "视频标题",
+      "renameTitlePlaceholder": "输入视频标题",
+      "folderName": "文件夹名称",
+      "folderNamePlaceholder": "如：行测、申论、面试",
+      "moveTarget": "移动到文件夹",
+      "newFolderName": "新建文件夹名称",
+      "subtitleLang": "选择字幕语言",
+      "pinned": "已置顶",
+      "more": "更多操作",
+      "rename": "重命名",
+      "move": "移动到文件夹",
+      "reparse": "重新解析",
+      "delete": "删除"
+    },
+    "statusBar": {
+      "selectedCount": "已选择 {{selected}} 项，共 {{total}} 项",
+      "itemCount": "{{count}} 个项目",
+      "tapHint": "轻点打开 · 长按选择",
+      "dragHint": "拖动空白处框选 · 双击打开"
+    },
+    "path": {
+      "allResources": "全部资料"
+    },
+    "search": {
+      "scope": "搜索范围：{{scope}}",
+      "clearFilters": "清除筛选"
+    },
+    "empty": {
+      "title": "还没有资料",
+      "import": "导入文件",
+      "noMatch": "没有找到匹配的内容",
+      "folderTitle": "文件夹还是空的",
+      "folderDescription": "通过资料的更多菜单，将已有资料移动到这里。",
+      "browseAll": "浏览全部资料",
+      "botTitle": "还没有 Bot 记忆",
+      "botDescription": "Bot 保存的长期记忆会显示在这里，与 Bot 记忆管理共用同一份内容。"
+    },
+    "system": {
+      "readError": "系统文件读取失败：{{message}}",
+      "reading": "正在读取系统文件…",
+      "prevPage": "上一页",
+      "nextPage": "下一页"
+    },
+    "mobile": {
+      "manageHint": "轻点一个资料或文件夹进行管理",
+      "moveShort": "移动",
+      "moveUndo": "撤销移动"
+    }
   }
 }

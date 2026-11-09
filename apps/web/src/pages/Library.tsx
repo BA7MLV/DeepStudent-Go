@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentProps } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -141,11 +142,12 @@ const SHOW_PWA_HINT = isIOS() && !isStandalone();
  * mdui 的 `mdui-chip` 不带语义色变体、标签文字颜色还在 shadow DOM 里，按状态分别上色做不到，
  * 现在用 HeroUI Chip 的静态语义色变体表达状态，不再依赖页面专属 tag 样式。
  */
-const STATUS_TAG: Record<VideoRow['status'], { variant: '' | 'primary' | 'error'; text: string }> = {
-  new: { variant: '', text: '未转写' },
-  transcribing: { variant: 'primary', text: '转写中' },
-  transcribed: { variant: 'primary', text: '已转写' },
-  error: { variant: 'error', text: '出错' },
+type StatusTagKey = 'library.status.new' | 'library.status.transcribing' | 'library.status.transcribed' | 'library.status.error';
+const STATUS_TAG: Record<VideoRow['status'], { variant: '' | 'primary' | 'error'; text: StatusTagKey }> = {
+  new: { variant: '', text: 'library.status.new' },
+  transcribing: { variant: 'primary', text: 'library.status.transcribing' },
+  transcribed: { variant: 'primary', text: 'library.status.transcribed' },
+  error: { variant: 'error', text: 'library.status.error' },
 };
 
 interface ImportTask {
@@ -184,12 +186,13 @@ const LONG_PRESS_MS = 400;
 /** 长按期间允许的抖动上限（px）：超过即判定为滚动/点按，取消长按 */
 const LONG_PRESS_SLOP = 8;
 
-const TASK_STATUS_TEXT: Record<ImportTask['status'], string> = {
-  queued: '排队中',
-  probing: '读取信息',
-  writing: '写入中',
-  done: '已导入',
-  error: '失败',
+type TaskStatusKey = 'library.task.queued' | 'library.task.probing' | 'library.task.writing' | 'library.task.done' | 'library.task.error';
+const TASK_STATUS_TEXT: Record<ImportTask['status'], TaskStatusKey> = {
+  queued: 'library.task.queued',
+  probing: 'library.task.probing',
+  writing: 'library.task.writing',
+  done: 'library.task.done',
+  error: 'library.task.error',
 };
 
 /** 材料写入的提示文案与视频不同（材料不做容器探测，直接就是写文件） */
@@ -203,10 +206,10 @@ const MATERIAL_MIME: Record<'pdf' | 'docx' | 'md' | 'html', string> = {
 /** 「未分类」虚拟组的 key（折叠状态持久化用） */
 const UNCAT_KEY = '__uncat__';
 const LIBRARY_FILTERS = [
-  { value: 'all', label: '全部' },
-  { value: 'video', label: '视频' },
-  { value: 'material', label: '阅读材料' },
-  { value: 'started', label: '继续学习' },
+  { value: 'all', label: 'library.filter.all' },
+  { value: 'video', label: 'library.filter.video' },
+  { value: 'material', label: 'library.filter.material' },
+  { value: 'started', label: 'library.filter.started' },
 ] as const;
 type LibraryFilter = (typeof LIBRARY_FILTERS)[number]['value'];
 
@@ -258,6 +261,7 @@ function LibraryFrame({ bare, ...props }: ComponentProps<typeof PageShell> & { b
 function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose: () => void } }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { t: tr } = useTranslation('projects');
   // 设置与历史聊天中的深链接也进入普通 Markdown 阅读页。
   const agentFileRequested = ['/system/AGENTS.md', 'AGENTS.md'].includes(searchParams.get('file') ?? '');
   const memoryFileRequested = searchParams.get('file')?.startsWith('/system/memory/') ? searchParams.get('file')! : '';
@@ -542,7 +546,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     [groups, searchQuery, filter, hasFilters],
   );
   const currentFolder = inSystemFolder ? undefined : groups.find((group) => group.key === folderKey && group.folder != null);
-  const folderTitle = inSystemFolder ? (folderKey?.split('/').at(-1) ?? 'system') : currentFolder?.name ?? '全部资料';
+  const folderTitle = inSystemFolder ? (folderKey?.split('/').at(-1) ?? 'system') : currentFolder?.name ?? tr('library.path.allResources');
   const scopedGroups = currentFolder ? visibleGroups.filter((group) => group.key === currentFolder.key) : visibleGroups;
   const folderTiles = groups.filter((group) => !inSystemFolder && group.folder &&
     (group.folder.parentId ?? null) === (currentFolder?.folder?.id ?? null) &&
@@ -1550,7 +1554,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
           </Modal.Body>
         </Modal.Dialog></Modal.Container></Modal.Backdrop>
       </Modal.Root>
-      <input ref={nativeInputRef} data-testid="import-input" type="file" multiple tabIndex={-1} aria-label="选择要导入的视频或阅读材料" onChange={handleNativePick} style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' }} />
+      <input ref={nativeInputRef} data-testid="import-input" type="file" multiple tabIndex={-1} aria-label={tr('library.aria.pickFile')} onChange={handleNativePick} style={{ position: 'absolute', width: 1, height: 1, opacity: 0, overflow: 'hidden' }} />
 
       {tasks.length > 0 && (
         <Card.Root variant="secondary" className="import-tasks mt-3 flex flex-col gap-2 p-3" data-testid="import-tasks">
@@ -1573,7 +1577,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     ? (t.error ?? '失败')
                     : t.status === 'writing'
                       ? `${t.percent}%`
-                      : TASK_STATUS_TEXT[t.status]}
+                      : tr(TASK_STATUS_TEXT[t.status])}
                 </span>
                 {t.status === 'error' && (
                   <Button
@@ -1581,7 +1585,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     variant="tertiary"
                     size="sm"
                     data-testid="btn-dismiss-import-error"
-                    aria-label="关掉这条失败提示"
+                    aria-label={tr('library.aria.dismissError')}
                     onPress={() => setTasks((prev) => prev.filter((x) => x.key !== t.key))}
                   >
                     <Sym name="close" />
@@ -1596,7 +1600,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   maxValue={100}
                   value={t.status === 'writing' ? t.percent : 0}
                   isIndeterminate={t.status !== 'writing'}
-                  aria-label="导入进度"
+                  aria-label={tr('library.aria.importProgress')}
                 />
               )}
             </div>
@@ -1604,7 +1608,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         </Card.Root>
       )}
 
-      {!importing && <section className="finder-window" aria-label="资料访达" data-mobile={isMobile || undefined} data-managing={isMobile && mobileManaging || undefined} data-drag-active={finderDragging.length > 0 || undefined}
+      {!importing && <section className="finder-window" aria-label={tr('library.aria.finder')} data-mobile={isMobile || undefined} data-managing={isMobile && mobileManaging || undefined} data-drag-active={finderDragging.length > 0 || undefined}
         onDragOver={(event) => {
           if (inSystemFolder || (event.target as Element).closest('[data-system-folder]')) {
             event.preventDefault();
@@ -1624,38 +1628,38 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       >
         <header className="finder-toolbar">
           <div className="finder-navigation">
-            {isMobile ? <Button isIconOnly variant="ghost" aria-label="返回上一级" isDisabled={!currentFolder && !inSystemFolder} onPress={() => openFolder(currentFolder?.folder?.parentId != null ? String(currentFolder.folder.parentId) : null)}><Sym name="chevron_left" /></Button> : <>
-            <Button isIconOnly variant="ghost" aria-label="后退" isDisabled={folderHistory.index === 0} onPress={() => travelFolder(-1)}><Sym name="chevron_left" /></Button>
-            <Button isIconOnly variant="ghost" aria-label="前进" isDisabled={folderHistory.index === folderHistory.entries.length - 1} onPress={() => travelFolder(1)}><Sym name="chevron_right" /></Button>
+            {isMobile ? <Button isIconOnly variant="ghost" aria-label={tr('library.aria.back')} isDisabled={!currentFolder && !inSystemFolder} onPress={() => openFolder(currentFolder?.folder?.parentId != null ? String(currentFolder.folder.parentId) : null)}><Sym name="chevron_left" /></Button> : <>
+            <Button isIconOnly variant="ghost" aria-label={tr('library.aria.backNav')} isDisabled={folderHistory.index === 0} onPress={() => travelFolder(-1)}><Sym name="chevron_left" /></Button>
+            <Button isIconOnly variant="ghost" aria-label={tr('library.aria.forward')} isDisabled={folderHistory.index === folderHistory.entries.length - 1} onPress={() => travelFolder(1)}><Sym name="chevron_right" /></Button>
             </>}
           </div>
           <h2 className="finder-title">{folderTitle}</h2>
           {isMobile && <Button className="finder-manage" variant="ghost" isDisabled={inSystemFolder} onPress={() => { setMobileManaging(!mobileManaging); setSelection(new Set()); setActionMenuOpen(false); }}>{mobileManaging ? '完成' : '管理'}</Button>}
           <div className="finder-tools">
-            <ToggleButtonGroup className="finder-view-switch" selectionMode="single" disallowEmptySelection selectedKeys={[view]} onSelectionChange={(keys) => { const key = [...keys][0]; if (key === 'icons' || key === 'list') setView(key); }} aria-label="显示方式">
-              <ToggleButton id="icons" aria-label="图标视图"><Sym name="grid_view" /></ToggleButton>
-              <ToggleButton id="list" aria-label="列表视图"><Sym name="list" /></ToggleButton>
+            <ToggleButtonGroup className="finder-view-switch" selectionMode="single" disallowEmptySelection selectedKeys={[view]} onSelectionChange={(keys) => { const key = [...keys][0]; if (key === 'icons' || key === 'list') setView(key); }} aria-label={tr('library.aria.view')}>
+              <ToggleButton id="icons" aria-label={tr('library.aria.iconsView')}><Sym name="grid_view" /></ToggleButton>
+              <ToggleButton id="list" aria-label={tr('library.aria.listView')}><Sym name="list" /></ToggleButton>
             </ToggleButtonGroup>
             <Dropdown>
-              <Dropdown.Trigger className="finder-tool" aria-label="排序与筛选"><Sym name="sort" /></Dropdown.Trigger>
-              <Dropdown.Popover><Dropdown.Menu aria-label="排序与筛选" onAction={(key) => {
+              <Dropdown.Trigger className="finder-tool" aria-label={tr('library.aria.sortFilter')}><Sym name="sort" /></Dropdown.Trigger>
+              <Dropdown.Popover><Dropdown.Menu aria-label={tr('library.aria.sortFilter')} onAction={(key) => {
                 if (key === 'name' || key === 'recent') setSort(key);
                 else { setFilter(key as LibraryFilter); setSelection(new Set()); }
               }}>
-                <Dropdown.Item id="name" textValue="按名称排序">按名称排序 {sort === 'name' && <Sym name="check" className="size-4" />}</Dropdown.Item>
-                <Dropdown.Item id="recent" textValue="最近导入优先">最近导入优先 {sort === 'recent' && <Sym name="check" className="size-4" />}</Dropdown.Item>
+                <Dropdown.Item id="name" textValue={tr('library.sort.name')}>{tr('library.sort.name')} {sort === 'name' && <Sym name="check" className="size-4" />}</Dropdown.Item>
+                <Dropdown.Item id="recent" textValue={tr('library.sort.recent')}>{tr('library.sort.recent')} {sort === 'recent' && <Sym name="check" className="size-4" />}</Dropdown.Item>
                 <Dropdown.Section>
-                  {LIBRARY_FILTERS.map((item) => <Dropdown.Item key={item.value} id={item.value} textValue={item.label}>{item.label} {filter === item.value && <Sym name="check" className="size-4" />}</Dropdown.Item>)}
+                  {LIBRARY_FILTERS.map((item) => <Dropdown.Item key={item.value} id={item.value} textValue={tr(item.label)}>{tr(item.label)} {filter === item.value && <Sym name="check" className="size-4" />}</Dropdown.Item>)}
                 </Dropdown.Section>
               </Dropdown.Menu></Dropdown.Popover>
             </Dropdown>
             <span className="finder-tool-divider" />
-            <Button isIconOnly variant="ghost" data-testid="btn-new-folder" aria-label="新建文件夹" isDisabled={inSystemFolder} onPress={() => openFolderModal('create')}><Sym name="create_new_folder" /></Button>
-            <Button isIconOnly={!isMobile} className="finder-import" variant="ghost" aria-label="导入资料" isDisabled={inSystemFolder} onPress={() => setImportOpen(true)}><Sym name="upload" />{isMobile && '导入'}</Button>
+            <Button isIconOnly variant="ghost" data-testid="btn-new-folder" aria-label={tr('library.aria.newFolder')} isDisabled={inSystemFolder} onPress={() => openFolderModal('create')}><Sym name="create_new_folder" /></Button>
+            <Button isIconOnly={!isMobile} className="finder-import" variant="ghost" aria-label={tr('library.aria.import')} isDisabled={inSystemFolder} onPress={() => setImportOpen(true)}><Sym name="upload" />{isMobile && tr('library.aria.importShort')}</Button>
             <div className="finder-item-actions">
             <Dropdown isOpen={actionMenuOpen} onOpenChange={(open) => { setActionMenuOpen(open); if (!open) setContextPoint(null); }}>
-              <Dropdown.Trigger className="finder-tool" aria-label="所选项目的操作" isDisabled={!selectedFolder && !selectedVideo}><Sym name="more_horiz" /></Dropdown.Trigger>
-              <Dropdown.Popover {...(contextPoint ? { triggerRef: contextAnchor, placement: 'bottom start' as const } : {})}><Dropdown.Menu aria-label="项目操作" onAction={(key) => {
+              <Dropdown.Trigger className="finder-tool" aria-label={tr('library.aria.selectedActions')} isDisabled={!selectedFolder && !selectedVideo}><Sym name="more_horiz" /></Dropdown.Trigger>
+              <Dropdown.Popover {...(contextPoint ? { triggerRef: contextAnchor, placement: 'bottom start' as const } : {})}><Dropdown.Menu aria-label={tr('library.aria.itemActions')} onAction={(key) => {
                 if (key === 'open' && selectedKey) openItem(selectedKey);
                 if (selectedFolder?.folder) {
                   if (key === 'rename') openFolderModal('rename', selectedFolder.folder);
@@ -1673,7 +1677,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                 <Dropdown.Item id="rename" textValue="重命名">重命名</Dropdown.Item>
                 {selectedFolder?.folder && <Dropdown.SubmenuTrigger>
                   <Dropdown.Item id="folder-color" textValue="文件夹颜色"><Label>文件夹颜色</Label><Dropdown.SubmenuIndicator /></Dropdown.Item>
-                  <Dropdown.Popover><Dropdown.Menu aria-label="文件夹颜色" selectionMode="single" selectedKeys={[selectedFolder.folder.color ?? 'blue']} onAction={(key) => {
+                  <Dropdown.Popover><Dropdown.Menu aria-label={tr('library.aria.folderColor')} selectionMode="single" selectedKeys={[selectedFolder.folder.color ?? 'blue']} onAction={(key) => {
                     const color = FOLDER_COLORS.find((entry) => entry.id === key)?.id;
                     const folderId = selectedFolder.folder?.id;
                     if (!color || folderId == null) return;
@@ -1707,7 +1711,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
           </SearchField>
         </header>
         {projectLibrary.error && <Banner variant="error" title="项目目录加载失败" description={projectLibrary.error} action={<Button size="sm" onPress={projectLibrary.retry}>重试</Button>} />}
-        {hasFilters && <div className="finder-search-scope"><span>搜索范围：{folderTitle}{filter !== 'all' ? ` · ${LIBRARY_FILTERS.find((item) => item.value === filter)?.label}` : ''}</span><Button variant="ghost" size="sm" onPress={clearFilters}>清除筛选</Button></div>}
+        {hasFilters && <div className="finder-search-scope"><span>{tr('library.search.scope', { scope: folderTitle })}{filter !== 'all' ? ` · ${tr(LIBRARY_FILTERS.find((item) => item.value === filter)!.label)}` : ''}</span><Button variant="ghost" size="sm" onPress={clearFilters}>{tr('library.search.clearFilters')}</Button></div>}
       <div className="finder-canvas" data-testid="video-list" onClick={(event) => { if (event.target === event.currentTarget) setSelection(new Set()); }}
         ref={canvasRef}
         data-folder-id={currentFolder?.folder?.id ?? ''}
@@ -1768,12 +1772,12 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
            ) : !inSystemFolder && videos.length === 0 && folders.length === 0 && !projectTiles.length && !systemFiles.length && !systemDirectories.length && !showSystemFolder && !hasFilters ? (
             // 不再给 description：上面那条投放区已经把「点哪儿导入 / 从 B 站导入 / 只存本机不上传」
             // 全说完了，这里再铺一句等于让手机端多占三行重复文案。
-            <EmptyState testId="empty-state" icon={<Sym name="folder_open" />} title="还没有资料" action={<Button variant="secondary" onPress={() => setImportOpen(true)}>导入文件</Button>} />
+            <EmptyState testId="empty-state" icon={<Sym name="folder_open" />} title={tr('library.empty.title')} action={<Button variant="secondary" onPress={() => setImportOpen(true)}>{tr('library.empty.import')}</Button>} />
              ) : hasFilters && visibleCount === 0 && !systemLoading && !systemError ? (
             <EmptyState
               testId="library-no-results"
               icon={<Sym name="search" />}
-              title="没有找到匹配的内容"
+              title={tr('library.empty.noMatch')}
               description={searchQuery ? '试试其他名称，或清除筛选查看全部内容。' : '当前筛选下没有内容，可以切换到全部查看。'}
               action={<Button variant="secondary" onPress={clearFilters}>清除搜索和筛选</Button>}
             />
@@ -1843,29 +1847,29 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   </span>
                 </ListBox.Item>)}
               </ListBox>
-               {inSystemFolder && systemError && <p role="alert" className="text-danger">系统文件读取失败：{systemError}</p>}
-               {inSystemFolder && systemLoading && !systemFiles.length && !systemDirectories.length && <p role="status">正在读取系统文件…</p>}
-               {inMemoryFolder && !systemLoading && !systemError && !systemFiles.length && !systemDirectories.length && !hasFilters && <EmptyState icon={<Sym name="folder_open" />} title="还没有 Bot 记忆" description="Bot 保存的长期记忆会显示在这里，与 Bot 记忆管理共用同一份内容。" />}
-               {inSystemFolder && (systemOffset > 0 || systemPage.nextOffset !== null) && <div className="flex gap-2 p-3"><Button variant="secondary" isDisabled={systemLoading || systemOffset === 0} onPress={() => setSystemOffset(Math.max(0, systemOffset - 50))}>上一页</Button><Button variant="secondary" isDisabled={systemLoading || systemPage.nextOffset === null} onPress={() => setSystemOffset(systemPage.nextOffset!)}>下一页</Button></div>}
-              {currentFolder && visibleCount === 0 && <EmptyState icon={<Sym name="folder_open" />} title="文件夹还是空的" description="通过资料的更多菜单，将已有资料移动到这里。" action={<Button variant="secondary" onPress={() => openFolder(null)}>浏览全部资料</Button>} />}
+               {inSystemFolder && systemError && <p role="alert" className="text-danger">{tr('library.system.readError', { message: systemError })}</p>}
+               {inSystemFolder && systemLoading && !systemFiles.length && !systemDirectories.length && <p role="status">{tr('library.system.reading')}</p>}
+               {inMemoryFolder && !systemLoading && !systemError && !systemFiles.length && !systemDirectories.length && !hasFilters && <EmptyState icon={<Sym name="folder_open" />} title={tr('library.empty.botTitle')} description={tr('library.empty.botDescription')} />}
+               {inSystemFolder && (systemOffset > 0 || systemPage.nextOffset !== null) && <div className="flex gap-2 p-3"><Button variant="secondary" isDisabled={systemLoading || systemOffset === 0} onPress={() => setSystemOffset(Math.max(0, systemOffset - 50))}>{tr('library.system.prevPage')}</Button><Button variant="secondary" isDisabled={systemLoading || systemPage.nextOffset === null} onPress={() => setSystemOffset(systemPage.nextOffset!)}>{tr('library.system.nextPage')}</Button></div>}
+              {currentFolder && visibleCount === 0 && <EmptyState icon={<Sym name="folder_open" />} title={tr('library.empty.folderTitle')} description={tr('library.empty.folderDescription')} action={<Button variant="secondary" onPress={() => openFolder(null)}>{tr('library.empty.browseAll')}</Button>} />}
             </>
           )}
         </SkeletonReveal>
         {marquee.box && <div className="finder-selection-box" data-testid="selection-box" aria-hidden="true" style={marquee.box} />}
       </div>
         <footer className="finder-footer">
-          {isMobile && mobileManaging && <div className="finder-mobile-actions" aria-label="资料管理">
-            <span role="status">{selectedVideo?.name ?? selectedFolder?.name ?? '轻点一个资料或文件夹进行管理'}</span>
+          {isMobile && mobileManaging && <div className="finder-mobile-actions" aria-label={tr('library.aria.mobileManage')}>
+            <span role="status">{selectedVideo?.name ?? selectedFolder?.name ?? tr('library.mobile.manageHint')}</span>
             <div>
-              <Button variant="ghost" isDisabled={!selectedVideo && !selectedFolder} onPress={() => { if (selectedVideo) openRename(selectedVideo); else if (selectedFolder?.folder) openFolderModal('rename', selectedFolder.folder); }}><Sym name="edit" />重命名</Button>
-              <Button variant="ghost" isDisabled={!selectedVideo} onPress={() => { if (selectedVideo) openMove(selectedVideo); }}><Sym name="folder" />移动</Button>
-              <Button variant="ghost" className="text-danger" isDisabled={!selectedVideo && !selectedFolder} onPress={() => { if (selectedVideo) askDeleteVideo(selectedVideo); else if (selectedFolder?.folder) void confirmDeleteFolder(selectedFolder.folder, selectedFolder.videos.length); }}><Sym name="delete" />删除</Button>
+              <Button variant="ghost" isDisabled={!selectedVideo && !selectedFolder} onPress={() => { if (selectedVideo) openRename(selectedVideo); else if (selectedFolder?.folder) openFolderModal('rename', selectedFolder.folder); }}><Sym name="edit" />{tr('library.menu.rename')}</Button>
+              <Button variant="ghost" isDisabled={!selectedVideo} onPress={() => { if (selectedVideo) openMove(selectedVideo); }}><Sym name="folder" />{tr('library.mobile.moveShort')}</Button>
+              <Button variant="ghost" className="text-danger" isDisabled={!selectedVideo && !selectedFolder} onPress={() => { if (selectedVideo) askDeleteVideo(selectedVideo); else if (selectedFolder?.folder) void confirmDeleteFolder(selectedFolder.folder, selectedFolder.videos.length); }}><Sym name="delete" />{tr('library.menu.delete')}</Button>
             </div>
           </div>}
-          {moveNotice && !finderDragging.length && <div className="finder-move-notice" data-error={moveNotice.error || undefined} role={moveNotice.error ? 'alert' : 'status'}><span>{moveNotice.text}</span>{lastMove.length > 0 && <Button size="sm" variant="ghost" onPress={() => void undoFinderMove()} isDisabled={undoingMove}>撤销移动</Button>}<Button size="sm" isIconOnly variant="ghost" aria-label="关闭移动提示" onPress={() => setMoveNotice(null)}>×</Button></div>}
-            <nav aria-label="资料路径" className="finder-path"><span className="finder-path-target" data-drop-target={dropFolder === 'root' || undefined} {...pathDropProps(null)}><Button variant="ghost" size="sm" onPress={() => openFolder(null)}><Sym name="folder" />全部资料</Button></span>{inSystemFolder && systemPath.split('/').filter(Boolean).map((part, index, parts) => { const key = parts.slice(0, index + 1).join('/'); return <span key={key}><Sym name="chevron_right" /><Button variant="ghost" size="sm" aria-current={key === folderKey ? 'page' : undefined} onPress={() => openFolder(key)}>{part}</Button></span>; })}{folderPath.map((folder) => <span key={folder.id} className="finder-path-target" data-folder-id={folder.id} data-drop-target={dropFolder === String(folder.id) || undefined} {...pathDropProps(folder.id!)}><Sym name="chevron_right" /><Button variant="ghost" size="sm" aria-current={folder.id === currentFolder?.folder?.id ? 'page' : undefined} onPress={() => openFolder(String(folder.id))}>{folder.name}</Button></span>)}{!finderDragging.length && (selectedVideo || selectedFolder) && <><Sym name="chevron_right" /><span>{selectedVideo?.name ?? selectedFolder?.name}</span></>}</nav>
+          {moveNotice && !finderDragging.length && <div className="finder-move-notice" data-error={moveNotice.error || undefined} role={moveNotice.error ? 'alert' : 'status'}><span>{moveNotice.text}</span>{lastMove.length > 0 && <Button size="sm" variant="ghost" onPress={() => void undoFinderMove()} isDisabled={undoingMove}>{tr('library.mobile.moveUndo')}</Button>}<Button size="sm" isIconOnly variant="ghost" aria-label={tr('library.aria.closeMove')} onPress={() => setMoveNotice(null)}>×</Button></div>}
+            <nav aria-label={tr('library.aria.path')} className="finder-path"><span className="finder-path-target" data-drop-target={dropFolder === 'root' || undefined} {...pathDropProps(null)}><Button variant="ghost" size="sm" onPress={() => openFolder(null)}><Sym name="folder" />{tr('library.path.allResources')}</Button></span>{inSystemFolder && systemPath.split('/').filter(Boolean).map((part, index, parts) => { const key = parts.slice(0, index + 1).join('/'); return <span key={key}><Sym name="chevron_right" /><Button variant="ghost" size="sm" aria-current={key === folderKey ? 'page' : undefined} onPress={() => openFolder(key)}>{part}</Button></span>; })}{folderPath.map((folder) => <span key={folder.id} className="finder-path-target" data-folder-id={folder.id} data-drop-target={dropFolder === String(folder.id) || undefined} {...pathDropProps(folder.id!)}><Sym name="chevron_right" /><Button variant="ghost" size="sm" aria-current={folder.id === currentFolder?.folder?.id ? 'page' : undefined} onPress={() => openFolder(String(folder.id))}>{folder.name}</Button></span>)}{!finderDragging.length && (selectedVideo || selectedFolder) && <><Sym name="chevron_right" /><span>{selectedVideo?.name ?? selectedFolder?.name}</span></>}</nav>
           {finderDragging.length > 0 && <div className="finder-drag-status" role="status"><Sym name={dropHint.startsWith('不能') ? 'block' : 'folder_open'} /><span>{dropHint}</span><kbd>Esc 取消</kbd></div>}
-          <div className="finder-status"><span role="status">{selection.size > 0 ? `已选择 ${selection.size} 项，共 ${visibleCount} 项` : `${visibleCount} 个项目`}</span><span className="finder-interaction-hint">{isMobile ? '轻点打开 · 长按选择' : '拖动空白处框选 · 双击打开'}</span>{selectedVideo && <Button isIconOnly size="sm" variant="ghost" aria-label="显示简介" onPress={() => setDetails(selectedVideo)}><Sym name="info" /></Button>}</div>
+          <div className="finder-status"><span role="status">{selection.size > 0 ? tr('library.statusBar.selectedCount', { selected: selection.size, total: visibleCount }) : tr('library.statusBar.itemCount', { count: visibleCount })}</span><span className="finder-interaction-hint">{isMobile ? tr('library.statusBar.tapHint') : tr('library.statusBar.dragHint')}</span>{selectedVideo && <Button isIconOnly size="sm" variant="ghost" aria-label={tr('library.aria.showIntro')} onPress={() => setDetails(selectedVideo)}><Sym name="info" /></Button>}</div>
         </footer>
         {dropActive && <div className="finder-drop-overlay">松开以导入资料</div>}
       </section>}
@@ -1926,8 +1930,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   <Input
                     value={renameText}
                     maxLength={100}
-                    placeholder="输入视频标题"
-                    aria-label="视频标题"
+                    placeholder={tr('library.aria.renameTitlePlaceholder')}
+                    aria-label={tr('library.aria.videoTitle')}
                     autoFocus
                     onChange={(e) => setRenameText(e.target.value)}
                     onKeyDown={(e) => {
@@ -1963,8 +1967,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   <Input
                     value={folderText}
                     maxLength={50}
-                    placeholder="如：行测、申论、面试"
-                    aria-label="文件夹名称"
+                    placeholder={tr('library.aria.folderNamePlaceholder')}
+                    aria-label={tr('library.aria.folderName')}
                     autoFocus
                     onChange={(e) => setFolderText(e.target.value)}
                     onKeyDown={(e) => {
@@ -2000,7 +2004,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   value={moveTarget}
                   onChange={(key) => setMoveTarget(String(key))}
                   data-testid="move-radio-group"
-                  aria-label="移动到文件夹"
+                  aria-label={tr('library.aria.moveTarget')}
                 >
                   <Radio value="-1">
                     <Radio.Content>
@@ -2026,8 +2030,8 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     <Input
                       value={moveNewName}
                       maxLength={50}
-                      placeholder="新建文件夹名称"
-                      aria-label="新建文件夹名称"
+                      placeholder={tr('library.aria.newFolderName')}
+                      aria-label={tr('library.aria.newFolderName')}
                       onChange={(e) => setMoveNewName(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') void createFolderInMove();
@@ -2191,7 +2195,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                           selectionMode="multiple"
                           selectedKeys={biliLangs}
                           onSelectionChange={(keys) => selectLangs([...keys].map(String))}
-                          aria-label="选择字幕语言"
+                          aria-label={tr('library.aria.subtitleLang')}
                         >
                           <TagGroup.List
                             className="row"
@@ -2324,6 +2328,7 @@ function finderProgressText(video: VideoRow): string | null {
 }
 
 function FinderFileIcon({ video }: { video: VideoRow }) {
+  const { t: tr } = useTranslation('projects');
   const cover = useThumb(video.id);
   const isMaterial = video.kind === 'material';
   const ratio = progressRatio(video);
@@ -2341,7 +2346,7 @@ function FinderFileIcon({ video }: { video: VideoRow }) {
         aria-valuenow={Math.round(ratio * 100)}
         aria-valuetext={finderProgressText(video) ?? undefined}
       ><span style={{ width: `${ratio * 100}%` }} /></span>}
-      {video.pinned === 1 && <span className="finder-file-pin" aria-label="已置顶"><Sym name="pin" /></span>}
+      {video.pinned === 1 && <span className="finder-file-pin" aria-label={tr('library.aria.pinned')}><Sym name="pin" /></span>}
     </span>
   );
 }
@@ -2377,14 +2382,15 @@ function VideoRow({
   onDragEnd: () => void;
   onDragCancel: () => void;
 }) {
+  const { t: tr } = useTranslation('projects');
   const isMaterial = v.kind === 'material';
   const matKind: 'page' | 'para' = v.materialFormat === 'pdf' || !v.materialFormat ? 'page' : 'para';
-  const noun = matKind === 'page' ? '页' : '段';
+  const noun = tr(matKind === 'page' ? 'library.material.pageNoun' : 'library.material.paraNoun');
   const unitText = v.unitCount
     ? `${v.unitCount} ${noun}`
     : v.empty === 1
-      ? '无正文'
-      : '未解析';
+      ? tr('library.material.noText')
+      : tr('library.material.unparsed');
   /**
    * 材料的状态标签与视频不是一套语义：
    * 已解析 / 待解析 / 扫描件（不可检索）/ 无正文（不可检索）/ 文件已删。
@@ -2393,13 +2399,13 @@ function VideoRow({
    */
   const status = isMaterial
     ? v.scanned === 1
-      ? { variant: 'error' as const, text: '扫描件·不可检索' }
+      ? { variant: 'error' as const, text: tr('library.material.scanned') }
       : v.empty === 1
-        ? { variant: 'error' as const, text: '无正文·不可检索' }
+        ? { variant: 'error' as const, text: tr('library.material.empty') }
         : v.unitCount
-          ? { variant: 'primary' as const, text: `已解析 ${v.unitCount} ${noun}` }
-          : { variant: '' as const, text: '待解析' }
-    : STATUS_TAG[v.status];
+          ? { variant: 'primary' as const, text: tr('library.material.parsed', { count: v.unitCount, noun }) }
+          : { variant: '' as const, text: tr('library.material.pending') }
+    : { ...STATUS_TAG[v.status], text: tr(STATUS_TAG[v.status].text) };
   const meta = `${isMaterial ? unitText : formatDuration(v.duration)} · ${formatSize(v.size)} · ${new Date(v.createdAt).toLocaleDateString()}`;
   const cover = useThumb(v.id);
   /**
@@ -2602,8 +2608,8 @@ function VideoRow({
         )}
       </div>
       <div className={TAGS_CLS}>
-        {v.pinned === 1 && <Chip size="sm" color="accent" variant="soft">已置顶</Chip>}
-        {v.fileDeleted === 1 && <Chip size="sm" color="default" variant="soft">文件已删</Chip>}
+        {v.pinned === 1 && <Chip size="sm" color="accent" variant="soft">{tr('library.aria.pinned')}</Chip>}
+        {v.fileDeleted === 1 && <Chip size="sm" color="default" variant="soft">{tr('library.material.deleted')}</Chip>}
         <Chip size="sm" color={status.variant === 'error' ? 'danger' : status.variant ? 'accent' : 'default'} variant="soft">
           {jobCopy ? jobCopy.tag : status.text}
         </Chip>
@@ -2620,13 +2626,13 @@ function VideoRow({
             <Dropdown.Trigger
               className={buttonVariants({ isIconOnly: true, variant: 'tertiary', size: 'sm' })}
               data-testid="btn-more"
-              aria-label="更多操作"
+              aria-label={tr('library.aria.more')}
             >
               <Sym name="more_vert" />
             </Dropdown.Trigger>
             <Dropdown.Popover placement="bottom end">
               <Dropdown.Menu
-                aria-label="更多操作"
+                aria-label={tr('library.aria.more')}
                 onAction={(key) => {
                   if (key === 'rename') onRename();
                   else if (key === 'move') onMove();
@@ -2635,36 +2641,36 @@ function VideoRow({
                   else if (key === 'delete') onDelete();
                 }}
               >
-                <Dropdown.Item id="rename" textValue="重命名" data-testid="menu-rename">
+                <Dropdown.Item id="rename" textValue={tr('library.menu.rename')} data-testid="menu-rename">
                   <Sym name="edit" />
-                  重命名
+                  {tr('library.menu.rename')}
                 </Dropdown.Item>
-                <Dropdown.Item id="move" textValue="移动到文件夹" data-testid="menu-move">
+                <Dropdown.Item id="move" textValue={tr('library.menu.move')} data-testid="menu-move">
                   <Sym name="folder_open" />
-                  移动到文件夹
+                  {tr('library.menu.move')}
                 </Dropdown.Item>
                 <Dropdown.Item
                   id="pin"
-                  textValue={v.pinned === 1 ? '取消置顶' : '置顶'}
+                  textValue={tr(v.pinned === 1 ? 'library.menu.unpin' : 'library.menu.pin')}
                   data-testid="menu-pin"
                 >
                   <Sym name={v.pinned === 1 ? 'pin_off' : 'pin'} />
-                  {v.pinned === 1 ? '取消置顶' : '置顶'}
+                  {tr(v.pinned === 1 ? 'library.menu.unpin' : 'library.menu.pin')}
                 </Dropdown.Item>
                 {/* 解析失败/想换索引重来时用得上；参数化重试比隐式后台扫描可控 */}
                 {isMaterial && onReparse && (
-                  <Dropdown.Item id="reparse" textValue="重新解析" data-testid="menu-reparse">
+                  <Dropdown.Item id="reparse" textValue={tr('library.menu.reparse')} data-testid="menu-reparse">
                     <Sym name="refresh" />
-                    重新解析
+                    {tr('library.menu.reparse')}
                   </Dropdown.Item>
                 )}
                 <Dropdown.Item
                   id="delete"
-                  textValue="删除"
+                  textValue={tr('library.menu.delete')}
                   data-testid="menu-delete"
                 >
                   <Sym name="delete" />
-                  删除
+                  {tr('library.menu.delete')}
                 </Dropdown.Item>
               </Dropdown.Menu>
             </Dropdown.Popover>
@@ -2676,7 +2682,7 @@ function VideoRow({
               variant="tertiary"
               size="sm"
               data-testid="btn-rename"
-              aria-label="重命名"
+              aria-label={tr('library.aria.rename')}
               onPress={onRename}
             >
               <Sym name="edit" />
@@ -2686,7 +2692,7 @@ function VideoRow({
               variant="tertiary"
               size="sm"
               data-testid="btn-move"
-              aria-label="移动到文件夹"
+              aria-label={tr('library.aria.moveTarget')}
               onPress={onMove}
             >
               <Sym name="folder_open" />
@@ -2707,7 +2713,7 @@ function VideoRow({
                 variant="tertiary"
                 size="sm"
                 data-testid="btn-reparse"
-                aria-label="重新解析"
+                aria-label={tr('library.aria.reparse')}
                 onPress={onReparse}
               >
                 <Sym name="refresh" />
@@ -2718,7 +2724,7 @@ function VideoRow({
               variant="tertiary"
               size="sm"
               data-testid="btn-delete"
-              aria-label="删除"
+              aria-label={tr('library.aria.delete')}
               onPress={onDelete}
             >
               <Sym name="delete" />
