@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { MATERIAL_TASK_ACTIONS } from '@wangke/contracts/learning-plugins';
 import type { BuiltinViewProps } from '../builtins';
 import type { PluginProjectionHook } from '../../client/plugin-projection';
+import { isTaskUnfinished } from '@wangke/contracts/task-status';
 import { confirmDialog } from '../../ui';
 import './learning.css';
 
@@ -26,7 +27,7 @@ function MaterialTasks({ materialId, useProjection, call }: { materialId: string
     <p className="text-sm text-muted">复用原讲义、评论、弹幕、字幕、解析与封面任务及数据。浏览器任务必须有已登录页面保持打开；排队不表示产物已保存。</p>
     <Link to={`/player/${encodeURIComponent(materialId)}`}>打开资料与原学习产物</Link>
     {error || projection.error ? <p role="alert">{error || projection.error}</p> : null}
-    <div className="learning-plugin__actions">{MATERIAL_TASK_ACTIONS.map(action => <button type="button" key={action.id} disabled={busy || tasks.some(t => t.origin.actionId === `material.${action.id}` && ['queued', 'running', 'waiting_user'].includes(t.status))} onClick={async () => {
+    <div className="learning-plugin__actions">{MATERIAL_TASK_ACTIONS.map(action => <button type="button" key={action.id} disabled={busy || tasks.some(t => t.origin.actionId === `material.${action.id}` && isTaskUnfinished(t.status))} onClick={async () => {
       if (!await confirmDialog({ headline: action.title, description: `${action.note} 将操作当前资料，沿用原功能的覆盖语义。`, confirmText: '继续', cancelText: '取消' })) return;
       setBusy(true); setError('');
       try { await call(`material.${action.id}`, { materialId, clientNonce: crypto.randomUUID(), ...(action.id === 'cover' ? { force: true } : {}) }); }

@@ -6,7 +6,7 @@
   "resources": "View resources",
   "runSteps_one": "{{count}} step processed",
   "runSteps_other": "{{count}} steps processed",
-  "runStatus": { "queued": "Getting ready", "running": "Working", "waiting_user": "Waiting for you", "paused": "Paused", "completed": "Completed", "failed": "Not completed", "cancelled": "Stopped" },
+  "runStatus": { "queued": "Getting ready", "running": "Working", "waiting_user": "Waiting for you", "waiting_event": "Waiting for tasks or events", "paused": "Paused", "completed": "Completed", "failed": "Not completed", "cancelled": "Stopped" },
   "refresh": "Refresh diagnostics",
   "usage": "Today: {{requests}} requests · {{knownTokens}} known tokens · {{unknownReservedTokens}} unknown reserved · {{knownCost}} known cost · {{unknownCostRequests}} requests with unknown cost",
   "unknown": "Unknown",

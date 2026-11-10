@@ -1,3 +1,4 @@
+import type { TaskStatus } from './task-status.js';
 /** JSON is the wire boundary of sandbox-owned state, never arbitrary JS objects. */
 export type RuntimeJson = null | boolean | number | string | RuntimeJson[] | { [key: string]: RuntimeJson };
 /** A process group followed by its delivered text. String offsets are UTF-16;
@@ -55,7 +56,7 @@ export type RuntimeTask = {
   id: string;
   kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce' | 'bilibiliImport';
   resource: string;
-   status: 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+   status: TaskStatus;
   input: { [key: string]: RuntimeJson };
   progress: { [key: string]: RuntimeJson } | null;
   result: RuntimeJson;

@@ -52,9 +52,12 @@ function literalList(file, pattern) {
   assert.ok(match, `audit_source_shape_changed:${file}`);
   return [...match[1].matchAll(/'([^']+)'/g)].map(item => item[1]);
 }
-const serverActive = literalList('apps/api/src/cloud/tasks.ts', /const ACTIVE_TASK_STATUSES = new Set\(\[([^\]]+)\]/);
-const resourceCancellable = literalList('apps/web/src/cloud/tasks.ts', /export async function cancelResourceTasks\([\s\S]*?\[([^\]]+)\]\.includes\(t.status\)/);
-const activityActive = literalList('apps/web/src/cloud/activityStore.ts', /return ([^;]+);/);
+const serverActive = literalList('packages/contracts/src/task-status.ts', /export const UNFINISHED_TASK_STATUSES[^=]*= \[([^\]]+)\]/);
+const resourceCancellable = serverActive;
+const activityActive = serverActive;
+assert.ok(/const ACTIVE_TASK_STATUSES = new Set\(UNFINISHED_TASK_STATUSES\)/.test(read('apps/api/src/cloud/tasks.ts')), 'audit_source_shape_changed:apps/api/src/cloud/tasks.ts');
+assert.ok(/taskOccupiesResource\(t\.status\)/.test(read('apps/web/src/cloud/tasks.ts')), 'audit_source_shape_changed:apps/web/src/cloud/tasks.ts');
+assert.ok(/isTaskUnfinished\(task\.status\)/.test(read('apps/web/src/cloud/activityStore.ts')), 'audit_source_shape_changed:apps/web/src/cloud/activityStore.ts');
 const botStopVisible = literalList('apps/web/src/cloud/BotManagement.tsx', /\{\[([^\]]+)\]\.includes\(run.status\)/);
 const statuses = ['queued', 'running', 'waiting_user', 'waiting_event', 'completed', 'failed', 'cancelled', 'interrupted'];
 const matrix = statuses.map(status => ({ status,

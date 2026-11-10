@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "generatedAt": "2026-11-10T05:15:06.416Z",
+  "generatedAt": "2026-11-10T09:49:39.792Z",
   "scope": {
     "roots": [
       "apps/web/src",
@@ -36,12 +36,12 @@
     ]
   },
   "summary": {
-    "files": 837,
-    "candidateFiles": 500,
-    "clueLines": 5532,
+    "files": 844,
+    "candidateFiles": 506,
+    "clueLines": 5683,
     "families": 64,
-    "probesPassed": 6,
-    "probesFailed": 1
+    "probesPassed": 7,
+    "probesFailed": 0
   },
   "caveat": "Keyword clues and workflow families are not an exhaustive count of independent state machines. Source-extracted predicates are not end-to-end executions.",
   "taskPredicateMatrix": [
@@ -75,10 +75,10 @@
     {
       "status": "waiting_event",
       "serverActive": true,
-      "chatActive": false,
-      "chatStreaming": false,
-      "activityActive": false,
-      "selectedForResourceCancel": false,
+      "chatActive": true,
+      "chatStreaming": true,
+      "activityActive": true,
+      "selectedForResourceCancel": true,
       "boardTerminal": false
     },
     {
@@ -122,25 +122,26 @@
     "queued",
     "running",
     "waiting_user",
+    "waiting_event",
     "paused"
   ],
   "findings": [
     {
       "id": "F01",
       "evidence": "mixed: source-extracted server/cancel/activity plus executed pure chat selector",
-      "present": true,
+      "present": false,
       "status": "waiting_event"
     },
     {
       "id": "F02",
       "evidence": "source-extracted BotManagement stop-button guard",
-      "present": true,
+      "present": false,
       "status": "waiting_event"
     },
     {
       "id": "F10",
       "evidence": "executed DSML parser across every single split point and character chunks",
-      "present": true
+      "present": false
     }
   ],
   "probes": [
@@ -166,8 +167,7 @@
     },
     {
       "name": "DSML sample is invariant under every single split point",
-      "passed": false,
-      "error": "DSML text differs across chunk boundaries; see dsmlPartitionEvidence"
+      "passed": true
     },
     {
       "name": "VAD timeline preserves a minimal speech segment on finish",
@@ -176,42 +176,7 @@
   ],
   "dsmlPartitionEvidence": {
     "input": "before <｜DSML｜tool_calls><｜DSML｜invoke name=\"read\"><｜DSML｜parameter name=\"path\" string=\"true\">a.md</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls> after",
-    "mismatchingSplits": [
-      151
-    ],
-    "firstDifference": {
-      "split": 151,
-      "expected": [
-        {
-          "kind": "text",
-          "text": "before "
-        },
-        {
-          "kind": "toolCall",
-          "name": "read",
-          "arguments": "{\"path\":\"a.md\"}"
-        },
-        {
-          "kind": "text",
-          "text": " after"
-        }
-      ],
-      "actual": [
-        {
-          "kind": "text",
-          "text": "before "
-        },
-        {
-          "kind": "toolCall",
-          "name": "read",
-          "arguments": "{\"path\":\"a.md\"}"
-        },
-        {
-          "kind": "text",
-          "text": "after"
-        }
-      ]
-    },
+    "mismatchingSplits": [],
     "characterChunks": [
       {
         "kind": "text",
@@ -224,11 +189,11 @@
       },
       {
         "kind": "text",
-        "text": "after"
+        "text": " after"
       }
     ],
     "sampleToolCallsInvariant": true,
-    "textInvariant": false
+    "textInvariant": true
   },
   "catalog": [
     {
@@ -5988,29 +5953,23 @@
     },
     {
       "path": "apps/api/src/cloud/tasks.ts",
-      "sha256": "f6dcd7d1966ad523acc46a13723aa1ce31164955353d0c5a377a72a795ec8e13",
-      "lines": 308,
+      "sha256": "e34285becc278a8089d085fe3828a9d34461553af97a249402388ebd7329a80f",
+      "lines": 309,
       "hits": [
         {
-          "line": 17,
+          "line": 5,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 20,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 24,
+          "line": 18,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 35,
+          "line": 25,
           "kinds": [
             "state"
           ]
@@ -6022,57 +5981,57 @@
           ]
         },
         {
-          "line": 43,
+          "line": 37,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 61,
+          "line": 44,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 62,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 66,
+          "line": 67,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 75,
+          "line": 76,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 98,
+          "line": 99,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 102,
+          "line": 103,
           "kinds": [
             "flags"
-          ]
-        },
-        {
-          "line": 104,
-          "kinds": [
-            "lifetime"
           ]
         },
         {
           "line": 105,
           "kinds": [
-            "flags"
+            "lifetime"
           ]
         },
         {
-          "line": 108,
+          "line": 106,
           "kinds": [
             "flags"
           ]
@@ -6080,60 +6039,60 @@
         {
           "line": 109,
           "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 110,
+          "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 118,
+          "line": 119,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 124,
+          "line": 125,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 128,
+          "line": 129,
           "kinds": [
             "flags",
             "time-or-revision"
           ]
         },
         {
-          "line": 131,
+          "line": 132,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 135,
+          "line": 136,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 142,
+          "line": 143,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 146,
+          "line": 147,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 149,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 152,
+          "line": 150,
           "kinds": [
             "flags"
           ]
@@ -6145,7 +6104,13 @@
           ]
         },
         {
-          "line": 159,
+          "line": 154,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 160,
           "kinds": [
             "state",
             "flags",
@@ -6153,23 +6118,17 @@
           ]
         },
         {
-          "line": 160,
+          "line": 161,
           "kinds": [
             "state",
             "time-or-revision"
           ]
         },
         {
-          "line": 161,
+          "line": 162,
           "kinds": [
             "state",
             "flags"
-          ]
-        },
-        {
-          "line": 167,
-          "kinds": [
-            "state"
           ]
         },
         {
@@ -6179,13 +6138,13 @@
           ]
         },
         {
-          "line": 173,
+          "line": 169,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 176,
+          "line": 174,
           "kinds": [
             "state"
           ]
@@ -6197,37 +6156,37 @@
           ]
         },
         {
-          "line": 183,
+          "line": 178,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 185,
+          "line": 184,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 187,
+          "line": 186,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 195,
+          "line": 188,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 200,
+          "line": 196,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 204,
+          "line": 201,
           "kinds": [
             "state"
           ]
@@ -6245,7 +6204,7 @@
           ]
         },
         {
-          "line": 209,
+          "line": 207,
           "kinds": [
             "state"
           ]
@@ -6269,14 +6228,13 @@
           ]
         },
         {
-          "line": 219,
+          "line": 213,
           "kinds": [
-            "state",
-            "flags"
+            "state"
           ]
         },
         {
-          "line": 221,
+          "line": 220,
           "kinds": [
             "state",
             "flags"
@@ -6285,26 +6243,27 @@
         {
           "line": 222,
           "kinds": [
+            "state",
             "flags"
           ]
         },
         {
           "line": 223,
           "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 224,
+          "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 225,
+          "line": 226,
           "kinds": [
             "lifetime"
-          ]
-        },
-        {
-          "line": 227,
-          "kinds": [
-            "flags"
           ]
         },
         {
@@ -6314,93 +6273,93 @@
           ]
         },
         {
-          "line": 230,
+          "line": 229,
           "kinds": [
-            "time-or-revision"
+            "flags"
           ]
         },
         {
           "line": 231,
           "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 232,
+          "kinds": [
             "flags"
           ]
         },
         {
-          "line": 233,
+          "line": 234,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 240,
+          "line": 241,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 247,
+          "line": 248,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 249,
+          "line": 250,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 251,
+          "line": 252,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 272,
+          "line": 273,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 279,
+          "line": 280,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 283,
+          "line": 284,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 286,
+          "line": 287,
           "kinds": [
             "state"
-          ]
-        },
-        {
-          "line": 288,
-          "kinds": [
-            "state",
-            "flags"
           ]
         },
         {
           "line": 289,
           "kinds": [
+            "state",
             "flags"
           ]
         },
         {
-          "line": 294,
+          "line": 290,
           "kinds": [
-            "state"
+            "flags"
           ]
         },
         {
@@ -6410,9 +6369,9 @@
           ]
         },
         {
-          "line": 299,
+          "line": 296,
           "kinds": [
-            "flags"
+            "state"
           ]
         },
         {
@@ -6428,7 +6387,13 @@
           ]
         },
         {
-          "line": 304,
+          "line": 302,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 305,
           "kinds": [
             "state",
             "flags"
@@ -8061,59 +8026,59 @@
     },
     {
       "path": "apps/api/src/plugins/files.ts",
-      "sha256": "58931d02363fc6a7adab95ec7af5f89eeb21926d1468242f0de63f6ca680b69b",
-      "lines": 228,
+      "sha256": "48acab087068263e8bbdbc0f325a603f64d62144f70e9439e9e320563c1fa364",
+      "lines": 255,
       "hits": [
         {
-          "line": 30,
+          "line": 37,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 101,
+          "line": 108,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 102,
+          "line": 109,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 105,
+          "line": 112,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 203,
+          "line": 230,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 208,
+          "line": 235,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 215,
+          "line": 242,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 216,
+          "line": 243,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 223,
+          "line": 250,
           "kinds": [
             "state"
           ]
@@ -8890,8 +8855,8 @@
     },
     {
       "path": "apps/api/src/realtime/domain.ts",
-      "sha256": "d5eb84a10019550effeee9a6d94765668cbea13c9b2eaac2876cbb5458f32ca4",
-      "lines": 618,
+      "sha256": "c02fe518bd27241be2deccbb79cf9a46dc75b350cc29731cd26611cb5dd1eca4",
+      "lines": 625,
       "hits": [
         {
           "line": 63,
@@ -8978,107 +8943,76 @@
           ]
         },
         {
-          "line": 209,
+          "line": 211,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 214,
+          "line": 221,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 220,
+          "line": 227,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 234,
+          "line": 241,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 236,
+          "line": 243,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 237,
+          "line": 244,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 240,
+          "line": 247,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 245,
+          "line": 252,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 260,
+          "line": 267,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 271,
+          "line": 278,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 275,
+          "line": 282,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 276,
+          "line": 283,
           "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 290,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 291,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 292,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 293,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 294,
-          "kinds": [
-            "state",
             "flags"
           ]
         },
@@ -9101,93 +9035,106 @@
           ]
         },
         {
+          "line": 300,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
           "line": 301,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 302,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 303,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 307,
+          "line": 304,
           "kinds": [
             "state"
+          ]
+        },
+        {
+          "line": 305,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 306,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 308,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 309,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 310,
+          "kinds": [
+            "state",
+            "flags"
           ]
         },
         {
           "line": 314,
           "kinds": [
-            "lifetime"
+            "state"
           ]
         },
         {
-          "line": 326,
+          "line": 321,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 327,
+          "line": 333,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 334,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 330,
+          "line": 337,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 333,
+          "line": 340,
           "kinds": [
             "flags",
             "time-or-revision"
           ]
         },
         {
-          "line": 334,
+          "line": 341,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 339,
+          "line": 346,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 342,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 343,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 345,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 348,
+          "line": 349,
           "kinds": [
             "time-or-revision"
           ]
@@ -9195,17 +9142,11 @@
         {
           "line": 350,
           "kinds": [
-            "flags"
+            "time-or-revision"
           ]
         },
         {
           "line": 352,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 354,
           "kinds": [
             "time-or-revision"
           ]
@@ -9217,7 +9158,19 @@
           ]
         },
         {
-          "line": 356,
+          "line": 357,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 359,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 361,
           "kinds": [
             "time-or-revision"
           ]
@@ -9225,7 +9178,7 @@
         {
           "line": 362,
           "kinds": [
-            "flags"
+            "time-or-revision"
           ]
         },
         {
@@ -9235,13 +9188,7 @@
           ]
         },
         {
-          "line": 364,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 366,
+          "line": 369,
           "kinds": [
             "flags"
           ]
@@ -9249,120 +9196,120 @@
         {
           "line": 370,
           "kinds": [
-            "lifetime"
+            "time-or-revision"
           ]
         },
         {
-          "line": 374,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 379,
+          "line": 371,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 381,
+          "line": 373,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 384,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 385,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 387,
+          "line": 377,
           "kinds": [
             "lifetime"
+          ]
+        },
+        {
+          "line": 381,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 386,
+          "kinds": [
+            "time-or-revision"
           ]
         },
         {
           "line": 388,
           "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 391,
+          "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 403,
+          "line": 392,
           "kinds": [
-            "state"
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 394,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 395,
+          "kinds": [
+            "time-or-revision"
           ]
         },
         {
           "line": 410,
           "kinds": [
-            "time-or-revision"
+            "state"
           ]
         },
         {
-          "line": 429,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 433,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 435,
+          "line": 417,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 438,
+          "line": 436,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 440,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 442,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 445,
           "kinds": [
             "flags",
             "time-or-revision"
           ]
         },
         {
-          "line": 439,
+          "line": 446,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 442,
+          "line": 449,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 445,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 448,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 450,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 454,
+          "line": 452,
           "kinds": [
             "state"
           ]
@@ -9370,43 +9317,19 @@
         {
           "line": 455,
           "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 456,
-          "kinds": [
-            "time-or-revision"
+            "flags"
           ]
         },
         {
           "line": 457,
           "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 458,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 459,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 460,
-          "kinds": [
-            "time-or-revision"
+            "flags"
           ]
         },
         {
           "line": 461,
           "kinds": [
-            "time-or-revision"
+            "state"
           ]
         },
         {
@@ -9416,37 +9339,55 @@
           ]
         },
         {
+          "line": 463,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
           "line": 464,
           "kinds": [
-            "flags"
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 465,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 466,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 467,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 468,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 469,
+          "kinds": [
+            "time-or-revision"
           ]
         },
         {
           "line": 471,
           "kinds": [
-            "time-or-revision"
+            "flags"
           ]
         },
         {
-          "line": 472,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 473,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 475,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 476,
+          "line": 478,
           "kinds": [
             "time-or-revision"
           ]
@@ -9454,7 +9395,7 @@
         {
           "line": 479,
           "kinds": [
-            "state"
+            "time-or-revision"
           ]
         },
         {
@@ -9464,19 +9405,13 @@
           ]
         },
         {
-          "line": 481,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
           "line": 482,
           "kinds": [
-            "flags"
+            "state"
           ]
         },
         {
-          "line": 485,
+          "line": 483,
           "kinds": [
             "time-or-revision"
           ]
@@ -9484,7 +9419,7 @@
         {
           "line": 486,
           "kinds": [
-            "time-or-revision"
+            "state"
           ]
         },
         {
@@ -9494,38 +9429,50 @@
           ]
         },
         {
-          "line": 489,
+          "line": 488,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 490,
+          "line": 489,
           "kinds": [
-            "flags",
+            "flags"
+          ]
+        },
+        {
+          "line": 492,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 493,
+          "kinds": [
             "time-or-revision"
           ]
         },
         {
           "line": 494,
           "kinds": [
-            "lifetime"
+            "time-or-revision"
           ]
         },
         {
           "line": 496,
           "kinds": [
-            "flags"
+            "time-or-revision"
           ]
         },
         {
           "line": 497,
           "kinds": [
-            "flags"
+            "flags",
+            "time-or-revision"
           ]
         },
         {
-          "line": 500,
+          "line": 501,
           "kinds": [
             "lifetime"
           ]
@@ -9537,33 +9484,39 @@
           ]
         },
         {
-          "line": 505,
+          "line": 504,
           "kinds": [
             "flags"
+          ]
+        },
+        {
+          "line": 507,
+          "kinds": [
+            "lifetime"
           ]
         },
         {
           "line": 510,
           "kinds": [
-            "time-or-revision"
+            "flags"
           ]
         },
         {
-          "line": 511,
+          "line": 512,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 542,
+          "line": 517,
           "kinds": [
-            "state"
+            "time-or-revision"
           ]
         },
         {
-          "line": 545,
+          "line": 518,
           "kinds": [
-            "state"
+            "flags"
           ]
         },
         {
@@ -9573,49 +9526,61 @@
           ]
         },
         {
-          "line": 553,
+          "line": 552,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 564,
+          "line": 556,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 567,
+          "line": 560,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 575,
+          "line": 571,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 576,
+          "line": 574,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 599,
+          "line": 582,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 583,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 606,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 604,
+          "line": 611,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 615,
+          "line": 622,
           "kinds": [
             "time-or-revision"
           ]
@@ -9933,35 +9898,29 @@
     },
     {
       "path": "apps/api/src/realtime/record-projections.ts",
-      "sha256": "6fefa191aa3426ea50c50a2426ac85ae971a6b4ad0ddb8a525d9bfea68d4e5c0",
-      "lines": 309,
+      "sha256": "4e8566112a850a866d2d1d6db5da5f4107bf1e8d9d181ed748cc3eeb4cfd21c4",
+      "lines": 391,
       "hits": [
         {
-          "line": 28,
+          "line": 29,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 56,
+          "line": 60,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 57,
+          "line": 61,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 65,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 71,
+          "line": 69,
           "kinds": [
             "time-or-revision"
           ]
@@ -9969,23 +9928,11 @@
         {
           "line": 74,
           "kinds": [
-            "time-or-revision"
+            "state"
           ]
         },
         {
-          "line": 76,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 77,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 78,
+          "line": 75,
           "kinds": [
             "time-or-revision"
           ]
@@ -9997,21 +9944,63 @@
           ]
         },
         {
-          "line": 80,
+          "line": 83,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 103,
+          "line": 84,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 113,
+          "line": 85,
           "kinds": [
-            "state"
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 86,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 87,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 98,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 99,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 144,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 151,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 154,
+          "kinds": [
+            "time-or-revision"
           ]
         },
         {
@@ -10021,91 +10010,43 @@
           ]
         },
         {
-          "line": 162,
+          "line": 157,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 167,
+          "line": 158,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 168,
+          "line": 159,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 169,
+          "line": 160,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 170,
+          "line": 183,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 171,
+          "line": 193,
           "kinds": [
-            "time-or-revision"
+            "state"
           ]
         },
         {
-          "line": 173,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 192,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 194,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 196,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 197,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 227,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 238,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 241,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 243,
+          "line": 236,
           "kinds": [
             "time-or-revision"
           ]
@@ -10117,37 +10058,37 @@
           ]
         },
         {
-          "line": 245,
+          "line": 249,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 246,
+          "line": 250,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 247,
+          "line": 251,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 267,
+          "line": 252,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 271,
+          "line": 253,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 272,
+          "line": 255,
           "kinds": [
             "time-or-revision"
           ]
@@ -10159,7 +10100,13 @@
           ]
         },
         {
-          "line": 275,
+          "line": 276,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 278,
           "kinds": [
             "time-or-revision"
           ]
@@ -10171,43 +10118,127 @@
           ]
         },
         {
-          "line": 282,
+          "line": 309,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 284,
+          "line": 320,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 285,
+          "line": 323,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 286,
+          "line": 325,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 287,
+          "line": 326,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 295,
+          "line": 327,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 302,
+          "line": 328,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 329,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 349,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 353,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 354,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 356,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 357,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 361,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 364,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 366,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 367,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 368,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 369,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 377,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 384,
           "kinds": [
             "time-or-revision"
           ]
@@ -10310,17 +10341,11 @@
     },
     {
       "path": "apps/api/src/realtime/resources.ts",
-      "sha256": "34babdf6d53f6c0c5be461e3890cf9e394382585576f6e71469cce9589ba62f0",
-      "lines": 196,
+      "sha256": "859756f558a00b188619ee9a492938d8644ec48f776918474cb94db1a0bd7f7c",
+      "lines": 191,
       "hits": [
         {
-          "line": 20,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 23,
+          "line": 21,
           "kinds": [
             "state"
           ]
@@ -10328,14 +10353,14 @@
         {
           "line": 24,
           "kinds": [
-            "state",
-            "flags"
+            "state"
           ]
         },
         {
-          "line": 26,
+          "line": 25,
           "kinds": [
-            "state"
+            "state",
+            "flags"
           ]
         },
         {
@@ -10347,12 +10372,11 @@
         {
           "line": 28,
           "kinds": [
-            "state",
-            "flags"
+            "state"
           ]
         },
         {
-          "line": 34,
+          "line": 29,
           "kinds": [
             "state",
             "flags"
@@ -10361,17 +10385,18 @@
         {
           "line": 35,
           "kinds": [
-            "state"
+            "state",
+            "flags"
           ]
         },
         {
-          "line": 43,
+          "line": 36,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 46,
+          "line": 44,
           "kinds": [
             "state"
           ]
@@ -10379,24 +10404,42 @@
         {
           "line": 47,
           "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 48,
+          "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 72,
+          "line": 73,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 89,
+          "line": 84,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 109,
+          "line": 104,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 119,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 121,
           "kinds": [
             "state"
           ]
@@ -10408,33 +10451,33 @@
           ]
         },
         {
-          "line": 126,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 129,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 130,
+          "line": 125,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 133,
+          "line": 128,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 176,
+          "line": 171,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 173,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 177,
           "kinds": [
             "state"
           ]
@@ -10446,26 +10489,14 @@
           ]
         },
         {
-          "line": 182,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 183,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 191,
+          "line": 186,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 193,
+          "line": 188,
           "kinds": [
             "state"
           ]
@@ -10474,8 +10505,8 @@
     },
     {
       "path": "apps/api/src/realtime/runtime-domains.ts",
-      "sha256": "2571aa432c6ac431a54758ffd5cabaf2833827f946a3f0f0932be2fff2f50566",
-      "lines": 147,
+      "sha256": "102583fb12d1b0563c20abe96ca02207e116d23028147b79451f2c5e6b932d3a",
+      "lines": 162,
       "hits": [
         {
           "line": 27,
@@ -10484,31 +10515,31 @@
           ]
         },
         {
-          "line": 52,
+          "line": 59,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 53,
+          "line": 60,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 65,
+          "line": 72,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 106,
+          "line": 114,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 143,
+          "line": 158,
           "kinds": [
             "state"
           ]
@@ -10525,6 +10556,12 @@
       "path": "apps/api/src/realtime/study-overview.ts",
       "sha256": "6397a1f3be227fd57912deafacb2cd28db1d66951a9ab8ced4b137420a33e8db",
       "lines": 56,
+      "hits": []
+    },
+    {
+      "path": "apps/api/src/realtime/subtitle-import.ts",
+      "sha256": "89022a744d76e1db46b4c06f171165ca0cbb1ef8bd0211fcfa0733a215dc52d6",
+      "lines": 58,
       "hits": []
     },
     {
@@ -14239,8 +14276,8 @@
     },
     {
       "path": "apps/web/src/client/bootstrap.ts",
-      "sha256": "1ee175bde07dbc63379eb4818d063769486a4059d126a882d9b1c3dac99284d6",
-      "lines": 52,
+      "sha256": "22e8d05c1e1dbbe36fc6a15af9a7fc7f4099af74d789bc61786754a5d9136376",
+      "lines": 58,
       "hits": [
         {
           "line": 3,
@@ -14267,25 +14304,13 @@
           ]
         },
         {
-          "line": 27,
+          "line": 25,
           "kinds": [
             "lifetime"
           ]
         },
         {
           "line": 28,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 29,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 32,
           "kinds": [
             "lifetime"
           ]
@@ -14303,19 +14328,43 @@
           ]
         },
         {
+          "line": 35,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 38,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 39,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
           "line": 40,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 48,
+          "line": 46,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 49,
+          "line": 54,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 55,
           "kinds": [
             "lifetime"
           ]
@@ -14534,9 +14583,89 @@
       "hits": []
     },
     {
+      "path": "apps/web/src/client/course-access.ts",
+      "sha256": "59659cb7c930cd5045266405cef3fc03495777c49f2547804664392724ef07f4",
+      "lines": 45,
+      "hits": [
+        {
+          "line": 2,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 10,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 11,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 14,
+          "kinds": [
+            "lifetime"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "apps/web/src/client/course-subtitles.ts",
+      "sha256": "749e56c56621f2d4d8c0c4f3532293948d4b2633b51b247acd7bfce47247b630",
+      "lines": 49,
+      "hits": [
+        {
+          "line": 14,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 21,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 28,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 31,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 43,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 44,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 46,
+          "kinds": [
+            "state"
+          ]
+        }
+      ]
+    },
+    {
       "path": "apps/web/src/client/learning.ts",
-      "sha256": "51d51c9b516bae80614e25ce9d22a584053468456bf84e58249a0e4eb2837df8",
-      "lines": 221,
+      "sha256": "e06c3b7fa0fbecea4536b5dfa6feb26d6695e4a6ea9a1cdf87c80db8ef59db8f",
+      "lines": 257,
       "hits": [
         {
           "line": 4,
@@ -14545,7 +14674,7 @@
           ]
         },
         {
-          "line": 16,
+          "line": 18,
           "kinds": [
             "state"
           ]
@@ -14553,101 +14682,143 @@
         {
           "line": 38,
           "kinds": [
-            "time-or-revision"
+            "lifetime"
           ]
         },
         {
-          "line": 61,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 62,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 66,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 89,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 91,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 93,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 110,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 132,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 151,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 163,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 168,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 201,
+          "line": 39,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 202,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 208,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 216,
+          "line": 47,
           "kinds": [
             "time-or-revision"
+          ]
+        },
+        {
+          "line": 71,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 72,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 77,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 100,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 102,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 104,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 121,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 143,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 162,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 174,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 179,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 188,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 194,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 205,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 206,
+          "kinds": [
+            "lifetime"
           ]
         },
         {
           "line": 217,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 237,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 238,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 244,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 252,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 253,
           "kinds": [
             "time-or-revision"
           ]
@@ -15833,7 +16004,7 @@
     },
     {
       "path": "apps/web/src/cloud/BotManagement.tsx",
-      "sha256": "d8987a1736bfe01e6c19504ade130f8d1a5602e790f7e47060219676e7e47124",
+      "sha256": "b3759a927aa420ce2fa7686a48301f82bb71feb035313caca4c56ba48d921a1f",
       "lines": 103,
       "hits": [
         {
@@ -17597,14 +17768,19 @@
     },
     {
       "path": "apps/web/src/cloud/activityStore.ts",
-      "sha256": "13ae76960428a94c12f6b079cdb8ad0f4b1f82e8548915a5d27570cda016babf",
-      "lines": 14,
+      "sha256": "fa0e4a01b1c92817bc2d90e43a9f4a223cfc53db1570a7b81a70a49d0b2701a4",
+      "lines": 15,
       "hits": [
         {
-          "line": 12,
+          "line": 3,
           "kinds": [
-            "state",
-            "flags"
+            "state"
+          ]
+        },
+        {
+          "line": 13,
+          "kinds": [
+            "state"
           ]
         }
       ]
@@ -19296,8 +19472,8 @@
     },
     {
       "path": "apps/web/src/cloud/tasks.ts",
-      "sha256": "ade73dd0a9eb223f3340da64842ad2edf9532eb166355dd9d2d221fd451428c7",
-      "lines": 232,
+      "sha256": "bd0a7e5fec7b3e21a7dbf80a1ca8a2e6bbc7a912f54a04b2642b0a491018f3f8",
+      "lines": 240,
       "hits": [
         {
           "line": 1,
@@ -19306,7 +19482,7 @@
           ]
         },
         {
-          "line": 15,
+          "line": 7,
           "kinds": [
             "state"
           ]
@@ -19318,39 +19494,39 @@
           ]
         },
         {
-          "line": 26,
-          "kinds": [
-            "state",
-            "flags"
-          ]
-        },
-        {
-          "line": 27,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 30,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 48,
-          "kinds": [
-            "state",
-            "flags"
-          ]
-        },
-        {
-          "line": 55,
+          "line": 17,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 57,
+          "line": 27,
+          "kinds": [
+            "state",
+            "flags"
+          ]
+        },
+        {
+          "line": 28,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 31,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 52,
+          "kinds": [
+            "state",
+            "flags"
+          ]
+        },
+        {
+          "line": 59,
           "kinds": [
             "state"
           ]
@@ -19362,57 +19538,45 @@
           ]
         },
         {
-          "line": 83,
+          "line": 65,
           "kinds": [
-            "state",
-            "flags"
+            "state"
           ]
         },
         {
           "line": 87,
           "kinds": [
-            "state"
+            "state",
+            "flags"
           ]
         },
         {
-          "line": 88,
+          "line": 91,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 117,
+          "line": 92,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 121,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 121,
+          "line": 125,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 127,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 142,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 144,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 145,
+          "line": 131,
           "kinds": [
             "lifetime"
           ]
@@ -19420,23 +19584,29 @@
         {
           "line": 146,
           "kinds": [
-            "lifetime"
+            "flags"
+          ]
+        },
+        {
+          "line": 148,
+          "kinds": [
+            "flags"
           ]
         },
         {
           "line": 149,
           "kinds": [
-            "flags"
+            "lifetime"
           ]
         },
         {
           "line": 150,
           "kinds": [
-            "flags"
+            "lifetime"
           ]
         },
         {
-          "line": 151,
+          "line": 153,
           "kinds": [
             "flags"
           ]
@@ -19454,39 +19624,33 @@
           ]
         },
         {
-          "line": 163,
+          "line": 158,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 183,
+          "line": 159,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 188,
+          "line": 167,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 191,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 196,
           "kinds": [
             "state"
-          ]
-        },
-        {
-          "line": 207,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 210,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 211,
-          "kinds": [
-            "flags"
           ]
         },
         {
@@ -19496,17 +19660,33 @@
           ]
         },
         {
-          "line": 221,
+          "line": 218,
           "kinds": [
-            "state",
             "flags"
           ]
         },
         {
-          "line": 227,
+          "line": 219,
           "kinds": [
-            "state",
             "flags"
+          ]
+        },
+        {
+          "line": 223,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 229,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 235,
+          "kinds": [
+            "state"
           ]
         }
       ]
@@ -20439,47 +20619,47 @@
     },
     {
       "path": "apps/web/src/components/ChatPanel.tsx",
-      "sha256": "b00bb07994553d5e9e9f4fd494ab10a0fedd85bb334e693e9844abf8ab31a46f",
-      "lines": 1673,
+      "sha256": "f92ad1f4e48143771774ffc020450a72463cdb36beb014347c22d17f42f68388",
+      "lines": 1674,
       "hits": [
         {
-          "line": 73,
+          "line": 49,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 227,
+          "line": 74,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 228,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 233,
+          "line": 234,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 285,
+          "line": 286,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 295,
+          "line": 296,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 339,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 341,
+          "line": 340,
           "kinds": [
             "flags"
           ]
@@ -20491,55 +20671,55 @@
           ]
         },
         {
-          "line": 376,
+          "line": 343,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 378,
+          "line": 377,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 422,
+          "line": 379,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 461,
+          "line": 423,
           "kinds": [
-            "state"
+            "flags"
           ]
         },
         {
           "line": 462,
           "kinds": [
-            "flags"
+            "state"
           ]
         },
         {
-          "line": 492,
+          "line": 463,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 495,
+          "line": 493,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 496,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 547,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 582,
+          "line": 548,
           "kinds": [
             "flags"
           ]
@@ -20551,9 +20731,9 @@
           ]
         },
         {
-          "line": 586,
+          "line": 584,
           "kinds": [
-            "lifetime"
+            "flags"
           ]
         },
         {
@@ -20565,23 +20745,23 @@
         {
           "line": 588,
           "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 589,
+          "kinds": [
             "flags"
           ]
         },
         {
-          "line": 629,
+          "line": 630,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 635,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 638,
+          "line": 636,
           "kinds": [
             "lifetime"
           ]
@@ -20593,15 +20773,15 @@
           ]
         },
         {
-          "line": 706,
+          "line": 640,
           "kinds": [
-            "flags"
+            "lifetime"
           ]
         },
         {
-          "line": 746,
+          "line": 707,
           "kinds": [
-            "lifetime"
+            "flags"
           ]
         },
         {
@@ -20611,45 +20791,45 @@
           ]
         },
         {
-          "line": 815,
+          "line": 748,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 816,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 839,
+          "line": 840,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 842,
+          "line": 843,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 849,
+          "line": 850,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 882,
+          "line": 883,
           "kinds": [
             "state"
-          ]
-        },
-        {
-          "line": 904,
-          "kinds": [
-            "state",
-            "flags"
           ]
         },
         {
           "line": 905,
           "kinds": [
+            "state",
             "flags"
           ]
         },
@@ -20660,57 +20840,57 @@
           ]
         },
         {
-          "line": 908,
+          "line": 907,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 912,
+          "line": 909,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 913,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 915,
+          "line": 916,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 923,
+          "line": 924,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 926,
+          "line": 927,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 946,
+          "line": 947,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 1045,
+          "line": 1046,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1051,
+          "line": 1052,
           "kinds": [
             "flags"
-          ]
-        },
-        {
-          "line": 1072,
-          "kinds": [
-            "lifetime"
           ]
         },
         {
@@ -20720,31 +20900,31 @@
           ]
         },
         {
-          "line": 1089,
+          "line": 1074,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 1169,
+          "line": 1090,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 1170,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1216,
+          "line": 1217,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1322,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 1339,
+          "line": 1323,
           "kinds": [
             "flags"
           ]
@@ -20758,17 +20938,17 @@
         {
           "line": 1341,
           "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 1345,
-          "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1347,
+          "line": 1342,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 1346,
           "kinds": [
             "flags"
           ]
@@ -20786,85 +20966,91 @@
           ]
         },
         {
-          "line": 1351,
+          "line": 1350,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1388,
+          "line": 1352,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1398,
+          "line": 1389,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1410,
+          "line": 1399,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1414,
+          "line": 1411,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1444,
+          "line": 1415,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1451,
+          "line": 1445,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 1452,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1456,
+          "line": 1457,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1467,
+          "line": 1468,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1536,
+          "line": 1537,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1590,
+          "line": 1591,
           "kinds": [
             "flags"
-          ]
-        },
-        {
-          "line": 1621,
-          "kinds": [
-            "state"
           ]
         },
         {
           "line": 1622,
           "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 1623,
+          "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1627,
+          "line": 1628,
           "kinds": [
             "flags"
           ]
@@ -21331,29 +21517,29 @@
     },
     {
       "path": "apps/web/src/components/FolderPlanCard.tsx",
-      "sha256": "d663b91a741b659ed4b80d8eeda182dbb4173535071c4d410cf16f745084ddc7",
-      "lines": 181,
+      "sha256": "779bd63ea326a9aa3db2fc6d7a7dc56132b2b15f51a34fbf3667b1d38fd82359",
+      "lines": 165,
       "hits": [
         {
-          "line": 17,
+          "line": 19,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 31,
+          "line": 33,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 59,
+          "line": 41,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 164,
+          "line": 148,
           "kinds": [
             "flags"
           ]
@@ -21362,53 +21548,59 @@
     },
     {
       "path": "apps/web/src/components/HandoutDocView.tsx",
-      "sha256": "4f568de70845eaefc1dff6a8bde24023189e744b772e2b4fe5d34e859cba11e9",
-      "lines": 844,
+      "sha256": "c696d31d7ccdc921c36115baf29f42727e8c845766b0f4f007d70059e3d831dd",
+      "lines": 853,
       "hits": [
         {
-          "line": 291,
+          "line": 47,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 48,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 300,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 309,
+          "line": 318,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 346,
+          "line": 355,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 590,
+          "line": 599,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 607,
+          "line": 616,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 611,
+          "line": 620,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 618,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 624,
+          "line": 627,
           "kinds": [
             "flags"
           ]
@@ -21420,13 +21612,19 @@
           ]
         },
         {
-          "line": 637,
+          "line": 642,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 640,
+          "line": 646,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 649,
           "kinds": [
             "flags"
           ]
@@ -21435,8 +21633,8 @@
     },
     {
       "path": "apps/web/src/components/HandoutPanel.tsx",
-      "sha256": "2a4bb96fc937f9bf17bf81935157a48b77bdb3419a7b9c4125d1779a4cce4453",
-      "lines": 377,
+      "sha256": "a7bda87693f496a30965b4c3ac0fce04536641ee86a66d9f07cd4ceb58af8f86",
+      "lines": 396,
       "hits": [
         {
           "line": 6,
@@ -21445,13 +21643,7 @@
           ]
         },
         {
-          "line": 50,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 51,
+          "line": 54,
           "kinds": [
             "lifetime"
           ]
@@ -21463,31 +21655,25 @@
           ]
         },
         {
-          "line": 56,
+          "line": 59,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 92,
+          "line": 60,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 94,
+          "line": 105,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 103,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 106,
+          "line": 107,
           "kinds": [
             "lifetime"
           ]
@@ -21495,29 +21681,41 @@
         {
           "line": 116,
           "kinds": [
-            "state"
+            "lifetime"
           ]
         },
         {
-          "line": 117,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 141,
+          "line": 119,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 159,
+          "line": 129,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 174,
+          "line": 131,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 132,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 137,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 158,
           "kinds": [
             "lifetime"
           ]
@@ -21529,74 +21727,98 @@
           ]
         },
         {
-          "line": 191,
+          "line": 176,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 179,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 193,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 194,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 210,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 200,
+          "line": 219,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 233,
+          "line": 252,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 237,
+          "line": 256,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 243,
+          "line": 262,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 275,
+          "line": 294,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 290,
+          "line": 309,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 316,
+          "line": 335,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 344,
+          "line": 363,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 348,
+          "line": 367,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 349,
+          "line": 368,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 364,
+          "line": 383,
           "kinds": [
             "state"
           ]
@@ -22536,11 +22758,35 @@
     },
     {
       "path": "apps/web/src/components/ResourceFileIcon.tsx",
-      "sha256": "f69c26164acfabf48df6f41d85048968361287a605973938cd855a4d3b332e32",
-      "lines": 84,
+      "sha256": "19a3bb3a93eb279023546b83e9fb713f3f75ea56d2cc61d0de0cd1b9518a60dd",
+      "lines": 89,
       "hits": [
         {
-          "line": 79,
+          "line": 4,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 21,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 43,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 78,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 84,
           "kinds": [
             "flags"
           ]
@@ -23336,23 +23582,23 @@
     },
     {
       "path": "apps/web/src/components/SubtitlePanel.tsx",
-      "sha256": "8a565e9caa18ec85811ef6ff67321735ecf73872e48db1c480f6727e648e09b0",
-      "lines": 339,
+      "sha256": "b094af329fb719351aff315b656a5b592efceb1ccff03df81b1ae61a8fe62770",
+      "lines": 297,
       "hits": [
         {
-          "line": 41,
+          "line": 39,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 46,
+          "line": 44,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 91,
+          "line": 86,
           "kinds": [
             "flags"
           ]
@@ -23364,104 +23610,92 @@
           ]
         },
         {
-          "line": 106,
+          "line": 99,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 109,
+          "line": 100,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 102,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 153,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 154,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 183,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 119,
+          "line": 185,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 135,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 136,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 138,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 196,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 197,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 226,
+          "line": 189,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 228,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 232,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 237,
+          "line": 194,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 242,
+          "line": 199,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 303,
+          "line": 209,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 309,
+          "line": 260,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 266,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 320,
+          "line": 276,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 326,
+          "line": 284,
           "kinds": [
             "flags"
           ]
@@ -25787,8 +26021,247 @@
       ]
     },
     {
+      "path": "apps/web/src/components/useCourseMetadata.ts",
+      "sha256": "fb23c14612bcb3230050a46be5da4507a3b656173beb56c36b497e4f1abdd218",
+      "lines": 72,
+      "hits": [
+        {
+          "line": 5,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 18,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 19,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 20,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 22,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 24,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 26,
+          "kinds": [
+            "state",
+            "lifetime"
+          ]
+        },
+        {
+          "line": 31,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 33,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 35,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 37,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 39,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 49,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 50,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 67,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 68,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 69,
+          "kinds": [
+            "state",
+            "lifetime"
+          ]
+        },
+        {
+          "line": 70,
+          "kinds": [
+            "state",
+            "lifetime"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "apps/web/src/components/useCourseSubtitles.ts",
+      "sha256": "68e57276cff7bdc141451290fc2281015ecae8bbe47c65c1b468afa0b66acc2a",
+      "lines": 98,
+      "hits": [
+        {
+          "line": 5,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 16,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 22,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 23,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 25,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 30,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 31,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 41,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 47,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 50,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 53,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 54,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 66,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 73,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 78,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 85,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 89,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 95,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 96,
+          "kinds": [
+            "state"
+          ]
+        }
+      ]
+    },
+    {
       "path": "apps/web/src/components/useLatestHandout.ts",
-      "sha256": "f996f31aae7ed1853bc492e61b572e09a5b4096944b53daf9efee55d7797b291",
+      "sha256": "4053187eff7602e611d4af923e0c0121ac1550f0ebb28ba2cd85bdb945c5a61a",
       "lines": 54,
       "hits": [
         {
@@ -26188,23 +26661,29 @@
     },
     {
       "path": "apps/web/src/handout/useReadingPos.ts",
-      "sha256": "571383b57235e867871a27e8aca6cf99e6db0ef65db617d6608fe4f114eded30",
-      "lines": 128,
+      "sha256": "4582da73027cc5b01c7fe7070cc34976f08f89678f0ab23893ffd59e2def058a",
+      "lines": 131,
       "hits": [
         {
-          "line": 61,
+          "line": 55,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 64,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 106,
+          "line": 83,
           "kinds": [
-            "flags"
+            "lifetime"
           ]
         },
         {
-          "line": 113,
+          "line": 109,
           "kinds": [
             "flags"
           ]
@@ -26212,11 +26691,17 @@
         {
           "line": 116,
           "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 119,
+          "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 118,
+          "line": 121,
           "kinds": [
             "flags"
           ]
@@ -29057,8 +29542,8 @@
     },
     {
       "path": "apps/web/src/pages/Library.tsx",
-      "sha256": "03e2c765a6f9405855bba0a54e06f18bba862eaa12c36f0225dbb24341dd2889",
-      "lines": 2796,
+      "sha256": "9024d2d19d5491bd58101a43de5e5936bd6917a19e9d2fa61e0fea81917129ba",
+      "lines": 2806,
       "hits": [
         {
           "line": 56,
@@ -29067,13 +29552,7 @@
           ]
         },
         {
-          "line": 135,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 150,
+          "line": 136,
           "kinds": [
             "state"
           ]
@@ -29109,172 +29588,166 @@
           ]
         },
         {
-          "line": 161,
+          "line": 156,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 195,
+          "line": 162,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 217,
+          "line": 196,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 218,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 225,
+          "line": 226,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 254,
+          "line": 255,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 285,
+          "line": 287,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 288,
+          "line": 290,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 291,
+          "line": 293,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 312,
+          "line": 314,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 315,
+          "line": 317,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 320,
+          "line": 322,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 373,
+          "line": 375,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 383,
+          "line": 385,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 413,
+          "line": 415,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 422,
+          "line": 424,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 495,
+          "line": 434,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 504,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 496,
+          "line": 505,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 552,
+          "line": 561,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 577,
+          "line": 586,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 595,
+          "line": 604,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 597,
+          "line": 606,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 598,
+          "line": 607,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 602,
+          "line": 611,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 605,
+          "line": 614,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 609,
+          "line": 618,
           "kinds": [
             "flags"
-          ]
-        },
-        {
-          "line": 653,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 660,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 661,
-          "kinds": [
-            "lifetime"
           ]
         },
         {
@@ -29284,31 +29757,31 @@
           ]
         },
         {
-          "line": 667,
+          "line": 670,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 671,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 669,
+          "line": 673,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 674,
+          "line": 677,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 680,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 682,
+          "line": 679,
           "kinds": [
             "lifetime"
           ]
@@ -29320,97 +29793,109 @@
           ]
         },
         {
-          "line": 686,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
           "line": 690,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 695,
+          "line": 692,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 698,
+          "line": 694,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 704,
+          "line": 696,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 706,
+          "line": 700,
           "kinds": [
-            "state"
+            "lifetime"
+          ]
+        },
+        {
+          "line": 705,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 708,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 710,
+          "kinds": [
+            "lifetime"
           ]
         },
         {
           "line": 716,
           "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 718,
+          "kinds": [
             "state"
           ]
         },
         {
-          "line": 844,
+          "line": 728,
           "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 845,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 846,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 854,
-          "kinds": [
-            "lifetime"
+            "state"
           ]
         },
         {
           "line": 856,
           "kinds": [
-            "state"
+            "lifetime"
+          ]
+        },
+        {
+          "line": 857,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 858,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 866,
+          "kinds": [
+            "lifetime"
           ]
         },
         {
           "line": 868,
           "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 880,
+          "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1026,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 1027,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 1028,
+          "line": 1037,
           "kinds": [
             "state"
           ]
@@ -29422,151 +29907,145 @@
           ]
         },
         {
-          "line": 1345,
+          "line": 1039,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 1049,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 1355,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 1346,
+          "line": 1356,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 1347,
+          "line": 1357,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 1348,
+          "line": 1358,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 1349,
+          "line": 1359,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 1459,
+          "line": 1469,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 1460,
+          "line": 1470,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 1547,
+          "line": 1557,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 1621,
+          "line": 1631,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1625,
+          "line": 1635,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1626,
+          "line": 1636,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1628,
+          "line": 1638,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1630,
+          "line": 1640,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1632,
+          "line": 1642,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1634,
+          "line": 1644,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1647,
+          "line": 1657,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1653,
+          "line": 1663,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1654,
+          "line": 1664,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1797,
+          "line": 1807,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1815,
+          "line": 1825,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 1827,
+          "line": 1837,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1903,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 1914,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 1921,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 1923,
+          "line": 1913,
           "kinds": [
             "state"
           ]
@@ -29578,46 +30057,58 @@
           ]
         },
         {
-          "line": 1949,
+          "line": 1931,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 1971,
+          "line": 1933,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 1934,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 1959,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 1981,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 2014,
+          "line": 2024,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 2233,
+          "line": 2243,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 2282,
+          "line": 2292,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 2283,
+          "line": 2293,
           "kinds": [
             "state"
-          ]
-        },
-        {
-          "line": 2305,
-          "kinds": [
-            "flags"
           ]
         },
         {
@@ -29627,49 +30118,49 @@
           ]
         },
         {
-          "line": 2396,
+          "line": 2325,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 2458,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 2465,
+          "line": 2406,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 2466,
+          "line": 2468,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 2594,
+          "line": 2475,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 2654,
+          "line": 2476,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 2656,
+          "line": 2604,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 2664,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 2661,
+          "line": 2666,
           "kinds": [
             "state"
           ]
@@ -29681,7 +30172,13 @@
           ]
         },
         {
-          "line": 2672,
+          "line": 2681,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 2682,
           "kinds": [
             "state"
           ]
@@ -29690,101 +30187,113 @@
     },
     {
       "path": "apps/web/src/pages/Player.tsx",
-      "sha256": "e34441ff44b1e7769e7e4cad4103e66840874a1509f89df5422ada8c3b5d8963",
-      "lines": 757,
+      "sha256": "07f3f234812ee6aee7c838784885e94cc2df9211ce0eb1e2fcd1f8713ec34172",
+      "lines": 761,
       "hits": [
         {
-          "line": 132,
+          "line": 137,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 141,
+          "line": 146,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 145,
+          "line": 150,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 168,
+          "line": 173,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 208,
+          "line": 210,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 289,
+          "line": 216,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 350,
+          "line": 288,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 294,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 354,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 435,
+          "line": 439,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 449,
+          "line": 453,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 469,
+          "line": 473,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 470,
+          "line": 474,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 471,
+          "line": 475,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 516,
+          "line": 520,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 532,
+          "line": 536,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 534,
+          "line": 538,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 660,
+          "line": 664,
           "kinds": [
             "state",
             "flags"
@@ -29837,8 +30346,8 @@
     },
     {
       "path": "apps/web/src/pages/ResourceLibrary.tsx",
-      "sha256": "2643954759dfbe7c9280f51fb3d77c18ae527d510fd56349e973f0f09c8c5eec",
-      "lines": 399,
+      "sha256": "17dfb3786da2adf6a27bdb8e7f555854e3f4d97f8ce1f46d4a0b65409005eebf",
+      "lines": 398,
       "hits": [
         {
           "line": 65,
@@ -29895,43 +30404,49 @@
           ]
         },
         {
-          "line": 200,
+          "line": 199,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 204,
+          "line": 203,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 255,
+          "line": 254,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 259,
+          "line": 258,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 277,
+          "line": 276,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 285,
+          "line": 284,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 287,
+          "line": 286,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 292,
           "kinds": [
             "flags"
           ]
@@ -29943,7 +30458,7 @@
           ]
         },
         {
-          "line": 294,
+          "line": 295,
           "kinds": [
             "flags"
           ]
@@ -29955,68 +30470,62 @@
           ]
         },
         {
-          "line": 297,
+          "line": 311,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 312,
+          "line": 322,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 323,
+          "line": 342,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 343,
+          "line": 345,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 346,
+          "line": 357,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 358,
+          "line": 362,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 363,
+          "line": 364,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 365,
+          "line": 370,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 371,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 378,
+          "line": 377,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 390,
+          "line": 389,
           "kinds": [
             "flags"
           ]
@@ -30336,13 +30845,55 @@
     },
     {
       "path": "apps/web/src/pipelines/coverQueue.ts",
-      "sha256": "bd88521916af7d2592e3c4d4d709fbe7a833eb15ac9475c1a0a210c7653d5732",
-      "lines": 98,
+      "sha256": "0d919319777862599a09c5204adf7b5fb7809bf845f81eaaf1974f028afc4613",
+      "lines": 130,
       "hits": [
         {
-          "line": 15,
+          "line": 5,
           "kinds": [
             "state"
+          ]
+        },
+        {
+          "line": 11,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 24,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 110,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 111,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 113,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 115,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 122,
+          "kinds": [
+            "time-or-revision"
           ]
         }
       ]
@@ -30355,8 +30906,8 @@
     },
     {
       "path": "apps/web/src/pipelines/folderPlan.ts",
-      "sha256": "61fde159ad34869c1720f8579c9b079a14e57e7c58f09ce56a99018545208e17",
-      "lines": 31,
+      "sha256": "d3f584b7d0c66a2978baddee1dfa4f533682f17d73b740f7395619c0921ae0e6",
+      "lines": 30,
       "hits": []
     },
     {
@@ -30374,8 +30925,8 @@
     },
     {
       "path": "apps/web/src/pipelines/handoutEdit.ts",
-      "sha256": "8f20ec69e378043dbfd2e53650128ef052b55f366fcfa0fba1320adadb6b5744",
-      "lines": 73,
+      "sha256": "d8c6ef05a39a314428b2766ad6a31dc1fcf2ee83e1e19a1e547976cdf9e41127",
+      "lines": 76,
       "hits": [
         {
           "line": 6,
@@ -30384,16 +30935,29 @@
           ]
         },
         {
-          "line": 53,
+          "line": 34,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 35,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 56,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 69,
+          "line": 72,
           "kinds": [
-            "state"
+            "state",
+            "lifetime"
           ]
         }
       ]
@@ -30541,47 +31105,41 @@
     },
     {
       "path": "apps/web/src/plugins/PluginActionsView.tsx",
-      "sha256": "64338680faba33b92880634d2c868126cc8e16a4f910ba5ce681d74752dcf467",
-      "lines": 72,
+      "sha256": "2745ed3da22b9d4b85ef9ebb74b35797252efcee9ce23e0aa184817026489379",
+      "lines": 86,
       "hits": [
         {
-          "line": 22,
+          "line": 31,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 23,
+          "line": 32,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 25,
+          "line": 34,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 27,
+          "line": 36,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 46,
+          "line": 58,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 49,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
-          "line": 50,
+          "line": 62,
           "kinds": [
             "lifetime"
           ]
@@ -30593,7 +31151,13 @@
           ]
         },
         {
-          "line": 65,
+          "line": 76,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 78,
           "kinds": [
             "state"
           ]
@@ -30729,35 +31293,35 @@
     },
     {
       "path": "apps/web/src/plugins/PluginSlotView.tsx",
-      "sha256": "7890fdff790104aee0107034e436d338643c3a38d357496d889e1f537ff37f93",
-      "lines": 48,
+      "sha256": "5742935699c766bb8555048e39d9f5eb6b7af5eb195639db7e758ed00eee0f2d",
+      "lines": 52,
       "hits": [
         {
-          "line": 18,
+          "line": 22,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 25,
+          "line": 29,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 27,
+          "line": 31,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 35,
+          "line": 39,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 36,
+          "line": 40,
           "kinds": [
             "flags"
           ]
@@ -30974,79 +31538,85 @@
     },
     {
       "path": "apps/web/src/plugins/learning/FlashcardsView.tsx",
-      "sha256": "0d39ac4d6b097667d99467cc3b7599b6500c8e39f8ddb73f02acffc856bc90cb",
-      "lines": 64,
+      "sha256": "56634ccdac2edd508c6f534dca066b142bb5c3dfbbef87c9a241db9c93eead20",
+      "lines": 65,
       "hits": [
         {
-          "line": 9,
+          "line": 6,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 25,
+          "line": 10,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 29,
+          "line": 26,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 36,
+          "line": 30,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 37,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 39,
+          "line": 40,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 47,
+          "line": 48,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 50,
+          "line": 51,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 53,
+          "line": 54,
           "kinds": [
             "state",
-            "flags"
-          ]
-        },
-        {
-          "line": 57,
-          "kinds": [
             "flags"
           ]
         },
         {
           "line": 58,
           "kinds": [
-            "state",
             "flags"
           ]
         },
         {
           "line": 59,
           "kinds": [
-            "state"
+            "state",
+            "flags"
           ]
         },
         {
           "line": 60,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 61,
           "kinds": [
             "state"
           ]
@@ -31055,30 +31625,36 @@
     },
     {
       "path": "apps/web/src/plugins/learning/MaterialToolsView.tsx",
-      "sha256": "052c821772f7ce9938c5c2540fed84891168568d8ddaafe8310d05767539c463",
-      "lines": 39,
+      "sha256": "8fc92ebdd724a81097fb8c0f9c2338a3ec14e8254f77bbf8a4c984c3f11553ec",
+      "lines": 40,
       "hits": [
         {
-          "line": 9,
+          "line": 6,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 22,
+          "line": 10,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 23,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 29,
+          "line": 30,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 36,
+          "line": 37,
           "kinds": [
             "state"
           ]
@@ -31087,11 +31663,11 @@
     },
     {
       "path": "apps/web/src/plugins/learning/PracticeView.tsx",
-      "sha256": "ad05e6e4b426ef7000e34566d4fd81d99ee5f7b2981b55153a4baae36f7fbfc6",
-      "lines": 80,
+      "sha256": "eb54838e4f55507713aa15208ed3e9f3029a38ec056875c12e780cf7d27b7ffd",
+      "lines": 81,
       "hits": [
         {
-          "line": 27,
+          "line": 6,
           "kinds": [
             "state"
           ]
@@ -31099,42 +31675,48 @@
         {
           "line": 28,
           "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 29,
+          "kinds": [
             "flags"
           ]
         },
         {
-          "line": 43,
+          "line": 44,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 47,
+          "line": 48,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 54,
+          "line": 55,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 69,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 74,
+          "line": 70,
           "kinds": [
             "flags"
           ]
         },
         {
           "line": 75,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 76,
           "kinds": [
             "state"
           ]
@@ -31192,23 +31774,53 @@
     },
     {
       "path": "apps/web/src/plugins/legacy-actions.ts",
-      "sha256": "df821d3f6b09a680c57f3fbd11e91e3fd9c94f13c74901eaa8b829ed31d9e939",
-      "lines": 45,
+      "sha256": "2a94e8d56315a745a7fe70f99246b879ab3342df5cdf54b7cdb7466a8af6067e",
+      "lines": 49,
       "hits": [
         {
-          "line": 23,
+          "line": 4,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 27,
+          "line": 11,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 40,
+          "line": 12,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 15,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 25,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 27,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 31,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 44,
           "kinds": [
             "lifetime"
           ]
@@ -31324,6 +31936,117 @@
       "sha256": "d1089c4db7cf5d9d94483fe91c1d7ef3a5dec3d63bd8025606457a0027650d19",
       "lines": 18,
       "hits": []
+    },
+    {
+      "path": "apps/web/src/plugins/usePluginScope.ts",
+      "sha256": "564c879edee5cc900b123c24734f025f364ee951a39e992370958074baefb9ac",
+      "lines": 57,
+      "hits": [
+        {
+          "line": 4,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 13,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 15,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 17,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 19,
+          "kinds": [
+            "state",
+            "lifetime"
+          ]
+        },
+        {
+          "line": 24,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 26,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 27,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 30,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 37,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 40,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 41,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 49,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 50,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 53,
+          "kinds": [
+            "state",
+            "lifetime"
+          ]
+        },
+        {
+          "line": 54,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 55,
+          "kinds": [
+            "state"
+          ]
+        }
+      ]
     },
     {
       "path": "apps/web/src/projects/ProjectFiles.tsx",
@@ -32447,24 +33170,29 @@
     },
     {
       "path": "apps/web/src/store/chatTaskState.ts",
-      "sha256": "b88954f6541ac9e48575d2d87081091cf1ef603e5f2def37808827b262bae723",
-      "lines": 20,
+      "sha256": "ec901a6da7c002c3a2e4aba1889421c58be60533a9a5d39eb6507e04b947e86b",
+      "lines": 22,
       "hits": [
         {
-          "line": 3,
-          "kinds": [
-            "state",
-            "flags"
-          ]
-        },
-        {
-          "line": 9,
+          "line": 2,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 16,
+          "line": 5,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 11,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 18,
           "kinds": [
             "state"
           ]
@@ -32869,8 +33597,8 @@
     },
     {
       "path": "apps/web/src/store/courseChat.ts",
-      "sha256": "22ef84fa5b9500a17e960078ea95b427d91f4a1593a9cacd2bbafc2aa47bf988",
-      "lines": 603,
+      "sha256": "1d77b2d73c5dccab2a72dbc439a5fa209a5e60bad0f640d27e39d242d1a5f6e8",
+      "lines": 604,
       "hits": [
         {
           "line": 2,
@@ -32879,39 +33607,39 @@
           ]
         },
         {
-          "line": 70,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 85,
+          "line": 7,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 90,
+          "line": 71,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 86,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 100,
+          "line": 91,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 101,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 104,
+          "line": 105,
           "kinds": [
             "flags"
-          ]
-        },
-        {
-          "line": 112,
-          "kinds": [
-            "lifetime"
           ]
         },
         {
@@ -32921,69 +33649,69 @@
           ]
         },
         {
-          "line": 127,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 128,
-          "kinds": [
-            "state",
-            "flags"
-          ]
-        },
-        {
-          "line": 142,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 143,
-          "kinds": [
-            "state",
-            "flags"
-          ]
-        },
-        {
-          "line": 172,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 175,
+          "line": 114,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 178,
+          "line": 128,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 203,
+          "line": 129,
+          "kinds": [
+            "state",
+            "flags"
+          ]
+        },
+        {
+          "line": 143,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 213,
+          "line": 144,
           "kinds": [
-            "state"
+            "state",
+            "flags"
           ]
         },
         {
-          "line": 219,
+          "line": 173,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 221,
+          "line": 176,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 179,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 204,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 214,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 220,
           "kinds": [
             "flags"
           ]
@@ -33007,20 +33735,19 @@
           ]
         },
         {
-          "line": 227,
+          "line": 225,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 252,
+          "line": 228,
           "kinds": [
-            "state",
             "flags"
           ]
         },
         {
-          "line": 262,
+          "line": 253,
           "kinds": [
             "state"
           ]
@@ -33032,45 +33759,45 @@
           ]
         },
         {
-          "line": 277,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 298,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 301,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 308,
+          "line": 264,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 364,
+          "line": 278,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 376,
+          "line": 299,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 381,
+          "line": 302,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 309,
           "kinds": [
             "state"
+          ]
+        },
+        {
+          "line": 365,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 377,
+          "kinds": [
+            "flags"
           ]
         },
         {
@@ -33086,27 +33813,27 @@
           ]
         },
         {
-          "line": 392,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 394,
+          "line": 384,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 400,
+          "line": 393,
           "kinds": [
-            "state",
             "flags"
           ]
         },
         {
-          "line": 407,
+          "line": 395,
           "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 401,
+          "kinds": [
+            "state",
             "flags"
           ]
         },
@@ -33117,13 +33844,13 @@
           ]
         },
         {
-          "line": 412,
+          "line": 409,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 416,
+          "line": 413,
           "kinds": [
             "flags"
           ]
@@ -33135,27 +33862,27 @@
           ]
         },
         {
-          "line": 425,
+          "line": 418,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 428,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 430,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 440,
+          "line": 426,
           "kinds": [
             "flags"
+          ]
+        },
+        {
+          "line": 429,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 431,
+          "kinds": [
+            "state"
           ]
         },
         {
@@ -33165,52 +33892,52 @@
           ]
         },
         {
-          "line": 447,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 463,
+          "line": 442,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 465,
+          "line": 448,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 464,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 470,
+          "line": 466,
           "kinds": [
-            "state"
+            "flags"
           ]
         },
         {
           "line": 471,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 472,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 481,
+          "line": 482,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 491,
+          "line": 492,
           "kinds": [
             "flags"
-          ]
-        },
-        {
-          "line": 501,
-          "kinds": [
-            "state"
           ]
         },
         {
@@ -33220,7 +33947,7 @@
           ]
         },
         {
-          "line": 527,
+          "line": 503,
           "kinds": [
             "state"
           ]
@@ -33232,7 +33959,7 @@
           ]
         },
         {
-          "line": 583,
+          "line": 529,
           "kinds": [
             "state"
           ]
@@ -33244,7 +33971,13 @@
           ]
         },
         {
-          "line": 586,
+          "line": 585,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 587,
           "kinds": [
             "state"
           ]
@@ -33608,8 +34341,8 @@
     },
     {
       "path": "apps/web/src/store/studyTime.ts",
-      "sha256": "5e3611fbb8ace7f88fea5f6f0c470e50c8a9ab6e818e9d59d311593d90ffa24f",
-      "lines": 256,
+      "sha256": "b4604c67eb98d74341dcc70388c95e1276aa210c640a003b3daad5d3f191a895",
+      "lines": 319,
       "hits": [
         {
           "line": 6,
@@ -33648,13 +34381,49 @@
           ]
         },
         {
-          "line": 73,
+          "line": 78,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 99,
+          "line": 88,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 90,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 91,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 95,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 96,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 97,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 100,
           "kinds": [
             "flags"
           ]
@@ -33662,65 +34431,30 @@
         {
           "line": 102,
           "kinds": [
-            "flags"
+            "lifetime"
           ]
         },
         {
-          "line": 107,
+          "line": 115,
+          "kinds": [
+            "flags",
+            "lifetime"
+          ]
+        },
+        {
+          "line": 137,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 111,
+          "line": 142,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 112,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 113,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 120,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 129,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 131,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 132,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 133,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 148,
+          "line": 149,
           "kinds": [
             "flags"
           ]
@@ -33732,97 +34466,175 @@
           ]
         },
         {
-          "line": 181,
+          "line": 153,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 182,
+          "line": 154,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 185,
+          "line": 155,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 166,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 175,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 176,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 178,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 179,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 180,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 196,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 198,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 232,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 186,
+          "line": 234,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 187,
+          "line": 241,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 242,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 246,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 190,
+          "line": 247,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 248,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 251,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 191,
+          "line": 252,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 192,
+          "line": 253,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 194,
+          "line": 255,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 203,
+          "line": 264,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 204,
+          "line": 265,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 213,
+          "line": 275,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 216,
+          "line": 278,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 230,
+          "line": 292,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 231,
+          "line": 293,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 249,
+          "line": 312,
           "kinds": [
             "flags"
           ]
@@ -33831,8 +34643,8 @@
     },
     {
       "path": "apps/web/src/store/subtitles.ts",
-      "sha256": "43d6dc8299fc49b1fcbc400019917d1ab929f96f13c4c0bd740238c8b0e4b113",
-      "lines": 8,
+      "sha256": "055bdbaead75f109a526823d287e90acffa3bb728de597187824088c0cb86726",
+      "lines": 7,
       "hits": []
     },
     {
@@ -36532,8 +37344,8 @@
     },
     {
       "path": "packages/client-core/src/index.ts",
-      "sha256": "50268bd8d6ae7ad1abcef89d657ec293e1a03183d924b68f9884318c8957d958",
-      "lines": 467,
+      "sha256": "895b22315131c0532e25a376fa6a3f0ed0e926ec378c3cb797f891c87c618485",
+      "lines": 488,
       "hits": [
         {
           "line": 23,
@@ -36869,43 +37681,13 @@
           ]
         },
         {
-          "line": 323,
+          "line": 344,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 329,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 331,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 338,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 340,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 345,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 347,
+          "line": 350,
           "kinds": [
             "flags"
           ]
@@ -36917,25 +37699,13 @@
           ]
         },
         {
-          "line": 354,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 358,
-          "kinds": [
-            "lifetime"
-          ]
-        },
-        {
           "line": 359,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 363,
+          "line": 361,
           "kinds": [
             "flags"
           ]
@@ -36947,7 +37717,7 @@
           ]
         },
         {
-          "line": 370,
+          "line": 368,
           "kinds": [
             "flags"
           ]
@@ -36959,9 +37729,15 @@
           ]
         },
         {
-          "line": 377,
+          "line": 375,
           "kinds": [
             "flags"
+          ]
+        },
+        {
+          "line": 379,
+          "kinds": [
+            "lifetime"
           ]
         },
         {
@@ -36989,16 +37765,15 @@
           ]
         },
         {
-          "line": 397,
+          "line": 394,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 400,
+          "line": 398,
           "kinds": [
-            "lifetime",
-            "time-or-revision"
+            "flags"
           ]
         },
         {
@@ -37010,83 +37785,120 @@
         {
           "line": 405,
           "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 408,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 412,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 418,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 421,
+          "kinds": [
+            "lifetime",
             "time-or-revision"
           ]
         },
         {
-          "line": 406,
+          "line": 422,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 407,
+          "line": 426,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 411,
+          "line": 427,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 413,
+          "line": 428,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 432,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 414,
+          "line": 434,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 435,
           "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 415,
+          "line": 436,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 417,
+          "line": 438,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 439,
+          "line": 460,
           "kinds": [
             "time-or-revision"
-          ]
-        },
-        {
-          "line": 440,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 457,
-          "kinds": [
-            "lifetime"
           ]
         },
         {
           "line": 461,
           "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 478,
+          "kinds": [
             "lifetime"
           ]
         },
         {
-          "line": 462,
+          "line": 482,
+          "kinds": [
+            "lifetime"
+          ]
+        },
+        {
+          "line": 483,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 463,
+          "line": 484,
           "kinds": [
             "flags",
             "lifetime"
@@ -37543,8 +38355,8 @@
     },
     {
       "path": "packages/contracts/src/client-runtime.ts",
-      "sha256": "cb1a1acf15a61dfbe11ad20ae15e52fead275e34adc411a593176519cd0693f7",
-      "lines": 251,
+      "sha256": "a459c054a496f7dd875fd1dfd7547551bcd7b70b6d2e5fcc0296c1cf4f8f8452",
+      "lines": 266,
       "hits": [
         {
           "line": 1,
@@ -37553,63 +38365,62 @@
           ]
         },
         {
-          "line": 25,
+          "line": 2,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 27,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 26,
+          "line": 28,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 30,
+          "line": 32,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 44,
+          "line": 35,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 54,
+          "line": 49,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 59,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 79,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 80,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 74,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 75,
-          "kinds": [
-            "state",
-            "flags"
-          ]
-        },
-        {
-          "line": 76,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 77,
-          "kinds": [
-            "state"
-          ]
-        },
-        {
-          "line": 78,
+          "line": 81,
           "kinds": [
             "state"
           ]
@@ -37617,36 +38428,42 @@
         {
           "line": 82,
           "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 83,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 87,
+          "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 88,
+          "line": 93,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 89,
+          "line": 94,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 98,
+          "line": 103,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 99,
-          "kinds": [
-            "time-or-revision"
-          ]
-        },
-        {
-          "line": 107,
+          "line": 104,
           "kinds": [
             "time-or-revision"
           ]
@@ -37658,25 +38475,37 @@
           ]
         },
         {
-          "line": 114,
+          "line": 115,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 118,
+          "line": 119,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 134,
+          "line": 121,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 142,
+          "line": 127,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 130,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 133,
           "kinds": [
             "time-or-revision"
           ]
@@ -37684,78 +38513,90 @@
         {
           "line": 149,
           "kinds": [
-            "state"
+            "time-or-revision"
           ]
         },
         {
-          "line": 155,
+          "line": 157,
+          "kinds": [
+            "time-or-revision"
+          ]
+        },
+        {
+          "line": 164,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 158,
+          "line": 170,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 173,
           "kinds": [
             "state",
             "flags"
           ]
         },
         {
-          "line": 176,
+          "line": 191,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 182,
+          "line": 197,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 185,
+          "line": 200,
           "kinds": [
             "state"
           ]
         },
         {
-          "line": 190,
+          "line": 205,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 219,
+          "line": 234,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 220,
+          "line": 235,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 221,
+          "line": 236,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 222,
+          "line": 237,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 223,
+          "line": 238,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 241,
+          "line": 256,
           "kinds": [
             "state"
           ]
@@ -37764,20 +38605,25 @@
     },
     {
       "path": "packages/contracts/src/cloud.ts",
-      "sha256": "b9fd8d05fa7818c9bbe0ab9e8db5af044b2ebd488e3f86d124bc0830ba244455",
-      "lines": 143,
+      "sha256": "4e08c80a649c3f8ab72d8a1097c0d8a00a1d6cd78abf5f2cce241730ee83b13b",
+      "lines": 144,
       "hits": [
         {
-          "line": 22,
+          "line": 1,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 23,
           "kinds": [
             "time-or-revision"
           ]
         },
         {
-          "line": 136,
+          "line": 137,
           "kinds": [
-            "state",
-            "flags"
+            "state"
           ]
         }
       ]
@@ -38089,6 +38935,79 @@
       ]
     },
     {
+      "path": "packages/contracts/src/task-status.ts",
+      "sha256": "5c0316b366f27242f569a95286c1f2074c726998d493bd1d5daa156bc3b48259",
+      "lines": 27,
+      "hits": [
+        {
+          "line": 4,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 8,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 13,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 17,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 19,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 21,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 22,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 23,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 24,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 25,
+          "kinds": [
+            "state"
+          ]
+        },
+        {
+          "line": 26,
+          "kinds": [
+            "state"
+          ]
+        }
+      ]
+    },
+    {
       "path": "packages/contracts/src/web-search.ts",
       "sha256": "2b9440f6a111d2bf2ed06c22645eb72ad2b4bfac55b19dcc9366f7a94bc39b3a",
       "lines": 43,
@@ -38247,8 +39166,8 @@
     },
     {
       "path": "packages/study-core/src/api/dsml.ts",
-      "sha256": "f6113a739cbe4671db08a085bd7e3467a22c8a5a74c83bc816d63d1c4965ee4b",
-      "lines": 453,
+      "sha256": "39503372c312adda81668e04ecd14ad5846013f84d8166685de771e8ffd06358",
+      "lines": 470,
       "hits": [
         {
           "line": 223,
@@ -38263,25 +39182,19 @@
           ]
         },
         {
-          "line": 237,
+          "line": 243,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 259,
+          "line": 265,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 263,
-          "kinds": [
-            "flags"
-          ]
-        },
-        {
-          "line": 264,
+          "line": 274,
           "kinds": [
             "flags"
           ]
@@ -38293,13 +39206,19 @@
           ]
         },
         {
-          "line": 322,
+          "line": 290,
           "kinds": [
             "flags"
           ]
         },
         {
-          "line": 343,
+          "line": 336,
+          "kinds": [
+            "flags"
+          ]
+        },
+        {
+          "line": 358,
           "kinds": [
             "flags"
           ]

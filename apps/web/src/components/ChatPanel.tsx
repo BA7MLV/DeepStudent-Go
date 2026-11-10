@@ -46,6 +46,7 @@ import {
 import { StreamParagraph, useMessageEnter } from './motion';
 import ResponseTimeline from './ResponseTimeline';
 import type { ResponseSegment, SessionIndexPage } from '@wangke/contracts/client-runtime';
+import { isTaskUnfinished } from '@wangke/contracts/task-status';
 import { responsePhase, type ProcessPhase } from '../utils/responseProcess';
 import VirtualMessages, { type VirtualMessagesHandle } from './VirtualMessages';
 import { useMessageDeletion } from './useMessageDeletion';
@@ -901,7 +902,7 @@ export default function ChatPanel({
       const revision = ++requested;
       const current = () => !cancelled && revision === requested && !localRequest.current;
       if (activeId == null) return;
-      const running = task && ['queued', 'running', 'waiting_user'].includes(task.status);
+      const running = task && isTaskUnfinished(task.status);
       if (running && !await (await import('../cloud/tasks')).syncTaskWidgets(task.progress)) return;
       const messages: ChatMsg[] = page.rows.filter(row => !running || row.taskId !== task.id || row.role !== 'assistant')
         .map(row => ({ ...row, key: `h-${row.id}`, rowId: row.id, role: row.role === 'user' ? 'user' : 'ai' }));

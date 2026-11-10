@@ -2,6 +2,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { DatabaseStore } from '../storage/database.js';
 import type { CloudTask, CloudTaskKind } from '@wangke/contracts/cloud';
+import { UNFINISHED_TASK_STATUSES } from '@wangke/contracts/task-status';
 import { CloudConfiguration } from './config.js';
 import { CloudRecords } from './records.js';
 import { executorFor, recordMutation, type TaskContext, type TaskExecutor } from './execution.js';
@@ -17,7 +18,7 @@ export const TASK_KINDS: CloudTaskKind[] = ['chat', 'qa', 'transcribe', 'handout
  * `activity` feeds the global task watcher (status/counters only for chat);
  * `session` feeds one open conversation (live text, no duplicate transcript). */
 export type TaskListDetail = 'full' | 'activity' | 'session';
-const ACTIVE_TASK_STATUSES = new Set(['queued', 'running', 'waiting_user', 'waiting_event']);
+const ACTIVE_TASK_STATUSES = new Set(UNFINISHED_TASK_STATUSES);
 
 function progressSummary(progress: Record<string, unknown>) {
   const summary: Record<string, unknown> = {};

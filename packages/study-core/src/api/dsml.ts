@@ -231,6 +231,12 @@ export function createDsmlRecoverer(): {
    * 用于丢弃标签之间的换行与缩进 —— 它们是标记语法的一部分。
    */
   let inBlock = false;
+  /**
+   * 结构块内部尚未定性的正文空白：等下一个非空正文、DSML 标签或 EOF 决定保留还是丢弃。
+   * 必须跨 `consume` 调用存活，否则分块方式会改变输出（F10）。
+   */
+  let pendingBody = '';
+  const dropStructuralBody = () => { pendingBody = ''; };
 
   const consume = (final: boolean): DsmlPart[] => {
     const out: DsmlPart[] = [];
@@ -257,12 +263,19 @@ export function createDsmlRecoverer(): {
      * ```
      * 进出标签之间的换行/缩进属于标记语法，发到界面上就是凭空多出来的空行。
      * 只有切到真正的正文（`inBlock` 转 false）之后，空白才算数。
+     *
+     * 但「这块是不是纯空白」不能取决于网络怎么分块：结构块内部的空白先挂起
+     * （`pendingBody`），直到后续非空正文（保留）、DSML 标签或 EOF（丢弃）
+     * 才决定它的归属，保证同一输入在任何切分方式下输出一致。
      */
     const emitBody = (t: string) => {
       if (!t) return;
-      if (t.trim()) inBlock = false;
-      else if (inBlock) return;
-      emitText(t);
+      if (t.trim()) {
+        inBlock = false;
+        emitText(pendingBody + t);
+        pendingBody = '';
+      } else if (inBlock) pendingBody += t;
+      else emitText(t);
     };
     const finishCall = (): DsmlPart => {
       const done = call as PendingCall;
@@ -275,6 +288,7 @@ export function createDsmlRecoverer(): {
     for (;;) {
       if (buf.length - pos > MAX_INVOKE_LEN) {
         passthrough = true;
+        dropStructuralBody();
         emitText(buf.slice(pos));
         pos = buf.length;
         break;
@@ -320,6 +334,7 @@ export function createDsmlRecoverer(): {
               out.push({ kind: 'toolCall', name: name[1], arguments: JSON.stringify(args) });
               callCount++;
               inBlock = true;
+              dropStructuralBody();
             } else emitBody(buf.slice(i, end + '</tool_call>'.length));
             pos = end + '</tool_call>'.length;
             continue;
@@ -341,6 +356,7 @@ export function createDsmlRecoverer(): {
         }
         emitBody(buf.slice(pos, i));
         inBlock = true;
+        dropStructuralBody();
         pos = i + tag.length;
         if (!tag.isClose && tag.kind === 'invoke') {
           const name = attr(tag.attrs, 'name');
@@ -407,6 +423,7 @@ export function createDsmlRecoverer(): {
     }
 
     buf = pos >= buf.length ? '' : buf.slice(pos);
+    if (final) dropStructuralBody();
     return out;
   };
 

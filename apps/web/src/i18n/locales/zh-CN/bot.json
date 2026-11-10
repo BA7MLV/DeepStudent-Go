@@ -5,7 +5,7 @@
   "modelSettings": "模型设置",
   "resources": "查看资源",
   "runSteps": "已处理 {{count}} 步",
-  "runStatus": { "queued": "准备中", "running": "正在处理", "waiting_user": "等你确认", "paused": "已暂停", "completed": "已完成", "failed": "未完成", "cancelled": "已停止" },
+  "runStatus": { "queued": "准备中", "running": "正在处理", "waiting_user": "等你确认", "waiting_event": "等待任务或事件", "paused": "已暂停", "completed": "已完成", "failed": "未完成", "cancelled": "已停止" },
   "refresh": "刷新诊断",
   "usage": "今日 {{requests}} 次请求 · 已知 {{knownTokens}} token · 未知预留 {{unknownReservedTokens}} · 已知费用 {{knownCost}} · {{unknownCostRequests}} 次费用未知",
   "unknown": "未知",
