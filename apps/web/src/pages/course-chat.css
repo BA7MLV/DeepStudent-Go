@@ -32,12 +32,12 @@
 
 /* 模糊贴着聊天可视区，不随消息滚走。实色安全区不参与模糊梯度。 */
 .page-course-chat .page-app-bar__blur {
-  bottom: 0;
+  height: var(--app-bar-h, 60px);
 }
 
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) and ((mask-image: linear-gradient(#000, transparent)) or (-webkit-mask-image: linear-gradient(#000, transparent))) {
   .page-course-chat .page-app-bar__blur {
-    bottom: -48px;
+    height: calc(var(--app-bar-h, 60px) + 48px);
   }
 
   .page-course-chat .page-app-bar__blur > span {
@@ -47,25 +47,26 @@
   }
 
   /* 低半径层保持覆盖，强模糊层依次交接；不是把同一张模糊图逐渐变透明。
-     标题背后保留强模糊，再在栏下 48px 内连续回到清晰正文。 */
+     标题背后保留足以压住正文的模糊，但把上限从 24px 收到 16px，并在栏下
+     48px 内更早回到清晰正文 —— 阅读时先看到字，再注意到磨砂。 */
   .page-course-chat .page-app-bar__blur > span:nth-child(1) {
     --app-bar-blur: 1px;
     --chat-bar-mask: linear-gradient(to bottom, #000 85%, transparent 100%);
   }
 
   .page-course-chat .page-app-bar__blur > span:nth-child(2) {
-    --app-bar-blur: 4px;
-    --chat-bar-mask: linear-gradient(to bottom, #000 60%, transparent 85%);
+    --app-bar-blur: 3px;
+    --chat-bar-mask: linear-gradient(to bottom, #000 58%, transparent 84%);
   }
 
   .page-course-chat .page-app-bar__blur > span:nth-child(3) {
-    --app-bar-blur: 12px;
-    --chat-bar-mask: linear-gradient(to bottom, #000 35%, transparent 65%);
+    --app-bar-blur: 8px;
+    --chat-bar-mask: linear-gradient(to bottom, #000 32%, transparent 60%);
   }
 
   .page-course-chat .page-app-bar__blur > span:nth-child(4) {
-    --app-bar-blur: 24px;
-    --chat-bar-mask: linear-gradient(to bottom, #000 10%, transparent 40%);
+    --app-bar-blur: 16px;
+    --chat-bar-mask: linear-gradient(to bottom, #000 8%, transparent 36%);
   }
 
   .page-course-chat .page-app-bar__blur::after {
@@ -80,7 +81,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .page-course-chat .page-app-bar__blur {
-    bottom: 0;
+    height: var(--app-bar-h, 60px);
   }
 
   .page-course-chat .page-app-bar__blur::after {
@@ -945,7 +946,7 @@
      队列条一出来按钮就压进输入卡里了。 */
   position: absolute;
   inset: auto 0 0;
-  z-index: 1;
+  z-index: 4;
   flex: 0 0 auto;
   padding: 8px max(20px, calc((100% - var(--course-chat-column)) / 2))
     max(12px, env(safe-area-inset-bottom));

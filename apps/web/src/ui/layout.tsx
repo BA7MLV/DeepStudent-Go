@@ -752,15 +752,6 @@ export function PageShell({
               'landscape:pr-[env(safe-area-inset-right)]',
             ].join(' ')}
           >
-            {/* 渐进模糊垫层：垫在顶栏内容**之下**（z-index:-1），把滚上来的内容逐级虚化。
-                顶栏自己 `z-[5]` 已建层叠上下文，所以负 z 不会溜到 `<main>` 背后，只落在
-                标题 / 按钮下面 —— 否则模糊会把标题自己也糊掉。样式见 layout.css。 */}
-            <div className="page-app-bar__blur" aria-hidden="true">
-              <span />
-              <span />
-              <span />
-              <span />
-            </div>
             {/* 窄屏默认保留汉堡菜单；嵌套页可改为只显示返回按钮。 */}
             {showMobileRail && (
               <Button
@@ -806,6 +797,16 @@ export function PageShell({
             <div className="flex-1" />
             {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
           </header>
+          {/* 渐进模糊垫层独立成层：夹在内容（z=0）与吸顶工具栏（z=3）之间，
+              再把顶栏（z=5）盖在它上面。它不能留在 `<header>` 的层叠上下文里 ——
+              那样整个顶栏（包括模糊）都会压在聊天里的吸顶标题之上，标题会被糊掉。
+              高度跟随量出来的 `--app-bar-h`，页面可在外层再向下延长（如 Chat 的 48px）。 */}
+          <div className="page-app-bar__blur page-app-bar__blur--chrome" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
           <main
             id={mainId}
             role="main"

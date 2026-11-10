@@ -7,16 +7,17 @@
   z-index: 4;
 }
 
-/* Inside the chat column the floating composer bar (z=1) must paint over the
+/* Inside the chat column the floating composer bar (z=4) must paint over the
    pinned header; elsewhere the header keeps its own layer above the content. */
 .course-chat__messages .chat-sticky-header[data-sticky='true'] {
   z-index: 0;
 }
 
-/* Absolute (not fixed) so the promoted header stays inside the chat column
-   and the composer bar can cover it. */
+/* Absolute (not fixed) so the promoted header stays inside the chat column.
+   The portal layer sits above the page's progressive blur (z=2) so the pinned
+   heading stays sharp, but still below the composer (z=4) and app bar (z=5). */
 .chat-sticky-header.chat-sticky-overlay {
   position: absolute;
-  z-index: 0;
+  z-index: 3;
   margin: 0;
 }

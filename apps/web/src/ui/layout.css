@@ -75,12 +75,14 @@
    1. `.page-shell__content`：普通页的内容列自己让出顶栏高度。高度是**量**出来的
       （刘海安全区 / 副标题 / 右侧控件都会撑高它），写进主列的 `--app-bar-h`
       （见 PageShell 的 ResizeObserver），缺省 60px。
-   2. `.page-app-bar__blur`：仅窄屏在顶栏内容之下（z-index:-1）叠渐进模糊。
+   2. `.page-app-bar__blur`：仅窄屏生效，作为主列里的独立层（z-index:2）夹在内容
+      与顶栏之间；聊天吸顶工具栏（z-index:3）因此仍能保持清晰。
 
    渐进模糊怎么叠：单层 `backdrop-filter` 的半径是均匀的，没有「渐变」这回事。
    这里用四层、半径 1 / 2 / 4 / 8px 递增、mask 衰减区间逐层缩短，叠出「越靠上越糊、
    越靠下越清楚、栏底衰减到 0」的曲线 —— 所以栏底**没有硬边**，内容从栏下钻出来是连续的。
-   模糊只限制在 60px 顶栏本身，避免对整页做昂贵的 filter；尺寸固定且不跟滚动做 JS 更新。
+   模糊只覆盖顶栏高度及页面声明的延伸段（Chat 为栏下 48px），避免对整页做昂贵的 filter；
+   尺寸固定且不跟滚动做 JS 更新。
    颜色一律读共享的 --app-edge-color，顶部实色与浏览器染色衔接，下缘才逐渐透明。 */
 .page-shell {
   --app-edge-color: var(--dyn-edge, var(--background-secondary));
@@ -124,10 +126,19 @@
 .page-app-bar__blur {
   position: absolute;
   inset: 0;
-  /* 落在顶栏内容的下面：顶栏自己 z-[5] 已建层叠上下文，负 z 出不去，
-     只保证模糊层不把标题 / 按钮也糊掉。 */
+  /* 仍留在自定义顶栏内部（Bot）时的默认层：垫在标题 / 按钮下面。 */
   z-index: -1;
   pointer-events: none;
+}
+
+/* PageShell 把这层放在 `<header>` 外面，单独夹在内容与顶栏之间：
+   内容 (0) < 渐进模糊 (2) < 聊天吸顶工具栏 (3) < 输入栏 (4) < 顶栏内容 (5)。
+   留在 header 的层叠上下文里的话，整个 header（含模糊）会高于吸顶标题，
+   标题滚到栏下就被糊掉。高度跟随顶栏实际测量值，页面可在外层继续延长。 */
+.page-app-bar__blur--chrome {
+  inset: 0 0 auto;
+  height: var(--app-bar-h, 60px);
+  z-index: 2;
 }
 
 .page-app-bar__blur > span {

@@ -5,8 +5,8 @@ import './sticky-header.css';
 interface Overlay { target: HTMLElement; style: CSSProperties; height: number }
 
 /** Native sticky owns the bounds. Only its stuck toolbar escapes the message
- * scrollport; it stays inside the chat column, below both the composer bar and
- * the app header. */
+ * scrollport; it stays inside the chat column, above the progressive blur but
+ * below both the composer bar and the app header. */
 export default function StickyHeader({ children, className, enabled = true }: {
   children: ReactNode; className: string; enabled?: boolean;
 }) {
@@ -18,8 +18,8 @@ export default function StickyHeader({ children, className, enabled = true }: {
   useLayoutEffect(() => {
     const slot = slotRef.current;
     const scroll = slot?.closest<HTMLElement>('.course-chat__messages');
-    // Stay inside the chat column: the composer bar (z=1) must keep painting
-    // over the promoted toolbar, while the app bar (z=5) stays above both.
+    // Stay inside the chat column: the progressive blur (z=2) sits below the
+    // toolbar (z=3), while the composer (z=4) and app bar (z=5) stay above it.
     const target = slot?.closest<HTMLElement>('.course-chat__main')
       ?? slot?.closest<HTMLElement>('.page-shell__surface');
     if (!enabled || !slot || !scroll || !target) { setOverlay(null); return; }

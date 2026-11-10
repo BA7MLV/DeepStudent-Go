@@ -29,7 +29,7 @@ try {
       [data-testid="top-app-bar"] { position: fixed; inset: 0 0 auto; height: 60px; z-index: 5; }
       .course-chat__main { position: relative; }
       .course-chat__messages { height: 600px; overflow: auto; padding: 60px 20px 0; }
-      .course-chat__composer-wrap { position: absolute; inset: auto 0 0; height: 90px; z-index: 1; background: #fff; }
+      .course-chat__composer-wrap { position: absolute; inset: auto 0 0; height: 90px; z-index: 4; background: #fff; }
     `;
     document.head.append(style);
     const h = React.createElement;

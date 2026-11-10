@@ -81,6 +81,9 @@ try {
             .page-course-chat { --app-edge-solid-height: ${safeArea}px; }
             .page-course-chat [data-testid='top-app-bar'] { padding-top: ${safeArea}px; }
           ` }) : null;
+          // The app bar reports its measured height through a ResizeObserver; let
+          // the blur layer pick up the injected safe area before sampling geometry.
+          await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const geometry = await page.evaluate(() => {
             const blur = document.querySelector('.page-app-bar__blur');
             const span = blur.firstElementChild.getBoundingClientRect();
@@ -138,7 +141,7 @@ try {
           // A transformed page must still sample its own messages, not the revealed navigation.
           await page.getByTestId('nav-rail-open').click();
           await page.getByRole('dialog', { name: 'DeepStudent Go', exact: true }).waitFor();
-          const hideControls = await page.addStyleTag({ content: '.page-course-chat [data-testid="top-app-bar"] > :not(.page-app-bar__blur) { visibility: hidden !important; }' });
+          const hideControls = await page.addStyleTag({ content: '.page-course-chat [data-testid="top-app-bar"] > * { visibility: hidden !important; }' });
           const shiftedGeometry = await page.evaluate(() => {
             const span = document.querySelector('.page-app-bar__blur > span').getBoundingClientRect();
             const main = document.querySelector('.course-chat__messages').getBoundingClientRect();
@@ -169,7 +172,12 @@ try {
       await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }] });
       assert.ok(await page.evaluate(() => matchMedia('(prefers-reduced-transparency: reduce)').matches));
       assert.ok(await page.locator('.page-app-bar__blur > span').evaluateAll(spans => spans.every(el => getComputedStyle(el).display === 'none')), 'reduced transparency disables the blur layers');
-      assert.equal(await page.locator('.page-app-bar__blur').evaluate(el => getComputedStyle(el).bottom), '0px', 'opaque fallback does not extend over the reading area');
+      const opaqueEdge = await page.evaluate(() => {
+        const blur = document.querySelector('.page-app-bar__blur').getBoundingClientRect();
+        const header = document.querySelector('[data-testid="top-app-bar"]').getBoundingClientRect();
+        return { blurBottom: Math.round(blur.bottom), headerBottom: Math.round(header.bottom) };
+      });
+      assert.ok(Math.abs(opaqueEdge.blurBottom - opaqueEdge.headerBottom) <= 1, 'opaque fallback does not extend over the reading area');
       await page.goto(`${base}/#/library`);
       await page.locator('.finder-toolbar').waitFor();
       assert.equal(await page.locator('.page-app-bar__blur').evaluate(el => getComputedStyle(el).display), 'none', 'the library keeps its existing non-blurred toolbar');
