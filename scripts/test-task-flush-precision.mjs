@@ -30,6 +30,13 @@ test('session revision in ChatPanel drains only that session entity', () => {
   assert.ok(!/\bflushCloud\(\)/.test(revise), 'session revision must not run the global records cycle');
 });
 
+test('model settings save pushes the preferences journal, not a global records cycle', () => {
+  const source = read('apps/web/src/cloud/Models.tsx');
+  const save = source.slice(source.indexOf('const saved = await cloudRequest<CloudConfig>'), source.indexOf('setSavedPreferences(JSON.stringify(cloudModelPreferences(draft)));'));
+  assert.ok(save.includes('flushPreferences();'), 'model preferences flush through their own journal');
+  assert.ok(!/\bflushCloud\(\)/.test(source), 'model settings must not run the global records cycle');
+});
+
 test('material readers consume the bounded snapshot, not the business mirror', () => {
   for (const file of ['apps/web/src/components/MdReader.tsx', 'apps/web/src/components/DocxReader.tsx', 'apps/web/src/components/HtmlReader.tsx']) {
     const source = read(file);
