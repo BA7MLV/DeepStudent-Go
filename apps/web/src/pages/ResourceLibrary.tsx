@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { AgentProfileDto, ProjectDetailDto } from '@wangke/contracts';
 import type { ResourceDirectory, ResourceEntry } from '@wangke/contracts/resources';
 import { request, serverClient } from '../api/serverClient';
-import { followResources, readResources, resourceCommand } from '../client/resources';
+import { followResources, readResources, resourceCommand, RESOURCE_PAGE_SIZE } from '../client/resources';
 import { FolderIcon } from '../components/FolderIcon';
 import FolderColorMenu from '../components/FolderColorMenu';
 import { PluginActions } from '../plugins/PluginActions';
@@ -49,6 +49,19 @@ function ResourceSkeleton({ view, count }: { view: 'icons' | 'list'; count: numb
   </ul>;
 }
 
+/** Paged find-by-name: a directory larger than one page must not silently
+ * miss the just-uploaded file when post-upload facts (courseId) are needed. */
+async function findEntryByName(projectId: string, path: string, name: string): Promise<ResourceEntry | undefined> {
+  let cursor: string | undefined;
+  do {
+    const page = await readResources(projectId, path, true, cursor, RESOURCE_PAGE_SIZE);
+    const hit = page.entries.find(entry => entry.name === name);
+    if (hit) return hit;
+    cursor = page.next;
+  } while (cursor);
+  return undefined;
+}
+
 /** The server filesystem is the browser's directory listing, not a second library. */
 export default function ResourceLibrary({ onImport }: { onImport: (folderId?: number) => void }) {
   const { t } = useTranslation('projects');
@@ -60,6 +73,13 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const projectId = search.get('folder') ?? undefined;
   const directory = search.get('path') ?? '';
   const [data, setData] = useState<ResourceDirectory | null>(null);
+  /** Accumulated later pages of a large directory. The projection owns page one
+   * and replaces it wholesale on change; accumulated pages reset with it. */
+  const [appended, setAppended] = useState<ResourceEntry[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | undefined>(undefined);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const cursorRef = useRef<string | undefined>(undefined);
+  const searchGeneration = useRef(0);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -94,6 +114,11 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   };
   useEffect(() => { setSelection(new Set()); }, [locationKey, query]);
   useEffect(() => {
+    setAppended([]);
+    cursorRef.current = data?.next;
+    setNextCursor(data?.next);
+  }, [data, locationKey]);
+  useEffect(() => {
     const available = new Set((data?.entries ?? []).map(keyOf));
     setSelection(current => {
       const next = new Set([...current].filter(key => available.has(key)));
@@ -107,7 +132,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     if (loadedLocation.current !== locationKey) { setLoading(true); setData(null); }
     return followResources(projectId, directory, result => {
       setData(result); setError(''); loadedLocation.current = locationKey; setLoading(false);
-    }, error => { setError(projectError(error)); setLoading(false); });
+    }, error => { setError(projectError(error)); setLoading(false); }, RESOURCE_PAGE_SIZE);
   }, [projectId, directory, revision, locationKey]);
   const openDirectory = (id?: string, path = '') => {
     springLoader.cancel();
@@ -170,8 +195,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
           const id = projectId ?? data.rootId;
           await serverClient.uploadProjectFile(id, join(directory, file.name), file);
           if (file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|flv|ts|m2ts|mpeg|mpg|wmv|3gp|rmvb|rm)$/i.test(file.name)) {
-            const listing = await readResources(id, directory);
-            const entry = listing.entries.find(entry => entry.name === file.name);
+            const entry = await findEntryByName(id, directory, file.name);
             if (entry?.courseId) {
               const duration = await probeDuration(file);
               await courseAccess.read(entry.courseId);
@@ -246,8 +270,41 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
       });
     } catch { /* Unrelated drag payload. */ }
   };
-  const entries = (data?.entries ?? []).filter(entry => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const entries = [...(data?.entries ?? []), ...appended].filter(entry => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name, undefined, { numeric: true }));
   const entryCount = entries.length;
+  const loadMore = async () => {
+    const cursor = cursorRef.current;
+    if (cursor === undefined || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await readResources(projectId, directory, true, cursor, RESOURCE_PAGE_SIZE);
+      setAppended(previous => [...previous, ...page.entries]);
+      cursorRef.current = page.next;
+      setNextCursor(page.next);
+    } catch (error) { toast.error(projectError(error)); }
+    finally { setLoadingMore(false); }
+  };
+  /**
+   * 筛选必须覆盖完整目录：只过滤已加载页会静默漏掉未加载条目。输入搜索词时
+   * 自动补齐剩余页；搜索词变化时作废上一轮，已加载内容保留。
+   */
+  useEffect(() => {
+    if (!query || cursorRef.current === undefined) return;
+    const generation = ++searchGeneration.current;
+    let next: string | undefined = cursorRef.current;
+    void (async () => {
+      try {
+        while (next !== undefined) {
+          const page = await readResources(projectId, directory, true, next, RESOURCE_PAGE_SIZE);
+          if (generation !== searchGeneration.current) return;
+          setAppended(previous => [...previous, ...page.entries]);
+          next = page.next;
+          cursorRef.current = page.next;
+          setNextCursor(page.next);
+        }
+      } catch { /* 保留已加载页；手动入口仍可用 */ }
+    })();
+  }, [query, locationKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const breadcrumbs = directory.split('/').filter(Boolean);
   const readOnly = Boolean(data?.project?.archived);
   const dragOverFolder = (event: React.DragEvent, entry: ResourceEntry) => {
@@ -367,6 +424,9 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
               {entry.kind === 'file' && entry.courseId ? <PluginActions surface="resource.actions" materialId={entry.courseId} /> : null}
             </li>)}
           </ul>
+          {!loading && !showSkeleton && nextCursor !== undefined && <div className="resource-pages" data-testid="resource-load-more">
+            <Button variant="secondary" size="sm" isDisabled={loadingMore} onPress={() => void loadMore()}>{loadingMore ? t('working') : t('loadMore')}</Button>
+          </div>}
           {!loading && !showSkeleton && !entryCount && !error && <div className="project-empty">{query ? t('noResults') : t('folderEmpty')}</div>}
         </>
         </SkeletonReveal>

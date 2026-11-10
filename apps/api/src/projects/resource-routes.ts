@@ -21,9 +21,13 @@ export function registerResourceRoutes(app: FastifyInstance, resources: Resource
       return { ok: true };
     });
   }
-  app.get<{ Querystring: { projectId?: string; path?: string; archived?: string } }>('/api/v1/resources', async (request, reply) => {
+  app.get<{ Querystring: { projectId?: string; path?: string; archived?: string; cursor?: string; limit?: string } }>('/api/v1/resources', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
-    return resources.list(user.id, request.query.projectId, request.query.path ?? '', request.query.archived === 'true');
+    const limit = Number(request.query.limit);
+    if (request.query.limit !== undefined && (!Number.isInteger(limit) || limit <= 0 || limit > 2000)) throw new ProjectError('invalid_resource_page');
+    return request.query.cursor !== undefined || request.query.limit !== undefined
+      ? resources.listPage(user.id, request.query.projectId, request.query.path ?? '', request.query.archived === 'true', request.query.cursor, limit || 500)
+      : resources.list(user.id, request.query.projectId, request.query.path ?? '', request.query.archived === 'true');
   });
   app.post<{ Body: { name: string } }>('/api/v1/resources/folders', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;

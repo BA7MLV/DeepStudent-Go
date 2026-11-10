@@ -20,6 +20,10 @@ export interface ResourceDirectory {
   path: string;
   folderId?: number;
   entries: ResourceEntry[];
+  /** Forward cursor of a paged listing; absent when every entry is included.
+   * A cursor is only valid for the same directory contents; the projection
+   * replaces the whole page on change, so stale cursors never mix snapshots. */
+  next?: string;
 }
 
 /** Explicit filesystem operations, not table mutations. */

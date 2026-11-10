@@ -577,6 +577,8 @@ const _wangke_remote_host_clientRuntime_read_parameter_0$schema = () => (_wangke
   'folderId': z.union([z.undefined(), z.number()]).optional(),
   'path': z.string(),
   'archived': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+  'limit': z.union([z.undefined(), z.number()]).optional(),
 }), z.object({
   'kind': z.literal("resourceTrash"),
 }), z.object({
@@ -1275,6 +1277,11 @@ const _wangke_remote_host_clientRuntime_submitTask_result$schema = () => (_wangk
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema22())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema22()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 }))
 let _wangke_remote_host_clientRuntime_taskAdmission_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_taskAdmission_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_taskAdmission_parameter_0$schema$value ??= z.string())
@@ -1315,6 +1322,11 @@ const _wangke_remote_host_clientRuntime_taskAdmission_result$schema = () => (_wa
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema20())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema20()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 }),
 })]))
 let _wangke_remote_host_clientRuntime_watch_parameter_0$schema$value
@@ -1328,6 +1340,8 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0$schema = () => (_wangk
   'folderId': z.union([z.undefined(), z.number()]).optional(),
   'path': z.string(),
   'archived': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+  'limit': z.union([z.undefined(), z.number()]).optional(),
 }), z.object({
   'kind': z.literal("resourceTrash"),
 }), z.object({
@@ -1693,6 +1707,11 @@ const _wangke_remote_host_clientRuntime_watchSession_result$schema = () => (_wan
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 })),
 }),
 })]))
@@ -1742,6 +1761,11 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 })),
   'hasOlder': z.boolean(),
 }), z.object({
@@ -1809,6 +1833,11 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 })),
 })]))
 let _wangke_remote_host_clientRuntime_watchTask_parameter_0$schema$value
@@ -1858,6 +1887,11 @@ const _wangke_remote_host_clientRuntime_watchTask_result$schema = () => (_wangke
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema12())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 }),
 })]))
 let _wangke_remote_host_clientRuntime_watchTasks_result$schema$value
@@ -1906,6 +1940,11 @@ const _wangke_remote_host_clientRuntime_watchTasks_result$schema = () => (_wangk
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema11())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema11()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 })),
 }),
 })]))
@@ -2425,6 +2464,8 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
   'folderId': z.union([z.undefined(), z.number()]).optional(),
   'path': z.string(),
   'archived': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+  'limit': z.union([z.undefined(), z.number()]).optional(),
 }), z.strictObject({
   'kind': z.literal("resourceTrash"),
 }), z.strictObject({
@@ -3026,6 +3067,8 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0_strict$schema = () => 
   'folderId': z.union([z.undefined(), z.number()]).optional(),
   'path': z.string(),
   'archived': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+  'limit': z.union([z.undefined(), z.number()]).optional(),
 }), z.strictObject({
   'kind': z.literal("resourceTrash"),
 }), z.strictObject({
@@ -4141,7 +4184,7 @@ export const TYPERT = {
           },
           {
             "name": "RuntimeRead",
-            "declaration": "export type RuntimeRead = { kind: 'preferences'; } | { kind: 'permissions'; } | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean; } | { kind: 'resourceTrash'; } | { kind: 'courseDocument'; courseId: string; } | { kind: 'systemDocument'; path: string; } | { kind: 'systemDirectory'; path: string; offset: number; query: string; } | { kind: 'executorRecovery'; taskId?: string; operationIds: string[]; } | { kind: 'interactionRecovery'; taskId: string; sequence: number; } | { kind: 'catalog'; } | { kind: 'pluginScope'; materialId?: string; projectFolderId?: number; } | { kind: 'tasks'; } | { kind: 'records'; after: number; } | { kind: 'recordKeys'; keys: { table: ProjectionTable; key: string | number; }[]; } | { kind: 'collectionPage'; table: ProjectionTable; parent?: string | number; cursor?: string; } | { kind: 'sessionIndex'; videoId: string; archived: boolean; recentOnly: boolean; cursor?: string; } | { kind: 'courseCount'; } | { kind: 'courseReadiness'; videoId: string; } | { kind: 'courseMetadata'; ids: string[]; covers: boolean; } | { kind: 'coverCandidates'; cursor?: string; } | { kind: 'courseColorFrame'; videoId: string; } | { kind: 'latestHandout'; videoId: string; } | { kind: 'skillIndex'; cursor?: string; } | { kind: 'studySummary'; } | { kind: 'studyOverview'; today: string; from: string; preview: { date: string; seconds: number; }[]; } | { kind: 'fileIntents'; } | { kind: 'session'; sessionId: number; before?: { createdAt: number; id: number; role?: string; }; after?: { createdAt: number; id: number; role?: string; }; } | { kind: 'plugin'; pluginId: string; instanceId: string; revision: number; method: string; args: { [key: string]: RuntimeJson; }; } | { kind: 'pluginQueries'; pluginId: string; instanceId: string; revision: number; queries: { key: string; method: string; args: { [key: string]: RuntimeJson; }; }[]; } | { kind: 'task'; taskId: string; };"
+            "declaration": "export type RuntimeRead = { kind: 'preferences'; } | { kind: 'permissions'; } | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean; cursor?: string; limit?: number; } | { kind: 'resourceTrash'; } | { kind: 'courseDocument'; courseId: string; } | { kind: 'systemDocument'; path: string; } | { kind: 'systemDirectory'; path: string; offset: number; query: string; } | { kind: 'executorRecovery'; taskId?: string; operationIds: string[]; } | { kind: 'interactionRecovery'; taskId: string; sequence: number; } | { kind: 'catalog'; } | { kind: 'pluginScope'; materialId?: string; projectFolderId?: number; } | { kind: 'tasks'; } | { kind: 'records'; after: number; } | { kind: 'recordKeys'; keys: { table: ProjectionTable; key: string | number; }[]; } | { kind: 'collectionPage'; table: ProjectionTable; parent?: string | number; cursor?: string; } | { kind: 'sessionIndex'; videoId: string; archived: boolean; recentOnly: boolean; cursor?: string; } | { kind: 'courseCount'; } | { kind: 'courseReadiness'; videoId: string; } | { kind: 'courseMetadata'; ids: string[]; covers: boolean; } | { kind: 'coverCandidates'; cursor?: string; } | { kind: 'courseColorFrame'; videoId: string; } | { kind: 'latestHandout'; videoId: string; } | { kind: 'skillIndex'; cursor?: string; } | { kind: 'studySummary'; } | { kind: 'studyOverview'; today: string; from: string; preview: { date: string; seconds: number; }[]; } | { kind: 'fileIntents'; } | { kind: 'session'; sessionId: number; before?: { createdAt: number; id: number; role?: string; }; after?: { createdAt: number; id: number; role?: string; }; } | { kind: 'plugin'; pluginId: string; instanceId: string; revision: number; method: string; args: { [key: string]: RuntimeJson; }; } | { kind: 'pluginQueries'; pluginId: string; instanceId: string; revision: number; queries: { key: string; method: string; args: { [key: string]: RuntimeJson; }; }[]; } | { kind: 'task'; taskId: string; };"
           },
           {
             "name": "RuntimeReceipt",
@@ -4177,7 +4220,7 @@ export const TYPERT = {
           },
           {
             "name": "RuntimeTask",
-            "declaration": "export type RuntimeTask = { frozenModel?: import('./model-gateway.js').FrozenTaskModel; source?: { kind: 'app' | 'bot'; name?: string; }; resourceName?: string; executor?: 'node' | 'browser'; id: string; kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce' | 'bilibiliImport'; resource: string; status: 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled' | 'interrupted'; input: { [key: string]: RuntimeJson; }; progress: { [key: string]: RuntimeJson; } | null; result: RuntimeJson; error: string | null; createdAt: string; };"
+            "declaration": "export type RuntimeTask = { frozenModel?: import('./model-gateway.js').FrozenTaskModel; source?: { kind: 'app' | 'bot'; name?: string; }; resourceName?: string; executor?: 'node' | 'browser'; id: string; kind: 'chat' | 'qa' | 'transcribe' | 'handout' | 'cards' | 'comments' | 'danmaku' | 'material' | 'cover' | 'artifactEdit' | 'handoutEdit' | 'modelOnce' | 'bilibiliImport'; resource: string; status: TaskStatus; input: { [key: string]: RuntimeJson; }; progress: { [key: string]: RuntimeJson; } | null; result: RuntimeJson; error: string | null; createdAt: string; effects?: { table: string; key: string | number; revision: number; }[]; };"
           },
           {
             "name": "RuntimeTaskAdmission",
@@ -4218,6 +4261,10 @@ export const TYPERT = {
           {
             "name": "TaskModelSelection",
             "declaration": "export type TaskModelSelection = { modelRef: ModelRef; presetId?: never; fallbackPolicy?: 'strict'; } | { presetId: string; modelRef?: never; fallbackPolicy?: 'strict' | 'configured'; };"
+          },
+          {
+            "name": "TaskStatus",
+            "declaration": "export type TaskStatus = 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled' | 'interrupted';"
           }
         ]
       }

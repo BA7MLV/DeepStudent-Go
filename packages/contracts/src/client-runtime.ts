@@ -12,7 +12,7 @@ export type ResponseSegment = {
 export type RuntimeRead =
   | { kind: 'preferences' }
   | { kind: 'permissions' }
-  | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean }
+  | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean; cursor?: string; limit?: number }
   | { kind: 'resourceTrash' }
   | { kind: 'courseDocument'; courseId: string }
   | { kind: 'systemDocument'; path: string }
@@ -62,6 +62,14 @@ export type RuntimeTask = {
   result: RuntimeJson;
   error: string | null;
   createdAt: string;
+  /**
+   * Terminal-only receipt of the record versions this task's committed
+   * mutations touched, so the client can reconcile exactly those keys instead
+   * of a global records cycle. Absent on pre-protocol servers, non-terminal
+   * tasks, or when a task's effects exceeded the server's cap (fall back to a
+   * full sync); an empty array means the task wrote no records at all.
+   */
+  effects?: { table: string; key: string | number; revision: number }[];
 };
 export type RuntimeTaskFrame = { type: 'snapshot'; revision: number; value: RuntimeTask } | Exclude<RuntimeFrame, RuntimeSnapshot>;
 export type RuntimeTasksFrame = { type: 'snapshot'; revision: number; value: { tasks: RuntimeTask[] } } | Exclude<RuntimeFrame, RuntimeSnapshot>;

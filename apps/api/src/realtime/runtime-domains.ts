@@ -101,7 +101,10 @@ function resourceReads({ store, resources }: Ports): Pick<ReadHandlers, 'systemD
     courseDocument: { read: (owner, request) => { const resource = files(), mapped = resource.course(owner, request.courseId); return resource.projects.files.read(mapped.project_id, mapped.path); }, matches: (request, change) => inDomains(change, ['resources', 'projects', 'resource_trash'])
       || change.domain === 'resource_files' && change.entity === request.courseId
       || recordTable(change, ['videos', 'files', 'courseFiles']) && change.entity.endsWith(`:${JSON.stringify(request.courseId)}`) },
-    resources: { read: (owner, request) => { const resource = files(); return JSON.parse(JSON.stringify(request.folderId === undefined ? resource.list(owner, request.projectId, request.path, request.archived) : resource.listFolder(owner, request.folderId))); }, matches: (_, change) => inDomains(change, ['resources', 'projects', 'resource_files', 'resource_folders', 'resource_trash'])
+    resources: { read: (owner, request) => { const resource = files(); return JSON.parse(JSON.stringify(request.folderId === undefined
+      ? (request.cursor === undefined && request.limit === undefined ? resource.list(owner, request.projectId, request.path, request.archived)
+        : resource.listPage(owner, request.projectId, request.path, request.archived, request.cursor, request.limit))
+      : resource.listFolder(owner, request.folderId))); }, matches: (_, change) => inDomains(change, ['resources', 'projects', 'resource_files', 'resource_folders', 'resource_trash'])
       // Chat attachments still require migration into the filesystem library.
       // Learning progress/text chunks and preferences cannot affect a directory.
       || recordTable(change, ['videos', 'folders', 'files', 'courseFiles', 'chats', 'chatSessions']) },

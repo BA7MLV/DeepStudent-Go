@@ -8,7 +8,7 @@ import { ModelSettingsContext } from '../components/settings/modelSettingsContex
 import { useSettings, type Provider } from '../store/settings';
 import { LoadingButton, confirmDialog, toast } from '../ui';
 import { cloudRequest } from './state';
-import { applyCloudConfig, flushCloud } from './sync';
+import { applyCloudConfig } from './sync';
 import { cloudDiscoveryProviders, cloudEditorProviders, cloudModelConfig, cloudModelPreferences, cloudModelUpdate, cloudModelsDirty, cloudProviderDirty, createCloudModelDraft, modelSettingsError } from './modelSettings';
 import { modelReferenceIssues } from '@wangke/contracts/model-settings';
 import { registerSettingsLeaveGuard } from '../components/settingsDialogStore';
@@ -184,7 +184,9 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
       store.setState({ providers: cloudEditorProviders(saved), llmModel: saved.llmModel, visionModel: saved.visionModel,
         asrModel: saved.asrModel, decisionModel: saved.decisionModel ?? { providerId: '', model: '' } });
       useSettings.getState().update(cloudModelPreferences(draft));
-      try { await flushCloud(); }
+      // 模型偏好是 preferences journal 的实体：精确推送该 journal 即可。
+      // 配置本身已由上面的 HTTP 响应应用，全账号 records 周期在这里没有职责。
+      try { await (await import('./preferences')).flushPreferences(); }
       catch {
         setMessage('连接与默认模型已保存到服务器');
         setError('模型库偏好同步失败，重试保存可继续同步。');

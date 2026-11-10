@@ -17,6 +17,11 @@ export interface TaskContext {
   owner: string;
   store: DatabaseStore;
   records: CloudRecords;
+  /** Accumulated receipt versions of every record this task's committed
+   * mutations touched. The runner persists them at terminal states (and at
+   * waiting_event suspension) so the client can reconcile exactly these keys
+   * instead of a global records cycle. */
+  effects: { table: string; key: string | number; revision: number }[];
   configuration: CloudConfiguration;
   filesDir: string;
   signal: AbortSignal;
@@ -52,7 +57,9 @@ export function commitTask(context: TaskContext, mutations: CloudMutation[]) {
     const policy = context.configuration.taskPolicy(context.owner, context.task.id);
     if (policy.read !== 'allow' || policy.write !== 'allow') throw new Error('bot_child_write_permission_required');
   }
-  if (mutations.length) context.records.apply(context.owner, mutations);
+  if (!mutations.length) return;
+  const receipt = context.records.apply(context.owner, mutations);
+  context.effects.push(...receipt.versions);
 }
 
 export function newRecordId() { return crypto.randomInt(1_000_000, 2 ** 48 - 1); }

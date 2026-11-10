@@ -197,6 +197,49 @@ export async function readRecordKeys<T>(table: ProjectionTable, keys: (string | 
   });
 }
 
+/**
+ * Reconcile exactly the record versions a completed task touched (its terminal
+ * `effects` receipt) — never advance the account cursor, never pull unrelated
+ * tables. Returns false when the server generation changed mid-read: during
+ * this rollout the legacy mirror still owns generation switches, so the
+ * caller falls back to a full sync instead of mixing epochs.
+ */
+export async function reconcileTaskEffects(effects: { table: string; key: string | number; revision: number }[]): Promise<boolean> {
+  if (!effects.length) return true;
+  const database = db, owner = cloud.userId, lifetime = accountLifetime(owner);
+  const runtime = await serverRuntime(owner);
+  const guard = () => {
+    lifetime.assertCurrent();
+    if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
+  };
+  guard();
+  const unique = new Map(effects.map(effect => [JSON.stringify([effect.table, effect.key]), effect]));
+  const versions = [...unique.values()], records: RuntimeRecord[] = [];
+  let epoch: string | undefined;
+  for (let index = 0; index < versions.length; index += 100) {
+    const keys = versions.slice(index, index + 100).map(({ table, key }) => ({ table: table as ProjectionTable, key }));
+    const response = await runtime.read({ kind: 'recordKeys', keys }); guard();
+    const value = response.value as unknown as { records: RuntimeRecord[]; epoch: string };
+    if (epoch !== undefined && value.epoch !== epoch) throw new Error('records_generation_changed');
+    epoch = value.epoch;
+    if (value.records.length !== keys.length) throw new Error('protocol_task_effects_projection');
+    for (let offset = 0; offset < keys.length; offset++) {
+      const row = value.records[offset], key = keys[offset];
+      if (row.table !== key.table || row.key !== key.key || row.revision < versions[index + offset].revision) throw new Error('task_effects_projection_unavailable');
+      records.push(row);
+    }
+  }
+  guard();
+  return cloudTransaction(database, [...new Set(records.map(row => row.table)), '_cloudMeta'].map(name => database.table(name)), async () => {
+    guard(); markCloudApply();
+    const localEpoch = (await database.table('_cloudMeta').get('records-epoch'))?.value;
+    if (localEpoch && epoch && localEpoch !== epoch) return false;
+    await putRecords(database, records, true);
+    guard();
+    return true;
+  });
+}
+
 /** Confirm only receipt keys, never advance the account/collection cursor.
  * Journals and attachment originals survive every failed or stale point read. */
 export async function reconcileLearningProjection(command: LearningCommandRow) {
