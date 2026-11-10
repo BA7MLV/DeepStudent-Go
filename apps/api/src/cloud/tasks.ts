@@ -48,7 +48,25 @@ export function taskDto(row: any, detail: TaskListDetail = 'full'): CloudTask {
     error: row.error, createdAt: row.created_at, executor: row.executor === 'media' ? 'node' : row.executor ?? undefined,
     ...(detail === 'full' && row.model_snapshot ? { frozenModel: JSON.parse(row.model_snapshot) } : {}),
     source: row.parent_run_id ? { kind: 'bot', ...(typeof row.bot_name === 'string' ? { name: row.bot_name } : {}) } : { kind: 'app' },
-    ...(typeof row.resource_name === 'string' ? { resourceName: row.resource_name } : {}) };
+    ...(typeof row.resource_name === 'string' ? { resourceName: row.resource_name } : {}),
+    ...(detail === 'full' && row.effects ? parseTaskEffects(row.effects) : {}) };
+}
+/** Terminal task effects are bounded receipts, never an unbounded dump: a task
+ * that touched more keys than the cap stores the overflow sentinel and clients
+ * fall back to a full records sync. */
+export const TASK_EFFECTS_CAP = 1000;
+const TASK_EFFECTS_OVERFLOW = 'overflow';
+export function taskEffectsValue(effects: { table: string; key: string | number; revision: number }[]): string {
+  return effects.length > TASK_EFFECTS_CAP ? TASK_EFFECTS_OVERFLOW : JSON.stringify(effects);
+}
+export function parseTaskEffects(value: unknown): { effects?: { table: string; key: string | number; revision: number }[] } {
+  if (value === TASK_EFFECTS_OVERFLOW) return {};
+  if (typeof value !== 'string' || !value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed) || parsed.some(item => !item || typeof item.table !== 'string' || !['string', 'number'].includes(typeof item.key) || typeof item.revision !== 'number')) return {};
+    return { effects: parsed };
+  } catch { return {}; }
 }
 
 export function listOwnerTasks(store: DatabaseStore, owner: string, detail: TaskListDetail = 'full', sessionId?: number): CloudTask[] {
@@ -232,6 +250,9 @@ export class CloudTaskRunner {
     } finally { this.draining = false; }
   }
   private async execute(origin: string, row: any, signal: AbortSignal) {
+    // A waiting_event suspension splits one task across executions; earlier
+    // runs' effects are already persisted and must not be lost.
+    const effects: TaskContext['effects'] = parseTaskEffects(row.effects).effects ?? [];
     try {
       const task = taskDto(row);
       if (row.parent_run_id) {
@@ -257,6 +278,7 @@ export class CloudTaskRunner {
       const contextPolicy = () => (this.options.configuration ?? new CloudConfiguration(this.store, path.join(directory, 'config'))).taskPolicy(row.owner_id, row.id);
       const context: TaskContext = {
         task, owner: row.owner_id, store: this.store, records: this.records,
+        effects,
         webSearch: this.options.webSearch,
         mcp: this.options.mcp,
         pluginService: this.pluginService,
@@ -281,7 +303,7 @@ export class CloudTaskRunner {
         .run(JSON.stringify(result ?? null), new Date().toISOString(), row.id);
     } catch (error) {
       if (error instanceof Error && error.name === 'TaskWaitSuspended' && this.store.db.prepare('SELECT 1 FROM task_agent_checkpoints WHERE task_id=?').get(row.id)) {
-        this.store.db.prepare("UPDATE cloud_tasks SET status='waiting_event',updated_at=? WHERE id=? AND status='running'").run(new Date().toISOString(), row.id);
+        this.store.db.prepare("UPDATE cloud_tasks SET status='waiting_event',effects=?,updated_at=? WHERE id=? AND status='running'").run(taskEffectsValue(effects), new Date().toISOString(), row.id);
         return;
       }
       if (isBudgetBlocked(error) && row.parent_run_id) this.store.db.prepare("UPDATE runs SET status='paused',error_code=? WHERE id=? AND status NOT IN ('completed','cancelled','failed')").run(error.code, row.parent_run_id);
@@ -299,9 +321,13 @@ export class CloudTaskRunner {
         if (answer && answer.taskId === row.id && answer.sessionId === JSON.parse(row.input).sessionId) {
           const stopped = { ...answer };
           delete stopped.interrupted; delete stopped.interruptReason;
-          this.records.apply(row.owner_id, [recordMutation('chats', answer.id, answer, stopped)]);
+          effects.push(...this.records.apply(row.owner_id, [recordMutation('chats', answer.id, answer, stopped)]).versions);
         }
       }
+      // Persist the accumulated receipt versions at every terminal state. The
+      // stop path above may have added one more mutation; overflow keeps the
+      // sentinel so clients fall back to a full sync instead of a partial view.
+      this.store.db.prepare('UPDATE cloud_tasks SET effects=? WHERE id=?').run(taskEffectsValue(effects), row.id);
       this.store.db.prepare("UPDATE cloud_permissions SET status='expired' WHERE task_id=? AND status IN ('pending','approved','consumed')").run(row.id);
     }
   }

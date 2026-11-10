@@ -577,6 +577,8 @@ const _wangke_remote_host_clientRuntime_read_parameter_0$schema = () => (_wangke
   'folderId': z.union([z.undefined(), z.number()]).optional(),
   'path': z.string(),
   'archived': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+  'limit': z.union([z.undefined(), z.number()]).optional(),
 }), z.object({
   'kind': z.literal("resourceTrash"),
 }), z.object({
@@ -1275,6 +1277,11 @@ const _wangke_remote_host_clientRuntime_submitTask_result$schema = () => (_wangk
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema22())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema22()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 }))
 let _wangke_remote_host_clientRuntime_taskAdmission_parameter_0$schema$value
 const _wangke_remote_host_clientRuntime_taskAdmission_parameter_0$schema = () => (_wangke_remote_host_clientRuntime_taskAdmission_parameter_0$schema$value ??= z.string())
@@ -1315,6 +1322,11 @@ const _wangke_remote_host_clientRuntime_taskAdmission_result$schema = () => (_wa
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema20())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema20()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 }),
 })]))
 let _wangke_remote_host_clientRuntime_watch_parameter_0$schema$value
@@ -1328,6 +1340,8 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0$schema = () => (_wangk
   'folderId': z.union([z.undefined(), z.number()]).optional(),
   'path': z.string(),
   'archived': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+  'limit': z.union([z.undefined(), z.number()]).optional(),
 }), z.object({
   'kind': z.literal("resourceTrash"),
 }), z.object({
@@ -1693,6 +1707,11 @@ const _wangke_remote_host_clientRuntime_watchSession_result$schema = () => (_wan
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema2())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema2()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 })),
 }),
 })]))
@@ -1742,6 +1761,11 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 })),
   'hasOlder': z.boolean(),
 }), z.object({
@@ -1809,6 +1833,11 @@ const _wangke_remote_host_clientRuntime_watchSessionJournal_result$schema = () =
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 })),
 })]))
 let _wangke_remote_host_clientRuntime_watchTask_parameter_0$schema$value
@@ -1858,6 +1887,11 @@ const _wangke_remote_host_clientRuntime_watchTask_result$schema = () => (_wangke
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema12())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema12()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 }),
 })]))
 let _wangke_remote_host_clientRuntime_watchTasks_result$schema$value
@@ -1906,6 +1940,11 @@ const _wangke_remote_host_clientRuntime_watchTasks_result$schema = () => (_wangk
   'result': z.union([z.literal(null), z.string(), z.number(), z.literal(false), z.literal(true), z.array(z.lazy(() => RuntimeJsonRemoteCodec$schema11())), z.record(z.string(), z.lazy(() => RuntimeJsonRemoteCodec$schema11()))]),
   'error': z.union([z.literal(null), z.string()]),
   'createdAt': z.string(),
+  'effects': z.union([z.undefined(), z.array(z.object({
+  'table': z.string(),
+  'key': z.union([z.string(), z.number()]),
+  'revision': z.number(),
+}))]).optional().describe('Terminal-only receipt of the record versions this task\'s committed mutations touched, so the client can reconcile exactly those keys instead of a global records cycle. Absent on pre-protocol servers, non-terminal tasks, or when a task\'s effects exceeded the server\'s cap (fall back to a full sync); an empty array means the task wrote no records at all.'),
 })),
 }),
 })]))
@@ -2425,6 +2464,8 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
   'folderId': z.union([z.undefined(), z.number()]).optional(),
   'path': z.string(),
   'archived': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+  'limit': z.union([z.undefined(), z.number()]).optional(),
 }), z.strictObject({
   'kind': z.literal("resourceTrash"),
 }), z.strictObject({
@@ -3026,6 +3067,8 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0_strict$schema = () => 
   'folderId': z.union([z.undefined(), z.number()]).optional(),
   'path': z.string(),
   'archived': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+  'limit': z.union([z.undefined(), z.number()]).optional(),
 }), z.strictObject({
   'kind': z.literal("resourceTrash"),
 }), z.strictObject({

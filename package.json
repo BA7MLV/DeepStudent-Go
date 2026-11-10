@@ -104,6 +104,7 @@
     "test:resources:pagination": "tsx scripts/test-resource-pagination.mjs",
     "test:material-blocks": "tsx --test scripts/test-material-blocks.mjs",
     "test:task-flush-precision": "tsx --test scripts/test-task-flush-precision.mjs",
+    "test:task-effects": "tsx scripts/test-task-effects.mjs",
     "test:server-media": "npm run build:api && tsx scripts/test-media-policy.mjs && tsx scripts/test-server-media.mjs",
     "test:bilibili:server": "npm run build:api && tsx scripts/test-server-bilibili.mjs",
     "test:bilibili:e2e": "npm run build:api && tsx scripts/e2e-bilibili-server.mjs",

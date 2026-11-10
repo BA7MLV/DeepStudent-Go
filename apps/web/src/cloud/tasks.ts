@@ -191,6 +191,12 @@ export async function waitCloudTask<T>(task: CloudTask, onProgress?: (p: any) =>
       const handoutId = (completed.result as { handoutId?: number } | null)?.handoutId;
       if (!Number.isSafeInteger(handoutId) || handoutId !== completed.input.handoutId) throw new Error('handout_receipt_invalid');
       await (await import('./sync')).readRecordKeys('handouts', [handoutId!]);
+    } else if (completed.effects !== undefined) {
+      // The task carried its own terminal receipt: reconcile exactly those
+      // record versions. An empty receipt means the task wrote no records.
+      // A generation change mid-read returns false and falls back to the full
+      // cycle rather than mixing epochs into the legacy mirror.
+      if (completed.effects.length && !(await (await import('./sync')).reconcileTaskEffects(completed.effects))) await flushCloud();
     } else await flushCloud();
     observationSignal.throwIfAborted();
     assertCurrent();

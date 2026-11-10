@@ -17,7 +17,10 @@ test('task admission pushes local pending writes without a global records pull',
   assert.ok(admission.includes('await drainLearning();'), 'admission must drain the learning journal');
   assert.ok(!/\bflushCloud\(\)/.test(admission), 'admission must not run the global records cycle');
   const completion = source.slice(source.indexOf('if (completed.kind ==='));
-  assert.ok(completion.includes("await flushCloud();"), 'completion keeps the projection refresh until per-kind effects exist as a protocol');
+  assert.ok(completion.includes("await flushCloud();"), 'completion keeps a full-sync fallback for pre-protocol servers and overflow receipts');
+  assert.ok(completion.includes('completed.effects !== undefined') && completion.includes('reconcileTaskEffects(completed.effects)'),
+    'completion must reconcile the terminal effects receipt exactly when the task carries one');
+  assert.ok(completion.includes('completed.effects.length && !'), 'an empty receipt must skip the global cycle entirely');
 });
 
 test('session revision in ChatPanel drains only that session entity', () => {

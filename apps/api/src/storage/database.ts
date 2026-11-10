@@ -459,6 +459,7 @@ const MIGRATIONS: Array<[number, string]> = [
     owner_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     value TEXT NOT NULL
   );`],
+  [36, `ALTER TABLE cloud_tasks ADD COLUMN effects TEXT;`],
 ];
 
 // These two migrations were already numbered 14 and 15 on the main branch.
@@ -587,6 +588,7 @@ export class DatabaseStore {
             { version: 31, tables: ['bot_artifact_files'], extra: [], sql: MIGRATIONS.find(([v]) => v === 31)![1] },
             { version: 32, tables: ['resource_trash'], extra: [], sql: MIGRATIONS.find(([v]) => v === 32)![1] },
             { version: 35, tables: ['bilibili_credentials'], extra: [], sql: MIGRATIONS.find(([v]) => v === 35)![1] },
+            { version: 36, tables: [], extra: [['cloud_tasks', 'effects']], sql: MIGRATIONS.find(([v]) => v === 36)![1] },
         ];
         const present = groups.map(group => {
           const markers = [...group.tables.map(table => columns(this.db, table).length > 0), ...group.extra.map(([table, column]) => columns(this.db, table).some(c => c.name === column))];
@@ -638,6 +640,7 @@ export class DatabaseStore {
          apply(31, groups[16], 16);
           apply(32, groups[17], 17);
           apply(35, groups[18], 18);
+          apply(36, groups[19], 19);
          // Retire folder archive without interpreting retained folders as deleted.
          // Trashed workspaces must remain locked until explicitly restored.
          if (!this.db.prepare('SELECT 1 FROM schema_migrations WHERE version=33').get()) {
