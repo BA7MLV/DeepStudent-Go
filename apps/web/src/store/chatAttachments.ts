@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import i18n from '../i18n';
 import { MAX_CHAT_ATTACHMENTS, type ChatAttachment } from '../chat/attachments';
 import { prepareAttachment, removeAttachmentFile } from '../chat/prepareAttachment';
 
@@ -11,6 +12,7 @@ interface PendingAttachment {
   phase: string;
   value?: ChatAttachment;
   error?: string;
+  editing?: boolean;
 }
 
 interface AttachmentDraft {
@@ -22,6 +24,7 @@ interface AttachmentDraft {
   discard: (sessionId: number | null) => Promise<void>;
   add: (files: File[]) => void;
   retry: (id: string) => void;
+  replace: (id: string, file: File) => Promise<void>;
   remove: (id: string) => Promise<void>;
   consume: (ids: string[]) => void;
 }
@@ -44,7 +47,7 @@ export const useChatAttachments = create<AttachmentDraft>((set, get) => {
       const update = (items: PendingAttachment[]) => items.map((row) => row.id === item.id ? { ...row, ...updates } : row);
       if (state.sessionKey === item.sessionKey) {
         const items = update(state.items);
-        return { items, ...(state.error === ATTACHMENTS_PENDING_ERROR && items.every(row => row.value && !row.error) ? { error: null } : {}) };
+        return { items, ...(state.error === ATTACHMENTS_PENDING_ERROR && items.every(row => row.value && !row.error && !row.editing) ? { error: null } : {}) };
       }
       return { parked: { ...state.parked, [item.sessionKey]: update(state.parked[item.sessionKey] ?? []) } };
     });
@@ -93,6 +96,32 @@ export const useChatAttachments = create<AttachmentDraft>((set, get) => {
       void (async () => { for (const item of items) if (hasPendingItem(get, item)) await process(item); })();
     },
     retry: (id) => { const item = get().items.find((row) => row.id === id); if (item?.error) void process(item); },
+    replace: async (id, file) => {
+      const original = get().items.find(row => row.id === id);
+      if (!original?.value || original.editing || original.error) throw new Error(i18n.t('interface:imageCrop.wait'));
+      const update = (change: (row: PendingAttachment) => PendingAttachment) => set(state => {
+        const apply = (items: PendingAttachment[]) => items.map(row => row.id === id ? change(row) : row);
+        return state.sessionKey === original.sessionKey ? { items: apply(state.items) }
+          : { parked: { ...state.parked, [original.sessionKey]: apply(state.parked[original.sessionKey] ?? []) } };
+      });
+      // Keep the old attachment until the replacement is safely stored. A failed
+      // crop upload restores the usable original rather than destroying the draft.
+      update(row => ({ ...row, editing: true, phase: i18n.t('interface:imageCrop.savePhase') }));
+      const nextId = `chat-file-${crypto.randomUUID()}`;
+      let value: ChatAttachment;
+      try {
+        value = await prepareAttachment(nextId, file, phase => update(row => ({ ...row, phase })));
+      } catch (error) {
+        update(() => original);
+        throw error;
+      }
+      if (!hasPendingItem(get, original)) { await removeAttachmentFile(value); return; }
+      update(() => ({ id: nextId, sessionKey: original.sessionKey, file, value, phase: i18n.t('interface:imageCrop.ready') }));
+      // Only the superseded draft snapshot is disposable; message files are never edited.
+      void removeAttachmentFile(original.value).catch(() => {
+        if (get().sessionKey === original.sessionKey) set({ error: i18n.t('interface:imageCrop.cleanupFailed') });
+      });
+    },
     remove: async (id) => {
       const item = get().items.find((row) => row.id === id);
       set((state) => ({ items: state.items.map((row) => row.id === id ? { ...row, value: undefined, phase: '移除中' } : row) }));

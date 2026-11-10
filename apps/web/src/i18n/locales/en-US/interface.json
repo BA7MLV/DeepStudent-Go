@@ -1,4 +1,18 @@
 {
+  "imageCrop": {
+    "orientation": "Image orientation", "rotateLeft": "Rotate left", "rotateRight": "Rotate right",
+    "title": "Crop image", "open": "Crop image {{name}}", "loading": "Loading crop editor", "imageLoading": "Loading image", "close": "Close crop editor",
+    "help": "Drag the edges to resize or the selection to move. Tab and arrow keys also work.", "optimize": "Compress large images",
+    "qualityHint": "High-quality WebP, up to 2560 px on the longest edge. Turn off for full-resolution lossless PNG. Images are never enlarged.",
+    "output": "Output {{width}} × {{height}} px.", "originalHint": "Only replaces the pending attachment, not the local original. Animated images become still images.",
+    "reset": "Reset selection", "cancel": "Cancel", "save": "Save crop", "saving": "Saving", "savePhase": "Saving crop", "ready": "Ready",
+    "invalidRegion": "Select a valid crop region", "tooManyPixels": "Images must be under 40 megapixels. Resize the image first.", "noCanvas": "This browser cannot process the image. Try another browser.",
+    "encodeFailed": "Image processing failed. Try a smaller crop.", "unsupportedOutput": "The browser returned an unsupported image format", "tooLarge": "The result exceeds 10 MB. Enable compression or select a smaller region.",
+    "sourceTooLarge": "The crop editor supports images up to 20 MB. Resize the image first.", "decodeFailed": "Cannot read the image. Use PNG, JPEG, WebP or GIF.", "saveFailed": "Could not save. Try again.",
+    "wait": "Wait for the upload or send to finish before cropping", "cleanupFailed": "Crop saved, but the old attachment could not be removed. Clean it up later in file management.", "name": "Image", "suffix": "cropped",
+    "area": "Crop region; use arrow keys to move", "nw": "Top left corner; use arrow keys to resize", "n": "Top edge; use arrow keys to resize", "ne": "Top right corner; use arrow keys to resize", "e": "Right edge; use arrow keys to resize",
+    "se": "Bottom right corner; use arrow keys to resize", "s": "Bottom edge; use arrow keys to resize", "sw": "Bottom left corner; use arrow keys to resize", "w": "Left edge; use arrow keys to resize"
+  },
   "handoutRead": { "failed": "Could not update this handout. The last document and edits are preserved.", "retry": "Retry", "loading": "Loading handout…" },
   "nav": { "home": "Home", "resources": "Resources", "bot": "Bot", "botHint": "Opens the Bot panel beside the chat home" },
   "composer": {

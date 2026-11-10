@@ -8,6 +8,7 @@ import { prefersReducedMotion } from '../utils/motion';
 import ImagePreview from './ImagePreview';
 import ImageGallery from './ImageGallery';
 import AttachmentUploadStatus from './AttachmentUploadStatus';
+import ImageCropButton from './ImageCropButton';
 import './chat-attachments.css';
 
 /** The same accessible viewer serves composer thumbnails and persisted messages. */
@@ -96,13 +97,14 @@ export function ChatAttachmentDraft() {
 }
 
 function ChatAttachmentDraftContent() {
-  const { items, error, retry, remove } = useChatAttachments();
+  const { items, error, retry, remove, replace } = useChatAttachments();
   const images = items.flatMap((item) => item.value?.dataUrl ? [item.value] : []);
   if (!items.length && !error) return null;
   return <div className="chat-attachments" data-testid="chat-attachment-draft" aria-label="待发送附件">
-    {items.map((item) => (item.value?.dataUrl || /^image\/(png|jpeg|webp|gif)$/.test(item.file.type) || /\.(png|jpe?g|webp|gif)$/i.test(item.file.name)) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.error ? 'error' : item.value ? 'ready' : 'loading'}>
+    {items.map((item) => (item.value?.dataUrl || /^image\/(png|jpeg|webp|gif)$/.test(item.file.type) || /\.(png|jpe?g|webp|gif)$/i.test(item.file.name)) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.error ? 'error' : item.value && !item.editing ? 'ready' : 'loading'}>
       {item.value?.dataUrl && !item.error ? <ChatImage file={item.value} images={images} draft /> : <PendingImage file={item.file} removing={item.phase === '移除中'} error={item.error} onRetry={() => retry(item.id)} />}
-      <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={item.phase === '移除中'} onPress={() => void remove(item.id)}><Sym name="close" /></Button>
+      <ImageCropButton file={item.file} isDisabled={!item.value || !!item.error || item.editing} onSave={file => replace(item.id, file)} />
+      <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={item.editing || item.phase === '移除中'} onPress={() => void remove(item.id)}><Sym name="close" /></Button>
     </div> : <div key={item.id} className="chat-attachments__item" data-testid="chat-attachment" data-state={item.error ? 'error' : item.value ? 'ready' : 'loading'}>
       {!item.value && !item.error ? <Spinner size="sm" aria-label="附件上传中" /> : <Sym name="description" />}
       <div className="chat-attachments__info">
@@ -120,7 +122,7 @@ function ChatAttachmentDraftContent() {
 export function ChatMessageAttachments({ files }: { files?: ChatAttachment[] }) {
   if (!files?.length) return null;
   const images = files.filter((file) => file.dataUrl);
-  return <div className="chat-attachments" data-testid="chat-message-attachments">
+  return <div className="chat-attachments chat-attachments--compact" data-testid="chat-message-attachments">
     {images.length > 0 && <ImageGallery count={images.length}><ChatImage file={images[0]} images={images} /></ImageGallery>}
     {files.filter((file) => !file.dataUrl).map((file) => <button type="button" key={file.id} className="chat-attachments__item" aria-label={`下载附件 ${file.name}`}
       onClick={() => void downloadAttachment(file).catch((error: Error) => toast.error(error.message))}>

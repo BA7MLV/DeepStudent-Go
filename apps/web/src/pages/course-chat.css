@@ -1119,6 +1119,13 @@
   row-gap: 4px;
 }
 
+/* Once a conversation starts, keep the cleared input and its controls on one
+   row. Multiline drafts still grow naturally; the welcome card stays roomy. */
+.course-chat:not(.course-chat--empty) .course-chat__composer:not([data-asking='true']) {
+  grid-template-areas: 'context context context' 'add input tools';
+  row-gap: 0;
+}
+
 /* Keep attachments and course chips clear of the top-right expand control. */
 .course-chat__composer:has(.composer-expand:not([hidden])) .course-chat__composer-context {
   padding-inline-end: 36px;

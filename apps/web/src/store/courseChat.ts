@@ -386,7 +386,7 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
     const composerSubmission = suppliedAttachments === undefined && target === undefined && !resume;
     const fromComposer = composerSubmission && !view.pendingAsk;
     const files = composerSubmission ? useChatAttachments.getState().items : [];
-    if (files.some(item => !item.value || !!item.error)) { useChatAttachments.setState({ error: ATTACHMENTS_PENDING_ERROR }); return; }
+    if (files.some(item => !item.value || !!item.error || item.editing)) { useChatAttachments.setState({ error: ATTACHMENTS_PENDING_ERROR }); return; }
     const attachments = suppliedAttachments ?? (fromComposer ? files.flatMap(item => item.value ? [item.value] : []) : []);
     const text = rawText.trim() || (attachments.length ? '请分析这些附件。' : '');
     const consume = () => { if (fromComposer) useChatAttachments.getState().consume(attachments.map(file => file.id)); };

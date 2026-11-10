@@ -7,6 +7,7 @@ import { Sym } from '../ui';
 import ImagePreview from './ImagePreview';
 import ImageGallery from './ImageGallery';
 import AttachmentUploadStatus from './AttachmentUploadStatus';
+import ImageCropButton from './ImageCropButton';
 import './chat-attachments.css';
 import { acquireBotImage, invalidateBotImage } from './botImageCache';
 
@@ -15,6 +16,7 @@ export interface BotDraftFile {
   file: File;
   uploaded?: BotAttachment;
   error?: string;
+  editing?: boolean;
 }
 
 const nameOf = (file: BotAttachment) => file.originalName || file.name || '附件';
@@ -90,7 +92,7 @@ function AttachmentImagePreview({ image: { name, url, local }, onClose, navigati
       onDownload={source ? () => { const link = document.createElement('a'); link.href = source; link.download = name; link.click(); } : undefined} />
 }
 
-export function BotMessageAttachments({ files, projectId }: { files: BotAttachment[]; projectId?: string }) {
+export function BotMessageAttachments({ files, projectId, compact = false }: { files: BotAttachment[]; projectId?: string; compact?: boolean }) {
   // Only consecutive images belong to an album; keep other attachments in order.
   const groups: BotAttachment[][] = [];
   for (const file of files) {
@@ -98,7 +100,7 @@ export function BotMessageAttachments({ files, projectId }: { files: BotAttachme
     if (isImage(file) && previous && isImage(previous[0])) previous.push(file);
     else groups.push([file]);
   }
-  return <div className="chat-attachments bot-message-attachments" data-testid="bot-message-attachments">
+  return <div className={`chat-attachments bot-message-attachments${compact ? ' chat-attachments--compact' : ''}`} data-testid="bot-message-attachments">
     {groups.map((group, index) => {
       const file = group[0];
       const name = nameOf(file), url = urlOf(file, projectId);
@@ -115,12 +117,13 @@ export function BotMessageAttachments({ files, projectId }: { files: BotAttachme
   </div>;
 }
 
-export function BotAttachmentDraft({ files, sending, onRemove, onRetry }: { files: BotDraftFile[]; sending: boolean; onRemove: (id: string) => void; onRetry: (id: string) => void }) {
+export function BotAttachmentDraft({ files, sending, onRemove, onRetry, onReplace }: { files: BotDraftFile[]; sending: boolean; onRemove: (id: string) => void; onRetry: (id: string) => void; onReplace: (id: string, file: File) => Promise<void> }) {
   return <div className="chat-attachments" data-testid="chat-attachment-draft" aria-label="待发送附件">
-    {files.map(item => isImage({ originalName: item.file.name, mimeType: item.file.type }) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.error ? 'error' : item.uploaded ? 'ready' : 'loading'}>
+    {files.map(item => isImage({ originalName: item.file.name, mimeType: item.file.type }) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.error ? 'error' : item.uploaded && !item.editing ? 'ready' : 'loading'}>
       <AttachmentImage name={item.file.name} local={item.file} draft />
       {(!item.uploaded || item.error) && <AttachmentUploadStatus label="图片上传中" error={item.error} onRetry={() => onRetry(item.id)} />}
-      <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={sending} onPress={() => onRemove(item.id)}><Sym name="close" /></Button>
+      <ImageCropButton file={item.file} isDisabled={sending || !item.uploaded || !!item.error || item.editing} onSave={file => onReplace(item.id, file)} />
+      <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={sending || item.editing} onPress={() => onRemove(item.id)}><Sym name="close" /></Button>
     </div> : <div key={item.id} className="chat-attachments__item" data-testid="chat-attachment" data-state={item.error ? 'error' : item.uploaded ? 'ready' : 'loading'}>
       {!item.uploaded && !item.error ? <Spinner size="sm" aria-label="附件上传中" /> : <Sym name="description" />}
       <span className="chat-attachments__info"><span>{item.file.name}</span><small>{attachmentSize(item.file.size)} · {item.error ? '上传失败' : item.uploaded ? '待发送' : '上传中'}</small>{item.error && <span role="alert" className="chat-attachments__error">{item.error}</span>}</span>

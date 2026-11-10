@@ -72,6 +72,10 @@ try {
   await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="bot-message-attachments"] img')].length === 2 && [...document.querySelectorAll('[data-testid="bot-message-attachments"] img')].every(img => img.naturalWidth > 0));
   assert.equal(await panel.getByText(/Attachment fileId=/).count(), 0);
   assert.equal(await panel.getByRole('button', { name: '预览图片 image.png' }).count(), 2);
+  const userThumbnail = await panel.locator('.imsg-row--mine .chat-image').first().boundingBox();
+  assert.ok(userThumbnail.width <= 97 && userThumbnail.height <= 97, 'user photos are small thumbnails');
+  const assistantImage = await panel.locator('.imsg-row:not(.imsg-row--mine) .chat-image').first().boundingBox();
+  assert.ok(assistantImage.width > 96, 'assistant image previews keep their existing size');
   await panel.getByRole('button', { name: '预览图片 image.png' }).first().click();
   await page.getByTestId('bot-image-viewer').waitFor();
   await page.getByRole('button', { name: '关闭图片预览', exact: true }).click();
@@ -104,12 +108,29 @@ try {
   await panel.locator('[data-testid="chat-attachment"][data-state="ready"]').waitFor();
   assert.equal(await panel.locator('.chat-image-pending__overlay').count(), 0, 'ready previews have no upload badge');
   await page.unroute('**/api/v1/files', holdDraftUpload);
+  await panel.getByRole('button', { name: '裁切图片 draft.png', exact: true }).click();
+  const cropDialog = page.getByTestId('image-crop-dialog');
+  await cropDialog.getByText('输出 400 × 220 px。', { exact: false }).waitFor();
+  const cropHandle = cropDialog.getByRole('button', { name: '右边，使用方向键调整', exact: true });
+  await cropHandle.focus(); await cropHandle.press('Shift+ArrowLeft');
+  await cropDialog.getByRole('button', { name: '向右旋转', exact: true }).click();
+  await cropDialog.getByText('输出 220 × 390 px。', { exact: false }).waitFor();
+  await page.screenshot({ path: path.join(output, 'image-crop-desktop.png'), animations: 'disabled' });
+  await cropDialog.getByRole('button', { name: '保存裁切', exact: true }).click();
+  await cropDialog.waitFor({ state: 'detached' });
+  await panel.locator('[data-testid="chat-attachment"][data-state="ready"]').waitFor();
   await input.press('Enter');
   await panel.locator('.bot-messages').getByText('附件已收到。', { exact: true }).waitFor({ timeout: 20000 });
   assert.equal(await panel.getByTestId('chat-attachment').count(), 0);
   const sent = store.db.prepare("SELECT content FROM messages WHERE thread_id=? AND role='user' AND kind='attachment' ORDER BY seq DESC LIMIT 1").get(thread.id);
   assert.equal(JSON.parse(sent.content).caption, '和图片一起发送');
   assert.equal(JSON.parse(sent.content).attachments.length, 1);
+  const cropped = JSON.parse(sent.content).attachments[0];
+  assert.equal(cropped.mimeType, 'image/webp');
+  assert.match(cropped.originalName, /_裁切_.*\.webp$/);
+  const croppedBytes = await (await context.request.get(`${origin}/api/v1/files/${cropped.fileId}`)).body();
+  const cropMetadata = await sharp(croppedBytes).metadata();
+  assert.equal(cropMetadata.width, 220); assert.equal(cropMetadata.height, 390);
   assert.ok(modelInputs.some(body => body.messages.some(message => message.role === 'user' && message.content.includes('Use study_file'))), 'file hints go only to the model');
 
   // Paste and drag/drop share the same pending attachment pipeline.

@@ -543,7 +543,7 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
   const composerAsk = useCourseChat(s => s.pendingAsk ? s.messages.find(message => message.key === s.pendingAsk!.messageKey)?.ask : undefined);
   const attachmentItems = useChatAttachments(s => s.items);
   const hasDraft = !!draft.trim() || attachmentItems.length > 0;
-  const attachmentsPending = attachmentItems.some(item => !item.value || !!item.error);
+  const attachmentsPending = attachmentItems.some(item => !item.value || !!item.error || item.editing);
   const generating = loading && pendingAsk == null && pendingPlan == null;
   const [composerOverflow, setComposerOverflow] = useState(false);
   const voiceDraftBase = useRef('');

@@ -190,7 +190,7 @@ const Bubble = memo(function Bubble({
   } else if (attachment) {
     body = (
       <div className="bot-attachment-message">
-        <BotMessageAttachments files={attachment.files} projectId={projectId} />
+        <BotMessageAttachments files={attachment.files} projectId={projectId} compact={mine} />
         {attachment.text && <div className="imsg-bubble"><p className="imsg-text">{attachment.text}</p></div>}
       </div>
     );
@@ -340,7 +340,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const setDraft = (value: string) => setDrafts(old => ({ ...old, [draftKey]: value }));
   const [attachmentDrafts, setAttachmentDrafts] = useState<Record<string, BotDraftFile[]>>({});
   const draftFiles = attachmentDrafts[draftKey] ?? [];
-  const attachmentsPending = draftFiles.some(file => !file.uploaded || !!file.error);
+  const attachmentsPending = draftFiles.some(file => !file.uploaded || !!file.error || file.editing);
   const uploadFlights = useRef(new Set<string>());
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -575,6 +575,15 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     } finally { sendLock.current = false; setSendBusy(false); }
   };
 
+  const storeDraftFile = async (file: File): Promise<BotAttachment> => {
+    if (projectId) {
+      const result = await serverClient.uploadProjectFile(projectId, file.name, file);
+      return { projectId, projectPath: result.path, originalName: file.name, mimeType: file.type, sizeBytes: file.size };
+    }
+    const result = await serverClient.uploadFile(file);
+    return { fileId: result.id, originalName: result.originalName, mimeType: result.mimeType, sizeBytes: result.sizeBytes };
+  };
+
   const uploadDraftFile = async (item: BotDraftFile) => {
     if (item.uploaded || uploadFlights.current.has(item.id)) return;
     uploadFlights.current.add(item.id);
@@ -585,17 +594,27 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     ));
     patch({ error: undefined });
     try {
-      let uploaded: BotAttachment;
-      if (projectId) {
-        const result = await serverClient.uploadProjectFile(projectId, item.file.name, item.file);
-        uploaded = { projectId, projectPath: result.path, originalName: item.file.name, mimeType: item.file.type, sizeBytes: item.file.size };
-      } else {
-        const result = await serverClient.uploadFile(item.file);
-        uploaded = { fileId: result.id, originalName: result.originalName, mimeType: result.mimeType, sizeBytes: result.sizeBytes };
-      }
+      const uploaded = await storeDraftFile(item.file);
       patch({ uploaded, error: undefined });
     } catch (error) { patch({ error: projectError(error) }); }
     finally { uploadFlights.current.delete(item.id); }
+  };
+
+  const replaceDraftFile = async (id: string, file: File) => {
+    const original = draftFiles.find(item => item.id === id);
+    if (!original?.uploaded || original.editing || sendLock.current || uploadFlights.current.has(id)) throw new Error(i18n.t('interface:imageCrop.wait'));
+    uploadFlights.current.add(id);
+    const patch = (update: (item: BotDraftFile) => BotDraftFile) => setAttachmentDrafts(old => Object.fromEntries(
+      Object.entries(old).map(([key, files]) => [key, files.map(item => item.id === id ? update(item) : item)]),
+    ));
+    patch(item => ({ ...item, editing: true }));
+    try {
+      const uploaded = await storeDraftFile(file);
+      const replacement = { id: crypto.randomUUID(), file, uploaded };
+      patch(() => replacement);
+      // Project uploads are user resources: keep the original, never overwrite/delete it.
+    } catch (error) { patch(() => original); throw new Error(projectError(error)); }
+    finally { uploadFlights.current.delete(id); }
   };
 
   const addFiles = (files: File[]) => {
@@ -822,6 +841,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
            <Button size="sm" variant="tertiary" onPress={continueRun}>{t('botHome.continueCurrent')}</Button>
          </div>}
           {draftFiles.length ? <BotAttachmentDraft files={draftFiles} sending={sendBusy}
+            onReplace={replaceDraftFile}
             onRetry={id => { const item = draftFiles.find(file => file.id === id); if (item) void uploadDraftFile(item); }}
             onRemove={id => setAttachmentDrafts(old => ({ ...old, [draftKey]: (old[draftKey] ?? []).filter(file => file.id !== id) }))} /> : null}
        </>}

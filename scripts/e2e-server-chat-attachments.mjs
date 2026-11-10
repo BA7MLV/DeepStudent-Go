@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import sharp from 'sharp';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
@@ -56,7 +57,34 @@ try {
   });
   await page.goto(origin);
   await page.getByTestId('course-chat-page').waitFor({ timeout: 60000 });
-  const input = page.locator('textarea.course-chat__input');
+  await page.evaluate(async () => { const { applyLocale } = await import('/src/i18n/index.ts'); applyLocale('zh-CN'); });
+  // Asymmetric pixels catch incorrect rotation/crop transforms, not just swapped
+  // output dimensions. Exercise the real browser Canvas and file encoder.
+  const rotationPixels = await page.evaluate(async () => {
+    const { renderCropCanvas, exportCroppedImage, rotateCrop } = await import('/src/chat/cropImage.ts');
+    const canvas = document.createElement('canvas'); canvas.width = 4; canvas.height = 2;
+    const context = canvas.getContext('2d');
+    for (const [color, x, y] of [['red', 0, 0], ['lime', 2, 0], ['blue', 0, 1], ['yellow', 2, 1]]) {
+      context.fillStyle = color; context.fillRect(x, y, 2, 1);
+    }
+    const image = new Image(); image.src = canvas.toDataURL(); await image.decode();
+    const full = { x: 0, y: 0, width: 100, height: 100 };
+    const corners = output => {
+      const ctx = output.getContext('2d'), w = output.width, h = output.height;
+      return [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]].map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data));
+    };
+    const cw = renderCropCanvas(image, full, 1), ccw = renderCropCanvas(image, full, -1);
+    const selected = rotateCrop({ x: 0, y: 0, width: 50, height: 100 }, 1);
+    const file = await exportCroppedImage(image, selected, 'quadrants.png', false, 1);
+    const output = await createImageBitmap(file);
+    const cropped = document.createElement('canvas'); cropped.width = output.width; cropped.height = output.height;
+    cropped.getContext('2d').drawImage(output, 0, 0); output.close();
+    return { cw: corners(cw), ccw: corners(ccw), cropped: corners(cropped), dimensions: [cropped.width, cropped.height], type: file.type };
+  });
+  const red = [255, 0, 0, 255], green = [0, 255, 0, 255], blue = [0, 0, 255, 255], yellow = [255, 255, 0, 255];
+  assert.deepEqual(rotationPixels, { cw: [blue, red, yellow, green], ccw: [green, yellow, red, blue],
+    cropped: [blue, red, blue, red], dimensions: [2, 2], type: 'image/png' });
+  const input = page.locator('.course-chat__composer [contenteditable="true"][role="textbox"]');
   await input.waitFor();
   await page.evaluate(() => {
     const data = new DataTransfer();
@@ -65,7 +93,7 @@ try {
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#4180b0'; ctx.fillRect(0, 0, 80, 80);
     const bytes = Uint8Array.from(atob(canvas.toDataURL('image/png').split(',')[1]), char => char.charCodeAt(0));
     data.items.add(new File([bytes], '示意图.png', { type: 'image/png' }));
-    document.querySelector('textarea.course-chat__input').closest('[class*="composer"]')
+    document.querySelector('.course-chat__composer')
       .dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }));
   });
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="chat-attachment-draft"] [data-testid="chat-attachment"]').length === 2);
@@ -78,6 +106,46 @@ try {
   release();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="chat-attachment-draft"] [data-state="ready"]').length === 2);
   assert.equal(uploads, 2);
+  // Optional crop: cancelling is non-destructive; keyboard resize uses original
+  // pixels; a failed replacement keeps the original ready and the editor open.
+  const cropButton = page.getByRole('button', { name: '裁切图片 示意图.png', exact: true });
+  await cropButton.click();
+  const cropDialog = page.getByTestId('image-crop-dialog');
+  await cropDialog.getByText('输出 80 × 80 px。', { exact: false }).waitFor();
+  await cropDialog.getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(uploads, 2, 'cancel never uploads or replaces');
+  await cropButton.click();
+  const rightHandle = cropDialog.getByRole('button', { name: '右边，使用方向键调整', exact: true });
+  await rightHandle.focus();
+  await rightHandle.press('Shift+ArrowLeft');
+  await cropDialog.getByText('输出 70 × 80 px。', { exact: false }).waitFor();
+  await cropDialog.getByRole('button', { name: '向右旋转', exact: true }).click();
+  await cropDialog.getByText('输出 80 × 70 px。', { exact: false }).waitFor();
+  await cropDialog.getByRole('button', { name: '向左旋转', exact: true }).click();
+  await cropDialog.getByText('输出 70 × 80 px。', { exact: false }).waitFor();
+  await cropDialog.getByRole('button', { name: '向右旋转', exact: true }).click();
+  let failCrop = true;
+  const rejectCrop = async route => {
+    if (route.request().method() === 'POST' && failCrop) {
+      failCrop = false;
+      await route.fulfill({ status: 500, json: { error: 'crop_upload_fixture_failed' } });
+    } else await route.fallback();
+  };
+  await page.route('**/api/v1/files', rejectCrop);
+  await cropDialog.getByRole('button', { name: '保存裁切', exact: true }).click();
+  await cropDialog.getByRole('alert').waitFor();
+  assert.equal(await page.locator('[data-testid="chat-attachment-draft"] [data-state="ready"]').count(), 2);
+  await page.unroute('**/api/v1/files', rejectCrop);
+  await cropDialog.getByRole('checkbox', { name: '压缩大图', exact: true }).uncheck();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const bounds = await cropDialog.boundingBox();
+  assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 391, 'crop editor fits a mobile viewport');
+  await page.screenshot({ path: path.join(directory, 'crop-mobile.png') });
+  await cropDialog.getByRole('button', { name: '保存裁切', exact: true }).click();
+  await cropDialog.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="chat-attachment-draft"] [data-state="ready"]').length === 2);
+  assert.equal(uploads, 3);
+  await page.setViewportSize({ width: 1280, height: 900 });
   await send.click();
   const until = async predicate => { const deadline = Date.now() + 30000; while (Date.now() < deadline) {
     if (await predicate()) return;
@@ -90,6 +158,11 @@ try {
   const row = records.get(owner, 'chats', result.userRowId);
   assert.equal(row.attachments.length, 2);
   assert.ok(row.attachments.every(file => file.serverId));
+  const cropped = row.attachments.find(file => file.dataUrl);
+  assert.match(cropped.name, /_裁切_.*\.png$/);
+  const croppedBytes = await (await context.request.get(`${origin}/api/v1/files/${cropped.serverId}`)).body();
+  const cropMetadata = await sharp(croppedBytes).metadata();
+  assert.equal(cropMetadata.width, 80); assert.equal(cropMetadata.height, 70);
   assert.ok(JSON.stringify(bodies[0].messages).includes('DRAGGED_FILE_MARKER'));
   assert.ok(bodies[0].messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url')));
   await page.getByText('已读取拖入的资料，第 1 次回答。', { exact: false }).first().waitFor();
@@ -97,6 +170,12 @@ try {
   await page.getByTestId('course-chat-page').waitFor({ timeout: 60000 });
   await page.getByText('已读取拖入的资料，第 1 次回答。', { exact: false }).first().waitFor({ timeout: 30000 });
   await page.getByTestId('chat-message-attachments').waitFor();
+  const thumbnail = page.getByTestId('chat-message-attachments').locator('.chat-image');
+  const thumbnailBox = await thumbnail.boundingBox();
+  assert.ok(thumbnailBox.width <= 97 && thumbnailBox.height <= 97, 'sent user photos stay thumbnail-sized');
+  await thumbnail.click();
+  await page.getByTestId('chat-image-viewer').waitFor();
+  await page.getByRole('button', { name: '关闭图片预览', exact: true }).click();
   await input.fill('接着分析刚才附件里的原题');
   await input.press('Enter');
   await until(() => bodies.length === 2 && latest()?.status === 'completed');

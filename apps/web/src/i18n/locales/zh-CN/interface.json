@@ -1,4 +1,18 @@
 {
+  "imageCrop": {
+    "orientation": "图片方向", "rotateLeft": "向左旋转", "rotateRight": "向右旋转",
+    "title": "裁切图片", "open": "裁切图片 {{name}}", "loading": "加载裁切工具", "imageLoading": "图片加载中", "close": "关闭裁切",
+    "help": "拖动边框调整范围，拖动选区移动；也可用 Tab 和方向键操作。", "optimize": "压缩大图",
+    "qualityHint": "高质量 WebP，最长边 2560 px；关闭则保存原分辨率无损 PNG。均不放大图片。",
+    "output": "输出 {{width}} × {{height}} px。", "originalHint": "仅替换待发送附件，不修改本机原文件；动图裁切后为静态图片。",
+    "reset": "重置选区", "cancel": "取消", "save": "保存裁切", "saving": "保存中", "savePhase": "保存裁切中", "ready": "就绪",
+    "invalidRegion": "请选择有效的裁切区域", "tooManyPixels": "图片不能超过 4000 万像素，请先缩小图片", "noCanvas": "浏览器无法处理图片，请更换浏览器重试",
+    "encodeFailed": "图片处理失败，请缩小裁切区域后重试", "unsupportedOutput": "浏览器返回了不支持的图片格式", "tooLarge": "裁切结果超过 10 MB，请启用压缩或缩小裁切区域",
+    "sourceTooLarge": "裁切支持 20 MB 以内的图片，请先缩小图片", "decodeFailed": "无法读取图片，请使用 PNG、JPEG、WebP 或 GIF", "saveFailed": "保存失败，请重试",
+    "wait": "请等待图片上传或发送完成后再裁切", "cleanupFailed": "裁切已保存，但旧附件清理失败，可稍后在文件管理中清理", "name": "图片", "suffix": "裁切",
+    "area": "裁切区域，使用方向键移动", "nw": "左上角，使用方向键调整", "n": "上边，使用方向键调整", "ne": "右上角，使用方向键调整", "e": "右边，使用方向键调整",
+    "se": "右下角，使用方向键调整", "s": "下边，使用方向键调整", "sw": "左下角，使用方向键调整", "w": "左边，使用方向键调整"
+  },
   "handoutRead": { "failed": "讲义读取失败，已保留上次文档和编辑内容。", "retry": "重试", "loading": "正在读取讲义…" },
   "nav": { "home": "主页", "resources": "资源", "bot": "机器人", "botHint": "在对话主页右侧打开机器人面板" },
   "composer": {

@@ -6,6 +6,7 @@
 .inline-skill-input .cm-content { min-height: calc(1.6em + 10px); padding: 4px 0; caret-color: var(--foreground); }
 .inline-skill-input .cm-line { padding: 0; }
 .inline-skill-input .cm-placeholder { color: var(--muted); }
+.inline-skill-input:not([data-expanded]) .cm-placeholder { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: top; }
 .inline-skill-input .cm-content[contenteditable='false'] { opacity: .6; }
 .inline-skill-chip { display: inline-flex; align-items: center; gap: .25em; max-width: 100%; padding: 0 .375em; margin-inline: .125em; border-radius: var(--radius-chip); background: var(--surface-secondary); color: var(--foreground); font: inherit; vertical-align: baseline; white-space: normal; overflow-wrap: anywhere; }
 .inline-skill-chip::before { content: '@'; color: var(--muted); }
