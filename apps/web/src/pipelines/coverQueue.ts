@@ -87,7 +87,7 @@ async function pump(): Promise<void> {
 export async function backfillCovers(limit = BACKFILL_LIMIT): Promise<number> {
   if (cloud.enabled) {
     try { return await backfillProjection(limit); }
-    catch (error) { console.warn(`[cover] 封面回填跳过：${formatCaughtError(error)}`); return 0; }
+    catch (error) { console.warn(`[cover] Backfill skipped: ${formatCaughtError(error)}`); return 0; }
   }
   const rows = await db.videos.toArray();
   if (rows.length === 0) return 0;
