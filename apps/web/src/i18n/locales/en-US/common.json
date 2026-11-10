@@ -1,5 +1,7 @@
 {
+  "courseMetadata": { "loadFailed": "Course details could not be loaded. This does not mean the courses were deleted.", "retry": "Retry" },
   "appTitle": "DeepStudent Go",
+  "fileLoadFailed": "Unable to load file ({{status}})",
   "clipboard": {
     "copied": "Copied",
     "failed": "Copy failed. Please try again."
@@ -312,6 +314,7 @@
     "sessionEmpty": "This session has no messages yet",
     "exportedMarkdown": "Markdown file exported",
     "sessionDeleted": "Session deleted",
+    "sessionUnavailable": "This conversation was deleted or is unavailable",
     "indexNotReady": "Q&A index is not ready yet",
     "forkedToast": "Branched a new session from this message",
     "deleteSessionTitle": "Delete this session?",

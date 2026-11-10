@@ -1,6 +1,6 @@
 import { createSessionStore } from '../client/session-store';
 import { cloud } from '../cloud/state';
-import { patchConversationSession, reviseConversationSession } from './conversationProducts';
+import { patchConversationSession, reviseConversationSession, readConversationSession, readConversationMessage } from './conversationProducts';
 import { learningEdit, learningId, submitLearning } from '../client/learning';
 import { removeConversationMessages, deleteServerSession, forkServerSession } from '../client/conversations';
 import type { CloudTask } from '@wangke/contracts/cloud';
@@ -9,7 +9,7 @@ import { readChatPage, readChatHistory } from './chatHistory';
 import { responsePhase, type ProcessPhase } from '../utils/responseProcess';
 import { getSettings } from './settings';
 import { taskModelChoice, taskModelKey, useTaskModel } from './taskModel';
-import { db, type AskUserState, type ChatRow, type ChatSessionRow, type ChatToolCall, type FolderPlanState } from './db';
+import { db, type AskUserState, type ChatRow, type ChatSessionRow, type ChatToolCall, type FolderPlanState, type VideoRow, type FolderRow } from './db';
 import { type CourseContextItem, LIBRARY_ASSISTANT_ID } from '../harness/libraryAssistant';
 import type { AppliedPlanResult } from '../pipelines/folderPlan';
 import { explicitSkillIds } from '../skills/activation';
@@ -28,6 +28,10 @@ import { stopServerChat, commandServerChat } from '../client/chat-server-executi
 import { accountLifecycle } from '../client/account-lifecycle';
 import { chatTaskActive, chatTaskState } from './chatTaskState';
 import type { RuntimeTask } from '@wangke/contracts/client-runtime';
+import type { SessionIndexPage } from '@wangke/contracts/client-runtime';
+import { serverRuntime } from '../client/bootstrap';
+import i18n from '../i18n';
+import { readRecordKeys } from '../cloud/sync';
 
 /** Server commands + durable private drafts + disposable page projections.
  * No browser model execution or authoritative conversation writes live here. */
@@ -265,14 +269,14 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
   bootstrap: async () => {
     if (get().ready) return;
     const current = captureScope();
-    const [sessions, count, pendingDraft] = await Promise.all([unarchivedSessions(), db.videos.count(), browserChatQueue().list(0)]);
+    const [sessions, count, pendingDraft] = await Promise.all([unarchivedSessions(), readCourseCount(), browserChatQueue().list(0)]);
     if (!current()) return;
     const selected = get().activeId;
     const activeId = selected != null && sessions.some(row => row.id === selected) ? selected : pendingDraft.length ? null : sessions.at(-1)?.id ?? null;
     set({ sessions, ready: true, courseCount: count, activeId });
     if (activeId == null) { set({ loaded: true }); await sessionQueue().restore(0); }
   },
-  refreshCourseCount: async () => { const current = captureScope(), courseCount = await db.videos.count(); if (current()) set({ courseCount }); },
+  refreshCourseCount: async () => { const current = captureScope(), courseCount = await readCourseCount(); if (current()) set({ courseCount }); },
   loadOlder: async () => {
     const id = get().activeId;
     if (id == null) return;
@@ -298,12 +302,14 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
       const request = Symbol('history-load'); historyLoads.set(id, request);
       set({ activeId: id, ...EMPTY_VIEW });
       releaseIdleSessions();
-      const session = await db.chatSessions.get(id);
+      const session = await readConversationSession(id);
       if (!current()) return;
-      const contextIds = session?.contextCourseIds ?? [];
+      if (!session) throw new Error(i18n.t('chatPanel.sessionUnavailable'));
+      set(state => ({ sessions: [...state.sessions.filter(row => row.id !== id).slice(-50), session] }));
+      const contextIds = normalizeCourseContextIds(session.contextCourseIds ?? []) ?? [];
       const [courses, projectFolder] = await Promise.all([
-        contextIds.length ? db.videos.where('id').anyOf(contextIds).toArray() : [],
-        session?.projectFolderId == null ? undefined : db.folders.get(session.projectFolderId),
+        cloud.enabled ? readRecordKeys<VideoRow>('videos', contextIds).then(rows => rows.filter(row => row != null)) : db.videos.bulkGet(contextIds).then(rows => rows.filter(row => row != null)),
+        session.projectFolderId == null ? undefined : cloud.enabled ? readRecordKeys<FolderRow>('folders', [session.projectFolderId]).then(rows => rows[0]) : db.folders.get(session.projectFolderId),
       ]);
       if (!current() || historyLoads.get(id) !== request) return;
       historyLoads.delete(id);
@@ -360,7 +366,8 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
   clearCourseContext: () => { const key = activeKey(), current = captureScope(); writeView(key, { contextCourses: [] }); if (key) void patchSession(key, row => { delete row.contextCourseIds; }).catch(error => { if (current()) writeView(key, { historyError: String(error) }); }); },
   setCourseContext: async ids => {
     const key = activeKey(), current = captureScope();
-    const courses = (await db.videos.bulkGet(normalizeCourseContextIds(ids) ?? [])).filter(row => row != null).map(row => ({ id: row.id, name: row.name }));
+    const contextIds = normalizeCourseContextIds(ids) ?? [];
+    const courses = (await (cloud.enabled ? readRecordKeys<VideoRow>('videos', contextIds) : db.videos.bulkGet(contextIds))).filter(row => row != null).map(row => ({ id: row.id, name: row.name }));
     if (!current()) return;
     if (key) await patchConversationSession(key, { contextCourseIds: courses.map(course => course.id) });
     if (current()) writeView(key, { contextCourses: courses });
@@ -406,8 +413,8 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
         const row = await newSessionRow(view.skillIds, view.contextCourses.map(course => course.id), view.mcpServerIds, view.project?.folderId);
         id = row.id!;
         if (!currentScope() || !adapter.current()) return;
-        if (activeKey() === key) set(s => ({ sessions: [...s.sessions, row], activeId: id, loaded: true }));
-        else { set(s => ({ sessions: [...s.sessions, row] })); writeView(id, { ...view, loaded: true }); }
+        if (activeKey() === key) set(s => ({ sessions: [...s.sessions.slice(-50), row], activeId: id, loaded: true }));
+        else { set(s => ({ sessions: [...s.sessions.slice(-50), row] })); writeView(id, { ...view, loaded: true }); }
       }
       pendingCloudSubmissions.set(operationId, id); timeline(id).begin(operationId);
       const messages = [...readView(id).messages];
@@ -454,7 +461,7 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
     if (sessionId == null || get().activeId !== sessionId) return false;
     const current = captureScope(), view = readView(sessionId), message = view.messages.find(item => item.key === key);
     if (view.loading || !message || message.streaming || message.rowId == null) return false;
-    const row = await db.chats.get(message.rowId);
+    const row = await readConversationMessage(message.rowId);
     if (!current() || !row || row.sessionId !== sessionId || readView(sessionId).loading) return false;
     await removeConversationMessages([message.rowId]); if (!current()) return false;
     writeView(sessionId, { messages: readView(sessionId).messages.filter(item => item.key !== key) }); return true;
@@ -507,7 +514,7 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
   },
   forkSession: async (id, uptoRowId) => {
     if (get().runningIds.includes(id)) return null;
-    const current = captureScope(), source = await db.chatSessions.get(id);
+    const current = captureScope(), source = await readConversationSession(id);
     if (!current() || !source) return null;
     const rows = await readChatHistory(id); if (!current()) return null;
     const cut = uptoRowId == null ? rows.length : rows.findIndex(row => row.id === uptoRowId) + 1;
@@ -541,12 +548,38 @@ async function newSessionRow(skillIds?: number[], contextCourseIds: string[] = [
   if (!current() || !adapter.current()) throw new Error('client_account_changed');
   await adapter.rekeyDraft(value.id!); return value;
 }
+async function readCourseCount() {
+  if (!cloud.enabled) return db.videos.count();
+  const current = captureScope(), runtime = await serverRuntime(cloud.userId);
+  if (!current()) throw new Error('client_account_changed');
+  const response = await runtime.read({ kind: 'courseCount' });
+  if (!current()) throw new Error('client_account_changed');
+  return (response.value as unknown as { count: number }).count;
+}
 async function unarchivedSessions() {
+  if (cloud.enabled) {
+    const current = captureScope(), runtime = await serverRuntime(cloud.userId);
+    if (!current()) throw new Error('client_account_changed');
+    const response = await runtime.read({ kind: 'sessionIndex', videoId: LIBRARY_ASSISTANT_ID, archived: false, recentOnly: false });
+    if (!current()) throw new Error('client_account_changed');
+    const page = response.value as unknown as SessionIndexPage;
+    const activeId = useCourseChat.getState().activeId;
+    let active = activeId == null ? undefined : await readConversationSession(activeId);
+    if ((!active || active.archived) && page.latestId != null && !page.sessions.some(row => row.id === page.latestId)) active = await readConversationSession(page.latestId);
+    if (!current()) throw new Error('client_account_changed');
+    const rows: ChatSessionRow[] = page.sessions.map(row => ({ id: row.id, videoId: row.videoId, title: row.title, createdAt: row.createdAt, pinned: row.pinned, archived: row.archived }));
+    // The store is a bounded landing/active metadata projection, not all sessions.
+    if (active && !active.archived) {
+      const position = rows.findIndex(row => row.id === active.id);
+      if (position >= 0) rows[position] = active; else rows.push(active);
+    }
+    return rows.sort((a, b) => a.createdAt - b.createdAt || a.id! - b.id!);
+  }
   return (await db.chatSessions.where('videoId').equals(LIBRARY_ASSISTANT_ID).sortBy('createdAt')).filter(row => !row.archived);
 }
 async function patchSession(id: number, mutate: (row: ChatSessionRow) => void) {
   const current = captureScope(); await reviseConversationSession(id, mutate); if (!current()) return;
-  const fresh = await db.chatSessions.get(id); if (!current() || !fresh) return;
+  const fresh = await readConversationSession(id); if (!current() || !fresh) return;
   useCourseChat.setState(state => {
     const archived = new Map(state.archivedSessions.map(row => [row.id, row]));
     if (fresh.archived) archived.set(id, fresh); else archived.delete(id);

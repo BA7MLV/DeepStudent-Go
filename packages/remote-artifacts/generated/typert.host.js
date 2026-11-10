@@ -401,6 +401,10 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => 
   'updatedAt': z.number(),
   'mcpRequired': z.union([z.undefined(), z.array(z.string())]).optional(),
 })]),
+  'referencesSnapshot': z.union([z.undefined(), z.object({
+  'epoch': z.string(),
+  'version': z.number(),
+})]).optional(),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 }), z.object({
@@ -531,6 +535,11 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => 
 })),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
+}), z.object({
+  'kind': z.literal("clearStudySnapshot"),
+  'snapshot': z.string(),
+  'mutationId': z.string(),
+  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 })])),
 }))
 let _wangke_remote_host_clientRuntime_editLearning_result$schema$value
@@ -592,10 +601,62 @@ const _wangke_remote_host_clientRuntime_read_parameter_0$schema = () => (_wangke
 }), z.object({
   'kind': z.literal("catalog"),
 }), z.object({
+  'kind': z.literal("pluginScope"),
+  'materialId': z.union([z.undefined(), z.string()]).optional(),
+  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
+}), z.object({
   'kind': z.literal("tasks"),
 }), z.object({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.object({
+  'kind': z.literal("recordKeys"),
+  'keys': z.array(z.object({
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'key': z.union([z.string(), z.number()]),
+})),
+}), z.object({
+  'kind': z.literal("collectionPage"),
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'parent': z.union([z.undefined(), z.string(), z.number()]).optional(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("sessionIndex"),
+  'videoId': z.string(),
+  'archived': z.boolean(),
+  'recentOnly': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("courseCount"),
+}), z.object({
+  'kind': z.literal("courseReadiness"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("courseMetadata"),
+  'ids': z.array(z.string()),
+  'covers': z.boolean(),
+}), z.object({
+  'kind': z.literal("coverCandidates"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("courseColorFrame"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("latestHandout"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("skillIndex"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("studySummary"),
+}), z.object({
+  'kind': z.literal("studyOverview"),
+  'today': z.string(),
+  'from': z.string(),
+  'preview': z.array(z.object({
+  'date': z.string(),
+  'seconds': z.number(),
+})),
 }), z.object({
   'kind': z.literal("fileIntents"),
 }), z.object({
@@ -1291,10 +1352,62 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0$schema = () => (_wangk
 }), z.object({
   'kind': z.literal("catalog"),
 }), z.object({
+  'kind': z.literal("pluginScope"),
+  'materialId': z.union([z.undefined(), z.string()]).optional(),
+  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
+}), z.object({
   'kind': z.literal("tasks"),
 }), z.object({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.object({
+  'kind': z.literal("recordKeys"),
+  'keys': z.array(z.object({
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'key': z.union([z.string(), z.number()]),
+})),
+}), z.object({
+  'kind': z.literal("collectionPage"),
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'parent': z.union([z.undefined(), z.string(), z.number()]).optional(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("sessionIndex"),
+  'videoId': z.string(),
+  'archived': z.boolean(),
+  'recentOnly': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("courseCount"),
+}), z.object({
+  'kind': z.literal("courseReadiness"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("courseMetadata"),
+  'ids': z.array(z.string()),
+  'covers': z.boolean(),
+}), z.object({
+  'kind': z.literal("coverCandidates"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("courseColorFrame"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("latestHandout"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("skillIndex"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("studySummary"),
+}), z.object({
+  'kind': z.literal("studyOverview"),
+  'today': z.string(),
+  'from': z.string(),
+  'preview': z.array(z.object({
+  'date': z.string(),
+  'seconds': z.number(),
+})),
 }), z.object({
   'kind': z.literal("fileIntents"),
 }), z.object({
@@ -2158,6 +2271,10 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema =
   'updatedAt': z.number(),
   'mcpRequired': z.union([z.undefined(), z.array(z.string())]).optional(),
 })]),
+  'referencesSnapshot': z.union([z.undefined(), z.strictObject({
+  'epoch': z.string(),
+  'version': z.number(),
+})]).optional(),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 }), z.strictObject({
@@ -2288,6 +2405,11 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema =
 })),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("clearStudySnapshot"),
+  'snapshot': z.string(),
+  'mutationId': z.string(),
+  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 })])),
 }))
 let _wangke_remote_host_clientRuntime_fileIntent_parameter_0_strict$schema$value
@@ -2327,10 +2449,62 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
 }), z.strictObject({
   'kind': z.literal("catalog"),
 }), z.strictObject({
+  'kind': z.literal("pluginScope"),
+  'materialId': z.union([z.undefined(), z.string()]).optional(),
+  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
+}), z.strictObject({
   'kind': z.literal("tasks"),
 }), z.strictObject({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.strictObject({
+  'kind': z.literal("recordKeys"),
+  'keys': z.array(z.strictObject({
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'key': z.union([z.string(), z.number()]),
+})),
+}), z.strictObject({
+  'kind': z.literal("collectionPage"),
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'parent': z.union([z.undefined(), z.string(), z.number()]).optional(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("sessionIndex"),
+  'videoId': z.string(),
+  'archived': z.boolean(),
+  'recentOnly': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("courseCount"),
+}), z.strictObject({
+  'kind': z.literal("courseReadiness"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("courseMetadata"),
+  'ids': z.array(z.string()),
+  'covers': z.boolean(),
+}), z.strictObject({
+  'kind': z.literal("coverCandidates"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("courseColorFrame"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("latestHandout"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("skillIndex"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("studySummary"),
+}), z.strictObject({
+  'kind': z.literal("studyOverview"),
+  'today': z.string(),
+  'from': z.string(),
+  'preview': z.array(z.strictObject({
+  'date': z.string(),
+  'seconds': z.number(),
+})),
 }), z.strictObject({
   'kind': z.literal("fileIntents"),
 }), z.strictObject({
@@ -2876,10 +3050,62 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0_strict$schema = () => 
 }), z.strictObject({
   'kind': z.literal("catalog"),
 }), z.strictObject({
+  'kind': z.literal("pluginScope"),
+  'materialId': z.union([z.undefined(), z.string()]).optional(),
+  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
+}), z.strictObject({
   'kind': z.literal("tasks"),
 }), z.strictObject({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.strictObject({
+  'kind': z.literal("recordKeys"),
+  'keys': z.array(z.strictObject({
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'key': z.union([z.string(), z.number()]),
+})),
+}), z.strictObject({
+  'kind': z.literal("collectionPage"),
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'parent': z.union([z.undefined(), z.string(), z.number()]).optional(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("sessionIndex"),
+  'videoId': z.string(),
+  'archived': z.boolean(),
+  'recentOnly': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("courseCount"),
+}), z.strictObject({
+  'kind': z.literal("courseReadiness"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("courseMetadata"),
+  'ids': z.array(z.string()),
+  'covers': z.boolean(),
+}), z.strictObject({
+  'kind': z.literal("coverCandidates"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("courseColorFrame"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("latestHandout"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("skillIndex"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("studySummary"),
+}), z.strictObject({
+  'kind': z.literal("studyOverview"),
+  'today': z.string(),
+  'from': z.string(),
+  'preview': z.array(z.strictObject({
+  'date': z.string(),
+  'seconds': z.number(),
+})),
 }), z.strictObject({
   'kind': z.literal("fileIntents"),
 }), z.strictObject({
@@ -3735,7 +3961,7 @@ export const TYPERT = {
           },
           {
             "name": "ClientLearningEdit",
-            "declaration": "export type ClientLearningEdit = (Extract<LearningProduct, { kind: 'conversationMessage' | 'conversationSession' | 'handoutDocument'; }> | { kind: 'skillDefinition'; expected: LearningSkill | null; value: LearningSkill | null; } | { kind: 'skillReference'; expected: LearningSkillReference | null; value: LearningSkillReference | null; } | { kind: 'materialAnnotation'; expected: LearningInk | null; value: LearningInk | null; } | { kind: 'reviewCard'; courseId: string; cardId: number; expected: 0 | 1 | 2; status: 0 | 1 | 2; } | { kind: 'handoutReading'; courseId: string; handoutId: number; position: { anchor: string; offset: number; }; } | { kind: 'studyTime'; date: string; seconds: number; updatedAt: number; } | { kind: 'clearStudyTime'; expected: { date: string; seconds: number; updatedAt: number; }[]; }) & { mutationId: string; baseRevision?: number; };"
+            "declaration": "export type ClientLearningEdit = (Extract<LearningProduct, { kind: 'conversationMessage' | 'conversationSession' | 'handoutDocument'; }> | { kind: 'skillDefinition'; expected: LearningSkill | null; value: LearningSkill | null; referencesSnapshot?: { epoch: string; version: number; }; } | { kind: 'skillReference'; expected: LearningSkillReference | null; value: LearningSkillReference | null; } | { kind: 'materialAnnotation'; expected: LearningInk | null; value: LearningInk | null; } | { kind: 'reviewCard'; courseId: string; cardId: number; expected: 0 | 1 | 2; status: 0 | 1 | 2; } | { kind: 'handoutReading'; courseId: string; handoutId: number; position: { anchor: string; offset: number; }; } | { kind: 'studyTime'; date: string; seconds: number; updatedAt: number; } | { kind: 'clearStudyTime'; expected: { date: string; seconds: number; updatedAt: number; }[]; } | { kind: 'clearStudySnapshot'; snapshot: string; }) & { mutationId: string; baseRevision?: number; };"
           },
           {
             "name": "ConversationMode",
@@ -3866,6 +4092,10 @@ export const TYPERT = {
             "declaration": "export interface PreferencesProjection {\n    values: { [key: string]: RuntimeJson; };\n}"
           },
           {
+            "name": "ProjectionTable",
+            "declaration": "export type ProjectionTable = 'videos' | 'files' | 'segments' | 'frames' | 'handouts' | 'chats' | 'chatSessions' | 'skills' | 'skillRefs' | 'danmakus' | 'folders' | 'cards' | 'subtitleTracks' | 'materialBlocks' | 'materialInk' | 'covers' | 'studyDays' | 'courseFiles' | 'comments';"
+          },
+          {
             "name": "ResourceCommand",
             "declaration": "export interface ResourceCommand {\n    operationId: string;\n    operation: ResourceOperation;\n    scope?: string;\n    delivery?: { stream: string; sequence: number; };\n}"
           },
@@ -3911,7 +4141,7 @@ export const TYPERT = {
           },
           {
             "name": "RuntimeRead",
-            "declaration": "export type RuntimeRead = { kind: 'preferences'; } | { kind: 'permissions'; } | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean; } | { kind: 'resourceTrash'; } | { kind: 'courseDocument'; courseId: string; } | { kind: 'systemDocument'; path: string; } | { kind: 'systemDirectory'; path: string; offset: number; query: string; } | { kind: 'executorRecovery'; taskId?: string; operationIds: string[]; } | { kind: 'interactionRecovery'; taskId: string; sequence: number; } | { kind: 'catalog'; } | { kind: 'tasks'; } | { kind: 'records'; after: number; } | { kind: 'fileIntents'; } | { kind: 'session'; sessionId: number; before?: { createdAt: number; id: number; role?: string; }; after?: { createdAt: number; id: number; role?: string; }; } | { kind: 'plugin'; pluginId: string; instanceId: string; revision: number; method: string; args: { [key: string]: RuntimeJson; }; } | { kind: 'pluginQueries'; pluginId: string; instanceId: string; revision: number; queries: { key: string; method: string; args: { [key: string]: RuntimeJson; }; }[]; } | { kind: 'task'; taskId: string; };"
+            "declaration": "export type RuntimeRead = { kind: 'preferences'; } | { kind: 'permissions'; } | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean; } | { kind: 'resourceTrash'; } | { kind: 'courseDocument'; courseId: string; } | { kind: 'systemDocument'; path: string; } | { kind: 'systemDirectory'; path: string; offset: number; query: string; } | { kind: 'executorRecovery'; taskId?: string; operationIds: string[]; } | { kind: 'interactionRecovery'; taskId: string; sequence: number; } | { kind: 'catalog'; } | { kind: 'pluginScope'; materialId?: string; projectFolderId?: number; } | { kind: 'tasks'; } | { kind: 'records'; after: number; } | { kind: 'recordKeys'; keys: { table: ProjectionTable; key: string | number; }[]; } | { kind: 'collectionPage'; table: ProjectionTable; parent?: string | number; cursor?: string; } | { kind: 'sessionIndex'; videoId: string; archived: boolean; recentOnly: boolean; cursor?: string; } | { kind: 'courseCount'; } | { kind: 'courseReadiness'; videoId: string; } | { kind: 'courseMetadata'; ids: string[]; covers: boolean; } | { kind: 'coverCandidates'; cursor?: string; } | { kind: 'courseColorFrame'; videoId: string; } | { kind: 'latestHandout'; videoId: string; } | { kind: 'skillIndex'; cursor?: string; } | { kind: 'studySummary'; } | { kind: 'studyOverview'; today: string; from: string; preview: { date: string; seconds: number; }[]; } | { kind: 'fileIntents'; } | { kind: 'session'; sessionId: number; before?: { createdAt: number; id: number; role?: string; }; after?: { createdAt: number; id: number; role?: string; }; } | { kind: 'plugin'; pluginId: string; instanceId: string; revision: number; method: string; args: { [key: string]: RuntimeJson; }; } | { kind: 'pluginQueries'; pluginId: string; instanceId: string; revision: number; queries: { key: string; method: string; args: { [key: string]: RuntimeJson; }; }[]; } | { kind: 'task'; taskId: string; };"
           },
           {
             "name": "RuntimeReceipt",

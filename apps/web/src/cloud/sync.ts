@@ -10,7 +10,7 @@ import { cloudTransaction, cloudRetry, isLostCloudTransaction } from './transact
 import { reasoningProviderOf } from '@wangke/study-core/model/reasoning';
 import Dexie from 'dexie';
 import { serverRuntime, isCurrentServerRuntime, disposeServerRuntime } from '../client/bootstrap';
-import type { RuntimeRecordsPage } from '@wangke/contracts/client-runtime';
+import type { ProjectionTable, RuntimeRecord, RuntimeRecordsPage } from '@wangke/contracts/client-runtime';
 import { migrateResourceOutbox } from '../client/resources';
 import { drainLearning, type LearningCommandRow } from '../client/learning';
 import { accountLifetime, type AccountLifetime } from '../client/account-lifecycle';
@@ -41,12 +41,12 @@ function reportSyncFailure(error: unknown, source: 'flush' | 'follow') {
   if ((error as Error)?.message === 'client_account_changed') return;
   const actionable = actionableMessage(error), detail = error instanceof Error ? error.message : String(error);
   if (actionable) { errorSource = source; useCloudSync.setState({ error: actionable, detail }); }
-  else useCloudSync.setState(state => ({ degradedSince: state.degradedSince || Date.now(), detail }));
+  else useCloudSync.setState(state => ({ degradedSince: state.degradedSince || Date.now(), healthySince: 0, detail }));
 }
 function reportSyncHealthy(source: 'flush' | 'follow') {
   const clearError = source === 'flush' || errorSource === source;
   if (clearError) errorSource = '';
-  useCloudSync.setState(state => ({ degradedSince: 0, detail: '', ...(clearError && state.error ? { error: '' } : {}) }));
+  useCloudSync.setState(state => ({ degradedSince: 0, detail: '', healthySince: navigator.onLine ? state.healthySince || Date.now() : 0, ...(clearError && state.error ? { error: '' } : {}) }));
 }
 let stopChanges: (() => void) | undefined;
 let retryRecords: (() => void) | undefined;
@@ -69,7 +69,6 @@ async function publishCommandDiagnostics(database = db) {
     uncertain: rows.filter(row => row.state === 'uncertain').length, conflicts: rows.filter(row => row.state === 'conflict').length,
     oldestPendingAt: rows.length ? Math.min(...rows.map(row => row.createdAt)) : 0 });
 }
-const fileCache = new Map<string, Blob>();
 let configSignature = '';
 let configCheckedAt = 0;
 
@@ -107,64 +106,47 @@ function decisionPatch(config: CloudConfig) {
   };
 }
 
-async function blobHash(blob: Blob) {
-  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
-}
-async function decode(value: any, database: typeof db, lifetime: AccountLifetime): Promise<any> {
-  lifetime.assertCurrent();
-  if (database !== db) throw new Error('client_account_changed');
-  if (value && typeof value.$file === 'string') {
-    const cached = fileCache.get(value.$file);
-    if (cached) return cached;
-    const response = await fetch(apiUrl(`/api/v1/files/${encodeURIComponent(value.$file)}`), { credentials: 'include', signal: lifetime.signal });
-    if (!response.ok) throw new Error(`无法同步文件（${response.status}）`);
-    const blob = new Blob([await response.blob()], { type: value.type });
-    const hash = await blobHash(blob);
-    lifetime.assertCurrent();
-    if (database !== db) throw new Error('client_account_changed');
-    await cloudTransaction(database, [database.table('_cloudBlobs')], async () => {
-      lifetime.assertCurrent();
-      await database.table('_cloudBlobs').put({ hash, id: value.$file, origin: 'download' });
-      lifetime.assertCurrent();
-    });
-    lifetime.assertCurrent();
-    // Bounded cache; IndexedDB remains the durable cache after decoding.
-    if (fileCache.size >= 50) fileCache.delete(fileCache.keys().next().value!);
-    fileCache.set(value.$file, blob);
-    return blob;
+const recordMetaId = (record: CloudRecord) => `revision:${record.table}:${JSON.stringify(record.key)}`;
+const projectionTables = (database: typeof db) => [...Object.keys(CLOUD_TABLES), '_cloudMeta', '_learningCommands', '_projectionStage'].map(name => database.table(name));
+
+/** File references stay in the projection. Image/document consumers fetch bytes
+ * only when visible or explicitly opened, never while holding a sync lock. */
+async function putRecords(database: typeof db, records: CloudRecord[], checkVersions: boolean) {
+  const metadata = database.table('_cloudMeta');
+  const known = checkVersions ? await metadata.bulkGet(records.map(recordMetaId)) : [];
+  const groups = new Map<string, { puts: Record<string, unknown>[]; deletes: (string | number)[] }>();
+  const versions: { id: string; value: number }[] = [];
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (!Object.hasOwn(CLOUD_TABLES, record.table)) throw new Error('服务器返回了未知数据表');
+    if (record.table === 'preferences' || record.revision < (known[index]?.value ?? 0)) continue;
+    let group = groups.get(record.table);
+    if (!group) { group = { puts: [], deletes: [] }; groups.set(record.table, group); }
+    if (record.value === null) group.deletes.push(record.key);
+    else group.puts.push(record.value);
+    versions.push({ id: recordMetaId(record), value: record.revision });
   }
-  if (Array.isArray(value)) return Promise.all(value.map(item => decode(item, database, lifetime)));
-  if (value && typeof value === 'object') return Object.fromEntries(await Promise.all(Object.entries(value).map(async ([k,v]) => [k, await decode(v, database, lifetime)])));
-  return value;
+  for (const [name, group] of groups) {
+    if (group.deletes.length) await database.table(name).bulkDelete(group.deletes);
+    if (group.puts.length) await database.table(name).bulkPut(group.puts);
+  }
+  if (versions.length) await metadata.bulkPut(versions);
 }
 
 async function applyRecordsPage(page: RuntimeRecordsPage, signal: AbortSignal | undefined, database: typeof db, lifetime: AccountLifetime) {
   lifetime.assertCurrent();
   if (database !== db) throw new Error('client_account_changed');
   const owner = cloud.userId;
-  const decoded: CloudRecord[] = [];
-  for (const record of page.records) decoded.push({ ...record, value: await decode(record.value, database, lifetime) });
   signal?.throwIfAborted();
-  return cloudTransaction(database, database.tables, async () => {
+  return cloudTransaction(database, projectionTables(database), async () => {
     markCloudApply();
     lifetime.assertCurrent();
     signal?.throwIfAborted();
     if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
     const cursor = (await database.table('_cloudMeta').get('cursor'))?.value ?? 0;
     if (page.cursor <= cursor) return true;
-    for (const record of decoded) {
-      if (!Object.hasOwn(CLOUD_TABLES, record.table)) throw new Error('服务器返回了未知数据表');
-      if (record.table === 'preferences') continue;
-      const metaId = `revision:${record.table}:${JSON.stringify(record.key)}`;
-      const known = (await database.table('_cloudMeta').get(metaId))?.value ?? 0;
-      // A queued stream page can predate a just-acknowledged local command.
-      // Advance its global cursor, but never roll that key back to its old echo.
-      if (record.revision < known) continue;
-      const table = database.table(record.table);
-      if (record.value === null) await table.delete(record.key);
-      else await table.put(record.value);
-      await database.table('_cloudMeta').put({ id: metaId, value: record.revision });
-    }
+    // A late stream page cannot roll back a just-acknowledged local command.
+    await putRecords(database, page.records, true);
     await database.table('_cloudMeta').put({ id: 'cursor', value: page.cursor });
     await retireConfirmedCommands(database);
     lifetime.assertCurrent();
@@ -187,9 +169,82 @@ async function retireConfirmedCommands(database = db) {
   }
 }
 
+/** Hydrate only explicit keys atomically; never advance a stream cursor or treat
+ * an unrequested/missing local row as an authoritative server deletion. */
+export async function readRecordKeys<T>(table: ProjectionTable, keys: (string | number)[]): Promise<(T | undefined)[]> {
+  if (!keys.length) return [];
+  const database = db, owner = cloud.userId, lifetime = accountLifetime(owner);
+  const runtime = await serverRuntime(owner);
+  const guard = () => {
+    lifetime.assertCurrent();
+    if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
+  };
+  guard();
+  const unique = [...new Set(keys)];
+  const response = await runtime.read({ kind: 'recordKeys', keys: unique.map(key => ({ table, key })) });
+  guard();
+  const page = response.value as unknown as { records: RuntimeRecord[]; epoch: string };
+  if (page.records.length !== unique.length || page.records.some((row, index) => row.table !== table || row.key !== unique[index])) throw new Error('protocol_record_keys');
+  return cloudTransaction(database, [database.table(table), database.table('_cloudMeta')], async () => {
+    guard();
+    const epoch = (await database.table('_cloudMeta').get('records-epoch'))?.value;
+    if (epoch && epoch !== page.epoch) throw new Error('records_generation_changed');
+    markCloudApply();
+    await putRecords(database, page.records, true);
+    guard();
+    // Return the accepted projection, not an older HTTP value superseded by WS.
+    return database.table<T>(table).bulkGet(keys);
+  });
+}
+
+/** Confirm only receipt keys, never advance the account/collection cursor.
+ * Journals and attachment originals survive every failed or stale point read. */
+export async function reconcileLearningProjection(command: LearningCommandRow) {
+  if (command.state !== 'confirmed' || !command.receipt) return false;
+  const database = db, owner = cloud.userId, lifetime = accountLifetime(owner);
+  const runtime = await serverRuntime(owner);
+  const guard = () => {
+    lifetime.assertCurrent();
+    if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
+  };
+  guard();
+  const unique = new Map(command.receipt.versions.map(version => [JSON.stringify([version.table, version.key]), version]));
+  const versions = [...unique.values()], records: RuntimeRecord[] = [];
+  let epoch: string | undefined;
+  for (let index = 0; index < versions.length; index += 100) {
+    const keys = versions.slice(index, index + 100).map(({ table, key }) => ({ table: table as ProjectionTable, key }));
+    const response = await runtime.read({ kind: 'recordKeys', keys }); guard();
+    const value = response.value as unknown as { records: RuntimeRecord[]; epoch: string };
+    if (epoch !== undefined && value.epoch !== epoch) throw new Error('records_generation_changed');
+    epoch = value.epoch;
+    if (value.records.length !== keys.length) throw new Error('protocol_receipt_projection');
+    for (let offset = 0; offset < keys.length; offset++) {
+      const row = value.records[offset], key = keys[offset];
+      if (row.table !== key.table || row.key !== key.key || row.revision < versions[index + offset].revision) throw new Error('learning_receipt_projection_unavailable');
+      records.push(row);
+    }
+  }
+  guard();
+  return cloudTransaction(database, [...new Set(records.map(row => row.table)), '_cloudMeta', '_learningCommands'].map(name => database.table(name)), async () => {
+    guard(); markCloudApply();
+    // Generations are not comparable. During this intermediate rollout the
+    // legacy mirror still owns generation changes; don't corrupt it with a
+    // different epoch's point read. The confirmed journal remains recoverable.
+    const localEpoch = (await database.table('_cloudMeta').get('records-epoch'))?.value;
+    if (localEpoch && epoch && localEpoch !== epoch) return false;
+    await putRecords(database, records, true);
+    guard();
+    await database.table('_cloudMeta').put({ id: `learning-completed:${command.operationId}`, value: {
+      receipt: command.receipt, inputDigest: command.inputDigest, confirmedAt: Date.now(),
+    } });
+    await database.table('_learningCommands').where('operationId').equals(command.operationId).delete();
+    return true;
+  });
+}
+
 /** Build separately while the previous committed view remains readable, then
  * publish all business rows/revisions/cursor in one IDB commit. Journals survive. */
-async function rebuildRecords(database: typeof db, runtime: Awaited<ReturnType<typeof serverRuntime>>, reason: string, lifetime: AccountLifetime) {
+async function rebuildRecords(database: typeof db, runtime: Awaited<ReturnType<typeof serverRuntime>>, reason: string, lifetime: AccountLifetime, firstPage?: RuntimeRecordsPage) {
   const owner = cloud.userId;
   const guard = () => { lifetime.assertCurrent(); if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed'); };
   const stage = database.table('_projectionStage');
@@ -197,26 +252,30 @@ async function rebuildRecords(database: typeof db, runtime: Awaited<ReturnType<t
   await cloudTransaction(database, [stage], async () => { guard(); await stage.clear(); guard(); });
   let cursor = 0, epoch = '', highWater = 0;
   for (;;) {
-    const page = await runtime.recordsPage(cursor); guard();
+    const page = firstPage ?? await runtime.recordsPage(cursor); firstPage = undefined; guard();
     if (epoch && epoch !== page.epoch) throw new Error('records_generation_changed');
     epoch = page.epoch;
     highWater = page.highWater;
     const records: { id: string; record: CloudRecord }[] = [];
-    for (const record of page.records) records.push({ id: `${record.table}:${JSON.stringify(record.key)}`, record: { ...record, value: await decode(record.value, database, lifetime) } });
+    for (const record of page.records) records.push({ id: `${record.table}:${JSON.stringify(record.key)}`, record });
     guard();
     await cloudTransaction(database, [stage], async () => { guard(); await stage.bulkPut(records); guard(); });
     cursor = page.cursor;
     if (!page.more) break;
   }
-  await cloudTransaction(database, database.tables, async () => {
+  await cloudTransaction(database, projectionTables(database), async () => {
     guard(); markCloudApply();
     for (const name of Object.keys(CLOUD_TABLES)) if (name !== 'preferences') await database.table(name).clear();
     const metadata = database.table('_cloudMeta');
     await metadata.where('id').startsWith('revision:').delete();
-    for (const { record } of await stage.toArray()) {
-      if (record.table === 'preferences') continue;
-      if (record.value !== null) await database.table(record.table).put(record.value);
-      await metadata.put({ id: `revision:${record.table}:${JSON.stringify(record.key)}`, value: record.revision });
+    // Keep atomic publication, but don't materialize the entire account staging
+    // table as one JS array. Only one 200-record batch lives in this reducer.
+    let lastStageId: string | undefined;
+    for (;;) {
+      const rows = await (lastStageId === undefined ? stage.orderBy('id') : stage.where('id').above(lastStageId)).limit(200).toArray();
+      if (!rows.length) break;
+      await putRecords(database, rows.map(row => row.record), false);
+      lastStageId = rows.at(-1)!.id;
     }
     await metadata.bulkPut([{ id: 'cursor', value: cursor }, { id: 'records-epoch', value: epoch }]);
     await stage.clear(); await retireConfirmedCommands(database);
@@ -234,7 +293,7 @@ async function syncCycle(pull: boolean, lifetime: AccountLifetime) {
   const guard = () => { lifetime.assertCurrent(); if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed'); };
   guard();
   if (Date.now() - configCheckedAt > 15000) {
-    const config = await cloudRequest<CloudConfig>('/config', { signal: lifetime.signal });
+    const config = await cloudRequest<CloudConfig>('/config', { signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]) });
     guard();
     configCheckedAt = Date.now();
     if (JSON.stringify(config) !== configSignature) applyCloudConfig(config);
@@ -251,7 +310,7 @@ async function syncCycle(pull: boolean, lifetime: AccountLifetime) {
     const page = await runtime.recordsPage(cursor);
     guard();
     if (page.reset || (await database.table('_cloudMeta').get('records-epoch'))?.value !== page.epoch) {
-      await rebuildRecords(database, runtime, page.reset ? 'future-cursor' : 'server-generation', lifetime); changed = true; conversationsChanged = true; break;
+      await rebuildRecords(database, runtime, page.reset ? 'future-cursor' : 'server-generation', lifetime, cursor === 0 && !page.reset ? page : undefined); changed = true; conversationsChanged = true; break;
     }
     if (page.records.length) changed = true;
     conversationsChanged ||= page.records.some(record => record.table === 'chatSessions');
@@ -358,7 +417,6 @@ export interface StartCloudOptions {
 export async function startCloud(owner: string, options: StartCloudOptions = {}) {
   disposeServerRuntime();
   flight = undefined;
-  fileCache.clear();
   cloud.enabled = true; cloud.userId = owner;
   useCloudSync.setState({ ...useCloudSync.getInitialState(), healthySince: Date.now() });
   errorSource = '';
@@ -369,7 +427,7 @@ export async function startCloud(owner: string, options: StartCloudOptions = {})
     stopChanges?.(); stopChanges = undefined;
     retryRecords = undefined; flight = undefined;
     repeatFlight = false; fullPullRequested = false;
-    fileCache.clear(); configSignature = ''; configCheckedAt = 0;
+    configSignature = ''; configCheckedAt = 0;
   });
   const databaseAtStart = db;
   const guard = () => { lifetime.assertCurrent(); if (databaseAtStart !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
@@ -379,17 +437,38 @@ export async function startCloud(owner: string, options: StartCloudOptions = {})
   // 登录前的语言不随模型配置重置；有账号语言偏好时，后续 loadPreferences 再覆盖。
   const uiLanguage = useSettings.getState().uiLanguage;
   useSettings.setState({ ...useSettings.getInitialState(), uiLanguage });
+  await loadPreferences(); guard();
   // 本地阶段到此完成。远端阶段（config / 基线对账 / 订阅）要么在后台跑，
   // 要么按调用方要求等它跑完。
-  const remote = cloudRemotePhase(owner, lifetime, databaseAtStart, guard);
+  const remote = cloudRemotePhase(owner, lifetime, databaseAtStart, guard, !!options.background);
   if (options.background) {
     remote.catch(error => {
-      if ((error as Error)?.message === 'client_account_changed') return;
-      reportSyncFailure(error, 'flush');
+      if (lifetime.current()) reportSyncFailure(error, 'flush');
     });
     return;
   }
   await remote;
+}
+
+/** Recovery is installed before the first request, not after the baseline. */
+async function retryCloudStartup<T>(operation: () => Promise<T>, lifetime: AccountLifetime, guard: () => void): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    guard();
+    try { return await operation(); }
+    catch (error) {
+      guard();
+      reportSyncFailure(error, 'flush');
+      const delay = Math.min(30_000, 1000 * 2 ** Math.min(attempt++, 5)) * (0.8 + Math.random() * 0.4);
+      await new Promise<void>(resolve => {
+        const wake = () => { clearTimeout(timer); window.removeEventListener('online', wake); lifetime.signal.removeEventListener('abort', wake); resolve(); };
+        const timer = setTimeout(wake, delay);
+        window.addEventListener('online', wake, { once: true });
+        lifetime.signal.addEventListener('abort', wake, { once: true });
+        if (lifetime.signal.aborted) wake();
+      });
+    }
+  }
 }
 
 async function cloudRemotePhase(
@@ -397,18 +476,26 @@ async function cloudRemotePhase(
   lifetime: AccountLifetime,
   databaseAtStart: typeof db,
   guard: () => void,
+  background: boolean,
 ) {
-  const config = await cloudRequest<CloudConfig>('/config', { signal: lifetime.signal });
+  const recover = <T>(operation: () => Promise<T>) => background ? retryCloudStartup(operation, lifetime, guard) : operation();
+  const config = await recover(() => cloudRequest<CloudConfig>('/config', { signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]) }));
   guard();
   applyCloudConfig(config);
-  try { await flushCloud(); }
-  catch (error) {
-    // Existing local edits must remain reachable through conflict recovery after reload.
-    guard();
-    if (!(await cloudRetry(databaseAtStart, () => databaseAtStart.table('_learningCommands').count()))) throw error;
-  }
-  guard();
-  await startPreferences();
+  // Settings are independent of the bulk records projection.
+  const preferences = recover(() => startPreferences());
+  const baseline = recover(async () => {
+    try { await flushCloud(); }
+    catch (error) {
+      // Existing local edits must remain reachable through conflict recovery after reload.
+      guard();
+      if (!(await cloudRetry(databaseAtStart, () => databaseAtStart.table('_learningCommands').count()))) throw error;
+    }
+  });
+  // Retry only the failed stage: a records outage must not tear down successful
+  // preference subscriptions or abandon an in-flight local preference write.
+  const results = await Promise.allSettled([preferences, baseline]);
+  for (const result of results) if (result.status === 'rejected') throw result.reason;
   guard();
   startResourceCommands();
   const database = databaseAtStart;
@@ -447,7 +534,7 @@ async function cloudRemotePhase(
   stopChanges = () => { closed = true; follow?.dispose(); retryRecords = undefined; Dexie.on('storagemutated').unsubscribe(changed); window.removeEventListener('online', online);
     window.removeEventListener('online', health); window.removeEventListener('offline', health); offHealth(); };
   {
-    const runtime = await serverRuntime(owner);
+    const runtime = await recover(() => serverRuntime(owner));
     guard(); if (closed) return;
     follow = runtime.followRecords({
       cursor: async () => await cloudRetry(database, async () => (await database.table('_cloudMeta').get('cursor'))?.value ?? 0),
@@ -486,13 +573,13 @@ async function cloudRemotePhase(
     guard();
     // Admission uncertainty has its own persisted command UI. Do not overwrite
     // a records conflict with a transient command warning that survives retry.
-    await reconcileTaskAdmissions();
+    void reconcileTaskAdmissions().catch(error => { if (lifetime.current()) reportSyncFailure(error, 'follow'); });
   }
 }
 
 export function stopCloud() {
   disposeServerRuntime();
-  stopChanges?.(); stopChanges = undefined; fileCache.clear();
+  stopChanges?.(); stopChanges = undefined;
   // Re-enter through the auth gate on a fresh JS realm: no parked conversations or model
   // settings from a previous identity remain visible after logout/session expiry.
   window.location.reload();
@@ -503,7 +590,6 @@ export async function clearCloudLocalData() {
   const database = db;
   disposeServerRuntime();
   stopChanges?.(); stopChanges = undefined;
-  fileCache.clear();
   flight = undefined;
   configSignature = '';
   configCheckedAt = 0;
@@ -521,6 +607,8 @@ export async function clearCloudLocalData() {
     markCloudApply();
     for (const name of Object.keys(CLOUD_TABLES)) await database.table(name).clear();
     await database.table('_projectionStage').clear();
+    await database.table('_fileCache').clear();
+    await database.table('_fileCacheMeta').clear();
     await database.table('_cloudMeta').where('id').startsWith('revision:').delete();
     await database.table('_cloudMeta').bulkDelete(['cursor', 'records-epoch']);
   });

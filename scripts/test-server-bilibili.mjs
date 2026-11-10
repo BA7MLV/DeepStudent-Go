@@ -187,7 +187,7 @@ try {
     mode = 'normal';
     await call('PUT', '/cloud/bilibili/credentials', { cookie: secretCookie });
     const { verifyBiliBrowser } = await import('./fixtures/bilibili-browser.mjs');
-    await verifyBiliBrowser({ api, cookie, bvid, secretCookie, folder, directory, call, setMode: value => { mode = value; } });
+    await verifyBiliBrowser({ api, cookie, bvid, secretCookie, folder, directory, call, setMode: value => { mode = value; }, localFetch: fetcher });
   }
   console.log('PASS server Bilibili resolve/short-link/season, encrypted owner credentials, two real FFmpeg MP4 imports, original subtitles, task idempotency, playback, origin/auth isolation, URL policy, oversize/cancellation and staging cleanup.');
 } finally { await api.close(); fs.rmSync(directory, { recursive: true, force: true }); }

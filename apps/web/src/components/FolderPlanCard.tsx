@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@heroui/react';
 import { LoadingButton, Sym } from '../ui';
-import { db, type FolderPlanState, type VideoRow } from '../store/db';
+import type { FolderPlanState } from '../store/db';
+import { useCourseMetadata } from './useCourseMetadata';
 import './ask-cards.css';
 
 /** 分类里最多列出的课程名：再多的用「还有 X 门」收起来，卡片不会变成一堵墙 */
@@ -30,33 +32,13 @@ interface Props {
  */
 export default function FolderPlanCard({ plan, active, restored, busy, onConfirm, onCancel }: Props) {
   const navigate = useNavigate();
-  const [names, setNames] = useState<Map<string, VideoRow> | null>(null);
+  const { t } = useTranslation('common');
   const ids = plan.folders.flatMap((entry) => entry.courseIds);
-  const idKey = ids.join('|');
-
-  useEffect(() => {
-    let cancelled = false;
-    if (ids.length === 0) {
-      setNames(new Map());
-      return;
-    }
-    void db.videos.bulkGet(ids).then((rows) => {
-      if (cancelled) return;
-      const map = new Map<string, VideoRow>();
-      rows.forEach((row) => {
-        if (row) map.set(row.id, row);
-      });
-      setNames(map);
-    });
-    return () => {
-      cancelled = true;
-    };
-    // idKey 而非 ids 本身：数组每次渲染都是新引用，会让这个 effect 每帧重查
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idKey]);
+  const metadata = useCourseMetadata(ids, false);
+  const names = useMemo(() => new Map(metadata.items.flatMap(item => item.course ? [[item.id, item.course] as const] : [])), [metadata.items]);
 
   const applied = plan.applied;
-  const actionable = active && applied === 0 && !busy;
+  const actionable = active && applied === 0 && !busy && metadata.ready;
   const total = ids.length;
 
   return (
@@ -73,6 +55,8 @@ export default function FolderPlanCard({ plan, active, restored, busy, onConfirm
         )}
       </div>
       <p className="plan-card__summary">{plan.summary}</p>
+      {metadata.error && <p role="alert" data-testid="plan-metadata-error">{t('courseMetadata.loadFailed')}{' '}
+        <Button variant="tertiary" onPress={metadata.retry}>{t('courseMetadata.retry')}</Button></p>}
 
       <div className="plan-card__folders">
         {plan.folders.map((entry) => {
@@ -89,7 +73,7 @@ export default function FolderPlanCard({ plan, active, restored, busy, onConfirm
                 <p className="plan-folder__empty">不归入任何课程（不会被创建）</p>
               ) : (
                 <ul className="plan-folder__courses">
-                  {names === null ? (
+                  {!metadata.ready ? (
                     <li className="plan-folder__loading">正在读取课程名…</li>
                   ) : (
                     <>
@@ -162,7 +146,7 @@ export default function FolderPlanCard({ plan, active, restored, busy, onConfirm
             variant="primary"
             isDisabled={!actionable}
             loading={busy}
-            onPress={onConfirm}
+            onPress={() => { if (actionable && metadata.current()) onConfirm(); }}
             data-testid="plan-confirm"
           >
             <Sym name="check" />

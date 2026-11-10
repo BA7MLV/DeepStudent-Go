@@ -7,6 +7,7 @@ import { db } from '../store/db';
 import { cloud } from '../cloud/state';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { toast } from '../ui';
+import { readConversationSession } from '../store/conversationProducts';
 
 export default function TaskModelPicker({ sessionId, onClose }: { sessionId: number | string | null; onClose?: () => void }) {
   const key = taskModelKey(sessionId), choice = useTaskModel(s => s.choices[key]), set = useTaskModel(s => s.set);
@@ -15,7 +16,7 @@ export default function TaskModelPicker({ sessionId, onClose }: { sessionId: num
   useEffect(() => {
     let current = true;
     setSessionDefault(null);
-    if (typeof sessionId === 'number') void db.chatSessions.get(sessionId).then(row => { if (current) setSessionDefault(row?.defaultModel ?? null); });
+    if (typeof sessionId === 'number') void readConversationSession(sessionId).then(row => { if (current) setSessionDefault(row?.defaultModel ?? null); }).catch(() => {});
     else if (typeof sessionId === 'string' && cloud.userId) void serverRuntime(cloud.userId).then(r => r.delegation({ action: 'bot.read', threadId: sessionId })).then(value => { if (current) setSessionDefault((value as any).defaultModel ?? null); }).catch(() => {});
     return () => { current = false; };
   }, [key, sessionId]);

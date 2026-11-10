@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Modal, ToggleButton, ToggleButtonGroup, Tooltip } from '@heroui/react';
 import { renderAsync } from 'docx-preview';
 import { ensureHandoutPreviewFonts } from '../handout/previewFonts';
-import { db, type HandoutRow } from '../store/db';
+import { db, type HandoutRow, type VideoRow } from '../store/db';
+import { cloud } from '../cloud/state';
+import { accountLifecycle, type AccountLifetime } from '../client/account-lifecycle';
+import { readRecordKeys } from '../cloud/sync';
+import { useLatestHandout } from './useLatestHandout';
+import { useTranslation } from 'react-i18next';
+import type { LatestHandout } from '@wangke/contracts/client-runtime';
+import { resolveCloudBlob } from '../store/cloudBlob';
 import { runHandout, type HandoutProgress } from '../pipelines/handout';
 import { usePluginAvailable } from '../plugins/catalog';
 import { loadEnabledSkillMeta, type SkillMeta } from '../skills/store';
@@ -34,9 +41,23 @@ interface Props {
 
 type SkillMode = 'auto' | 'pin' | 'drop';
 
-export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
+export default function HandoutPanel(props: Props) {
+  return <HandoutPanelView key={`${cloud.userId}:${props.videoId}`} {...props} />;
+}
+
+function HandoutPanelView({ videoId, hasSubtitles }: Props) {
+  const { t } = useTranslation('interface');
   const available = usePluginAvailable('material-tools');
-  const [handout, setHandout] = useState<HandoutRow | null>(null);
+  const { row: latest, media: latestMedia, ready, error: readError, retry: loadLatest } = useLatestHandout(videoId);
+  // A pushed new document/version cannot close an editor or rebase its original
+  // CAS baseline. Keep that user-owned draft until it settles or is cancelled.
+  const [retained, setRetained] = useState<{ videoId: string; row: HandoutRow; media?: LatestHandout['media']; database: typeof db; lifetime?: AccountLifetime } | null>(null);
+  const retainedCurrent = retained?.videoId === videoId && retained.database === db && (!retained.lifetime || retained.lifetime.current());
+  const handout = retainedCurrent ? retained.row : latest;
+  const media = retainedCurrent ? retained.media : latestMedia;
+  const retainDocument = useCallback((retain: boolean) => setRetained(previous => !retain ? null
+    : previous?.videoId === videoId && previous.database === db && (!previous.lifetime || previous.lifetime.current()) ? previous
+      : latest ? { videoId, row: latest, media: latestMedia, database: db, lifetime: accountLifecycle.current() } : null), [videoId, latest, latestMedia]);
   const [progress, setProgress] = useState<HandoutProgress | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillMeta[]>([]);
@@ -45,6 +66,15 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
   const skelRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
+  const owner = cloud.userId, database = db;
+  const view = useMemo(() => ({ videoId, owner, database, active: true }), [videoId, owner, database]);
+  const currentView = useRef(view);
+  currentView.current = view;
+  const viewCurrent = () => view.active && currentView.current === view && view.database === db && view.owner === cloud.userId;
+  useEffect(() => {
+    view.active = true;
+    return () => { view.active = false; };
+  }, [view]);
 
   /**
    * 手机端 docx 预览等比缩放：docx-preview 按 A4 像素宽（~794px）渲染，窄屏溢出。
@@ -81,34 +111,31 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
     };
   }, [fitPreviewScale]);
 
-  const loadLatest = useCallback(async () => {
-    const rows = await db.handouts.where('videoId').equals(videoId).sortBy('createdAt');
-    setHandout(rows[rows.length - 1] ?? null);
-  }, [videoId]);
-
-  useEffect(() => {
-    loadLatest();
-  }, [loadLatest]);
-
   /** 打开技能覆盖面板时加载：启用中的技能 + 本视频的手动覆盖 */
   const loadSkillState = useCallback(async () => {
-    const metas = await loadEnabledSkillMeta('legacy-handout');
+    const lifetime = accountLifecycle.current(), database = db;
+    const [metas, course] = await Promise.all([loadEnabledSkillMeta('legacy-handout'),
+      cloud.enabled ? readRecordKeys<VideoRow>('videos', [videoId]).then(rows => rows[0]) : database.videos.get(videoId)]);
+    if (!viewCurrent() || database !== db || lifetime && !lifetime.current()) return;
     setSkills(metas);
-    const ov = (await db.videos.get(videoId))?.skillOverride;
+    const ov = course?.skillOverride;
     const map: Record<number, SkillMode> = {};
     for (const m of metas) {
       map[m.id] = ov?.pin.includes(m.id) ? 'pin' : ov?.drop.includes(m.id) ? 'drop' : 'auto';
     }
     setSkillModes(map);
-  }, [videoId]);
+  }, [view]);
 
   const setSkillMode = async (id: number, mode: SkillMode) => {
+    if (!viewCurrent()) return;
+    const lifetime = accountLifecycle.current();
     const next = { ...skillModes, [id]: mode };
     setSkillModes(next);
     const pin = Object.entries(next).filter(([, v]) => v === 'pin').map(([k]) => Number(k));
     const drop = Object.entries(next).filter(([, v]) => v === 'drop').map(([k]) => Number(k));
-    const { cloud } = await import('../cloud/state');
-    await (await import('../client/resources')).resourceCommand({ kind: 'setCourseSkills', courseId: videoId, pin, drop });
+    const { resourceCommand } = await import('../client/resources');
+    if (!viewCurrent() || lifetime && !lifetime.current()) return;
+    await resourceCommand({ kind: 'setCourseSkills', courseId: videoId, pin, drop });
   };
 
   // 渲染 DOCX 预览（skeleton-reveal：脉冲占位 → cross-fade + cross-blur 到内容）
@@ -128,37 +155,51 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
 
     el.innerHTML = '';
     ensureHandoutPreviewFonts(); // 公文字体兜底：local() 优先，缺字体设备下载开源仿宋分包
-    renderAsync(handout.blob, el, undefined, { inWrapper: true })
+    const controller = new AbortController();
+    const preview = document.createElement('div');
+    resolveCloudBlob(handout.blob, controller.signal)
+      .then(blob => { controller.signal.throwIfAborted(); return renderAsync(blob, preview, undefined, { inWrapper: true }); })
       .then(() => {
+        if (controller.signal.aborted) return;
+        el.replaceChildren(...preview.childNodes);
         skel.classList.add('is-revealed');
         fitPreviewScale();
         // 字体分包异步加载完成后页面高度可能微变，重算一次手机端缩放补偿
-        void document.fonts.ready.then(() => fitPreviewScale());
+        void document.fonts.ready.then(() => { if (!controller.signal.aborted) fitPreviewScale(); });
       })
-      .catch((e) => console.error('docx 预览失败', e));
+      .catch((e) => { if (!controller.signal.aborted) console.error('docx 预览失败', e); });
+    return () => controller.abort();
   }, [handout, fitPreviewScale]);
 
   const start = async () => {
+    const lifetime = accountLifecycle.current();
+    const current = () => viewCurrent() && (!lifetime || lifetime.current());
+    if (!current() || !ready) return;
     setErrorText(null);
     setProgress({ phase: 'frames', done: 0, total: 1, message: '准备中…' });
     try {
-      await runHandout(videoId, setProgress);
-      toast.success('讲义生成完成');
+      await runHandout(videoId, progress => { if (current()) setProgress(progress); });
+      if (current()) toast.success('讲义生成完成');
     } catch (e) {
       // 失败详情留在面板里（带复制按钮），不再自动弹出模态打断阅读。
-      setErrorText(formatCaughtError(e));
+      if (current()) setErrorText(formatCaughtError(e));
     } finally {
-      setProgress(null);
-      await loadLatest();
+      if (current()) { setProgress(null); loadLatest(); }
     }
   };
 
   const downloadDocx = async () => {
-    if (!handout?.id) return;
-    // 从 DB 读最新行：块级编辑落盘后 blob 已重建，面板内存里的可能是旧版
-    const row = await db.handouts.get(handout.id);
+    if (!ready || !handout?.id) return;
+    const lifetime = accountLifecycle.current(), database = db;
+    const current = () => viewCurrent() && database === db && (!lifetime || lifetime.current());
+    // Export this selected complete document at its current authoritative version,
+    // not a stale mirror row left by a previous visit or an earlier edit.
+    const row = cloud.enabled ? (await readRecordKeys<HandoutRow>('handouts', [handout.id]))[0] : await database.handouts.get(handout.id);
+    if (!current()) return;
     if (!row) return;
-    const url = URL.createObjectURL(row.blob);
+    const blob = await resolveCloudBlob(row.blob);
+    if (!current()) return;
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `${row.title}.docx`;
@@ -178,7 +219,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
               loading={running}
               variant="primary"
               data-testid="handout-generate"
-              isDisabled={!available || hasSubtitles !== true}
+              isDisabled={!available || !ready || hasSubtitles !== true}
               onPress={start}
             >
               <Sym name="article" />
@@ -190,7 +231,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
           </Tooltip.Content>
         </Tooltip>
         {handout && (
-          <Button data-testid="handout-export" variant="outline" onPress={() => void downloadDocx()}>
+          <Button data-testid="handout-export" variant="outline" isDisabled={!ready} onPress={() => { void downloadDocx().catch(error => setErrorText(formatCaughtError(error))); }}>
             <Sym name="download" />
             下载 DOCX
           </Button>
@@ -199,7 +240,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
           data-testid="handout-settings"
           variant="outline"
           onPress={() => {
-            void loadSkillState();
+            void loadSkillState().catch(error => setErrorText(formatCaughtError(error)));
             setSettingsOpen(true);
           }}
         >
@@ -208,7 +249,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
         </Button>
       </PanelBar>
 
-      {hasSubtitles === false && !running && (
+      {hasSubtitles === false && ready && !running && (
         <PanelPlaceholder>讲义基于字幕内容生成，请等待字幕自动处理完成</PanelPlaceholder>
       )}
 
@@ -217,12 +258,14 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
       )}
 
       <PersistentError title="讲义生成失败" text={errorText} onClose={() => setErrorText(null)} />
+      {readError && <Banner variant="error" testId="handout-read-error" title={t('handoutRead.failed')} action={<Button variant="tertiary" onPress={loadLatest}>{t('handoutRead.retry')}</Button>} />}
+      {!ready && !readError && !handout && <div role="status" data-testid="handout-loading">{t('handoutRead.loading')}</div>}
 
-      <div className="hp-body">
+      <div className="hp-body" data-handout-latest-id={latest?.id} data-handout-id={handout?.id}>
         {handout ? (
           handout.sectionsJson ? (
             // 结构化视图：块级左滑 / hover → AI 改写、手动编辑；DOCX 由 IR 实时重建
-            <HandoutDocView handout={handout} />
+            <HandoutDocView key={`${handout.videoId}:${handout.id}`} handout={handout} media={media} onRetainDocument={retainDocument} />
           ) : (
             // 旧版生成的讲义（无 IR）：只读 docx-preview 预览
             <div className="hp-legacy">
@@ -248,7 +291,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
             </div>
           )
         ) : (
-          !running &&
+           ready && !running &&
           hasSubtitles === true && (
             <EmptyState
               testId="handout-empty"
@@ -290,7 +333,7 @@ export default function HandoutPanel({ videoId, hasSubtitles }: Props) {
                         key={s.id}
                         skill={s}
                         mode={skillModes[s.id] ?? 'auto'}
-                        onMode={(v) => void setSkillMode(s.id, v)}
+                        onMode={(v) => { void setSkillMode(s.id, v).catch(error => { if (viewCurrent()) setErrorText(formatCaughtError(error)); }); }}
                       />
                     ))
                   )}

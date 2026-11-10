@@ -71,7 +71,7 @@ export function listOwnerTasks(store: DatabaseStore, owner: string, detail: Task
     LEFT JOIN agent_profiles a ON a.id=th.agent_id AND a.owner_id=t.owner_id
     LEFT JOIN cloud_records v ON v.owner_id=t.owner_id AND v.table_name='videos'
       AND v.record_key=json_quote(json_extract(t.input,'$.videoId'))
-    WHERE t.owner_id=?${sessionId === undefined ? '' : " AND t.kind='chat' AND CAST(json_extract(t.input,'$.sessionId') AS INTEGER)=?"}
+    WHERE t.owner_id=?${sessionId === undefined ? '' : " AND t.kind IN ('chat','qa') AND CAST(json_extract(t.input,'$.sessionId') AS INTEGER)=?"}
     ORDER BY CASE WHEN t.status IN ('queued','running','waiting_user') THEN 0 ELSE 1 END, t.created_at DESC LIMIT 200`)
     .all(...(sessionId === undefined ? [owner] : [owner, sessionId])) as any[]).map(row => taskDto(row, detail));
 }

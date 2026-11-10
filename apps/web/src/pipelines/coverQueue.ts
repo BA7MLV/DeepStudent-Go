@@ -1,7 +1,16 @@
+import type { CoverCandidates } from '@wangke/contracts/client-runtime';
 import { db } from '../store/db';
 import { useCoverStore } from '../store/covers';
 import { formatCaughtError } from '../utils/errorText';
+import { cloud } from '../cloud/state';
+import { accountLifetime } from '../client/account-lifecycle';
+import { isCurrentServerRuntime, serverRuntime } from '../client/bootstrap';
 import { ensureCover } from './cover';
+
+/** Covers are derived: a startup backfill never blocks or fails the app, and it
+ * must not scan the account's full course mirror. Server mode asks for bounded
+ * candidate keys instead. */
+const BACKFILL_LIMIT = 200;
 
 /**
  * 封面生成队列：全局唯一入口。与转写队列同构，但刻意做得更轻。
@@ -75,7 +84,11 @@ async function pump(): Promise<void> {
  *
  * @returns 本次入队的数量（0 表示没有要补的）
  */
-export async function backfillCovers(): Promise<number> {
+export async function backfillCovers(limit = BACKFILL_LIMIT): Promise<number> {
+  if (cloud.enabled) {
+    try { return await backfillProjection(limit); }
+    catch (error) { console.warn(`[cover] 封面回填跳过：${formatCaughtError(error)}`); return 0; }
+  }
   const rows = await db.videos.toArray();
   if (rows.length === 0) return 0;
   // 只取主键：`primaryKeys()` 不会把封面 blob 读出来，几十上百张也是瞬间的事
@@ -89,6 +102,25 @@ export async function backfillCovers(): Promise<number> {
     n++;
   }
   return n;
+}
+
+async function backfillProjection(limit: number): Promise<number> {
+  const owner = cloud.userId;
+  if (!owner) return 0;
+  const lifetime = accountLifetime(owner), runtime = await serverRuntime(owner);
+  let cursor: string | undefined, queued = 0;
+  for (;;) {
+    lifetime.assertCurrent();
+    if (!isCurrentServerRuntime(runtime) || owner !== cloud.userId) throw new Error('client_account_changed');
+    const response = await runtime.read({ kind: 'coverCandidates', ...(cursor ? { cursor } : {}) });
+    const page = response.value as unknown as CoverCandidates;
+    for (const id of page.ids) {
+      enqueueCover(id);
+      if (++queued >= limit) return queued;
+    }
+    if (!page.next) return queued;
+    cursor = page.next;
+  }
 }
 
 /** 队列是否还在跑（探测脚本与测试用；界面不依赖它） */

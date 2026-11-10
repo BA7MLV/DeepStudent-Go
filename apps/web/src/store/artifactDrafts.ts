@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import { liveQuery } from 'dexie';
-import { db } from './db';
+import { db, type ChatRow } from './db';
 import { assertArtifactTarget, type ArtifactTarget } from './artifactEdit';
+import { readConversationMessage } from './conversationProducts';
+import { cloud } from '../cloud/state';
+import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
+import { accountLifecycle } from '../client/account-lifecycle';
 
 export interface ArtifactDraft {
   open: boolean;
@@ -53,9 +57,12 @@ export async function generateArtifactDraft(target: ArtifactTarget, mode: 'patch
   const draft = useArtifactDrafts.getState().drafts[key];
   if (!draft?.instruction.trim() || controllers.has(key) || draft.status === 'applying') return;
   const controller = new AbortController();
+  const database = db, owner = cloud.userId, lifetime = accountLifecycle.current();
+  const current = () => database === db && owner === cloud.userId && (!lifetime || lifetime.current());
   controllers.set(key, controller);
   updateArtifactDraft(key, { status: 'generating', error: '', notice: '' });
   let subscription: { unsubscribe(): void } | undefined;
+  let releaseLifetime: (() => void) | undefined;
   const invalidate = (error: unknown) => {
     if (controller.signal.aborted) return;
     controllers.delete(key);
@@ -64,9 +71,27 @@ export async function generateArtifactDraft(target: ArtifactTarget, mode: 'patch
     subscription?.unsubscribe();
   };
   try {
-    assertArtifactTarget(await db.chats.get(target.rowId), target);
+    // Account disposal must stop an offscreen request even without another record event.
+    releaseLifetime = lifetime?.own(() => invalidate(new Error('client_account_changed')));
+    assertArtifactTarget(await readConversationMessage(target.rowId), target);
+    if (!current()) throw new Error('client_account_changed');
     // Navigation is harmless; deleting/changing this target is not. Stop even while offscreen.
-    subscription = liveQuery(() => db.chats.get(target.rowId)).subscribe({
+    if (cloud.enabled) {
+      const runtime = await serverRuntime(owner);
+      if (!current() || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
+      const model = runtime.recordKeys({ kind: 'recordKeys', keys: [{ table: 'chats', key: target.rowId }] });
+      const inspect = () => {
+        if (!current()) { invalidate(new Error('client_account_changed')); return; }
+        const snapshot = model.getSnapshot();
+        if (snapshot.status === 'error') { invalidate(new Error(snapshot.error)); return; }
+        if (snapshot.status !== 'ready') return;
+        const value = snapshot.data as unknown as { records: { value: unknown }[] };
+        try { assertArtifactTarget(value.records[0]?.value as ChatRow | undefined, target); } catch (error) { invalidate(error); }
+      };
+      const off = model.subscribe(inspect), release = model.acquire();
+      subscription = { unsubscribe: () => { off(); release(); } };
+      inspect();
+    } else subscription = liveQuery(() => db.chats.get(target.rowId)).subscribe({
       next: (row) => { try { assertArtifactTarget(row, target); } catch (error) { invalidate(error); } },
       error: invalidate,
     });
@@ -76,13 +101,15 @@ export async function generateArtifactDraft(target: ArtifactTarget, mode: 'patch
       context: draft.context, libraries, mode, signal: controller.signal });
     if (controller.signal.aborted) return;
     await validateArtifact(target.kind, next, target.location === 'widget');
-    assertArtifactTarget(await db.chats.get(target.rowId), target);
+    assertArtifactTarget(await readConversationMessage(target.rowId), target);
+    if (!current()) throw new Error('client_account_changed');
     if (!controller.signal.aborted) updateArtifactDraft(key, { next, status: 'ready' });
   } catch (error) {
     if (!controller.signal.aborted) updateArtifactDraft(key, {
       status: draft.next ? 'ready' : 'idle', error: error instanceof Error ? error.message : String(error),
     });
   } finally {
+    releaseLifetime?.();
     subscription?.unsubscribe();
     // An older cancelled request must not release or overwrite a newer one.
     if (controllers.get(key) === controller) controllers.delete(key);

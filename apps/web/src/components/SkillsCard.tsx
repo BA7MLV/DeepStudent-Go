@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { learningId, saveSkillPackage, learningEdit, submitLearning } from '../client/learning';
 import { Button, Chip, Drawer, EmptyState, Input, Switch, TextArea, TextField } from '@heroui/react';
 import { Field, SectionCard, Sym, confirmDialog, toast } from '../ui';
 import { useIsMobile } from '../utils/useMobile';
 import { db, type SkillRow, type SkillRefRow } from '../store/db';
-import { ensureBuiltinSkills, importSkillFile } from '../skills/store';
+import { importSkillFile } from '../skills/store';
 import { BUILTIN_SKILLS, LEGACY_HANDOUT_SKILLS } from '../skills/builtin';
 import { isLegacyHandoutSkill } from '../skills/catalog';
-import { liveQuery } from 'dexie';
+import { useSkillCatalog } from '../skills/useSkillCatalog';
+import { readSkillReferences } from '../skills/demand';
+import { cloud } from '../cloud/state';
+import { accountLifetime, type AccountLifetime } from '../client/account-lifecycle';
+import type { SkillIndexItem } from '@wangke/contracts/client-runtime';
+import { useTranslation } from 'react-i18next';
 
 interface Draft {
   mcpRequired?: string[];
@@ -21,9 +26,10 @@ interface Draft {
 
 /** 设置页「写作技能」卡片：管理可注入讲义生成与问答的 skill（SKILL.md 单文件或含 references/ 的 zip 包） */
 export default function SkillsCard() {
-  const [skills, setSkills] = useState<SkillRow[]>([]);
+  const { t } = useTranslation('settings');
+  const { rows: skills = [], ready, error, retry } = useSkillCatalog();
   const [showLegacy, setShowLegacy] = useState(false);
-  const [refCounts, setRefCounts] = useState<Record<number, number>>({});
+  const [page, setPage] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftBaseline, setDraftBaseline] = useState('');
   const mobile = useIsMobile();
@@ -32,20 +38,42 @@ export default function SkillsCard() {
   const supportFileRef = useRef<HTMLInputElement>(null);
   const [draftError, setDraftError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [reading, setReading] = useState(false);
+  const generation = useRef(0);
+  const draftLifetime = useRef<AccountLifetime | undefined>(undefined);
+  useEffect(() => () => { ++generation.current; }, []);
 
-  const editSkill = async (skill: SkillRow) => {
+  // A discovery DTO is not a complete definition. Never spread it into a write.
+  const readDefinition = async (id: number): Promise<SkillRow> => {
+    const database = db;
+    const row = cloud.enabled ? (await (await import('../cloud/sync')).readRecordKeys<SkillRow>('skills', [id]))[0] : await database.skills.get(id);
+    if (database !== db) throw new Error('client_account_changed');
+    if (!row) throw new Error('skill_missing');
+    return row;
+  };
+
+  const editSkill = async (metadata: SkillIndexItem) => {
+    const fence = ++generation.current;
+    const lifetime = cloud.enabled ? accountLifetime(cloud.userId) : undefined;
+    setReading(true);
     try {
-      const refs = await db.skillRefs.where('skillId').equals(skill.id!).toArray();
+      const [skill, refs] = await Promise.all([readDefinition(metadata.id), cloud.enabled
+        ? readSkillReferences(metadata.id).then(rows => rows.map(row => row.value as unknown as SkillRefRow))
+        : db.skillRefs.where('skillId').equals(metadata.id).toArray()]);
+      lifetime?.assertCurrent();
+      if (fence !== generation.current) return;
+      draftLifetime.current = lifetime;
       setDraftError('');
       const next = { ...skill, builtin: !!skill.builtin, refs };
       setDraftBaseline(JSON.stringify(next));
       setDraft(next);
     } catch {
-      toast.error('读取技能失败，请重试');
-    }
+      if (fence === generation.current) toast.error(t('skillPicker.loadError'));
+    } finally { if (fence === generation.current) setReading(false); }
   };
 
   const addSupportFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fence = generation.current, lifetime = draftLifetime.current;
     const files = Array.from(e.target.files ?? []);
     e.target.value = '';
     try {
@@ -55,6 +83,8 @@ export default function SkillsCard() {
         }
         return { path: `references/${file.name}`, body: await file.text() };
       }));
+      lifetime?.assertCurrent();
+      if (fence !== generation.current) return;
       setDraft((current) => {
         if (!current) return current;
         const merged = new Map(current.refs.map((ref) => [ref.path, ref]));
@@ -67,32 +97,11 @@ export default function SkillsCard() {
     }
   };
 
-  const reload = useCallback(async () => {
-    await ensureBuiltinSkills();
-    setSkills(await db.skills.orderBy('id').toArray());
-    const refs = await db.skillRefs.toArray();
-    const counts: Record<number, number> = {};
-    for (const r of refs) counts[r.skillId] = (counts[r.skillId] ?? 0) + 1;
-    setRefCounts(counts);
-  }, []);
-
-  useEffect(() => {
-    void ensureBuiltinSkills().catch(() => toast.error('读取技能失败，请重试'));
-    const subscription = liveQuery(() => Promise.all([db.skills.orderBy('id').toArray(), db.skillRefs.toArray()])).subscribe({
-      next: ([rows, refs]) => {
-        setSkills(rows);
-        const counts: Record<number, number> = {};
-        for (const ref of refs) counts[ref.skillId] = (counts[ref.skillId] ?? 0) + 1;
-        setRefCounts(counts);
-      },
-      error: () => toast.error('读取技能失败，请重试'),
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const toggle = async (skill: SkillRow, enabled: boolean) => {
-    await submitLearning([learningEdit({ kind: 'skillDefinition', expected: skill, value: { ...skill, enabled: enabled ? 1 : 0 } } as any)], [`skill:${skill.id}`]);
-    void reload();
+  const toggle = async (metadata: SkillIndexItem, enabled: boolean) => {
+    try {
+      const skill = await readDefinition(metadata.id);
+      await submitLearning([learningEdit({ kind: 'skillDefinition', expected: skill, value: { ...skill, enabled: enabled ? 1 : 0 } } as any)], [`skill:${skill.id}`]);
+    } catch { toast.error(t('skillPicker.saveError')); }
   };
 
   const importFiles = async (files: File[]) => {
@@ -108,7 +117,6 @@ export default function SkillsCard() {
     }
     if (ok > 0) {
       setShowLegacy(false);
-      void reload();
     }
   };
 
@@ -129,17 +137,17 @@ export default function SkillsCard() {
     const row = { name, description: draft.description.trim(), body, mcpRequired: draft.mcpRequired, updatedAt: Date.now() };
     setSaving(true);
     try {
+      draftLifetime.current?.assertCurrent();
       {
-        const { refs: _refs, builtin, ...baseline } = JSON.parse(draftBaseline) as Draft & { enabled?: 0 | 1; updatedAt: number };
+        const { refs: originalRefs, builtin, ...baseline } = JSON.parse(draftBaseline) as Draft & { enabled?: 0 | 1; updatedAt: number };
         const expected = baseline.id != null && !builtin ? { ...baseline, builtin: 0 as const, enabled: baseline.enabled ?? 1 } : null;
-        await saveSkillPackage(expected, { ...expected, ...row, id: expected?.id ?? learningId(), enabled: expected?.enabled ?? 1, builtin: 0 }, draft.refs);
+        await saveSkillPackage(expected, { ...expected, ...row, id: expected?.id ?? learningId(), enabled: expected?.enabled ?? 1, builtin: 0 }, draft.refs, expected ? originalRefs as SkillRefRow[] : undefined);
       }
       setDraft(null);
       setShowLegacy(false);
       toast.success('已保存');
-      void reload();
     } catch {
-      setDraftError('保存失败，请重试');
+      setDraftError(t('skillPicker.saveError'));
     } finally {
       setSaving(false);
     }
@@ -153,28 +161,29 @@ export default function SkillsCard() {
       confirmText: '放弃修改', danger: true,
     })) return;
     setDraft(null);
+    ++generation.current;
     setDraftError('');
   };
 
-  const removeSkill = async (skill: SkillRow) => {
-    await saveSkillPackage(skill, null, []);
-    void reload();
+  const removeSkill = async (metadata: SkillIndexItem) => {
+    try { await saveSkillPackage(await readDefinition(metadata.id), null, []); }
+    catch { toast.error(t('skillPicker.saveError')); }
   };
 
-  const resetBuiltin = async (skill: SkillRow) => {
-    const src = [...BUILTIN_SKILLS, ...LEGACY_HANDOUT_SKILLS].find((s) => s.name === skill.name);
-    if (!src) return;
-    const patch = {
-      description: src.description,
-      body: src.body,
-      updatedAt: Date.now(),
-    };
-    await submitLearning([learningEdit({ kind: 'skillDefinition', expected: skill, value: { ...skill, ...patch } } as any)], [`skill:${skill.id}`]);
-    toast.success('已重置为内置版本');
-    void reload();
+  const resetBuiltin = async (metadata: SkillIndexItem) => {
+    try {
+      const skill = await readDefinition(metadata.id);
+      const src = [...BUILTIN_SKILLS, ...LEGACY_HANDOUT_SKILLS].find((s) => s.name === skill.name);
+      if (!src) return;
+      const patch = { description: src.description, body: src.body, updatedAt: Date.now() };
+      await submitLearning([learningEdit({ kind: 'skillDefinition', expected: skill, value: { ...skill, ...patch } } as any)], [`skill:${skill.id}`]);
+      toast.success('已重置为内置版本');
+    } catch { toast.error(t('skillPicker.saveError')); }
   };
 
   const visibleSkills = skills.filter((skill) => isLegacyHandoutSkill(skill) === showLegacy);
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(visibleSkills.length / 50) - 1));
+  const pageSkills = visibleSkills.slice(currentPage * 50, (currentPage + 1) * 50);
 
   return (
     <SectionCard
@@ -190,6 +199,8 @@ export default function SkillsCard() {
             variant="primary"
             data-testid="btn-skill-new"
             onPress={() => {
+              ++generation.current; setReading(false);
+              draftLifetime.current = cloud.enabled ? accountLifetime(cloud.userId) : undefined;
               setDraftError('');
               const next = { builtin: false, name: '', description: '', body: '', refs: [] };
               setDraftBaseline(JSON.stringify(next));
@@ -214,20 +225,22 @@ export default function SkillsCard() {
         课程讲义统一加载写作、数学、编程、行测与申论规范，专题按需读取。支持 SKILL.md 单文件（.md）或含 references/
         参考文档的 zip 包；技能正文会注入提示词，请只导入可信来源。
       </div>
-      <Button variant="tertiary" size="sm" className="mb-3" data-testid="skill-catalog-mode" onPress={() => setShowLegacy(!showLegacy)}>
+      <Button variant="tertiary" size="sm" className="mb-3" data-testid="skill-catalog-mode" onPress={() => { setShowLegacy(!showLegacy); setPage(0); }}>
         {showLegacy ? '返回日常技能' : '管理旧版讲义规范'}
       </Button>
       {showLegacy && <div className="mb-3 text-muted">这些规范仅供旧版 IR 讲义流水线使用，保留原有启停设置；日常对话使用「课程讲义」及其参考文档。</div>}
 
-      {visibleSkills.length === 0 ? (
+      {error && <div role="status" data-testid="skills-load-error">{t('skillPicker.loadError')} <Button size="sm" variant="tertiary" onPress={() => void retry().catch(() => {})}>{t('skillPicker.retry')}</Button></div>}
+      {(!ready || reading) && <p role="status">{t('skillPicker.loading')}</p>}
+      {visibleSkills.length === 0 && ready ? (
         <EmptyState data-testid="skill-empty">暂无技能</EmptyState>
       ) : (
         <div className="flex flex-col">
-          {visibleSkills.map((skill) => (
+          {pageSkills.map((skill) => (
             <SkillItem
               key={skill.id}
               skill={skill}
-              refCount={refCounts[skill.id!] ?? 0}
+              refCount={skill.refCount}
               onToggle={(enabled) => void toggle(skill, enabled)}
               onEdit={() => void editSkill(skill)}
               onReset={async () => {
@@ -249,6 +262,12 @@ export default function SkillsCard() {
           ))}
         </div>
       )}
+
+      {visibleSkills.length > 50 && <div className="flex items-center gap-2" data-testid="skills-pagination">
+        <Button variant="tertiary" isDisabled={currentPage === 0} data-testid="skills-previous" onPress={() => setPage(currentPage - 1)}>{t('skillPicker.previousPage')}</Button>
+        <span>{currentPage + 1} / {Math.ceil(visibleSkills.length / 50)}</span>
+        <Button variant="tertiary" isDisabled={(currentPage + 1) * 50 >= visibleSkills.length} data-testid="skills-next" onPress={() => setPage(currentPage + 1)}>{t('skillPicker.nextPage')}</Button>
+      </div>}
 
       <Drawer.Root isOpen={draft != null} onOpenChange={(open) => { if (!open) void closeDraft(); }}>
         <Drawer.Backdrop variant="opaque">
@@ -330,7 +349,7 @@ export default function SkillsCard() {
                 )}
               </Drawer.Body>
               <Drawer.Footer>
-                <Button variant="tertiary" data-testid="skill-cancel" onPress={() => setDraft(null)}>
+                <Button variant="tertiary" data-testid="skill-cancel" onPress={() => void closeDraft()}>
                   取消
                 </Button>
                 <Button variant="primary" isDisabled={saving} data-testid="skill-save" onPress={() => void saveDraft()}>
@@ -361,7 +380,7 @@ function SkillItem({
   onReset,
   onDelete,
 }: {
-  skill: SkillRow;
+  skill: SkillIndexItem;
   refCount: number;
   onToggle: (enabled: boolean) => void;
   onEdit: () => void;

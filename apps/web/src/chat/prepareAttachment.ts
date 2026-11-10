@@ -1,5 +1,6 @@
 import { serverClient, ServerApiError } from '../api/serverClient';
 import { db } from '../store/db';
+import { resolveCloudBlob } from '../store/cloudBlob';
 import { MAX_ATTACHMENT_TEXT, type ChatAttachment } from './attachments';
 import { apiUrl } from '../api/base';
 
@@ -97,7 +98,7 @@ export async function readAttachmentBlob(file: ChatAttachment): Promise<Blob> {
   } else {
     const saved = await db.files.get(file.id);
     if (!saved) throw new Error('本机附件文件已被清理');
-    blob = saved.blob;
+    blob = await resolveCloudBlob(saved.blob);
   }
   return blob;
 }

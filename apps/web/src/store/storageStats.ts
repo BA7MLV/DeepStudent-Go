@@ -43,10 +43,10 @@ export async function getStorageStats(): Promise<StorageStats> {
     else videos += v.size;
   });
   await db.files.each((f) => {
-    videos += f.blob.size;
+    videos += f.blob instanceof Blob ? f.blob.size : 0;
   });
   await db.frames.each((f) => {
-    frames += f.blob.size;
+    frames += f.blob instanceof Blob ? f.blob.size : 0;
   });
   await db.segments.each((s) => {
     textBytes += s.text.length * 2; // JS 字符串按 UTF-16 估算
@@ -60,11 +60,13 @@ export async function getStorageStats(): Promise<StorageStats> {
     textBytes += b.text.length * 2;
   });
   await db.handouts.each((h) => {
-    handouts += h.blob.size;
+    handouts += h.blob instanceof Blob ? h.blob.size : 0;
   });
   await db.materialInk.each((stroke) => { ink += JSON.stringify(stroke).length * 2; });
 
   const known = videos + materials + frames + textBytes + handouts + ink;
+  let cachedBytes = 0;
+  await db.table('_fileCacheMeta').each(row => { cachedBytes += row.size; });
 
   let usage = 0;
   let quota = 0;
@@ -77,7 +79,7 @@ export async function getStorageStats(): Promise<StorageStats> {
   } catch {
     /* 个别浏览器接口不可用，退化为自统计总数 */
   }
-  if (usage < known) usage = known;
+  if (usage < known + cachedBytes) usage = known + cachedBytes;
 
   // usage 与已知分类的差额：IndexedDB 索引、SQLite 页、OPFS 元数据等开销
   const overhead = Math.max(0, usage - known);

@@ -5,6 +5,7 @@ import type { RuntimeJson } from '@wangke/contracts/client-runtime';
 import type { ResourceFiles } from '../projects/resources.js';
 import { CloudRecords } from '../cloud/records.js';
 import { importLibrary } from './library-import.js';
+import { replaceCourseSubtitles } from './subtitle-import.js';
 import { journaledResourceCommand, recoverResourceWorkflow, resourceScope, throwResourceFailure } from './resource-workflows.js';
 import type {} from './errors.js';
 
@@ -79,13 +80,7 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
         for (const cue of [...operation.segments, ...operation.tracks.flatMap(track => track.cues)]) {
           if (!Number.isFinite(cue.start) || !Number.isFinite(cue.end) || cue.start < 0 || cue.end < cue.start || typeof cue.text !== 'string') throw new RemoteError('gateway/bad-request', 'Invalid subtitle cue', {});
         }
-        for (const [table, values] of [['segments', operation.segments], ['subtitleTracks', operation.tracks]] as const) {
-          const existing = (db.prepare('SELECT value FROM cloud_records WHERE owner_id=? AND table_name=? AND value IS NOT NULL').all(owner, table) as { value: string }[]).map(row => JSON.parse(row.value));
-          let next = existing.reduce((max, row) => Math.max(max, Number(row.id) || 0), 0) + 1;
-          const mutations = existing.filter(row => row.videoId === operation.courseId).map(row => ({ id: crypto.randomUUID(), table, key: row.id, before: row, after: null as Record<string, unknown> | null }));
-          for (const value of values) { const key = next++; mutations.push({ id: crypto.randomUUID(), table, key, before: null, after: { ...value, id: key, videoId: operation.courseId } }); }
-          if (mutations.length) records.apply(owner, mutations);
-        }
+        replaceCourseSubtitles(resources.projects.store, owner, operation);
         changes = { status: operation.primary ? 'transcribed' : 'new' };
       } else {
         const ids = [...operation.pin, ...operation.drop];

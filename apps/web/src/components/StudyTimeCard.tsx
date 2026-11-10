@@ -7,30 +7,75 @@ import { computeStats, dateKey, formatStudyDuration } from '../utils/studyLog';
 import { NumberPop, Shimmer } from './motion';
 import { db } from '../store/db';
 import { accountLifecycle, type AccountLifetime } from '../client/account-lifecycle';
+import { cloud } from '../cloud/state';
+import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
+import type { StudySummary } from '@wangke/contracts/client-runtime';
+import { useTranslation } from 'react-i18next';
 
 /** 空闲判定的候选档位（分钟）：播放视频时不做空闲判定，所以这几档只影响「没在播放」的时候 */
 const IDLE_OPTIONS = [2, 5, 10, 15];
 
 /** 设置页「学习时长」卡片：开关 / 空闲判定 / 清空记录 + 一眼看得到的总账 */
 export default function StudyTimeCard() {
+  const { t } = useTranslation('settings');
   const settings = useSettings();
   const flushCount = useStudyTime((s) => s.flushCount);
   const [summary, setSummary] = useState<{ days: number; total: number } | null>(null);
-  const [snapshot, setSnapshot] = useState<{ date: string; seconds: number; updatedAt: number }[]>([]);
+  const [snapshot, setSnapshot] = useState<{ date: string; seconds: number; updatedAt: number }[] | string>([]);
+  const [readError, setReadError] = useState('');
+  const [ready, setReady] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const refresh = useRef<(() => void) | undefined>(undefined);
+  const readGeneration = useRef(0);
   const [clearing, setClearing] = useState(false);
   const [clearError, setClearError] = useState('');
   const snapshotScope = useRef<{ lifetime: AccountLifetime; database: typeof db } | undefined>(undefined);
 
   const reload = useCallback(async () => {
+    if (cloud.enabled) { refresh.current?.(); return; }
+    const fence = ++readGeneration.current;
     const lifetime = accountLifecycle.current(), database = db;
     if (!lifetime?.current()) return;
-    const days = await loadStudySnapshot();
-    if (!lifetime.current() || database !== db) return;
-    snapshotScope.current = { lifetime, database };
-    setSnapshot(days);
-    const stats = computeStats(days, dateKey(Date.now()));
-    setSummary({ days: stats.activeDays, total: stats.totalSeconds });
+    try {
+      const days = await loadStudySnapshot();
+      if (!lifetime.current() || database !== db || fence !== readGeneration.current) return;
+      snapshotScope.current = { lifetime, database };
+      setSnapshot(days);
+      const stats = computeStats(days, dateKey(Date.now()));
+      setSummary({ days: stats.activeDays, total: stats.totalSeconds });
+      setReady(true); setReadError('');
+    } catch (error) {
+      if (lifetime.current() && database === db && fence === readGeneration.current) { setReady(false); setReadError(String(error)); }
+    }
   }, []);
+
+  useEffect(() => {
+    if (!cloud.enabled) return () => { ++readGeneration.current; };
+    const lifetime = accountLifecycle.current(), database = db;
+    if (!lifetime?.current()) return;
+    let active = true, cleanup: (() => void) | undefined;
+    const current = () => active && lifetime.current() && database === db;
+    const unown = lifetime.own(() => { active = false; cleanup?.(); refresh.current = undefined; setSummary(null); setReady(false); snapshotScope.current = undefined; });
+    void serverRuntime(cloud.userId).then(runtime => {
+      if (!current() || !isCurrentServerRuntime(runtime)) return;
+      const model = runtime.studySummary();
+      const observe = () => {
+        if (!current()) return;
+        const state = model.getSnapshot();
+        setReady(state.status === 'ready');
+        setReadError(state.error ?? '');
+        if (state.status !== 'ready' || !state.data) return;
+        const data = state.data as unknown as StudySummary;
+        snapshotScope.current = { lifetime, database };
+        setSnapshot(data.snapshot); setSummary({ days: data.activeDays, total: data.totalSeconds });
+      };
+      const off = model.subscribe(observe), release = model.acquire();
+      cleanup = () => { off(); release(); };
+      refresh.current = () => model.refresh();
+      observe();
+    }).catch(error => { if (current()) { setReady(false); setReadError(String(error)); } });
+    return () => { active = false; cleanup?.(); refresh.current = undefined; unown(); };
+  }, [cloud.userId, db, attempt]);
 
   useEffect(() => {
     void reload();
@@ -40,7 +85,8 @@ export default function StudyTimeCard() {
     const lifetime = accountLifecycle.current(), database = db;
     const current = () => !!lifetime?.current() && database === db;
     if (!current() || snapshotScope.current?.lifetime !== lifetime || snapshotScope.current?.database !== database) return;
-    const expected = snapshot.map(row => ({ ...row }));
+    if (!ready) return;
+    const expected = typeof snapshot === 'string' ? snapshot : snapshot.map(row => ({ ...row }));
     void confirmDialog({
       headline: '清空学习时长记录？',
       description: '每日热力图数据会全部删除，不可恢复（课程、字幕、讲义等其它数据不受影响）',
@@ -131,7 +177,7 @@ export default function StudyTimeCard() {
           <Button
             variant="tertiary"
             data-testid="study-clear"
-            isDisabled={!summary || clearing}
+            isDisabled={!summary || !ready || clearing}
             onPress={askClear}
           >
             清空记录
@@ -139,6 +185,7 @@ export default function StudyTimeCard() {
         </div>
       </Field>
       {clearError && <p role="alert" data-testid="study-clear-error">{clearError}</p>}
+      {readError && <p role="alert" data-testid="study-summary-load-error">{t('studyRead.loadError')} <Button variant="tertiary" onPress={() => { if (cloud.enabled && !refresh.current) setAttempt(value => value + 1); else void reload(); }}>{t('studyRead.retry')}</Button></p>}
     </SectionCard>
   );
 }

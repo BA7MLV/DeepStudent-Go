@@ -238,6 +238,7 @@ export async function createClientRuntime(identity: { server: string; account: s
   assemble?: (ctx: Context) => Promise<void>) {
   const ctx = new Context();
   const models = new Map<string, RuntimeModel>();
+  let projectionSequence = 0;
   const lifetime = new AbortController();
   let disposed = false;
   try {
@@ -297,10 +298,47 @@ export async function createClientRuntime(identity: { server: string; account: s
       if (disposed) throw new Error('client_runtime_disposed');
       const result = await ctx.remote.clientRuntime.read(request);
       if (disposed) throw new Error('client_runtime_disposed');
-      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
+      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code, detail: result.error.details });
       return result.value;
     },
     resources: (request: Extract<RuntimeRead, { kind: 'resources' | 'resourceTrash' }>) => model(JSON.stringify(request), () => new RuntimeModel(ctx, request)),
+    sessionIndex: (request: Omit<Extract<RuntimeRead, { kind: 'sessionIndex' }>, 'cursor'>) => model(JSON.stringify(request), () => new RuntimeModel(ctx, request)),
+    skillIndex: () => model('skillIndex', () => new RuntimeModel(ctx, { kind: 'skillIndex' })),
+    studySummary: () => model('studySummary', () => new RuntimeModel(ctx, { kind: 'studySummary' })),
+    // Preview parameters belong to this view, not an account-lifetime cache.
+    // Dispose removes the entry as well as the observation/retained snapshot.
+    studyOverview: (request: Omit<Extract<RuntimeRead, { kind: 'studyOverview' }>, 'kind'>) => {
+      const key = `studyOverview:${++projectionSequence}`;
+      const projection = model(key, () => new RuntimeModel(ctx, { kind: 'studyOverview', ...request }));
+      return { model: projection, dispose: () => { models.delete(key); projection.dispose(); } };
+    },
+    latestHandout: (videoId: string) => {
+      const key = `latestHandout:${++projectionSequence}`;
+      const projection = model(key, () => new RuntimeModel(ctx, { kind: 'latestHandout', videoId }));
+      return { model: projection, dispose: () => { models.delete(key); projection.dispose(); } };
+    },
+    courseSubtitlePages: (videoId: string) => {
+      const key = `courseSubtitlePages:${++projectionSequence}`;
+      const segments = model(`${key}:segments`, () => new RuntimeModel(ctx, { kind: 'collectionPage', table: 'segments', parent: videoId }));
+      const tracks = model(`${key}:tracks`, () => new RuntimeModel(ctx, { kind: 'collectionPage', table: 'subtitleTracks', parent: videoId }));
+      const course = model(`${key}:course`, () => new RuntimeModel(ctx, { kind: 'recordKeys', keys: [{ table: 'videos', key: videoId }] }));
+      return { segments, tracks, course, dispose: () => {
+        for (const [suffix, projection] of [['segments', segments], ['tracks', tracks], ['course', course]] as const) {
+          models.delete(`${key}:${suffix}`); projection.dispose();
+        }
+      } };
+    },
+    courseMetadata: (ids: string[], covers: boolean) => {
+      const key = `courseMetadata:${++projectionSequence}`;
+      const projection = model(key, () => new RuntimeModel(ctx, { kind: 'courseMetadata', ids, covers }));
+      return { model: projection, dispose: () => { models.delete(key); projection.dispose(); } };
+    },
+    pluginScope: (materialId?: string, projectFolderId?: number) => {
+      const key = `pluginScope:${++projectionSequence}`;
+      const projection = model(key, () => new RuntimeModel(ctx, { kind: 'pluginScope', materialId, projectFolderId }));
+      return { model: projection, dispose: () => { models.delete(key); projection.dispose(); } };
+    },
+    recordKeys: (request: Extract<RuntimeRead, { kind: 'recordKeys' }>) => model(JSON.stringify(request), () => new RuntimeModel(ctx, request)),
     document: (request: Extract<RuntimeRead, { kind: 'courseDocument' | 'systemDocument' | 'systemDirectory' }>) => model(JSON.stringify(request), () => new RuntimeModel(ctx, request)),
     savePluginLayout: async (request: import('@wangke/contracts/system').SavePluginLayout) => {
       if (disposed) throw new Error('client_runtime_disposed');

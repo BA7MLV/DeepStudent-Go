@@ -28,7 +28,7 @@ test('blocked upgrades resume without deleting drafts; old generations close and
   old.close(); await opening;
   assert.equal(databaseNotice(), null);
   await database.table('_cloudMeta').put({ id: 'draft', value: 'retain me' });
-  const next = new Dexie(name); next.version(19).stores({ _cloudMeta: 'id' });
+  const next = new Dexie(name); next.version(database.verno + 1).stores({ _cloudMeta: 'id' });
   await next.open();
   assert.equal(databaseNotice()?.state, 'update-required');
   assert.equal(database.isOpen(), false);

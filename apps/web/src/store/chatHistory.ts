@@ -4,10 +4,36 @@ import { cloud } from '../cloud/state';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { accountLifecycle } from '../client/account-lifecycle';
 import { drainLearning, type LearningCommandRow } from '../client/learning';
-import type { RuntimeTask } from '@wangke/contracts/client-runtime';
+import type { CollectionPage, RuntimeTask } from '@wangke/contracts/client-runtime';
 
 export async function readChatHistory(sessionId: number) {
-  return (await db.chats.where('sessionId').equals(sessionId).toArray()).sort(compareChatRows);
+  const rows: ChatRow[] = [];
+  for await (const page of streamChatHistory(sessionId)) rows.push(...page);
+  return rows.sort(compareChatRows);
+}
+
+/** Explicit full-history operations only (export/fork/retry). Never infer a
+ * complete history from a disposable UI/IndexedDB window. An expired collection
+ * cursor fails the operation rather than silently exporting a mixed snapshot. */
+export async function* streamChatHistory(sessionId: number): AsyncGenerator<ChatRow[]> {
+  if (!Number.isSafeInteger(sessionId) || sessionId <= 0) throw new Error('invalid_session');
+  const owner = cloud.userId, database = db, lifetime = accountLifecycle.current();
+  const runtime = await serverRuntime(owner);
+  const guard = () => {
+    lifetime?.assertCurrent();
+    if (owner !== cloud.userId || database !== db || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
+  };
+  guard();
+  // Reauthorize session existence, including an empty/deleted session.
+  await runtime.sessionPage(sessionId); guard();
+  let cursor: string | undefined;
+  do {
+    const response = await runtime.read({ kind: 'collectionPage', table: 'chats', parent: sessionId, ...(cursor ? { cursor } : {}) });
+    guard();
+    const page = response.value as unknown as CollectionPage;
+    yield page.records.map(record => record.value as unknown as ChatRow);
+    guard(); cursor = page.next;
+  } while (cursor !== undefined);
 }
 
 export const CHAT_PAGE_SIZE = 40;

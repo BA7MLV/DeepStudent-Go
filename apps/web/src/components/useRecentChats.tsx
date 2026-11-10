@@ -7,6 +7,8 @@ import { useCourseChat } from '../store/courseChat';
 import { popconfirm, promptDialog, Sym, toast } from '../ui';
 import type { RecentItem } from '../ui/layout';
 import { useTranslation } from 'react-i18next';
+import { cloud } from '../cloud/state';
+import { useRecentSessionIndex } from './useRecentSessionIndex';
 
 /** 由共享布局持有查询和操作，切页不重挂；只有对话页显示当前会话高亮。 */
 export function useRecentChats(showActive = false) {
@@ -17,12 +19,13 @@ export function useRecentChats(showActive = false) {
   const runningIds = useCourseChat((s) => s.runningIds);
   const awaitingIds = useCourseChat((s) => s.awaitingIds);
   const ready = useCourseChat((s) => s.ready);
+  const serverIndex = useRecentSessionIndex(ready && cloud.enabled);
   const [activity, setActivity] = useState<Map<number, number> | null>(null);
   const [retryTick, setRetryTick] = useState(0);
   const failures = useRef(0);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || cloud.enabled) return;
     // 仅展示发送过消息的会话，后台回答和跨标签页更新也刷新排序。
     // 重试会删除再重建提问；两次读取必须来自同一快照，避免跨过中间的空态。
     const readActivity = () => db.transaction('r', db.chats, async () => new Map(await Promise.all(
@@ -73,13 +76,18 @@ export function useRecentChats(showActive = false) {
 
   // 不改变 store 顺序：bootstrap 和删除后的落脚点依赖原有顺序。
   const recentSessions = useMemo(() => {
+    if (cloud.enabled) {
+      const rows = serverIndex.page?.sessions ?? [];
+      const active = showActive ? sessions.find(session => session.id === activeId) : undefined;
+      return active && !rows.some(row => row.id === activeId) ? [active, ...rows] : rows;
+    }
     if (!activity && !(showActive && activeId != null)) return [];
     return sessions
     .filter((session) => (showActive && session.id === activeId) || (activity?.get(session.id!) ?? 0) > 0)
     .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)
       || (activity?.get(b.id!) || b.createdAt) - (activity?.get(a.id!) || a.createdAt)
       || b.createdAt - a.createdAt || b.id! - a.id!);
-  }, [sessions, activity, showActive, activeId]);
+  }, [sessions, activity, showActive, activeId, serverIndex.page]);
 
   const remove = async (id: number, title: string) => {
     const ok = await popconfirm({
@@ -139,5 +147,12 @@ export function useRecentChats(showActive = false) {
       deleteDisabled: busy,
     };
   });
-  return { label: t('recent.label'), items, loading: !ready || activity === null };
+  return { label: t('recent.label'), items, loading: !ready || (cloud.enabled ? !serverIndex.page && serverIndex.loading : activity === null),
+    ...(cloud.enabled ? { pagination: {
+      previous: serverIndex.page?.previous ? serverIndex.previous : undefined,
+      next: serverIndex.page?.next ? serverIndex.next : undefined,
+      previousLabel: t('recent.previousPage'), nextLabel: t('recent.nextPage'),
+      busy: serverIndex.loading, error: serverIndex.error ? t('recent.loadFailed') : undefined,
+      retry: serverIndex.retry, retryLabel: t('recent.retry'),
+    } } : {}) };
 }

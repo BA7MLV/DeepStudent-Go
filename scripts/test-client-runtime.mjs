@@ -67,6 +67,40 @@ try {
   assert.equal(await rejectedUpgrade({ origin: base }), 401);
   assert.equal(await rejectedUpgrade({ cookie, origin: 'https://untrusted.example' }), 403);
   store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
+  {
+    const records = new CloudRecords(store);
+    const count = async () => {
+      const result = await ctx.remote.clientRuntime.read({ kind: 'courseCount' });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      return result.value.value.count;
+    };
+    const before = await count();
+    const course = { id: 'count-fixture', name: 'Count without downloading content', type: 'material' };
+    records.apply(owner, [{ id: crypto.randomUUID(), table: 'videos', key: course.id, before: null, after: course }]);
+    assert.equal(await count(), before + 1);
+    records.apply(owner, [{ id: crypto.randomUUID(), table: 'videos', key: course.id, before: course, after: null }]);
+    assert.equal(await count(), before, 'server aggregate excludes tombstones');
+    const readiness = async videoId => {
+      const result = await ctx.remote.clientRuntime.read({ kind: 'courseReadiness', videoId });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      return result.value.value;
+    };
+    assert.deepEqual(await readiness(course.id), { hasMaterialText: false, hasSubtitles: false });
+    const block = { id: 888001, materialId: course.id, text: 'server-only material text' };
+    const segment = { id: 888002, videoId: course.id, status: 0, text: 'not transcribed' };
+    const edit = (table, value, expected = null) => records.apply(owner, [{ id: crypto.randomUUID(), table, key: value.id, before: expected, after: value }]);
+    edit('materialBlocks', block); edit('segments', segment);
+    assert.deepEqual(await readiness(course.id), { hasMaterialText: true, hasSubtitles: false });
+    edit('segments', { ...segment, status: 1, text: '' }, segment);
+    assert.equal((await readiness(course.id)).hasSubtitles, false, 'empty completed segment is not searchable');
+    const readySegment = { ...segment, status: 1 };
+    edit('segments', readySegment, { ...segment, status: 1, text: '' });
+    assert.deepEqual(await readiness(course.id), { hasMaterialText: true, hasSubtitles: true });
+    assert.deepEqual(await readiness('another-course'), { hasMaterialText: false, hasSubtitles: false }, 'course scope never leaks unrelated content');
+    records.apply(owner, [{ id: crypto.randomUUID(), table: 'materialBlocks', key: block.id, before: block, after: null },
+      { id: crypto.randomUUID(), table: 'segments', key: segment.id, before: readySegment, after: null }]);
+    assert.deepEqual(await readiness(course.id), { hasMaterialText: false, hasSubtitles: false }, 'deleted content is not considered ready');
+  }
   const files = new PluginFiles(store);
   const typedLayoutDocument = files.layout(owner);
   const layoutCommand = { content: typedLayoutDocument.content, expected: typedLayoutDocument.content, revision: typedLayoutDocument.revision, operationId: 'typed-layout-cas-command-0001' };
@@ -296,13 +330,18 @@ try {
   assert.equal(new CloudRecords(store).get('other-owner', 'preferences', 'fontScale'), null, 'preferences remain owner scoped');
   preferenceControl.abort(); await preferenceStream.return?.();
   const catalogControl = new AbortController();
-  const catalogStream = ctx.remote.clientRuntime.watch({ kind: 'catalog' }, catalogControl.signal)[Symbol.asyncIterator]();
-  const catalogInitial = (await deadline(catalogStream.next(), 'catalog before resource indexing')).value;
   const indexedMaterial = { id: 'runtime-newly-indexed-material', name: 'Newly indexed resource', createdAt: Date.now() };
+  const catalogRead = await ctx.remote.clientRuntime.read({ kind: 'catalog' });
+  assert.equal(catalogRead.ok, true);
+  assert.ok(!catalogRead.value.value.scopes.materials.some(material => material.id === indexedMaterial.id));
+  const catalogStream = ctx.remote.clientRuntime.watch({ kind: 'pluginScope', materialId: indexedMaterial.id }, catalogControl.signal)[Symbol.asyncIterator]();
+  const catalogInitial = (await deadline(catalogStream.next(), 'exact host scope before resource indexing')).value;
   new CloudRecords(store).apply(owner, [{ id: 'runtime-indexed-material-change', table: 'videos', key: indexedMaterial.id, before: null, after: indexedMaterial }]);
   const catalogChanged = (await deadline(catalogStream.next(), 'catalog scopes pushed after resource indexing')).value;
   const catalogValue = catalogChanged.type === 'snapshot' ? catalogChanged.value : applyRuntimePatch(catalogInitial.value, catalogChanged.changes);
-  assert.ok(catalogValue.scopes.materials.some(material => material.id === indexedMaterial.id), 'new resource actions cannot remain hidden behind an old catalog scope snapshot');
+  assert.ok(catalogValue.materials.some(material => material.id === indexedMaterial.id), 'new resource actions cannot remain hidden behind an old exact scope snapshot');
+  const catalogAfter = await ctx.remote.clientRuntime.read({ kind: 'catalog' });
+  assert.ok(!catalogAfter.value.value.scopes.materials.some(material => material.id === indexedMaterial.id), 'global catalog never grows an unrelated material index');
   assert.ok(store.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name='client_resource_files_insert'").get());
   assert.ok(store.db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name='client_resource_folders_update'").get());
   catalogControl.abort();
@@ -494,9 +533,28 @@ try {
   const at = new Date().toISOString();
   const sessionRecords = new CloudRecords(store);
   const sessionId = 83000001;
-  sessionRecords.apply(owner, [{ id: 'session-projection-fixture', table: 'chatSessions', key: sessionId, before: null, after: { id: sessionId, title: 'Typed session', createdAt: 1 } },
+  sessionRecords.apply(owner, [{ id: 'session-projection-fixture', table: 'chatSessions', key: sessionId, before: null, after: { id: sessionId, videoId: 'runtime-index-course', title: 'Typed session', createdAt: 1 } },
     ...Array.from({ length: 55 }, (_, index) => ({ id: `session-message-${index}`, table: 'chats', key: 84000000 + index, before: null,
       after: { id: 84000000 + index, sessionId, role: index % 2 ? 'assistant' : 'user', content: `history ${index}`, createdAt: index } }))]);
+  const indexRequest = { kind: 'sessionIndex', videoId: 'runtime-index-course', archived: false, recentOnly: true };
+  const sessionIndex = runtime.sessionIndex(indexRequest);
+  assert.equal(sessionIndex, runtime.sessionIndex(indexRequest), 'navigation observers share one model');
+  const releaseIndex = sessionIndex.acquire();
+  await waitModel(sessionIndex, () => sessionIndex.getSnapshot().status === 'ready', 'lightweight index opening');
+  assert.equal(sessionIndex.getSnapshot().data.sessions.length, 1);
+  assert.equal(sessionIndex.getSnapshot().data.sessions[0].id, sessionId);
+  assert.ok(!JSON.stringify(sessionIndex.getSnapshot().data).includes('history '), 'index never returns message bodies');
+  const indexVersion = sessionIndex.getSnapshot().data.version;
+  const beforeContentEdit = sessionRecords.get(owner, 'chats', 84000000);
+  sessionRecords.apply(owner, [{ id: 'session-index-content-only-edit', table: 'chats', key: 84000000,
+    before: beforeContentEdit, after: { ...beforeContentEdit, content: 'index content edit' } }]);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(sessionIndex.getSnapshot().data.version, indexVersion, 'content-only edits do not invalidate navigation');
+  const indexSessionBefore = sessionRecords.get(owner, 'chatSessions', sessionId);
+  sessionRecords.apply(owner, [{ id: 'session-index-rename', table: 'chatSessions', key: sessionId,
+    before: indexSessionBefore, after: { ...indexSessionBefore, title: 'Renamed typed session' } }]);
+  await waitModel(sessionIndex, () => sessionIndex.getSnapshot().data?.sessions[0]?.title === 'Renamed typed session', 'pushed index rename');
+  releaseIndex();
   const sessionModel = runtime.session(sessionId);
   assert.equal(sessionModel, runtime.session(sessionId));
   const sessionRelease = [sessionModel.acquire(), sessionModel.acquire()];
@@ -565,7 +623,8 @@ try {
   assert.equal(taskModel.diagnostics().refs, 1);
   store.db.prepare("UPDATE cloud_tasks SET status='completed',result='42',updated_at=? WHERE id=?").run(new Date().toISOString(), 'runtime-task');
   assert.equal((await deadline(retainedWait, 'task completion')).result, 42);
-  await waitModel(taskList, () => taskList.tasks()?.find(task => task.id === 'runtime-task')?.result === 42, 'task list terminal');
+  await waitModel(taskList, () => taskList.tasks()?.find(task => task.id === 'runtime-task')?.status === 'completed', 'task list terminal');
+  assert.equal(taskList.tasks().find(task => task.id === 'runtime-task').result, null, 'activity summary excludes full task results');
   assert.equal(taskModel.diagnostics().refs, 0);
   const records = new CloudRecords(store);
   const notifications = () => store.db.prepare('SELECT COUNT(*) AS n FROM client_changes').get().n;

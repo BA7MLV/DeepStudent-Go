@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import i18n from '../i18n';
+import { resolveCloudBlob } from '../store/cloudBlob';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MediaPlayer, MediaProvider, Track, type MediaPlayerInstance, type MediaStorage } from '@vidstack/react';
 import { DefaultVideoLayout } from '@vidstack/react/player/layouts/default';
@@ -7,13 +8,15 @@ import { playerLayoutIcons } from '../ui/player-icons';
 import '@vidstack/react/player/styles/default/theme.css';
 import '@vidstack/react/player/styles/default/layouts/video.css';
 import '../player-enhance.css';
-import { db, type VideoRow } from '../store/db';
+import { type VideoRow } from '../store/db';
 import { describeVideoPlaybackError, getVideoPlaybackSource, VideoPlaybackError } from '../store/videoPlayback';
 import { Button } from '@heroui/react';
 import { useSettings } from '../store/settings';
 import { useLibraryNavigation } from '../store/libraryNavigation';
 import { getSystemMaterial, systemMaterialPath } from '../materials/systemFiles';
-import { setStudyMediaPlaying } from '../store/studyTime';
+import { captureStudyMediaReporter } from '../store/studyTime';
+import { accountLifecycle } from '../client/account-lifecycle';
+import { captureCourseAccess } from '../client/course-access';
 import { useSelectionAsk } from '../store/selectionAsk';
 import type { Cue } from '../utils/vtt';
 import { PageShell, EmptyState, Sym, useDynamicColor, toast } from '../ui';
@@ -126,6 +129,9 @@ export default function Player() {
 }
 
 function PlayerResource({ id }: { id: string | undefined }) {
+  const courseAccess = useState(() => captureCourseAccess())[0];
+  const studyLifetime = accountLifecycle.current();
+  const reportStudyMedia = useMemo(() => captureStudyMediaReporter(), [id, studyLifetime]);
   const navigate = useNavigate();
   const location = useLocation();
   const requestedReturn = location.state?.libraryReturn;
@@ -179,50 +185,49 @@ function PlayerResource({ id }: { id: string | undefined }) {
    * 不清的后果很具体：从播放页返回课程库后，标记还是 true —— 人去吃饭了，
    * 库页照样一直记时长。清理放在 `id` 的依赖上，换视频时同样会先清一次。
    */
-  useEffect(() => () => setStudyMediaPlaying(false), [id]);
+  useEffect(() => () => reportStudyMedia(false), [reportStudyMedia]);
 
   /**
    * Material You 动态取色：以「课程封面」为色彩来源。
    *
-   * ⚠️ 这里取的是 `db.frames` 里的幻灯片帧（`frames.kind === 'slide'`，通常是课件首页），
+   * 取幻灯片帧（`frames.kind === 'slide'`，通常是课件首页），
    * 没有幻灯片帧就退而用最早的一帧；一帧都没有就保持默认配色。
    *
-   * 这是**旧路径**：v10 起封面已经是入库即生成的独立资源（`pipelines/cover.ts`，
-   * `covers` 表对所有视频都有），换成它会让动态取色对所有视频生效，而且配色会和
-   * 资料库卡片缩略图一致。之所以还没换：`scripts/e2e-material-you.mjs` 是按
-   * 「种一帧 frames」来验这条链路的，改行为要同步改那个脚本的播种方式，
-   * 属于独立一笔改动 —— 别只改这一处，会静默打掉那条 e2e。
+   * 服务端由排序索引只选一帧并返回不可变文件引用，不读整门课的 frames，
+   * 也不将显示元数据提升为业务 IDB 行；保留原有优先级而不悄悄改用 covers。
    *
    * 这里只负责「取帧 → 建 blob URL → 用完回收」，真正的取色与上色在 useDynamicColor 里
    * （那一层刻意不依赖数据层，才能留在通用的 ui/ 适配层）。
    */
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!id || !dynamicColor) {
+    if (!id || !dynamicColor || !courseAccess.current()) {
       setCoverUrl(null);
       return;
     }
     let objectUrl: string | null = null;
     let cancelled = false;
+    const controller = new AbortController();
+    const cleanup = () => {
+      cancelled = true; controller.abort();
+      if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+      setCoverUrl(null);
+    };
+    const unown = courseAccess.lifetime?.own(cleanup);
     (async () => {
-      const frames = await db.frames.where('videoId').equals(id).toArray();
-      if (frames.length === 0) return;
-      // 幻灯片帧优先；同类里取时间最早的那一帧
-      frames.sort(
-        (a, b) => Number(b.kind === 'slide') - Number(a.kind === 'slide') || a.ts - b.ts,
-      );
-      if (cancelled) return;
-      objectUrl = URL.createObjectURL(frames[0].blob);
+      const frame = await courseAccess.colorFrame(id);
+      if (!frame || cancelled || !courseAccess.current()) return;
+      // Color extraction reads pixels via canvas: use an authenticated Blob
+      // rather than a remote image that taints canvas on split-origin installs.
+      const blob = await resolveCloudBlob(frame, controller.signal);
+      if (cancelled || !courseAccess.current()) return;
+      objectUrl = URL.createObjectURL(blob);
       setCoverUrl(objectUrl);
     })().catch(() => {
       /* 取不到封面就用默认配色，不影响播放 */
     });
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      setCoverUrl(null);
-    };
-  }, [id, dynamicColor]);
+    return () => { unown?.(); cleanup(); };
+  }, [id, dynamicColor, courseAccess]);
 
   // 配色挂在整页根节点上（Player 的根元素），离开播放页自动失效
   const colorSchemeRef = useDynamicColor({ sourceUrl: coverUrl, enabled: dynamicColor });
@@ -239,8 +244,8 @@ function PlayerResource({ id }: { id: string | undefined }) {
   const resumeStorage = useMemo<MediaStorage>(
     () => ({
       async getTime() {
-        if (!id) return null;
-        const row = await db.videos.get(id);
+        if (!id || !courseAccess.current()) return null;
+        const row = await courseAccess.read(id);
         if (!row) return null;
         if (row.finished === 1) {
           // 上一轮看完了：本次打开即新一轮观看，清掉标记并把位置归零。
@@ -251,7 +256,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
           //
           // 读进度失败不该拦住播放，所以吞掉异常、照样返回 0（从头上放）。
           try {
-            await (await import('../client/resources')).recordPlayback(id, 0, false);
+            await courseAccess.recordPlayback(id, 0, false);
           } catch {
             /* 落库失败只影响主页那根条，不影响本次从头播放 */
           }
@@ -261,10 +266,10 @@ function PlayerResource({ id }: { id: string | undefined }) {
       },
       async setTime(time, ended) {
         // 时长没探到等情况下 vidstack 会传 NaN，别把垃圾写进库
-        if (!id || !Number.isFinite(time)) return;
+        if (!id || !Number.isFinite(time) || !courseAccess.current()) return;
         // 播完时 vidstack 传的是 duration（其 #onEnded 里 `setTime(duration(), true)`），
         // 正好就是「看到哪儿了」的真实位置，直接落盘
-        await (await import('../client/resources')).recordPlayback(id, time, ended ? true : undefined);
+        await courseAccess.recordPlayback(id, time, ended ? true : undefined);
       },
       // 其余 getter 返回 null（无保存值），音量/字幕/倍率等行为与之前一致
       async getVolume() { return null; },
@@ -275,15 +280,20 @@ function PlayerResource({ id }: { id: string | undefined }) {
       async getVideoQuality() { return null; },
       async getAudioGain() { return null; },
     }),
-    [id],
+    [id, courseAccess],
   );
 
   useEffect(() => {
+    if (!courseAccess.current()) { setLoading(false); setSourcePending(false); return; }
     const controller = new AbortController();
     playbackAbort.current = controller;
     playbackFailureDetected.current = false;
     let release: (() => void) | undefined;
     let cancelled = false;
+    const current = () => !cancelled && courseAccess.current();
+    const unown = courseAccess.lifetime?.own(() => {
+      cancelled = true; controller.abort(); release?.(); setVideo(null); setVideoUrl(''); setLoading(false); setSourcePending(false);
+    });
     setSourcePending(true);
     setPlaybackError('');
     setFileMissing(false);
@@ -291,8 +301,8 @@ function PlayerResource({ id }: { id: string | undefined }) {
     const timeout = setTimeout(() => controller.abort(new DOMException(i18n.t('player.loadTimeout'), 'TimeoutError')), 20_000);
     (async () => {
       if (!id) return;
-      const row = getSystemMaterial(id) ?? await db.videos.get(id);
-      if (cancelled) return;
+      const row = getSystemMaterial(id) ?? await courseAccess.read(id);
+      if (!current()) return;
       if (!row) {
         toast.error(i18n.t('player.missing'));
         navigate('/library');
@@ -302,7 +312,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
       setLoading(false);
       if (row.kind === 'material') return;
       const source = await getVideoPlaybackSource(id, controller.signal);
-      if (cancelled) { source?.release(); return; }
+      if (!current()) { source?.release(); return; }
       if (source) {
         release = source.release;
         setVideoCrossOrigin(source.crossOrigin);
@@ -311,23 +321,24 @@ function PlayerResource({ id }: { id: string | undefined }) {
         setFileMissing(true);
       }
     })().catch((error: unknown) => {
-      if (cancelled) return;
+      if (!current()) return;
       setPlaybackError(error instanceof VideoPlaybackError || (error instanceof DOMException && error.name === 'TimeoutError')
         ? error.message : i18n.t('player.loadFailed'));
     }).finally(() => {
       clearTimeout(timeout);
-      if (!cancelled) { setLoading(false); setSourcePending(false); }
+      if (current()) { setLoading(false); setSourcePending(false); }
     });
     return () => {
       cancelled = true;
+      unown?.();
       clearTimeout(timeout);
       controller.abort();
       release?.();
     };
-  }, [id, navigate, playbackAttempt]);
+  }, [id, navigate, playbackAttempt, courseAccess]);
 
   const onPlaybackError = useCallback((error: { code?: number }) => {
-    setStudyMediaPlaying(false);
+    reportStudyMedia(false);
     const signal = playbackAbort.current?.signal;
     if (!signal || signal.aborted || playbackFailureDetected.current) return;
     playbackFailureDetected.current = true;
@@ -687,10 +698,10 @@ function PlayerResource({ id }: { id: string | undefined }) {
               }}
               // 学习时长追踪：播放中不做「人走开了」的空闲判定（看课不用一直操作键鼠）。
               // 暂停/播完/卸载都恢复普通判定，见 store/studyTime.ts。
-              onPlay={() => setStudyMediaPlaying(true)}
-              onPlaying={() => setStudyMediaPlaying(true)}
-              onPause={() => { setStudyMediaPlaying(false); keyboard.cancel(); }}
-              onEnded={() => { setStudyMediaPlaying(false); keyboard.cancel(); }}
+              onPlay={() => reportStudyMedia(true)}
+              onPlaying={() => reportStudyMedia(true)}
+              onPause={() => { reportStudyMedia(false); keyboard.cancel(); }}
+              onEnded={() => { reportStudyMedia(false); keyboard.cancel(); }}
               onFullscreenChange={(fullscreen) => { if (fullscreen) setWebFullscreen(false); }}
               // 这里刻意**不带** style：播放器是直角，真正的实现在 player-enhance.css 的
               // `[data-media-player] { --video-border-radius: 0 }` —— vds 默认布局会在宿主上写

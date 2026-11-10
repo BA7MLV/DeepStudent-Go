@@ -86,9 +86,29 @@ document.body.dataset.ready='yes';`;
   await context.addInitScript(owner => { window.owner = owner; }, owner);
   await context.route('**/chat/completions', route => { throw new Error('browser model execution forbidden: ' + route.request().url()); });
   const page = await context.newPage(); page.on('pageerror', error => evidence.errors.push(error.message));
+  let failReadiness = true, readinessRequests = 0;
+  await page.route('**/api/clientRuntime/read', async route => {
+    if (route.request().postData()?.includes('courseReadiness')) {
+      readinessRequests++;
+      if (failReadiness) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'readiness_fixture_unavailable' }) });
+    }
+    return route.continue();
+  });
   page.on('request', request => { if (request.url().includes('/api/clientRuntime/submitTask')) evidence.requests.push(request.postDataJSON()); });
   await page.goto(origin + '/__chat-ui'); await page.locator('body[data-ready="yes"]').waitFor({ timeout: 60000 });
-  await page.locator('textarea').waitFor({ timeout: 60000 });
+  try { await page.getByTestId('chat-index-retry').waitFor({ timeout: 60000 }); }
+  catch (error) {
+    fs.writeFileSync(path.join(directory, 'readiness-failure.json'), JSON.stringify({ readinessRequests, errors: evidence.errors, body: await page.locator('body').innerText() }, null, 2));
+    await page.screenshot({ path: path.join(directory, 'readiness-failure.png') });
+    console.error('Readiness evidence:', directory); throw error;
+  }
+  assert.ok(readinessRequests > 0, 'QA startup reads the server content-availability projection');
+  failReadiness = false;
+  await page.getByTestId('chat-index-retry').click();
+  const composer = page.getByRole('textbox');
+  await composer.waitFor({ timeout: 60000 });
+  await page.waitForFunction(() => !document.querySelector('[data-testid="chat-composer"] textarea')?.disabled);
+  evidence.assertions.push('QA content availability uses a boolean server projection; 503 is visible with explicit retry and successful recovery');
   await page.getByText('idle QA original', { exact: false }).first().waitFor();
   put('chats', 81, { ...records.get(owner, 'chats', 81), content: 'idle QA remotely updated' });
   await page.getByText('idle QA remotely updated', { exact: false }).first().waitFor();
@@ -134,7 +154,7 @@ document.body.dataset.ready='yes';`;
   await page.getByTestId('default-picker').getByRole('button',{name:'设为本会话默认'}).waitFor({state:'hidden'});
   evidence.assertions.push('TaskModelPicker saves session default with real server expected/CAS delegation');
   await page.evaluate(() => { probe.select(); probe.cite(); });
-  await page.locator('textarea').fill('Explain attached evidence'); await page.locator('textarea').press('Enter');
+  await composer.fill('Explain attached evidence'); await composer.press('Enter');
   await until(() => store.db.prepare("SELECT 1 FROM cloud_tasks WHERE owner_id=? AND kind='qa'").get(owner));
   const qa = store.db.prepare("SELECT * FROM cloud_tasks WHERE owner_id=? AND kind='qa' ORDER BY created_at DESC LIMIT 1").get(owner), input = JSON.parse(qa.input);
   assert.equal(input.modelSelection.modelRef.model, 'fixture-special'); assert.equal(input.shotCount, 1); assert.equal(input.refsCount, 1);
@@ -169,6 +189,19 @@ document.body.dataset.ready='yes';`;
   const compression = store.db.prepare("SELECT input FROM cloud_tasks WHERE owner_id=? AND json_extract(input,'$.action')='compressContext'").get(owner);
   assert.deepEqual(JSON.parse(compression.input).expected, baseline.map(row => ({ id: row.id, content: row.content })));
   evidence.assertions.push('production compression admits original complete expected baseline, runs server selector, commits omission CAS, protects latest two turns and leaves all messages unchanged');
+  store.transaction(() => {
+    for (let id = 1; id <= 61; id++) put('chatSessions', 910000 + id, { id: 910000 + id, videoId: 'course', title: `QA history ${id}`, createdAt: -id });
+  });
+  const sessionSelect = page.getByTestId('chat-session');
+  await sessionSelect.locator('option[value="910001"]').waitFor({ state: 'attached' });
+  assert.ok(await sessionSelect.locator('option').count() <= 52, '50 metadata options, active option and native empty sentinel at most');
+  await sessionSelect.locator('[data-slot="select-trigger"]').click();
+  await page.getByTestId('qa-sessions-next').click();
+  await page.getByRole('option', { name: 'QA history 61', exact: true }).waitFor();
+  await page.getByTestId('qa-sessions-previous').click();
+  await page.getByRole('option', { name: 'QA history 1', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  evidence.assertions.push('QA selector uses bounded 50-row metadata pages, preserves active selection and traverses forward/backward to all older sessions');
   assert.ok(modelCalls >= 2); assert.deepEqual(evidence.errors, []);
   await page.screenshot({ path: path.join(directory, 'course-panel.png'), fullPage: true });
   await page.route('**/api/clientRuntime/read', route => route.abort());

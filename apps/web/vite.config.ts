@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { formatBuildTime } from './src/utils/buildInfo';
 import { dshEsm } from './dsh-esm';
+import { shellPrecache, type BuildManifestChunk } from './pwa-precache';
 
 const require = createRequire(import.meta.url);
 const dependencyDirectory = (name: string) => {
@@ -210,7 +211,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // 预缓存只留 App Shell（js/css/svg）。wasm 一律改为运行时按需缓存：
+        // 只预缓存入口的静态依赖；动态功能分包也必须按需下载。
+        // wasm 一律改为运行时按需缓存：
         // onnxruntime 的 threaded wasm 单文件就 14MB，进预缓存会让首次安装
         // 下载几十 MB、拖慢 SW install，而多数用户当次根本用不到转写/导出。
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
@@ -225,11 +227,25 @@ export default defineConfig({
         // 而 worker 的文件名带内容哈希、由 Vite 在打包期才定，配置期没法确定它一定存在。
         // 改成下面的**运行时 CacheFirst**：正则匹配不到只是不缓存，绝不会让构建挂掉。
         globPatterns: ['**/*.{js,css,svg}'],
+        manifestTransforms: [entries => shellPrecache(entries, JSON.parse(fs.readFileSync(
+          new URL('./dist/.vite/manifest.json', import.meta.url), 'utf8')) as Record<string, BuildManifestChunk>)],
         // config.js 是运行时配置（web 容器启动时按 API_BASE_URL 重写），不能被 SW 缓存成旧值。
         globIgnores: ['config.js'],
         navigateFallback: undefined,
         cleanupOutdatedCaches: true,
         runtimeCaching: [
+          {
+            // Content-hashed same-origin build assets are immutable. Keep only
+            // features actually opened, never eagerly install the entire app.
+            urlPattern: ({ url }) => url.origin === self.location.origin
+              && /\/assets\/[^/]+-[\w-]+\.(?:js|css|woff2?|svg|png)$/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'app-demand-assets',
+              cacheableResponse: { statuses: [200] },
+              expiration: { maxEntries: 160, maxAgeSeconds: 30 * 24 * 3600 },
+            },
+          },
           {
             // 讲义预览的朱雀仿宋分包字体：按需下载后长期缓存（离线可用）
             urlPattern: /\/fonts\/zhuque-fangsong\/.+\.woff2$/,
@@ -326,7 +342,7 @@ export default defineConfig({
     include: ['sql.js', 'onnxruntime-web', 'pdfjs-dist', '@deepseek-ai/dsh-client-ui-slots'],
     exclude: ['@widget/chart-runtime', '@widget/chart-runtime?raw'],
   },
-  build: { target: 'es2020', chunkSizeWarningLimit: 2000 },
+  build: { target: 'es2020', chunkSizeWarningLimit: 2000, manifest: true },
   // 注入的是**对象字面量的源码文本**（define 做的是文本替换），故须 JSON.stringify。
   // dev 下这个值同样会被替换成「配置加载时刻」—— 那是误导，所以展示侧用
   // import.meta.env.DEV 分流，不读它（见 src/utils/buildInfo.ts 的 buildInfoLabel）。

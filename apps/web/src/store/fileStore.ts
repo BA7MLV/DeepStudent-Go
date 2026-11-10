@@ -1,4 +1,5 @@
 import { db } from './db';
+import { resolveCloudBlob } from './cloudBlob';
 import { apiUrl } from '../api/base';
 import { loadSystemMaterialFile } from '../materials/systemFiles';
 
@@ -13,7 +14,7 @@ export async function getCourseFile(id: string, _dirName?: string): Promise<Blob
     return new Blob([await response.blob()], { type: resource.mimeType });
   }
   const edited = await db.files.get(id);
-  if (edited) return edited.blob;
+  if (edited) return resolveCloudBlob(edited.blob);
   if (!resource) return null;
   const response = await fetch(apiUrl(`/api/v1/files/${encodeURIComponent(resource.fileId)}`), { credentials: 'include' });
   if (response.status === 404) return null;

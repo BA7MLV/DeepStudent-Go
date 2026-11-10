@@ -11,8 +11,7 @@ import FolderColorMenu from '../components/FolderColorMenu';
 import { PluginActions } from '../plugins/PluginActions';
 import { ResourceFileIcon } from '../components/ResourceFileIcon';
 import { useLibraryNavigation } from '../store/libraryNavigation';
-import { db } from '../store/db';
-import { flushCloud } from '../cloud/sync';
+import { captureCourseAccess } from '../client/course-access';
 import { MoreMenu, PageShell, Sym, toast, promptDialog, confirmDialog } from '../ui';
 import { SkeletonReveal, useSkeletonGate } from '../ui/skeleton';
 import { overflowTitleProps } from '../ui/overflowTitle';
@@ -55,6 +54,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const { t } = useTranslation('projects');
   const { t: text } = useTranslation('interface');
   const navigate = useNavigate();
+  const [courseAccess] = useState(() => captureCourseAccess());
   const mobile = useIsMobile();
   const [search, setSearch] = useSearchParams();
   const projectId = search.get('folder') ?? undefined;
@@ -174,7 +174,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
             const entry = listing.entries.find(entry => entry.name === file.name);
             if (entry?.courseId) {
               const duration = await probeDuration(file);
-              await flushCloud();
+              await courseAccess.read(entry.courseId);
               if (duration) await (await import('../client/resources')).recordMediaDuration(entry.courseId, duration);
               enqueueCover(entry.courseId);
               startTranscription(entry.courseId);
@@ -195,8 +195,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     if (!entry.courseId && !/\.(txt|md|markdown|json|csv|tsv|yaml|yml|xml|log|srt|vtt|js|ts|css|py|sh)$/i.test(entry.name)) { download(entry); return; }
     await perform(async () => {
       if (entry.courseId) {
-        await flushCloud();
-        const course = await db.videos.get(entry.courseId);
+        const course = await courseAccess.read(entry.courseId);
         if (course?.kind === 'material' && course.status === 'new' && course.materialFormat && !entry.missing) {
           const { startMaterialJob } = await import('../pipelines/materialJob');
           void startMaterialJob(course.id, course.materialFormat).catch(error => toast.error(projectError(error)));

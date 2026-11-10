@@ -107,7 +107,7 @@ export interface FolderRow {
 
 export interface FileRow {
   id: string; // 同 videoId
-  blob: Blob;
+  blob: import('./cloudBlob').StoredBlob;
 }
 
 export interface SegmentRow {
@@ -143,7 +143,7 @@ export interface FrameRow {
   id?: number;
   videoId: string;
   ts: number; // 秒
-  blob: Blob;
+  blob: import('./cloudBlob').StoredBlob;
   kind: 'slide' | 'other';
   caption?: string;
 }
@@ -163,7 +163,7 @@ export interface CoverRow {
   /** 主键，同 `videos.id` */
   videoId: string;
   /** 480px 宽（16:9 即 480×270）WebP，编码器不支持时回退 JPEG。只存小图，不存原尺寸 */
-  blob: Blob;
+  blob: import('./cloudBlob').StoredBlob;
   w: number;
   h: number;
   /** 视频：取自第几秒；材料：页码（PDF 恒为 1） */
@@ -181,7 +181,7 @@ export interface HandoutRow {
   videoId: string;
   createdAt: number;
   title: string;
-  blob: Blob; // docx
+  blob: import('./cloudBlob').StoredBlob; // docx, fetched only for preview/export
   outlineJson: string;
   /** 每节 IR（HandoutSection[] 的 JSON）：块级编辑/AI 改写的数据源；旧版生成的行没有此字段（只读）。
    *  非索引字段，无需升级版本（参照 SegmentRow.cues 先例）。 */
@@ -656,6 +656,7 @@ export class WangkeDB extends Dexie {
     this.version(17).stores({ preferences: 'id' });
     this.version(18).stores({ _learningCommands: '++sequence, &operationId', _historyRecovery: 'id', _historyTransactions: 'id', _projectionStage: 'id' });
     this.version(19).stores({ _widgetStates: '[rowId+widgetId], rowId' });
+    this.version(20).stores({ _fileCache: 'id', _fileCacheMeta: 'id, usedAt' });
     this.on('blocked', () => { setDatabaseNotice({ database: name, state: 'blocked' }); });
     this.on('ready', () => {
       if (databaseNotice()?.database === name && databaseNotice()?.state === 'blocked') setDatabaseNotice(null);

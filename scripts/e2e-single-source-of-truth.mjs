@@ -28,6 +28,7 @@ import {startCloud,flushCloud} from '/src/cloud/sync.ts';
 import {db,legacyCloudDatabaseName,useCloudDatabase} from '/src/store/db.ts';
 import {cloud} from '/src/cloud/state.ts';
 import {serverRuntime} from '/src/client/bootstrap.ts';
+import {resolveCloudBlob} from '/src/store/cloudBlob.ts';
 import {queueLearning,drainLearning,learningEdit,saveSkillPackage,addStudyTime,clearStudyTime,saveAnnotations,reviewCard,saveHandoutReading} from '/src/client/learning.ts';
 import {forkServerSession,deleteServerSession} from '/src/client/conversations.ts';
 import LearningRecovery from '/src/cloud/LearningRecovery.tsx';
@@ -48,6 +49,7 @@ function InkProbe(){const ink=useMaterialInk();window.ink=ink;return React.creat
 window.probe={
   flush:flushCloud,drain:drainLearning,
   get: (table,key)=>db.table(table).get(key),
+  async handoutText(id){return (await resolveCloudBlob((await db.handouts.get(id)).blob)).text();},
   commands:()=>db.table('_learningCommands').toArray(),
   studySnapshot:()=>db.studyDays.toArray(),
   clearStudy:(expected,id)=>clearStudyTime(expected,id),
@@ -109,9 +111,21 @@ document.body.dataset.ready='true';`;
   store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
   const records = new CloudRecords(store);
   const page = await context.newPage(), second = await device.newPage();
-  const errors = [];
+  const errors = [], network = [];
+  await Promise.all([context, device].map(context => context.addInitScript(() => {
+    window.truthUnhandled = [];
+    window.addEventListener('unhandledrejection', event => {
+      window.truthUnhandled.push({ message: String(event.reason), stack: event.reason?.stack });
+      console.error('truth-unhandled-rejection', String(event.reason), event.reason?.stack);
+    });
+  })));
+  for (const tab of [page, second]) {
+    tab.on('requestfailed', request => { network.push({ at: Date.now(), event: 'failed', path: new URL(request.url()).pathname,
+      body: request.postData(), error: request.failure()?.errorText }); fs.writeFileSync(path.join(directory, 'network-failures.json'), JSON.stringify(network, null, 2)); });
+    tab.on('console', message => { if (message.type() === 'error') fs.appendFileSync(path.join(directory, 'console-errors.log'), `${Date.now()} ${message.text()}\n`); });
+  }
   for (const tab of [page, second]) tab.on('pageerror', error => {
-    errors.push({ message: error.message, stack: error.stack });
+    errors.push({ at: Date.now(), message: error.message, stack: error.stack });
     fs.writeFileSync(path.join(directory, 'page-errors.json'), JSON.stringify(errors, null, 2));
   });
   await page.goto(`${origin}/__truth`); await page.locator('body[data-ready="true"]').waitFor();
@@ -215,12 +229,14 @@ document.body.dataset.ready='true';`;
   const blobId=await page.evaluate(async()=>{await probe.flush();const id=await probe.queueBlob();await probe.drain();return id;});
   await page.evaluate(()=>probe.rebuild());
   assert.equal(await page.evaluate(id=>probe.pendingBlob(id),blobId),'pending-handout-bytes');
-  assert.equal(await page.evaluate(async()=> (await probe.get('handouts',91)).blob.text()),'confirmed handout');
+  assert.equal(await page.evaluate(()=>probe.handoutText(91)),'confirmed handout');
+  assert.equal(await page.evaluate(async()=> (await probe.get('handouts',91)).blob.$file),file.id,'committed document remains an immutable lazy file reference');
   await context.unroute('**/api/clientRuntime/editLearning');
   await page.evaluate(()=>probe.flush());
   try { await waitForProbe(page,async id=>!(await probe.commands()).some(row=>row.operationId===id),blobId); }
   catch(error){console.error(await page.evaluate(()=>probe.commands()));throw error;}
-  assert.equal(await page.evaluate(async()=> (await probe.get('handouts',91)).blob.text()),'pending-handout-bytes');
+  assert.equal(await page.evaluate(()=>probe.handoutText(91)),'pending-handout-bytes');
+  assert.equal(typeof await page.evaluate(async()=> (await probe.get('handouts',91)).blob.$file),'string','upload confirmation keeps bytes outside the committed projection');
 
   // Real React provider: several offline strokes become separate durable
   // intents immediately, survive reload, and converge when the carrier returns.
@@ -274,6 +290,7 @@ document.body.dataset.ready='true';`;
   await page.getByRole('button',{name:'View details',exact:true}).first().click();
   await page.getByRole('button',{name:'Export backup',exact:true}).waitFor();
   assert.deepEqual(errors,[]);
+  for (const tab of [page, second]) assert.deepEqual(await tab.evaluate(() => window.truthUnhandled), [], 'diagnostics must not hide unhandled network rejections');
   fs.writeFileSync(path.join(directory,'evidence.json'),JSON.stringify({browser:process.env.BROWSER??'chromium',browserVersion:(browser??context.browser()).version(),profileMode:engine===webkit?'isolated-persistent':'isolated-private',narrow:!!process.env.NARROW,passed:true,recovery,producerUI:JSON.parse(fs.readFileSync(path.join(directory,'producer-ui.json'),'utf8')),cases:['two-device-conflict','independent-feed','causal-blocking','lost-response','reload-multi-tab','readonly-cache','generation-rebuild','tombstone','draft-blob','session-fork-delete','atomic-skill-package','card-review','handout-reading','annotation-undo-stable-id','annotation-provider-offline-multiple-strokes-reload-convergence','conflict-background-archive-dependent-recheck','guest-delta-dedup-and-id-reuse-rejection','pending-blob-rebuild-and-upload','legacy-original-transaction-conversion','legacy-byte-export','same-key-new-metadata-evidence','account-fences','real-chat-skills-cards-ui']},null,2));
   console.log(`PASS single-source production adapters (${process.env.BROWSER??'chromium'}): ${directory}`);
 } finally { for (const context of contexts) await context.close(); await browser?.close(); await web?.close(); store?.close(); await app.close(); }

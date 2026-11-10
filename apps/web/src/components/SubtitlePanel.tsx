@@ -1,12 +1,10 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, ListBox, Select } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import { liveQuery } from 'dexie';
-import { db, type SegmentRow, type SubtitleTrackRow } from '../store/db';
+import { useCourseSubtitles } from './useCourseSubtitles';
 import { isJobActive, useJobStore, useTranscribeJob } from '../store/jobs';
 import { usePluginAvailable } from '../plugins/catalog';
 import { cancelTranscription, startTranscription } from '../pipelines/transcribeQueue';
-import { formatCaughtError } from '../utils/errorText';
 import { fmtTime, toSRT, toVTT, type Cue } from '../utils/vtt';
 import { splitIntoCues, cueKey } from '../utils/cues';
 import { mergeBilingual, splitCueLines } from '../utils/bilingual';
@@ -85,18 +83,9 @@ const SubtitleCueRow = memo(function SubtitleCueRow({ cue, active, playerRef }: 
 
 export default function SubtitlePanel({ videoId, playerRef, playbackSource, followPlayback, onSegmentsChange, onRunningChange, onLoadedChange }: Props) {
   const available = usePluginAvailable('material-tools');
-  const [segments, setSegments] = useState<SegmentRow[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  /**
-   * 首次读到（或读失败）之前为 false —— 空态只在 `loaded && 真的为空` 时出现。
-   * 判据不能是 `segments.length === 0`：liveQuery 的首个回调是异步的，
-   * 首帧数组必然为空，有字幕的课程会先闪一下「还没有字幕」（不变量 I1）。
-   */
-  const [loaded, setLoaded] = useState(false);
-  const [retryable, setRetryable] = useState(false);
+  const { segments, tracks, ready: loaded, retryable, error: loadError, retry } = useCourseSubtitles(videoId);
   const listRef = useRef<HTMLDivElement>(null);
   /** B 站自带的多语言字幕（只喂显示）；空 = 这个视频没有对照字幕可选 */
-  const [tracks, setTracks] = useState<SubtitleTrackRow[]>([]);
   /** 选中的「对照语言」lan；空串 = 不显示对照 */
   const [compareLang, setCompareLang] = useState('');
 
@@ -104,51 +93,17 @@ export default function SubtitlePanel({ videoId, playerRef, playbackSource, foll
   // 这里只订阅自己这个视频的那一份：切走再回来进度还在，重复点也不会起第二份。
   const job = useTranscribeJob(videoId);
   const running = isJobActive(job);
-  useEffect(() => {
-    const sub = liveQuery(() => db.videos.get(videoId)).subscribe(row => {
-      setRetryable(row?.status === 'error' || !!row?.transcriptionPaused);
-    });
-    return () => sub.unsubscribe();
-  }, [videoId]);
-
-  // 转写进行中：每完成一段上游都会写库，这里用 liveQuery 增量跟进，不再等到最后 reload
-  useEffect(() => {
-    // 切视频：上一份字幕已经不属于当前课程，先回到「未知」态，避免拿旧列表当新课程的空/满
-    setLoaded(false);
-    const sub = liveQuery(async () =>
-      (await db.segments.where('videoId').equals(videoId).sortBy('idx')).filter((r) => r.status === 1 && !!r.text),
-    ).subscribe({
-      next: (rows) => {
-        setSegments(rows);
-        setLoaded(true);
-      },
-      error: (e) => {
-        setLoadError(formatCaughtError(e));
-        setLoaded(true);
-      },
-    });
-    return () => sub.unsubscribe();
-  }, [videoId]);
 
   // 上游（Player）据此把 hasSubtitles 从「未知」翻成布尔
   useEffect(() => {
     onLoadedChange?.(loaded);
   }, [loaded, onLoadedChange]);
 
-  const showSkeleton = useSkeletonGate(!loaded);
+  const showSkeleton = useSkeletonGate(!loaded && !loadError && segments.length === 0);
 
   // 对照字幕轨（B 站多语言）：切视频要重新订阅并把选择清零，避免拿上个视频的语言去配
   useEffect(() => {
     setCompareLang('');
-    const sub = liveQuery(async () =>
-      (await db.subtitleTracks.where('videoId').equals(videoId).toArray()).sort((a, b) =>
-        a.lang.localeCompare(b.lang),
-      ),
-    ).subscribe({
-      next: setTracks,
-      error: (e) => setLoadError(formatCaughtError(e)),
-    });
-    return () => sub.unsubscribe();
   }, [videoId]);
 
   // 展开为展示用 cue：优先 ASR 句级时间戳（超长的再按字数细分），无则按标点+字数估算。
@@ -159,7 +114,9 @@ export default function SubtitlePanel({ videoId, playerRef, playbackSource, foll
     if (cache.size > 4000) cache.clear(); // 反复重新生成时防止无界增长
     return segments.flatMap((s, si) => {
       const key = s.id ?? si;
-      const sig = `${s.start}|${s.end}|${s.text.length}|${s.cues?.length ?? 0}`;
+      // Length is not identity: an edit/import can replace text with an equally
+      // long string and must invalidate the split cache.
+      const sig = `${s.start}|${s.end}|${cueKey(s.start, s.end, s.text)}|${s.cues?.length ?? 0}`;
       let split = cache.get(key);
       if (split?.sig !== sig) {
         split = {
@@ -249,7 +206,7 @@ export default function SubtitlePanel({ videoId, playerRef, playbackSource, foll
             取消
           </Button>
         )}
-        {segments.length > 0 && (
+        {loaded && segments.length > 0 && (
           <>
             <Button
               variant="outline"
@@ -313,13 +270,14 @@ export default function SubtitlePanel({ videoId, playerRef, playbackSource, foll
       )}
 
       <PersistentError
-        title="转写失败"
+        title={loadError ? '字幕读取失败' : '转写失败'}
         text={errorText}
         onClose={() => {
-          setLoadError(null);
           if (job?.phase === 'error') useJobStore.getState().upsert(videoId, { error: undefined, message: '' });
+          if (loadError) retry();
         }}
       />
+      {loadError && <Button variant="outline" onPress={retry} data-testid="subs-load-retry"><Sym name="refresh" />重试读取字幕</Button>}
 
       <PanelBody bodyRef={listRef} testId="subs-list">
         <SkeletonReveal show={showSkeleton} skeleton={<CueSkeleton rows={9} />}>

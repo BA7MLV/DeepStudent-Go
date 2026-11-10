@@ -30,7 +30,10 @@ export async function submitCloudTask(kind: CloudTaskKind, resource: string, inp
       const unsettled = await pending();
       if (unsettled.length) throw new Error(unsettled[0].error ?? 'conversation_session_not_confirmed');
     }
-  } else await flushCloud();
+  } else if (!(kind === 'handoutEdit' && input.action === 'persist')) await flushCloud();
+  // A manual handout edit carries the original complete CAS baseline. Admission
+  // checks that baseline transactionally on the server; hydrating the entire
+  // account first adds no dependency and must not silently rebase the editor.
   if (account !== cloud.userId) throw new Error('client_account_changed');
   const { serverRuntime, isCurrentServerRuntime } = await import('../client/bootstrap');
   if (account !== cloud.userId) throw new Error('client_account_changed');
@@ -175,7 +178,11 @@ export async function waitCloudTask<T>(task: CloudTask, onProgress?: (p: any) =>
     assertCurrent();
     if (!await syncTaskWidgets(completed.progress)) await waitTaskWidgetOwner(completed.progress, observationSignal);
     assertCurrent();
-    await flushCloud();
+    if (completed.kind === 'handoutEdit' && completed.input.action === 'persist') {
+      const handoutId = (completed.result as { handoutId?: number } | null)?.handoutId;
+      if (!Number.isSafeInteger(handoutId) || handoutId !== completed.input.handoutId) throw new Error('handout_receipt_invalid');
+      await (await import('./sync')).readRecordKeys('handouts', [handoutId!]);
+    } else await flushCloud();
     observationSignal.throwIfAborted();
     assertCurrent();
     return completed.result as T;
@@ -188,7 +195,8 @@ export async function waitCloudTask<T>(task: CloudTask, onProgress?: (p: any) =>
  * in this browser's cache before its state/session bridge can be opened. */
 export async function syncTaskWidgets(progress: CloudTask['progress']): Promise<boolean> {
   if (await taskWidgetsReady(progress)) return true;
-  await flushCloud();
+  if (typeof progress?.rowId !== 'number') return false;
+  await (await import('./sync')).readRecordKeys('chats', [progress.rowId]);
   return taskWidgetsReady(progress);
 }
 

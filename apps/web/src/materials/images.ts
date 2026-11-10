@@ -1,4 +1,5 @@
 import { db, type VideoRow } from '../store/db';
+import { resolveCloudBlob } from '../store/cloudBlob';
 import { getMaterialFile } from '../store/fileStore';
 import { imageSourceKind, materialImageHref, materialSourceHref, parseMaterialImageHref, pdfRegionKey, validPdfRegion, videoFrameKey, type PdfRegion } from './imageRefs';
 
@@ -183,7 +184,7 @@ export async function loadMaterialImage(courseId: string, key: string): Promise<
     const frame = await db.frames.where('videoId').equals(courseId)
       .filter((r) => r.kind === 'slide' && videoFrameKey(r.ts) === key).first();
     if (!frame) throw new Error('已保存的课程画面不存在，请重新读取画面目录或打开来源视频');
-    return { blob: frame.blob, image: { key, label: frame.caption || '课程画面', ts: frame.ts }, courseName: course.name };
+    return { blob: await resolveCloudBlob(frame.blob), image: { key, label: frame.caption || '课程画面', ts: frame.ts }, courseName: course.name };
   }
   if (!course || course.kind !== 'material') throw new Error('来源材料已删除或不存在');
   const file = await getMaterialFile(courseId);

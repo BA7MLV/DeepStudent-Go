@@ -72,11 +72,15 @@ window.fixtureLifecycle=accountLifecycle; accountLifecycle.acquire('A');
 window.fixtureStudy=study; createRoot(document.getElementById('root')).render(<StudyTimeCard/>);`;
 await build({ stdin: { contents: uiEntry, loader: 'tsx', resolveDir: root }, outfile: uiFile, bundle: true, format: 'iife', platform: 'browser', jsx: 'automatic', plugins: [virtual({
   '../client/learning': `export async function addStudyTime(entries){ window.fixture.adds.push(entries); await window.fixture.addGate; }
+    export const captureStudyTimeWriter=()=>addStudyTime;
     export async function clearStudyTime(expected){ window.fixture.clears.push(structuredClone(expected)); await window.fixture.clearGate; if(window.fixture.conflict) throw new Error('client/record-conflict'); window.fixture.rows=[]; }`,
   './db': `export const db=window.fixture.database;`,
   '../store/db': `export const db=window.fixture.database;`,
   './settings': `export const useSettings=Object.assign(()=>window.fixture.settings,{getState:()=>window.fixture.settings,subscribe:()=>()=>{}});`,
   '../store/settings': `export const useSettings=()=>window.fixture.settings;`,
+  '../cloud/state': `export const cloud={enabled:false,userId:'A'};`,
+  '../client/bootstrap': `export const serverRuntime=async()=>{throw new Error('unexpected_server_read')}; export const isCurrentServerRuntime=()=>false;`,
+  'react-i18next': `export const useTranslation=()=>({t:key=>key});`,
   '@heroui/react': `import React from 'react'; export const Button=({onPress,isDisabled,children,...props})=><button {...props} disabled={isDisabled} onClick={onPress}>{children}</button>;
     export const ToggleButton=({children})=><span>{children}</span>;export const ToggleButtonGroup=ToggleButton;
     export const Switch=Object.assign(({children})=><span>{children}</span>,{Content:ToggleButton,Control:ToggleButton,Thumb:ToggleButton});`,
@@ -91,6 +95,9 @@ try {
   await page.evaluate(() => { window.fixture = { rows: [{date:'2026-11-05',seconds:30,updatedAt:17}], clears:[], adds:[], success:[], errors:[], conflict:false,
     settings:{studyTrackingEnabled:true,studyIdleMinutes:5,update(){}} };
     window.fixture.database={studyDays:{toArray:async()=>{const rows=structuredClone(window.fixture.rows); await window.fixture.readGate; return rows;}}};
+    // about:blank is not a secure-context app origin. Supply only this missing
+    // harness primitive; production timers use the browser's native nonce.
+    crypto.randomUUID ??= () => Array.from(crypto.getRandomValues(new Uint8Array(16)), b=>b.toString(16).padStart(2,'0')).join('');
   });
   await page.addScriptTag({ path: uiFile });
   await page.locator('[data-testid="study-clear"]').click();

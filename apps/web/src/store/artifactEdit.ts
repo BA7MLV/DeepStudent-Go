@@ -6,6 +6,7 @@ import { messageWidgets } from '../harness/widgetLayout';
 import { rebaseResponseSegments } from '../utils/responseOrder';
 import { versionWidget } from '../harness/widgetProtocol';
 import { editMessage } from '../client/learning';
+import { readConversationMessage } from './conversationProducts';
 
 export interface ArtifactTarget {
   rowId: number; kind: ArtifactKind; location: ArtifactLocation; source: string; widgetId?: string;
@@ -38,11 +39,11 @@ function replaceHtmlBlock(content: string, source: string, next: string): string
   return content.slice(0, block.start) + next + content.slice(block.end);
 }
 
-/** Compare-and-swap inside one IndexedDB transaction; unrelated row metadata is preserved. */
+/** Exact server expected value + durable CAS; unrelated metadata is preserved. */
 export async function persistArtifactEdit(input: ArtifactTarget & { next: string }): Promise<ChatRow> {
   const database = db;
   const run = async () => {
-    const row = await database.chats.get(input.rowId);
+    const row = await readConversationMessage(input.rowId);
     if (database !== db) throw new Error('client_account_changed');
     assertArtifactTarget(row, input);
     let patch: Partial<ChatRow>;

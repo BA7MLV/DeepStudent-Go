@@ -1,15 +1,18 @@
 import { parsePluginLayout } from '@wangke/contracts/plugins';
 import type { CloudTask } from '@wangke/contracts/cloud';
 import { readRendererPluginCatalog, saveRendererPluginLayout, runRendererPluginAction } from '../client/plugin-renderer-commands';
-import { flushCloud } from '../cloud/sync';
+import { cloud } from '../cloud/state';
+import { accountLifetime } from '../client/account-lifecycle';
 import { waitCloudTask } from '../cloud/tasks';
 
 /** Remote legacy actions use the same plugin RPC. Local pipelines separately
  * admit against availability.ts; workers use the server's accepted task snapshot. */
 export async function materialPluginInstance(pluginId: string, materialId: string) {
-  await flushCloud();
+  const lifetime = accountLifetime(cloud.userId);
+  lifetime.assertCurrent();
   for (let attempt = 0; attempt < 3; attempt++) {
     const { plugins, layout: document } = await readRendererPluginCatalog();
+    lifetime.assertCurrent();
     const plugin = plugins.find(p => p.id === pluginId && !p.error && p.manifest?.enabled);
     if (!plugin) throw new Error('plugin_unavailable');
     const layout = parsePluginLayout(JSON.parse(document.content));
@@ -19,6 +22,7 @@ export async function materialPluginInstance(pluginId: string, materialId: strin
     layout.instances.push(instance);
     try {
       await saveRendererPluginLayout(JSON.stringify(layout), document.content, document.revision);
+      lifetime.assertCurrent();
       return { plugin, instance };
     } catch (e) { if (!(e instanceof Error && 'status' in e && e.status === 409) || attempt === 2) throw e; }
   }

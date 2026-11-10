@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Input, Modal, TextArea } from '@heroui/react';
 import { db, type HandoutRow } from '../store/db';
+import { cloudBlobUrl } from '../store/cloudBlob';
 import type { Block } from '../handout/ir';
 import type { HandoutSection } from '../handout/docx';
 import { h1Num, h2Num } from '../handout/styles';
@@ -16,6 +17,8 @@ import { ensureHandoutPreviewFonts } from '../handout/previewFonts';
 import { useHandoutReadingPos } from '../handout/useReadingPos';
 import { blockToText, persistHandoutEdit, rewriteBlockWithLLM } from '../pipelines/handoutEdit';
 import { LoadingButton, Sym, toast, MODAL_CONTAINER_CLASS } from '../ui';
+import type { LatestHandout } from '@wangke/contracts/client-runtime';
+import { accountLifecycle } from '../client/account-lifecycle';
 
 /** 编辑目标：课程概述段 / 章节标题 / 节内某个内容块 */
 type Target = { kind: 'summary' } | { kind: 'heading'; sec: number } | { kind: 'block'; sec: number; idx: number };
@@ -26,7 +29,7 @@ const keyOf = (t: Target): string =>
 /** 滑动操作区宽度（AI 改写 + 编辑 两个按钮） */
 const SWIPE_W = 136;
 
-export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
+export default function HandoutDocView({ handout, media, onRetainDocument }: { handout: HandoutRow; media?: LatestHandout['media']; onRetainDocument?: (retain: boolean) => void }) {
   const [doc, setDoc] = useState<{ summary: string; sections: HandoutSection[] } | null>(null);
   const [videoName, setVideoName] = useState('');
   const [frameUrls, setFrameUrls] = useState<Map<number, string>>(new Map());
@@ -41,6 +44,16 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
   /** 滚动容器（位置记忆的坐标系）与文档内容（观察高度变化用） */
   const scrollRef = useRef<HTMLDivElement>(null);
   const docRef = useRef<HTMLDivElement>(null);
+  const identity = useRef({ database: db, lifetime: accountLifecycle.current(), active: true });
+  const current = () => identity.current.active && identity.current.database === db && (!identity.current.lifetime || identity.current.lifetime.current());
+  useEffect(() => {
+    identity.current.active = true;
+    return () => { identity.current.active = false; };
+  }, []);
+
+  useEffect(() => {
+    onRetainDocument?.(!!editTarget || !!aiTarget || !!aiDraft || aiBusy || saveState === 'saving' || saveState === 'error');
+  }, [editTarget, aiTarget, aiDraft, aiBusy, saveState, onRetainDocument]);
 
   useEffect(() => ensureHandoutPreviewFonts(), []);
 
@@ -65,7 +78,7 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
     const database = db;
     let active = true;
     void database.table('_cloudMeta').get(`handout-edit-draft:${handout.id}`).then(draft => {
-      if (!active || database !== db || !draft?.value.original) return;
+      if (!active || !current() || database !== db || !draft?.value.original) return;
       editingBaseline.current = draft.value.original;
       setDoc({ sections: draft.value.sections, summary: draft.value.summary });
       setSaveState('error');
@@ -74,11 +87,18 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
   }, [handout.id]);
 
   useEffect(() => {
-    void db.videos.get(handout.videoId).then((v) => setVideoName(v?.name ?? ''));
-  }, [handout.videoId]);
+    if (media) { setVideoName(media.courseName); return; }
+    let active = true;
+    void db.videos.get(handout.videoId).then((v) => { if (active) setVideoName(v?.name ?? ''); });
+    return () => { active = false; };
+  }, [handout.videoId, media]);
 
   // 配图：frames 表（VL 帧）→ objectURL；重新生成讲义（id 变化）时 frames 已刷新，需重读
   useEffect(() => {
+    if (media) {
+      setFrameUrls(new Map(media.frames.flatMap(frame => { const url = cloudBlobUrl(frame.blob); return url ? [[Math.floor(frame.ts), url] as const] : []; })));
+      return;
+    }
     let alive = true;
     const urls: string[] = [];
     void db.frames
@@ -89,9 +109,9 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
         if (!alive) return;
         const m = new Map<number, string>();
         for (const r of rows) {
-          const u = URL.createObjectURL(r.blob);
+          const u = cloudBlobUrl(r.blob) ?? URL.createObjectURL(r.blob as Blob);
           m.set(Math.floor(r.ts), u);
-          urls.push(u);
+          if (r.blob instanceof Blob) urls.push(u);
         }
         setFrameUrls(m);
       });
@@ -100,7 +120,7 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
       urls.forEach((u) => URL.revokeObjectURL(u));
       setFrameUrls(new Map());
     };
-  }, [handout.videoId, handout.id]);
+  }, [handout.videoId, handout.id, media]);
 
   // 「已保存」提示短暂停留后消失
   useEffect(() => {
@@ -127,12 +147,14 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
 
   /** 落盘：更新内存 IR + 后台重建 DOCX（连续修改由 persistHandoutEdit 队列合并） */
   const commitDoc = (next: { summary: string; sections: HandoutSection[] }) => {
+    if (!current()) return;
+    onRetainDocument?.(true);
     setDoc(next);
     savingRef.current += 1;
     setSaveState('saving');
     persistHandoutEdit(editingBaseline.current, next.sections, next.summary)
-      .then(() => { if (savingRef.current === 1) setSaveState('saved'); })
-      .catch((e) => { setSaveState('error'); toast.error(`讲义尚未保存到服务器，草稿已保留：${e instanceof Error ? e.message : String(e)}`); })
+      .then(() => { if (current() && savingRef.current === 1) setSaveState('saved'); })
+      .catch((e) => { if (current()) { setSaveState('error'); toast.error(`讲义尚未保存到服务器，草稿已保留：${e instanceof Error ? e.message : String(e)}`); } })
       .finally(() => {
         savingRef.current -= 1;
       });
@@ -155,6 +177,7 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
   };
 
   const submitAi = async (t: Target, instruction: string) => {
+    if (!current()) return;
     const block = getBlock(t);
     if (!block || !doc) return;
     setAiBusy(true);
@@ -169,11 +192,11 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
         next = arr[t.idx + 1] ? blockToText(arr[t.idx + 1]).slice(0, 120) : undefined;
       }
       const rewritten = await rewriteBlockWithLLM(block, instruction, { title: handout.title, heading, prev, next });
-      setAiDraft({ key: keyOf(t), block: rewritten });
+      if (current()) setAiDraft({ key: keyOf(t), block: rewritten });
     } catch (e) {
-      toast.error(`AI 改写失败：${e instanceof Error ? e.message : String(e)}`);
+      if (current()) toast.error(`AI 改写失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setAiBusy(false);
+      if (current()) setAiBusy(false);
     }
   };
 
@@ -222,6 +245,7 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
         onSwipeOpen={() => setOpenKey(k)}
         onSwipeClose={() => setOpenKey(null)}
         onStartEdit={() => {
+          onRetainDocument?.(true);
           setOpenKey(null);
           setAiTarget(null);
           setAiDraft(null);
@@ -231,6 +255,7 @@ export default function HandoutDocView({ handout }: { handout: HandoutRow }) {
           block.type === 'figure'
             ? undefined
             : () => {
+                onRetainDocument?.(true);
                 setOpenKey(null);
                 setEditTarget(null);
                 setAiDraft(null);
@@ -571,7 +596,7 @@ function BlockBody({
       return (
         <figure className="hd-figure">
           {url ? (
-            <img src={url} alt={block.caption ?? '课程画面'} />
+            <img src={url} alt={block.caption ?? '课程画面'} loading="lazy" decoding="async" />
           ) : (
             <div className="hd-figure-missing">画面不可用</div>
           )}

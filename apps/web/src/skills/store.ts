@@ -1,4 +1,7 @@
-import { db } from '../store/db';
+import { db, type SkillRow } from '../store/db';
+import { cloud } from '../cloud/state';
+import { accountLifetime } from '../client/account-lifecycle';
+import { readSkillIndex } from './demand';
 import { COURSE_HANDOUT_SKILL, isLegacyHandoutSkill } from './catalog';
 import { intersectSkillMetaIds } from './scope';
 import { parseSkillMarkdown } from './types';
@@ -53,8 +56,7 @@ async function doEnsureBuiltinSkills(): Promise<void> {
 
 /** Level 1：对话与旧 IR 流水线各自发现适用规范，失败兜底也不会混入另一套协议。 */
 export async function loadEnabledSkillMeta(context: 'chat' | 'legacy-handout' = 'chat'): Promise<SkillMeta[]> {
-  await ensureBuiltinSkills();
-  const skills = await db.skills.filter((s) => !!s.enabled).sortBy('id');
+  const skills = (cloud.enabled ? await readSkillIndex() : await db.skills.orderBy('id').toArray()).filter(s => !!s.enabled);
   const legacyIds = skills.filter(isLegacyHandoutSkill).map((s) => s.id!);
   return skills
     .filter((s) => !s.builtin || (context === 'legacy-handout' ? isLegacyHandoutSkill(s) : !isLegacyHandoutSkill(s)))
@@ -84,7 +86,19 @@ export async function loadSessionSkillMeta(skillIds?: number[]): Promise<SkillMe
 /** Level 2：按 id 加载技能正文并拼接（带总预算截断） */
 export async function loadSkillBodies(ids: number[]): Promise<string> {
   if (ids.length === 0) return '';
-  const rows = await db.skills.where('id').anyOf(ids).toArray();
+  const database = db, owner = cloud.userId;
+  const lifetime = cloud.enabled ? accountLifetime(owner) : undefined;
+  const rows: SkillRow[] = [];
+  // One exact body per request preserves the exceptional-record allowance; a
+  // large selected skill cannot make an otherwise valid multi-key batch fail.
+  for (const id of [...new Set(ids)].sort((a, b) => a - b)) {
+    lifetime?.assertCurrent();
+    const row = cloud.enabled ? (await (await import('../cloud/sync')).readRecordKeys<SkillRow>('skills', [id]))[0] : await database.skills.get(id);
+    lifetime?.assertCurrent();
+    if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
+    if (row) rows.push(row);
+    if (rows.reduce((total, skill) => total + skill.body.trim().length, 0) >= SKILL_BLOCK_BUDGET) break;
+  }
   return rows
     .sort((a, b) => (a.id ?? 0) - (b.id ?? 0))
     .map((s) => s.body.trim())
@@ -100,6 +114,7 @@ export function skillMetaBlock(metas: SkillMeta[]): string {
 
 /** 导入 .md 单文件或 skill zip 包（含 references/），落库并默认启用 */
 export async function importSkillFile(file: File): Promise<{ name: string; refCount: number }> {
+  const database = db, lifetime = cloud.enabled ? accountLifetime(cloud.userId) : undefined;
   let pkg: ParsedSkillPackage;
   if (/\.zip$/i.test(file.name)) {
     pkg = parseSkillZip(new Uint8Array(await file.arrayBuffer()), file.name.replace(/\.zip$/i, ''));
@@ -111,6 +126,8 @@ export async function importSkillFile(file: File): Promise<{ name: string; refCo
     if (!pkg.skill.body) throw new Error('正文为空');
   }
 
+  lifetime?.assertCurrent();
+  if (database !== db) throw new Error('client_account_changed');
   await saveSkillPackage(null, { ...pkg.skill, id: learningId(), enabled: 1, builtin: 0, updatedAt: Date.now() }, pkg.refs);
   return { name: pkg.skill.name, refCount: pkg.refs.length };
 }

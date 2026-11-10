@@ -125,7 +125,7 @@ try {
   await page.screenshot({ path: path.join(directory, 'stream-mobile.png'), animations: 'disabled' });
   controller.enqueue(encoder.encode('data: [DONE]\n\n')); controller.close(); controller = undefined;
   await page.getByTestId('chat-stop').waitFor({ state: 'detached' });
-  assert.equal(await input.inputValue(), '窄屏原稿保持'); assert.equal(calls, 1);
+  assert.equal(await input.innerText(), '窄屏原稿保持'); assert.equal(calls, 1);
   await page.reload(); await page.getByText('向上阅读时追加内容。', { exact: false }).first().waitFor();
   assert.equal(await page.locator('.t-stream-w').count(), 0);
   await page.setViewportSize({ width: 1280, height: 900 });

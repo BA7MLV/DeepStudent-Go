@@ -14,7 +14,6 @@ export interface AppliedPlanResult {
 /** The domain command owns authorization and the whole organization transaction. */
 export async function applyFolderPlan(plan: FolderPlan): Promise<AppliedPlanResult> {
   const result = await (await import('../client/resources')).resourceCommand({ kind: 'organizeCourses', folders: plan.folders });
-  await (await import('../cloud/sync')).flushCloud();
   useLibraryRevision.getState().bump();
   return result as unknown as AppliedPlanResult;
 }

@@ -1,0 +1,69 @@
+{
+  "directory": "/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/wangke-resource-ui-7CrL5s",
+  "errors": [
+    "Failed to fetch dynamically imported module: http://127.0.0.1:5174/src/App.tsx"
+  ],
+  "body": "主页\n资源\n机器人\n最近\n最近的学习对话\n用\n用户\n跳到主要内容\n设计资料\nTXT\n笔记.txt\n0 KB\nMD\n空白.markdown\n0 KB\nMD\n资料.md\n0 KB\n资源\n设计资料\n3 个条目\n拖动空白处框选 · Ctrl/Cmd 点击增选\nprojects/e210525f-4690-44c8-aa10-2a1f1e0ab21a",
+  "entries": {
+    "project": {
+      "id": "e210525f-4690-44c8-aa10-2a1f1e0ab21a",
+      "name": "设计资料",
+      "instructions": "",
+      "workspacePath": "projects/e210525f-4690-44c8-aa10-2a1f1e0ab21a",
+      "policy": {
+        "shell": "ask",
+        "network": "allow"
+      },
+      "archived": false,
+      "createdAt": "2026-11-10T03:17:46.614Z",
+      "updatedAt": "2026-11-10T03:17:46.614Z",
+      "grants": []
+    },
+    "rootId": "9c9f9007-dd6d-439b-a7c3-dc46fbeb13a5",
+    "path": "",
+    "folderId": 1,
+    "entries": [
+      {
+        "name": "空白.markdown",
+        "path": "空白.markdown",
+        "kind": "file",
+        "size": 0,
+        "updatedAt": "2026-11-10T03:17:46.621Z",
+        "revision": "178222691:0:1794280666621.3232:1794280666621.6687",
+        "projectId": "e210525f-4690-44c8-aa10-2a1f1e0ab21a",
+        "courseId": "275da810-75ab-49bc-891c-ddbc4467b879"
+      },
+      {
+        "name": "笔记.txt",
+        "path": "笔记.txt",
+        "kind": "file",
+        "size": 55,
+        "updatedAt": "2026-11-10T03:18:01.194Z",
+        "revision": "178226662:55:1794280681194.4065:1794280681213.62",
+        "projectId": "e210525f-4690-44c8-aa10-2a1f1e0ab21a"
+      },
+      {
+        "name": "资料.md",
+        "path": "资料.md",
+        "kind": "file",
+        "size": 58,
+        "updatedAt": "2026-11-10T03:18:01.295Z",
+        "revision": "178222686:58:1794280681294.9363:1794280681294.9363",
+        "projectId": "e210525f-4690-44c8-aa10-2a1f1e0ab21a",
+        "courseId": "6827d3cb-fd35-4909-8370-1603528edd91"
+      }
+    ]
+  },
+  "images": [
+    {
+      "src": "blob:http://127.0.0.1:5174/9243e557-965a-4539-a3d9-0710da2e87b3",
+      "complete": true,
+      "width": 480
+    },
+    {
+      "src": "blob:http://127.0.0.1:5174/0e78db4b-2add-45be-97f8-dcf5b3f43ac8",
+      "complete": true,
+      "width": 480
+    }
+  ]
+}

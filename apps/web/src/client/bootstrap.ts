@@ -21,7 +21,13 @@ export function serverRuntime(account: string): Promise<ClientRuntime> {
     interactions: 'answer', location,
     transport: {
       streamBaseUrl: base,
-      fetch: (url, init) => fetch(typeof url === 'string' ? new URL(url.replace(/^\//, ''), base) : url, { ...init, credentials: 'include' }),
+      fetch: (url, init) => {
+        lifetime.assertCurrent();
+        // Disposing a runtime also terminates its unary HTTP carrier. Without
+        // this, pagehide/account changes leave receipt/read requests in flight.
+        const signal = init?.signal ? AbortSignal.any([lifetime.signal, init.signal]) : lifetime.signal;
+        return fetch(typeof url === 'string' ? new URL(url.replace(/^\//, ''), base) : url, { ...init, credentials: 'include', signal });
+      },
     },
   }).then(async runtime => {
     lifetime.own(() => runtime.dispose());

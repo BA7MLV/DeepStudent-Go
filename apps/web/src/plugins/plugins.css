@@ -9,7 +9,7 @@
 .plugin-view__expand:hover,.plugin-view__expand:focus-visible{background:var(--surface-secondary);color:var(--foreground)}
 .plugin-panel{padding:16px;overflow-y:auto;height:100%;min-width:0}
 .plugin-panel>header{display:flex;gap:8px;justify-content:space-between;margin-bottom:16px}
-.plugin-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.plugin-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:1px;min-height:1px}
 .plugin-actions>button,.plugin-action-dialog header button{min-height:44px;padding:6px 10px;border:1px solid var(--separator);border-radius:10px;font:inherit}
 .plugin-action-dialog{width:min(720px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:16px;border:1px solid var(--separator);border-radius:16px;background:var(--background);color:var(--foreground);overflow:auto}
 .plugin-action-dialog::backdrop{background:rgb(0 0 0 / .45)}

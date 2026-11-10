@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ComponentProps } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
+import { cloudBlobUrl } from '../store/cloudBlob';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -51,6 +52,9 @@ import { useIsMobile } from '../utils/useMobile';
 import { useMarqueeSelection } from '../utils/useMarqueeSelection';
 // 课程/材料 id 的生成（降级实现与理由见 utils/uuid.ts 的文件头，仓库里只有那一份）
 import { fetchPageSubtitles, importBiliPages, resolveBiliTarget, type BiliTarget } from '../bilibili';
+import BiliBridgeStatus from '../bilibili/BridgeStatus';
+import { cloud } from '../cloud/state';
+import { accountLifetime } from '../client/account-lifecycle';
 import { extractBiliInput } from '../bilibili/parse';
 import type { BiliSubtitleItem } from '../bilibili/dmview';
 import { formatTotalDuration, pageLabel, resolveSelectedPages, selectedDuration } from '../bilibili/pages';
@@ -77,6 +81,7 @@ import './library.css';
 import { folderAncestors, validFolderDrop, moveLibraryItems, undoLibraryMove } from '../materials/libraryFolders';
 import { useProjectLibrary } from '../projects/useProjectLibrary';
 import ResourceLibrary from './ResourceLibrary';
+import { captureCourseAccess } from '../client/course-access';
 import { FOLDER_COLORS, FolderIcon } from '../components/FolderIcon';
 import { AgentInstructionsIcon } from '../components/AgentInstructionsIcon';
 import { FOLDER_SPRING_OPEN_MS } from '../ui/interactionTiming';
@@ -260,6 +265,7 @@ function LibraryFrame({ bare, ...props }: ComponentProps<typeof PageShell> & { b
 }
 
 function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose: () => void } }) {
+  const [courseAccess] = useState(() => captureCourseAccess());
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { t: tr } = useTranslation('projects');
@@ -406,16 +412,30 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   /** 勾选的分 P 序号 */
   const [biliPagesSel, setBiliPagesSel] = useState<number[]>([]);
   const [biliImporting, setBiliImporting] = useState(false);
-  /** Retain an admission ID after a lost response; do not silently duplicate jobs. */
-  const biliOperationRef = useRef<string | null>(null);
+  const biliAbortRef = useRef<AbortController | null>(null);
+  const [biliProgress, setBiliProgress] = useState('');
   const [biliError, setBiliError] = useState<string | null>(null);
   /** 语言列表刷新的竞态计数：只认最后一次请求 */
   const langReqRef = useRef(0);
+  useEffect(() => () => { biliAbortRef.current?.abort(); }, []);
+  useEffect(() => {
+    if (!biliImporting) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [biliImporting]);
   useEffect(() => {
     if (importing && !importOpen && !biliOpen && !biliImporting && !tasks.length) importing.onClose();
   }, [importing, importOpen, biliOpen, biliImporting, tasks.length]);
 
   const reload = async () => {
+    // Server listings are ResourceLibrary. This mounted adapter only hosts
+    // imports/system links: it must not invisibly scan every cached course and
+    // folder behind those surfaces. Local-only mode retains its old table UI.
+    if (cloud.enabled) {
+      setLoadError(null); initialLoadSettled.current = true; setLoadState('ready');
+      return;
+    }
     try {
       const [rows, folderRows] = await Promise.all([
         db.videos.orderBy('createdAt').reverse().toArray(),
@@ -639,51 +659,74 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   };
 
   const importOne = async (file: File, key: string, subtitles?: SubtitleBundle, biliSource?: BiliVideoSource) => {
+    if (!courseAccess.current()) return false;
+    const lifetime = accountLifetime(cloud.userId);
     // 大视频拷入 OPFS 要数分钟，持 Wake Lock 防熄屏后 tab 被挂起中断导入
-    await acquireWakeLock();
+    if (!biliSource) await acquireWakeLock();
     try {
       if (isLegacyDocFile(file)) throw new Error(tr('library.t.legacyDoc'));
       {
         const { readResourceFolder, uploadResource, resourceCommand, readResources, recordMediaDuration } = await import('../client/resources');
         patchTask(key, { status: 'writing', percent: 0 });
-        const directory = await readResourceFolder(importing?.folderId);
+        lifetime.assertCurrent();
+        const directory = await readResourceFolder(importing ? importing.folderId : currentFolder?.folder?.id);
+        lifetime.assertCurrent();
         const projectId = directory.project?.id ?? directory.rootId;
         const path = directory.path ? `${directory.path}/${file.name}` : file.name;
         await uploadResource(projectId, path, file);
+        lifetime.assertCurrent();
         const fresh = await readResources(projectId, directory.path);
+        lifetime.assertCurrent();
         const entry = fresh.entries.find(entry => entry.path === path);
         if (!entry?.courseId) throw new Error(tr('library.t.uploadIndexPending'));
         const id = entry.courseId;
-        await (await import('../cloud/sync')).flushCloud();
+        await courseAccess.read(id);
+        lifetime.assertCurrent();
         if (isMaterialFile(file)) {
           const format = detectMaterialFormat(file);
           void startMaterialJob(id, format).catch(error => toast.error(tr('library.t.parseFailed', { message: formatCaughtError(error) })));
         } else {
           const duration = await probeDuration(file);
+          lifetime.assertCurrent();
           if (duration) await recordMediaDuration(id, duration);
+          lifetime.assertCurrent();
           if (biliSource) await resourceCommand({ kind: 'setVideoSource', courseId: id, source: biliSource });
+          lifetime.assertCurrent();
           if (subtitles) await saveImportedSubtitles(id, subtitles);
-          if (!subtitles?.primary?.cues.length) startTranscription(id);
+          lifetime.assertCurrent();
+          if (!subtitles?.primary?.cues.length) {
+            if (biliSource) {
+              const { submitCloudTask } = await import('../cloud/tasks');
+              lifetime.assertCurrent();
+              await submitCloudTask('transcribe', `course:${id}`, { videoId: id, skipBiliSubtitles: true });
+            } else startTranscription(id);
+          }
         }
+        lifetime.assertCurrent();
         enqueueCover(id);
-        await (await import('../cloud/sync')).flushCloud();
+        const { flushResourceCommands } = await import('../client/resource-commands');
+        lifetime.assertCurrent();
+        await flushResourceCommands();
+        lifetime.assertCurrent();
         setTasks(previous => previous.filter(task => task.key !== key));
         toast.success(tr('library.t.imported', { name: file.name }));
-        return;
+        return true;
       }
     } catch (e) {
+      if (!lifetime.current()) return false;
       const text = formatCaughtError(e);
       patchTask(key, { status: 'error', error: text });
       showError(tr('library.t.importFailed', { name: file.name }), text);
+      return false;
     } finally {
-      await releaseWakeLock();
+      if (!biliSource) await releaseWakeLock();
     }
   };
 
   const enqueue = (file: File, subtitles?: SubtitleBundle, biliSource?: BiliVideoSource) => {
     const key = uuid();
     setTasks((prev) => [...prev, { key, name: file.name, status: 'queued', percent: 0 }]);
-    chainRef.current = chainRef.current.then(() => importOne(file, key, subtitles, biliSource));
+    chainRef.current = chainRef.current.then(async () => { await importOne(file, key, subtitles, biliSource); });
   };
 
   /** 清空 B 站导入弹窗的草稿（关弹窗 / 导入成功后都调） */
@@ -700,7 +743,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     setBiliLangPage(null);
     setBiliPagesSel([]);
     setBiliError(null);
-    biliOperationRef.current = null;
+    setBiliProgress('');
   }
 
   /** 选中的分 P 里最靠前的那个（字幕语言按它刷新） */
@@ -736,7 +779,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   // mdui-chip 时代靠容器上的 change 事件冒泡来读 chip.selected；迁到 TagGroup 后
   // 直接用受控的 selectedKeys + onSelectionChange，回调给的是「新的完整选中集」。
   const selectPages = (keys: Iterable<string>) => {
-    if (!biliTarget) return;
+    if (!biliTarget || biliImporting) return;
     const next = [...keys].map(Number).filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
     setBiliPagesSel(next);
     const first = firstSelectedPage(biliTarget, next);
@@ -745,6 +788,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
 
   // 语言 chips：同样改成受控选中集
   const selectLangs = (keys: Iterable<string>) => {
+    if (biliImporting) return;
     setBiliLangs([...keys]);
   };
 
@@ -763,7 +807,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     setBiliTarget(null);
     setBiliSubtitleError(null);
     setBiliSubtitleLoading(false);
-    biliOperationRef.current = null;
+    setBiliProgress('');
     setBiliResolving(true);
     setBiliError(null);
     try {
@@ -788,9 +832,9 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     }
   };
 
-  /** Submit a durable server job; closing this dialog never cancels downloads. */
+  /** Keep the browser open until local download/remux and upload have finished. */
   const handleBiliImport = async () => {
-    if (!biliTarget) return;
+    if (!biliTarget || biliAbortRef.current) return;
     const selected = resolveSelectedPages(biliTarget.pages, biliPagesSel);
     if (selected.length === 0) {
       toast.warning(tr('library.t.biliPickOne'));
@@ -809,18 +853,37 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
 
     setBiliImporting(true);
     setBiliError(null);
+    const controller = new AbortController();
+    const lifetime = accountLifetime(cloud.userId);
+    const release = lifetime.own(() => controller.abort());
+    biliAbortRef.current = controller;
+    await acquireWakeLock();
     try {
-      biliOperationRef.current ??= uuid();
-      await importBiliPages(biliTarget, { langs: biliLangs, pages: biliPagesSel, folderId: importing ? importing.folderId : currentFolder?.folder?.id }, biliOperationRef.current);
-      toast.success(tr('library.t.biliSubmitted'));
+      const warnings = await importBiliPages(biliTarget, {
+        langs: biliLangs, pages: biliPagesSel, signal: controller.signal,
+        progress: setBiliProgress,
+        save: async (file, subtitles, source) => {
+          lifetime.assertCurrent();
+          const key = uuid();
+          setTasks(previous => [...previous, { key, name: file.name, status: 'queued', percent: 0 }]);
+          const saved = await importOne(file, key, subtitles, source);
+          if (!saved) throw new Error(tr('biliLocal.saveFailed'));
+        },
+        // Saved pages are immediately unselected, including on partial failure.
+        imported: page => setBiliPagesSel(previous => previous.filter(value => value !== page)),
+      });
+      for (const warning of warnings) toast.warning(warning);
+      toast.success(tr('biliLocal.saved'));
       setBiliOpen(false);
       resetBiliDraft();
     } catch (e) {
-      const text = formatCaughtError(e);
+      const text = controller.signal.aborted ? tr('biliLocal.stopped') : formatCaughtError(e);
       setBiliError(text);
-      showError(tr('library.t.biliImportFailed'), text);
     } finally {
+      release();
+      biliAbortRef.current = null;
       setBiliImporting(false);
+      await releaseWakeLock();
     }
   };
 
@@ -830,7 +893,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
 
   /** 全选 / 清空分 P（清空后语言列表保持最后的那个 P，用户可自己再勾） */
   function selectAllPages(all: boolean) {
-    if (!biliTarget) return;
+    if (!biliTarget || biliImporting) return;
     if (!all) {
       setBiliPagesSel([]);
       return;
@@ -915,7 +978,6 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     const entry = directory.entries.find(entry => entry.courseId === row.id);
     if (!entry?.revision) throw new Error(tr('library.t.resourceChanged'));
     await resourceCommand({ kind: 'remove', projectId: entry.projectId, path: entry.path, revision: entry.revision });
-    await (await import('../cloud/sync')).flushCloud();
     invalidateCoverUrl(row.id);
     toast.success(tr('library.t.deleted'));
     await reload();
@@ -1021,7 +1083,6 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       if (!entry?.revision) throw new Error(tr('library.t.dirChanged'));
       await resourceCommand({ kind: 'remove', projectId: entry.projectId, path: entry.path, revision: entry.revision });
     }
-    await (await import('../cloud/sync')).flushCloud();
     toast.success(tr('library.t.folderRemoved'));
     await reload();
   };
@@ -2080,6 +2141,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                 <Modal.Heading>导入哔哩哔哩视频</Modal.Heading>
               </Modal.Header>
               <Modal.Body>
+                <BiliBridgeStatus />
                 {/* 原来是多行自增的 mdui-text-field → TextField 包 TextArea。
                     TextArea 没有 isDisabled，用原生 disabled。 */}
                 <TextField fullWidth>
@@ -2102,7 +2164,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       ++biliResolveReqRef.current;
                       setBiliTarget(null); // 改链接后旧的解析结果（含字幕列表）作废
                       setBiliError(null);
-                      biliOperationRef.current = null;
+                      setBiliProgress('');
                       ++langReqRef.current;
                       setBiliSubtitleError(null);
                       setBiliSubtitleLoading(false);
@@ -2110,7 +2172,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                   />
                 </TextField>
                 <div className="text-secondary" style={{ marginTop: 8, fontSize: 12 }}>
-                  支持直接粘贴整段分享文案，自动识别第一个 B 站链接；确认后才开始导入。由服务器下载保存，需要登录态时可在设置中保存 Cookie。
+                  {tr('biliLocal.importHint')}
                 </div>
                 {biliTarget && (
                   <div style={{ marginTop: 12 }} data-testid="bili-target">
@@ -2132,13 +2194,13 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                           <span className="text-secondary" style={{ flex: 1, fontSize: 12 }}>
                             {biliTarget.kind === 'season' ? tr('library.chrome.biliSeasonHint') : tr('library.chrome.biliPartHint')}
                           </span>
-                          <Button variant="tertiary" data-testid="bili-pages-all" onPress={() => selectAllPages(true)}>
+                          <Button variant="tertiary" data-testid="bili-pages-all" isDisabled={biliImporting} onPress={() => selectAllPages(true)}>
                             {tr('library.chrome.biliSelectAll')}
                           </Button>
                           <Button
                             variant="tertiary"
                             data-testid="bili-pages-none"
-                            isDisabled={biliPagesSel.length === 0}
+                            isDisabled={biliImporting || biliPagesSel.length === 0}
                             onPress={() => selectAllPages(false)}
                           >
                             清空
@@ -2149,6 +2211,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                             不再需要「容器上监听 change 冒泡」那套补丁。 */}
                         <TagGroup
                           selectionMode="multiple"
+                          disabledKeys={biliImporting ? biliTarget.pages.map(page => String(page.page)) : []}
                           selectedKeys={biliPagesSel.map(String)}
                           onSelectionChange={(keys) => selectPages([...keys].map(String))}
                           aria-label={biliTarget.kind === 'season' ? tr('library.chrome.biliSeasonLabel') : tr('library.chrome.biliPartLabel')}
@@ -2190,10 +2253,11 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       <>
                         <div className="text-secondary" style={{ fontSize: 12, marginTop: 10 }}>
                           {multiPage ? tr('library.chrome.biliLangTitleMulti', { scope: biliTarget.kind === 'season' ? tr('library.chrome.biliLangScopeSeason', { page: biliLangPage ?? '' }) : tr('library.chrome.biliLangScopePart', { page: biliLangPage ?? '' }) }) : tr('library.chrome.biliLangTitle')}
-                          ：优先使用所选语言，其余可做对照；未选择或无匹配时自动选择可用字幕
+                          {tr('biliLocal.languagesHint')}
                         </div>
                         <TagGroup
                           selectionMode="multiple"
+                          disabledKeys={biliImporting ? biliLangItems.map(item => item.lan) : []}
                           selectedKeys={biliLangs}
                           onSelectionChange={(keys) => selectLangs([...keys].map(String))}
                           aria-label={tr('library.aria.subtitleLang')}
@@ -2219,14 +2283,15 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                       </>
                     ) : (
                       <div className="text-secondary" style={{ fontSize: 12, marginTop: 10 }}>
-                        该视频没有自带字幕，导入后会安排服务器转写，无需保持页面打开
+                        {tr('biliLocal.noSubtitles')}
                       </div>
                     )}
                   </div>
                 )}
                 {biliImporting && (
                   <div className="mt-3 flex flex-col gap-2" data-testid="bili-download-status">
-                    <p className="text-secondary text-sm">正在提交服务器导入任务…</p>
+                    <p className="text-secondary text-sm" role="status">{biliProgress || tr('biliLocal.preparing')}</p>
+                    <Button variant="tertiary" onPress={() => biliAbortRef.current?.abort()}>{tr('biliLocal.stop')}</Button>
                   </div>
                 )}
                 {biliError && (
@@ -2235,7 +2300,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                     testId="bili-error"
                     icon={<Sym name="error" />}
                     title={tr('library.t.importFailedTitle')}
-                    description={tr('library.t.importFailedDesc')}
+                    description={biliError}
                   />
                 )}
               </Modal.Body>
@@ -2308,7 +2373,9 @@ function useThumb(videoId: string): string | null {
       .then((row) => {
         if (cancelled) return;
         if (!row?.blob) { setUrl(null); return; }
-        const next = cachedCoverUrl(videoId, row.createdAt) ?? createCachedCoverUrl(videoId, row.createdAt, row.blob);
+        const remote = cloudBlobUrl(row.blob);
+        if (remote) { setUrl(remote); return; }
+        const next = cachedCoverUrl(videoId, row.createdAt) ?? createCachedCoverUrl(videoId, row.createdAt, row.blob as Blob);
         retainCoverUrl(videoId);
         retained = true;
         setUrl(next);

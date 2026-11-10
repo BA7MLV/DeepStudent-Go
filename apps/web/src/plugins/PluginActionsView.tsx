@@ -6,6 +6,7 @@ import type { callPluginAction as CallAction } from '../client/plugins';
 import { PluginHost } from './PluginHost';
 import './plugins.css';
 import { pluginProject } from './scope';
+import { usePluginScope } from './usePluginScope';
 
 /** Native contribution controls. Package code only runs after opening its view. */
 export interface PluginActionsProps {
@@ -16,9 +17,17 @@ export function PluginActionsView({ surface, materialId, projectId: requestedPro
   useCatalog: <T>(select: (value: ReturnType<typeof pluginCatalogSource.getSnapshot>) => T) => T;
   callAction: typeof CallAction;
 }) {
-  const { data } = useCatalog(value => value), { i18n } = useTranslation('common');
-  const projectId = pluginProject(data, materialId, requestedProject, projectFolderId);
+  const catalog = useCatalog(value => value), { i18n } = useTranslation('common');
   const [opened, setOpened] = useState<{ placement: PluginPlacement; context: PluginHostContext; packageRevision?: number }>();
+  const anchor = useRef<HTMLDivElement>(null), [near, setNear] = useState(surface !== 'resource.actions');
+  useEffect(() => {
+    if (surface !== 'resource.actions' || !anchor.current) return;
+    const observer = new IntersectionObserver(([entry]) => setNear(entry.isIntersecting), { rootMargin: '320px' });
+    observer.observe(anchor.current); return () => observer.disconnect();
+  }, [surface]);
+  const scope = usePluginScope(catalog.data, materialId, projectFolderId, near || !!opened);
+  const { data, error: scopeError } = scope;
+  const projectId = pluginProject(data, materialId, requestedProject, projectFolderId);
   const [busy, setBusy] = useState<string>(), [message, setMessage] = useState('');
   const dialog = useRef<HTMLDialogElement>(null), generation = useRef(0);
   const revision = JSON.stringify([surface, projectId, materialId, selection, conversation]);
@@ -41,9 +50,13 @@ export function PluginActionsView({ surface, materialId, projectId: requestedPro
   available.current = new Set(entries.map(entry => `${entry.placement.id}:${entry.plugin.revision}`));
   const activeRevision = active?.plugin.revision;
   useEffect(() => { if (opened && (!active || activeRevision !== opened.packageRevision)) setOpened(undefined); }, [activeRevision, !!active, opened]);
-  if (!serverEnabled || !data || !entries.length) return null;
-  return <div className="plugin-actions" data-plugin-actions={surface}>
-    {entries.map(entry => <button type="button" key={entry.placement.id} disabled={!!busy} onClick={async () => {
+  if (!serverEnabled) return null;
+  const failure = scopeError ? <p role="alert">{scopeError} <button type="button" onClick={scope.retry}>{i18n.t('common:board.retry')}</button></p> : null;
+  if (!data || !entries.length) return surface === 'resource.actions' ? <div ref={anchor} className="plugin-actions" data-plugin-actions={surface}>{failure}</div> : failure;
+  return <div ref={anchor} className="plugin-actions" data-plugin-actions={surface}>
+    {!opened ? failure : null}
+    {entries.map(entry => <button type="button" key={entry.placement.id} disabled={!!busy || !scope.ready} onClick={async () => {
+      if (!scope.current()) return;
       const { contribution, placement, plugin } = entry;
       if (contribution.viewId) { setOpened({ placement: { ...placement, viewId: contribution.viewId }, context, packageRevision: plugin.revision }); return; }
       const captured = generation.current;
@@ -65,6 +78,7 @@ export function PluginActionsView({ surface, materialId, projectId: requestedPro
     {message ? <p role="status">{message}</p> : null}
     {opened && active ? <dialog ref={dialog} className="plugin-action-dialog" aria-label={active.contribution.title} onClose={() => setOpened(undefined)}>
       <header><strong>{active.contribution.title}</strong><button type="button" onClick={() => setOpened(undefined)}>关闭</button></header>
+      {failure}
       <PluginHost plugin={active.plugin} instance={active.instance} placement={opened.placement} context={opened.context} />
     </dialog> : null}
   </div>;

@@ -19,8 +19,8 @@ export async function loadMcpTools(context: McpContext, signal?: AbortSignal) {
   const catalog: McpCatalog = await cloudRequest('/mcp/catalog', { method: 'POST', body: JSON.stringify(context), signal });
   const byName = new Map(catalog.tools.map(tool => [tool.name, tool]));
   if (context.sessionId !== undefined) {
-    const [{ db }, { loadSessionSkillMeta }] = await Promise.all([import('../store/db'), import('../skills/store')]);
-    const session = await db.chatSessions.get(context.sessionId);
+    const [{ readConversationSession }, { loadSessionSkillMeta }] = await Promise.all([import('../store/conversationProducts'), import('../skills/store')]);
+    const session = await readConversationSession(context.sessionId);
     const skills = await loadSessionSkillMeta(session?.skillIds);
     const available = new Set(catalog.tools.map(tool => tool.serverName));
     for (const skill of skills) {

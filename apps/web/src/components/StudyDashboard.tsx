@@ -20,6 +20,12 @@ import {
   type StudyDay,
 } from '../utils/studyLog';
 import '../study.css';
+import { cloud } from '../cloud/state';
+import { db } from '../store/db';
+import { accountLifecycle } from '../client/account-lifecycle';
+import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
+import type { StudyOverview } from '@wangke/contracts/client-runtime';
+import { useTranslation } from 'react-i18next';
 
 /** 时间跨度档位：列数 = 周数（最后一列是本周） */
 const RANGES = [
@@ -34,6 +40,7 @@ type RangeKey = (typeof RANGES)[number]['key'];
 const WEEKDAY_LABELS = ['', '一', '', '三', '', '五', ''];
 
 export function StudyDashboard() {
+  const { t } = useTranslation('settings');
   const [days, setDays] = useState<StudyDay[]>([]);
   /**
    * 学习记录的加载状态。
@@ -46,6 +53,10 @@ export function StudyDashboard() {
    * 与 Library / store/courseChat 同一套规矩：加载态独立成一个字段。
    */
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [overview, setOverview] = useState<StudyOverview | undefined>(undefined);
+  const [attempt, setAttempt] = useState(0);
+  const readGeneration = useRef(0);
+  const refresh = useRef<(() => void) | undefined>(undefined);
   const [range, setRange] = useState<RangeKey>('1y');
   const { barRef, pillRef } = useSlidingTabs(range);
   const [today, setToday] = useState(() => dateKey(Date.now()));
@@ -66,13 +77,18 @@ export function StudyDashboard() {
   const idleMinutes = useSettings((s) => s.studyIdleMinutes);
 
   const reload = useCallback(async () => {
+    if (cloud.enabled) { if (refresh.current) refresh.current(); else setAttempt(value => value + 1); return; }
+    const lifetime = accountLifecycle.current(), database = db, generation = ++readGeneration.current;
+    const current = () => !!lifetime?.current() && database === db && generation === readGeneration.current;
     try {
-      setDays(await loadStudyDays());
+      const rows = await loadStudyDays();
+      if (!current()) return;
+      setDays(rows);
       setLoadState('ready');
     } catch {
       // 读不出来就停在加载态、不显示「还没有学习记录」——「读不到」和「没有」
       // 是两件事，把前者显示成后者等于让用户以为自己的一整年记录没了。
-      setLoadState('error');
+      if (current()) setLoadState('error');
     }
   }, []);
 
@@ -80,8 +96,40 @@ export function StudyDashboard() {
 
   // 落库后重读（flushCount 每次落库 +1；未落库的部分由 pending 叠加上去）
   useEffect(() => {
+    if (cloud.enabled) return;
     void reload();
+    return () => { ++readGeneration.current; };
   }, [reload, flushCount]);
+
+  const weeks = RANGES.find((r) => r.key === range)?.weeks ?? 53;
+  const from = shiftDays(today, -(weeks - 1) * 7 - new Date(`${today}T12:00:00`).getDay());
+  // A single retained Runtime projection computes complete historical stats and
+  // only the calendar interval; never compute full-history stats from that page.
+  useEffect(() => {
+    if (!cloud.enabled) return;
+    const lifetime = accountLifecycle.current(), database = db;
+    if (!lifetime?.current()) return;
+    let active = true, cleanup: (() => void) | undefined;
+    const current = () => active && lifetime.current() && database === db;
+    setLoadState('loading');
+    const unown = lifetime.own(() => { active = false; cleanup?.(); refresh.current = undefined; setOverview(undefined); setDays([]); setLoadState('loading'); });
+    void serverRuntime(cloud.userId).then(runtime => {
+      if (!current() || !isCurrentServerRuntime(runtime)) return;
+      const projection = runtime.studyOverview({ today, from, preview: Object.entries(pending).map(([date, seconds]) => ({ date, seconds })) });
+      const model = projection.model;
+      const observe = () => {
+        if (!current()) return;
+        const state = model.getSnapshot();
+        setLoadState(state.status === 'ready' ? 'ready' : state.status === 'error' ? 'error' : 'loading');
+        if (state.status === 'ready' && state.data) setOverview(state.data as unknown as StudyOverview);
+      };
+      const off = model.subscribe(observe), release = model.acquire();
+      cleanup = () => { off(); release(); projection.dispose(); };
+      refresh.current = () => model.refresh();
+      observe();
+    }).catch(() => { if (current()) setLoadState('error'); });
+    return () => { active = false; cleanup?.(); refresh.current = undefined; unown(); };
+  }, [cloud.userId, db, today, from, pending, flushCount, attempt]);
 
   // 跨零点时「今天」要跟着换：不换的话热力图的最后一列与「今日」会停在昨天。
   // 计时中 pending 每 15 秒推一次、天然会重渲染；空闲时没有推送，所以这里自己挂个分钟级心跳。
@@ -92,20 +140,20 @@ export function StudyDashboard() {
 
   /** 库里的记录 + 内存里未落库的部分（这样「今日」是活的，而不是滞后一分钟） */
   const live = useMemo(() => {
+    if (cloud.enabled) return toSecondsMap(overview?.days ?? []);
     const map = toSecondsMap(days);
     mergeSeconds(
       map,
       Object.entries(pending).map(([date, seconds]) => ({ date, seconds })),
     );
     return map;
-  }, [days, pending]);
+  }, [days, pending, overview]);
 
   const stats = useMemo(
-    () => computeStats([...live].map(([date, seconds]) => ({ date, seconds })), today),
-    [live, today],
+    () => cloud.enabled ? overview?.stats ?? computeStats([], today) : computeStats([...live].map(([date, seconds]) => ({ date, seconds })), today),
+    [live, today, overview],
   );
 
-  const weeks = RANGES.find((r) => r.key === range)?.weeks ?? 53;
   const heatmap = useMemo(
     () => buildHeatmap({ today, weeks, seconds: live }),
     [today, weeks, live],
@@ -285,7 +333,7 @@ export function StudyDashboard() {
           testId="study-load-error"
           icon={<Sym name="error" />}
           title="学习记录读取失败"
-          description="本机存储暂时读不出来，热力图与统计先不显示 —— 这不代表记录丢了。"
+          description={t('studyRead.dashboardLoadError')}
           action={
             <Button
               variant="secondary"

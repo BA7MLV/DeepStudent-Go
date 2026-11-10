@@ -1,5 +1,7 @@
 {
+  "courseMetadata": { "loadFailed": "课程信息暂时无法读取，未加载不表示课程已删除。", "retry": "重试" },
   "appTitle": "DeepStudent Go",
+  "fileLoadFailed": "无法加载文件（{{status}}）",
   "clipboard": {
     "copied": "已复制",
     "failed": "复制失败，请重试"
@@ -312,6 +314,7 @@
     "sessionEmpty": "当前会话还没有内容",
     "exportedMarkdown": "已导出 Markdown 文件",
     "sessionDeleted": "已删除会话",
+    "sessionUnavailable": "会话已删除或无法访问",
     "indexNotReady": "问答索引尚未就绪",
     "forkedToast": "已从这条消息分支出新会话",
     "deleteSessionTitle": "删除当前会话？",

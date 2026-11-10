@@ -1,7 +1,10 @@
 import { useEffect } from 'react';
-import { Button, EmptyState } from '@heroui/react';
+import { Button, EmptyState, Spinner } from '@heroui/react';
 import { SectionCard, Sym, popconfirm, toast } from '../../ui';
 import { useCourseChat } from '../../store/courseChat';
+import { cloud } from '../../cloud/state';
+import { useRecentSessionIndex } from '../useRecentSessionIndex';
+import { useTranslation } from 'react-i18next';
 
 /**
  * 设置 → 数据 →「已归档会话」卡片。
@@ -22,14 +25,17 @@ export default function ArchivedSessionsCard() {
 
 /** 设置卡片和账号菜单弹窗共用同一套恢复 / 删除逻辑。 */
 export function ArchivedSessionsList() {
-  const sessions = useCourseChat((s) => s.archivedSessions);
+  const localSessions = useCourseChat((s) => s.archivedSessions);
+  const index = useRecentSessionIndex(cloud.enabled, true, false);
+  const sessions = cloud.enabled ? index.page?.sessions ?? [] : localSessions;
+  const { t } = useTranslation('interface');
   const refresh = useCourseChat((s) => s.refreshArchived);
   const setArchived = useCourseChat((s) => s.setArchived);
   const deleteSessionById = useCourseChat((s) => s.deleteSessionById);
 
   // 设置是「偶尔进」的界面，每次挂载重读一遍即可，不做订阅
   useEffect(() => {
-    void refresh();
+    if (!cloud.enabled) void refresh();
   }, [refresh]);
 
   const onRestore = async (id: number) => {
@@ -48,13 +54,13 @@ export function ArchivedSessionsList() {
     if (ok) {
       await deleteSessionById(id);
       // `deleteSessionById` 改的是 Recent 那一侧的数组，这里自己这份要重新读
-      await refresh();
+      if (!cloud.enabled) await refresh();
     }
   };
 
   return (
     <>
-      {sessions.length === 0 ? (
+      {cloud.enabled && !index.page && index.loading ? <Spinner size="sm" /> : sessions.length === 0 && !index.error ? (
         <EmptyState data-testid="archived-empty">还没有归档任何会话</EmptyState>
       ) : (
         <div className="flex flex-col">
@@ -93,6 +99,14 @@ export function ArchivedSessionsList() {
           ))}
         </div>
       )}
+      {cloud.enabled && index.error && <div role="status" className="flex items-center gap-2">
+        <span>{t('recent.loadFailed')}</span>
+        <Button variant="tertiary" size="sm" onPress={index.retry}>{t('recent.retry')}</Button>
+      </div>}
+      {cloud.enabled && (index.page?.previous || index.page?.next) && <div className="flex gap-2 pt-2">
+        {index.page.previous && <Button variant="tertiary" size="sm" isDisabled={index.loading} onPress={index.previous} data-testid="archived-previous">{t('recent.previousPage')}</Button>}
+        {index.page.next && <Button variant="tertiary" size="sm" isDisabled={index.loading} onPress={index.next} data-testid="archived-next">{t('recent.nextPage')}</Button>}
+      </div>}
     </>
   );
 }

@@ -47,8 +47,12 @@ export class CloudRecords {
   ownedFile(owner: string, id: string) { return !!this.store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(id, owner); }
 
   studyDays(owner: string): Record<string, unknown>[] {
-    const rows = this.store.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='studyDays' AND value IS NOT NULL ORDER BY record_key")
+    const budget = this.store.db.prepare("SELECT count(*) count,coalesce(sum(length(CAST(value AS BLOB))),0) bytes FROM cloud_records WHERE owner_id=? AND table_name='studyDays' AND value IS NOT NULL")
+      .get(owner) as { count: number; bytes: number };
+    if (budget.count > 20000 || budget.bytes > 8 * 1024 * 1024) throw new Error('study_clear_budget_exceeded');
+    const rows = this.store.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='studyDays' AND value IS NOT NULL ORDER BY record_key LIMIT 20001")
       .all(owner) as { value: string }[];
+    if (rows.length > 20000) throw new Error('study_clear_budget_exceeded');
     return rows.map(row => JSON.parse(row.value));
   }
 
@@ -130,9 +134,11 @@ export class CloudRecords {
         }
         // Validate the actual optimistic merge inside the write transaction.
         validate?.(op.table, op.key, current, value);
-        // INSERT after DELETE allocates a monotonic revision, including tombstones.
-        this.store.db.prepare('DELETE FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?').run(owner, op.table, JSON.stringify(op.key));
-        this.store.db.prepare('INSERT INTO cloud_records(owner_id,table_name,record_key,value) VALUES(?,?,?,?)')
+        // The attempted INSERT allocates a new AUTOINCREMENT revision even on
+        // conflict. Publish it with the value in one UPDATE, avoiding a transient
+        // deletion in derived indexes during content-only streaming edits.
+        this.store.db.prepare(`INSERT INTO cloud_records(owner_id,table_name,record_key,value) VALUES(?,?,?,?)
+          ON CONFLICT(owner_id,table_name,record_key) DO UPDATE SET value=excluded.value,revision=excluded.revision`)
           .run(owner, op.table, JSON.stringify(op.key), value === null ? null : JSON.stringify(value));
         this.store.db.prepare('INSERT INTO cloud_operations(owner_id,id) VALUES(?,?)').run(owner, op.id);
       }

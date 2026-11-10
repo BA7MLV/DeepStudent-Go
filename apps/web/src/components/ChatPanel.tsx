@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
-import { appendConversationSession, removeConversationMessage, reviseConversationSession } from '../store/conversationProducts';
+import { cloudBlobUrl } from '../store/cloudBlob';
+import { appendConversationSession, removeConversationMessage, reviseConversationSession, readConversationSession, readConversationMessage } from '../store/conversationProducts';
 import { deleteServerSession, forkServerSession, removeConversationMessages } from '../client/conversations';
 import { useTranslation } from 'react-i18next';
 import { Button, Dropdown, ListBox, Select, Tooltip } from '@heroui/react';
@@ -44,7 +45,7 @@ import {
 } from '../ui';
 import { StreamParagraph, useMessageEnter } from './motion';
 import ResponseTimeline from './ResponseTimeline';
-import type { ResponseSegment } from '@wangke/contracts/client-runtime';
+import type { ResponseSegment, SessionIndexPage } from '@wangke/contracts/client-runtime';
 import { responsePhase, type ProcessPhase } from '../utils/responseProcess';
 import VirtualMessages, { type VirtualMessagesHandle } from './VirtualMessages';
 import { useMessageDeletion } from './useMessageDeletion';
@@ -68,8 +69,10 @@ import AssistantContent from './AssistantContent';
 import ChatScreenshots from './ChatScreenshots';
 import { useResolvedDark } from '../ui/theme';
 import type { WidgetPayload } from '../harness/widgetRuntime';
-import { useCloudActivity } from '../cloud/activityStore';
+import { followServerSession } from '../client/session';
 import { cloud } from '../cloud/state';
+import { serverRuntime } from '../client/bootstrap';
+import { useRecentSessionIndex } from './useRecentSessionIndex';
 import { taskModelChoice, taskModelKey, useTaskModel } from '../store/taskModel';
 import { accountLifecycle } from '../client/account-lifecycle';
 import { editMessage } from '../client/learning';
@@ -191,9 +194,10 @@ function FrameThumb({
     let objUrl: string | null = null;
     void db.frames.get(frame.id).then((row) => {
       if (cancelled || !row) return;
-      objUrl = URL.createObjectURL(row.blob);
-      setUrl(objUrl);
-    });
+      const remote = cloudBlobUrl(row.blob);
+      if (!remote) objUrl = URL.createObjectURL(row.blob as Blob);
+      setUrl(remote ?? objUrl);
+    }).catch(() => { /* An unavailable image must not hide the conversation. */ });
     return () => {
       cancelled = true;
       if (objUrl) URL.revokeObjectURL(objUrl);
@@ -220,6 +224,8 @@ function FrameThumb({
         <img
           src={url}
           alt={alt ?? ''}
+          loading="lazy"
+          decoding="async"
           onClick={() => onSeek(frame.ts)}
           className="chat-frame-img"
         />
@@ -467,6 +473,7 @@ export default function ChatPanel({
 }: Props) {
   const { t: chatText } = useTranslation('common');
   const { t: settingsText } = useTranslation('settings');
+  const { t: navigationText } = useTranslation('interface');
   const learningPlugin = useMaterialPluginView(videoId);
   const practiceAvailable = usePluginAvailable('practice'), reviewAvailable = usePluginAvailable('review');
   const openLearningPlugin = (id: string) => { void learningPlugin.open(id).catch(error => toast.error(error instanceof Error ? error.message : 'plugin_view_unavailable')); };
@@ -484,6 +491,7 @@ export default function ChatPanel({
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const localRequest = useRef(false);
+  const qaFollower = useRef<ReturnType<typeof followServerSession> | undefined>(undefined);
   const inflightAbort = useRef<AbortController | null>(null);
   useEffect(() => {
     const clear = () => {
@@ -497,8 +505,20 @@ export default function ChatPanel({
   const [indexReady, setIndexReady] = useState(false);
   /** 缺少可检索正文时的说明，不阻止聊天或截图提问。 */
   const [indexNote, setIndexNote] = useState<string | null>(null);
+  const [indexFailure, setIndexFailure] = useState(false);
+  const [indexAttempt, setIndexAttempt] = useState(0);
   const [sessions, setSessions] = useState<ChatSessionRow[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
+  const sessionIndex = useRecentSessionIndex(cloud.enabled && !!videoId, false, false, videoId);
+  useEffect(() => {
+    if (!cloud.enabled || !sessionIndex.page) return;
+    setSessions(previous => {
+      const rows: ChatSessionRow[] = sessionIndex.page!.sessions.map(row => ({ id: row.id, videoId: row.videoId, title: row.title, createdAt: row.createdAt, pinned: row.pinned, archived: row.archived }));
+      const active = previous.find(row => row.id === activeId);
+      if (active && !rows.some(row => row.id === activeId)) rows.push(active);
+      return rows.sort((a, b) => a.createdAt - b.createdAt || a.id! - b.id!);
+    });
+  }, [sessionIndex.page, activeId]);
   /** 新追加的消息（发出去的提问 + 助手占位）播一次上浮淡入，见 useMessageEnter */
   const entering = useMessageEnter(msgs.map((m) => m.key), activeId);
   const historySession = useRef(activeId);
@@ -723,14 +743,38 @@ export default function ChatPanel({
    */
   useEffect(() => {
     let cancelled = false;
+    const database = db, owner = cloud.userId, lifetime = accountLifecycle.current();
+    const current = () => !cancelled && database === db && owner === cloud.userId && (!lifetime || lifetime.current());
+    setIndexReady(false);
+    setIndexFailure(false);
+    setIndexNote(null);
     (async () => {
-      let list = await db.chatSessions.where('videoId').equals(videoId).sortBy('createdAt');
+      let list: ChatSessionRow[];
+      let readiness: { hasMaterialText: boolean; hasSubtitles: boolean } | undefined;
+      if (cloud.enabled) {
+        const runtime = await serverRuntime(owner);
+        if (!current()) return;
+        const [response, content] = await Promise.all([
+          runtime.read({ kind: 'sessionIndex', videoId, archived: false, recentOnly: false }),
+          systemMaterialPath(videoId) ? undefined : runtime.read({ kind: 'courseReadiness', videoId }),
+        ]);
+        if (!current()) return;
+        readiness = content?.value as unknown as typeof readiness;
+        const index = response.value as unknown as SessionIndexPage;
+        list = index.sessions.map(row => ({ id: row.id, videoId: row.videoId, title: row.title, createdAt: row.createdAt }));
+        if (index.latestId != null && !list.some(row => row.id === index.latestId)) {
+          const latest = await readConversationSession(index.latestId);
+          if (latest) list.push(latest);
+        }
+        list.sort((a, b) => a.createdAt - b.createdAt || a.id! - b.id!);
+      } else list = await db.chatSessions.where('videoId').equals(videoId).sortBy('createdAt');
+      if (!current()) return;
       if (list.length === 0) {
         const now = Date.now();
         const id = await appendConversationSession({ videoId, title: '新会话', createdAt: now });
         list = [{ id, videoId, title: '新会话', createdAt: now }];
       }
-      if (cancelled) return;
+      if (!current()) return;
       setSessions(list);
       setActiveId(list[list.length - 1].id!);
 
@@ -739,10 +783,17 @@ export default function ChatPanel({
         setIndexReady(true);
         return;
       }
+      if (readiness) {
+        setIndexNote(isMaterial
+          ? readiness.hasMaterialText ? null : chatText(materialKind === 'page' ? 'chatPanel.noSearchText' : 'chatPanel.noSearchBody')
+          : readiness.hasSubtitles ? null : chatText('chatPanel.noSubtitlesYet'));
+        setIndexReady(true);
+        return;
+      }
       // ── 阅读材料：检索的是文本块（materialBlocks）──
       if (isMaterial) {
         const blockCount = await db.materialBlocks.where('materialId').equals(videoId).count();
-        if (cancelled) return;
+        if (!current()) return;
         // 没有可检索文字也能读取图片目录、展示原图或框选提问，不能把整个聊天锁死。
         if (blockCount === 0) {
           setIndexNote(
@@ -763,16 +814,16 @@ export default function ChatPanel({
         .equals(videoId)
         .filter((r) => r.status === 1 && !!r.text)
         .count();
-      if (cancelled) return;
+      if (!current()) return;
       setIndexNote(segCount === 0
         ? chatText('chatPanel.noSubtitlesYet')
         : null);
       setIndexReady(true);
-    })();
+    })().catch(error => { if (current()) { setIndexNote(displayChatError(error instanceof Error ? error.message : String(error))); setIndexFailure(true); } });
     return () => {
       cancelled = true;
     };
-  }, [videoId, isMaterial]);
+  }, [videoId, isMaterial, indexAttempt]);
 
   /**
    * 消费「选区提问」的投递：浮层点「解释这段」或「就这段提问」后进到这里。
@@ -830,34 +881,11 @@ export default function ChatPanel({
     (async () => {
       // 技能范围从库里现查而不是读 sessions state：会话行可能刚被别处改过，
       // 且这样 effect 只依赖 activeId，不会因为 sessions 数组变化而重载整个历史。
-      const row = await db.chatSessions.get(activeId);
-      const page = await readChatPage(activeId);
-      const history = page.rows;
+      const row = await readConversationSession(activeId);
       if (!cancelled) setSkillIds(row?.skillIds);
       if (!cancelled) setMcpServerIds(row?.mcpServerIds);
-      if (!cancelled) {
-        setHasOlder(page.hasOlder);
-        setMsgs(history.map((r) => ({
-          key: `h-${r.id}`,
-          role: r.role === 'user' ? 'user' : 'ai',
-          content: r.content,
-          explicitSkillIds: r.explicitSkillIds,
-          createdAt: r.createdAt,
-          images: r.images,
-          reasoning: r.reasoning,
-          reasoningMs: r.reasoningMs,
-          tools: r.tools,
-          responseSegments: r.responseSegments,
-          quiz: r.quiz,
-          widget: r.widget,
-          widgets: r.widgets,
-          interrupted: r.interrupted,
-          interruptReason: r.interruptReason,
-          rowId: r.id,
-        })));
-        setLoadedSessionId(activeId);
-      }
-    })();
+      if (!cancelled && row) setSessions(previous => [...previous.filter(item => item.id !== row.id).slice(-50), row]);
+    })().catch(() => { if (!cancelled) setHistoryError(true); });
     return () => {
       cancelled = true;
     };
@@ -866,33 +894,23 @@ export default function ChatPanel({
   // A server-owned QA turn may originate on another device, or outlive this panel.
   useEffect(() => {
     let cancelled = false;
-    let previous = '';
     let requested = 0;
-    const refresh = async (dataChanged = false) => {
+    const refresh = async (page: Parameters<Parameters<typeof followServerSession>[1]['changed']>[0]) => {
       if (localRequest.current) return;
-      const { tasks } = useCloudActivity.getState();
-      const task = tasks?.find(t => t.kind === 'qa' && t.input.sessionId === activeId);
-      const signature = JSON.stringify([task?.id, task?.status, task?.progress]);
-      if (!dataChanged && signature === previous) return;
-      previous = signature;
+      const task = page.tasks.find(t => t.kind === 'qa' && t.input.sessionId === activeId);
       const revision = ++requested;
       const current = () => !cancelled && revision === requested && !localRequest.current;
-      const list = await db.chatSessions.where('videoId').equals(videoId).sortBy('createdAt');
-      if (!current()) return;
-      setSessions(list);
       if (activeId == null) return;
       const running = task && ['queued', 'running', 'waiting_user'].includes(task.status);
       if (running && !await (await import('../cloud/tasks')).syncTaskWidgets(task.progress)) return;
-      const page = await readChatPage(activeId);
-      if (!current()) return;
       const messages: ChatMsg[] = page.rows.filter(row => !running || row.taskId !== task.id || row.role !== 'assistant')
         .map(row => ({ ...row, key: `h-${row.id}`, rowId: row.id, role: row.role === 'user' ? 'user' : 'ai' }));
       if (running) messages.push({ key: `cloud-${task.id}`, taskId: task.id, role: 'ai', content: String(task.progress?.content ?? ''), reasoning: String(task.progress?.reasoning ?? ''),
         rowId: typeof task.progress?.rowId === 'number' ? task.progress.rowId : undefined,
-        tools: Array.isArray(task.progress?.tools) ? task.progress.tools as ChatToolCall[] : undefined,
+        tools: Array.isArray(task.progress?.tools) ? task.progress.tools as unknown as ChatToolCall[] : undefined,
         responseSegments: task.progress?.responseSegments as ResponseSegment[] | undefined,
         processPhase: responsePhase(task.progress?.phase), processStartedAt: Date.parse(task.createdAt),
-        widgets: Array.isArray(task.progress?.widgets) ? task.progress.widgets as WidgetPayload[] : undefined,
+        widgets: Array.isArray(task.progress?.widgets) ? task.progress.widgets as unknown as WidgetPayload[] : undefined,
         widgetPreview: task.progress?.widgetPreview as { html: string } | undefined, streaming: true });
       else if (task && ['failed', 'interrupted', 'cancelled'].includes(task.status)) messages.push({ key: `cloud-${task.id}`, role: 'ai', content: task.error || chatText('chatPanel.taskStopped') });
       // Reconciliation must not remount an already opened iframe when the
@@ -904,25 +922,18 @@ export default function ChatPanel({
       }));
       setHasOlder(page.hasOlder); setLoading(Boolean(running)); setLoadedSessionId(activeId);
     };
-    const listener = () => { void refresh().catch(() => { if (!cancelled) setHistoryError(true); }); };
-    const unsubscribe = useCloudActivity.subscribe(listener);
-    // Track only this material's sessions and the selected session's rows by
-    // their indexed ranges. toArray observes content updates AND deletions;
-    // unrelated studyTime/other-session records do not trigger history reads.
-    let recordsSignature: string | undefined;
-    const records = liveQuery(async () => JSON.stringify([
-      await db.chatSessions.where('videoId').equals(videoId).toArray(),
-      activeId == null ? [] : await db.chats.where('sessionId').equals(activeId).toArray(),
-    ])).subscribe({
-      next: signature => {
-        if (signature === recordsSignature) return;
-        recordsSignature = signature;
-        void refresh(true).catch(() => { if (!cancelled) setHistoryError(true); });
-      },
+    // Metadata changes do not read/serialize message bodies. One shared journal
+    // owns the loaded window, pagination fences, deletes and task checkpoints.
+    const records = cloud.enabled ? undefined : liveQuery(() => db.chatSessions.where('videoId').equals(videoId).sortBy('createdAt')).subscribe({
+      next: list => { if (!cancelled) setSessions(list); },
       error: () => { if (!cancelled) setHistoryError(true); },
     });
-    listener();
-    return () => { cancelled = true; unsubscribe(); records.unsubscribe(); };
+    const follower = activeId == null ? undefined : followServerSession(activeId, {
+      changed: refresh,
+      failed: () => { if (!cancelled) setHistoryError(true); },
+    });
+    qaFollower.current = follower;
+    return () => { cancelled = true; follower?.(); if (qaFollower.current === follower) qaFollower.current = undefined; records?.unsubscribe(); };
   }, [activeId, videoId]);
 
   const loadOlder = useCallback(async () => {
@@ -932,14 +943,9 @@ export default function ChatPanel({
     setLoadingOlder(true);
     setHistoryError(false);
     try {
-      const cursor = await db.chats.get(first.rowId);
-      if (!cursor) return;
-      const page = await readChatPage(activeId, cursor);
-      if (historySession.current !== activeId) return;
-      setMsgs((current) => [...page.rows.map((row): ChatMsg => ({
-        ...row, key: `h-${row.id}`, rowId: row.id, role: row.role === 'user' ? 'user' : 'ai',
-      })), ...current]);
-      setHasOlder(page.hasOlder);
+      if (first.createdAt == null) throw new Error('invalid_session_cursor');
+      await readChatPage(activeId, { id: first.rowId, createdAt: first.createdAt, role: first.role === 'user' ? 'user' : 'assistant' });
+      // Only the journal's accepted page merge may publish pagination metadata.
     } catch {
       if (historySession.current === activeId) setHistoryError(true);
     } finally {
@@ -1147,7 +1153,7 @@ export default function ChatPanel({
     } finally {
       updates.flush();
       if (inflightAbort.current === abort) inflightAbort.current = null;
-      if (current()) { localRequest.current = false; setLoading(false); }
+      if (current()) { localRequest.current = false; setLoading(false); qaFollower.current?.refresh(); }
     }
   };
 
@@ -1170,7 +1176,7 @@ export default function ChatPanel({
     if (message.role === 'ai' && message.rowId == null && message.error) {
       const previous = msgs[idx - 1];
       if (!previous || previous.role !== 'user' || previous.rowId == null) return;
-      const original = await db.chats.get(previous.rowId);
+      const original = await readConversationMessage(previous.rowId);
       await removeConversationMessages([previous.rowId]);
       setMsgs((prev) => prev.filter((m) => m.key !== message.key && m.key !== previous.key));
       await send(previous.content, undefined, original?.explicitSkillIds ?? turnSkillIds);
@@ -1208,7 +1214,7 @@ export default function ChatPanel({
   /** 从某条消息处分叉出新会话（复制到这条为止，原会话不动）。 */
   const forkMessage = async (message: ChatMsg) => {
     if (loading || activeId == null || message.rowId == null) return;
-    const source = await db.chatSessions.get(activeId);
+    const source = await readConversationSession(activeId);
     if (!source) return;
     const rows = await readChatHistory(activeId);
     const cut = rows.findIndex((row) => row.id === message.rowId);
@@ -1329,6 +1335,11 @@ export default function ChatPanel({
                 </ListBox.Item>
               ))}
             </ListBox>
+            {cloud.enabled && <div className="flex flex-wrap gap-1 p-1">
+              {sessionIndex.page?.previous && <Button size="sm" variant="tertiary" isDisabled={sessionIndex.loading} onPress={sessionIndex.previous} data-testid="qa-sessions-previous">{navigationText('recent.previousPage')}</Button>}
+              {sessionIndex.page?.next && <Button size="sm" variant="tertiary" isDisabled={sessionIndex.loading} onPress={sessionIndex.next} data-testid="qa-sessions-next">{navigationText('recent.nextPage')}</Button>}
+              {sessionIndex.error && <><span role="status">{navigationText('recent.loadFailed')}</span><Button size="sm" variant="tertiary" onPress={sessionIndex.retry}>{navigationText('recent.retry')}</Button></>}
+            </div>}
           </Select.Popover>
         </Select>
         {iconBtn('chat-new-session', chatText('chatPanel.newChat'), <Sym name="add" />, createSession, loading)}
@@ -1475,6 +1486,7 @@ export default function ChatPanel({
         <div className="chat-note" data-testid="chat-index-note">
           <Sym name="warning" className="chat-note__icon" />
           <span>{indexNote}</span>
+          {indexFailure && <Button size="sm" variant="tertiary" data-testid="chat-index-retry" onPress={() => setIndexAttempt(value => value + 1)}>{chatText('chatPanel.retry')}</Button>}
         </div>
       )}
 

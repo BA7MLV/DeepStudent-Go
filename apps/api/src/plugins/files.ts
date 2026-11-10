@@ -10,6 +10,13 @@ import { INSTALLED_LEARNING_PLUGINS, learningTaskProvider } from '@wangke/contra
 import { pluginTargets } from '@wangke/contracts/plugins';
 import { ProjectRepository } from '../projects/repository.js';
 import { CloudRecords } from '../cloud/records.js';
+import { RecordProjections } from '../realtime/record-projections.js';
+import { ProjectError } from '../projects/files.js';
+
+function unavailableScope(error: unknown): boolean {
+  return error instanceof Error && error.message === 'plugin_material_not_found'
+    || error instanceof ProjectError && ['project_not_found', 'project_trashed', 'project_archived', 'project_file_not_found', 'project_path_denied'].includes(error.code);
+}
 
 /** Reuses the SystemFiles transaction journal. All authority comes from the authenticated owner. */
 export class PluginFiles {
@@ -130,8 +137,9 @@ export class PluginFiles {
     }
   }
   materialProject(owner: string, id: string) {
-    const course = new CloudRecords(this.store).get(owner, 'videos', id);
-    if (!course || course.fileDeleted) throw new Error('plugin_material_not_found');
+    const course = this.store.db.prepare("SELECT json_extract(value,'$.fileDeleted') AS deleted FROM cloud_records WHERE owner_id=? AND table_name='videos' AND record_key=? AND value IS NOT NULL")
+      .get(owner, JSON.stringify(id)) as { deleted: unknown } | undefined;
+    if (!course || course.deleted) throw new Error('plugin_material_not_found');
     const mapped = this.store.db.prepare('SELECT project_id,path FROM resource_files WHERE owner_id=? AND course_id=?').get(owner, id) as { project_id: string; path: string } | undefined;
     if (!mapped) return undefined; // Legacy local/blob resources have no fabricated project.
     this.projects.writable(owner, mapped.project_id);
@@ -143,20 +151,39 @@ export class PluginFiles {
     if (scope.kind === 'material') this.materialProject(owner, scope.id);
     if (scope.kind === 'project') this.projects.writable(owner, scope.id);
   }
-  scopeCatalog(owner: string) {
-    const projects = this.projects.list(owner).filter(p => !p.archived).map(p => ({ id: p.id, name: p.name }));
+  scopeUsesMaterial(owner: string, id: string, context?: { materialId?: string }) {
+    if (context?.materialId === id) return true;
+    try {
+      const layout = parsePluginLayout(JSON.parse(this.read(owner, PLUGIN_LAYOUT_PATH).content));
+      return [...layout.instances, ...layout.placements].some(row => row.scope.kind === 'material' && row.scope.id === id);
+    } catch { return false; }
+  }
+  scopeCatalog(owner: string, context?: { materialId?: string; projectFolderId?: number }) {
+    if (context?.materialId !== undefined && (typeof context.materialId !== 'string' || !context.materialId || context.materialId.length > 256)
+      || context?.projectFolderId !== undefined && !Number.isSafeInteger(context.projectFolderId)) throw new Error('invalid_plugin_scope');
+    // Discovery is a small, explicitly bounded configuration catalog. Material
+    // availability is NOT a full account course/resource index: only layout
+    // bindings and the currently requested host context are inspected.
+    const projects = this.store.db.prepare(`SELECT id,name FROM projects WHERE owner_id=? AND archived=0
+      AND id NOT IN (SELECT project_id FROM resource_trash) ORDER BY updated_at DESC,id LIMIT 513`).all(owner) as { id: string; name: string }[];
+    if (projects.length > 512) throw new Error('plugin_scope_budget_exceeded');
     const projectIds = new Set(projects.map(p => p.id)), materialProjects: Record<string, string> = {};
-    for (const row of this.store.db.prepare('SELECT course_id FROM resource_files WHERE owner_id=?').all(owner) as { course_id: string }[]) {
-      try { const id = this.materialProject(owner, row.course_id); if (id) materialProjects[row.course_id] = id; } catch { /* Revoked, trashed, deleted or archived: never a live host context. */ }
-    }
-    const projectFolders = (this.store.db.prepare('SELECT folder_id AS folderId,project_id AS projectId FROM resource_folders WHERE owner_id=?').all(owner) as { folderId: number; projectId: string }[]).filter(p => projectIds.has(p.projectId));
+    const projectFolders = context?.projectFolderId === undefined ? [] : (this.store.db.prepare('SELECT folder_id AS folderId,project_id AS projectId FROM resource_folders WHERE owner_id=? AND folder_id=?')
+      .all(owner, context.projectFolderId) as { folderId: number; projectId: string }[]).filter(p => projectIds.has(p.projectId));
     let instances: PluginLayout['instances'] = [];
-    try { instances = parsePluginLayout(JSON.parse(this.read(owner, PLUGIN_LAYOUT_PATH).content)).instances; } catch { /* First visit. */ }
-    const unavailableInstances = instances.filter(i => { try { this.validateScope(owner, i.scope); return false; } catch { return true; } }).map(i => i.id);
-    const records = new CloudRecords(this.store);
-    const materialIds = new Set((this.store.db.prepare("SELECT record_key FROM cloud_records WHERE owner_id=? AND table_name='videos' AND value IS NOT NULL").all(owner) as { record_key: string }[]).map(row => String(JSON.parse(row.record_key))));
-    const materials = [...materialIds].flatMap(id => { try { this.materialProject(owner, id); const row = records.get(owner, 'videos', id); return row ? [{ id, name: String(row.name ?? '资料') }] : []; } catch { return []; } });
-    return { projects, materialProjects, projectFolders, unavailableInstances, materials };
+    let placements: PluginLayout['placements'] = [];
+    try { const layout = parsePluginLayout(JSON.parse(this.read(owner, PLUGIN_LAYOUT_PATH).content)); instances = layout.instances; placements = layout.placements; }
+    catch (error) { if (!(error instanceof Error && error.message === 'plugin_file_not_found')) throw error; }
+    const materialIds = new Set([...instances, ...placements].flatMap(row => row.scope.kind === 'material' ? [row.scope.id] : []));
+    if (context?.materialId) materialIds.add(context.materialId);
+    if (materialIds.size > 720) throw new Error('plugin_scope_budget_exceeded');
+    const unavailableInstances = instances.filter(i => { try { this.validateScope(owner, i.scope); return false; } catch (error) { if (!unavailableScope(error)) throw error; return true; } }).map(i => i.id);
+    const available = [...materialIds].filter(id => { try { const project = this.materialProject(owner, id); if (project) materialProjects[id] = project; return true; } catch (error) { if (!unavailableScope(error)) throw error; return false; } });
+    const metadata = new RecordProjections(this.store).courseMetadata(owner, { kind: 'courseMetadata', ids: available, covers: false });
+    const materials = metadata.items.flatMap(item => item.course ? [{ id: item.id, name: String(item.course.name ?? '资料') }] : []);
+    const result = { projects, materialProjects, projectFolders, unavailableInstances, materials };
+    if (Buffer.byteLength(JSON.stringify(result)) > 512 * 1024) throw new Error('plugin_scope_budget_exceeded');
+    return result;
   }
   private validateLayout(owner: string, layout: PluginLayout) {
     const packages = this.catalog(owner, layout.sources, layout);

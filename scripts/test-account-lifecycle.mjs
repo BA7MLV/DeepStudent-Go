@@ -111,7 +111,7 @@ test('database replacement and versionchange invalidate account work without del
   assert.equal(await storage.db.table('_learningCommands').count(), 1);
   assert.equal(await storage.db.table('_historyTransactions').count(), 1);
   const upgrade = new Dexie(storage.db.name);
-  upgrade.version(19).stores({ _cloudMeta: 'id' });
+  upgrade.version(storage.db.verno + 1).stores({ _cloudMeta: 'id' });
   t.after(() => upgrade.close());
   await upgrade.open();
   assert.equal(rebuilt.current(), false);

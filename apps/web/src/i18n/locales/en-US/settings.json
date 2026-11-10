@@ -1,4 +1,5 @@
 {
+  "studyRead": { "loadError": "Study records could not be loaded. The last summary is preserved; clearing is disabled until refreshed.", "dashboardLoadError": "Study records are temporarily unavailable. Statistics are hidden until refreshed; this does not mean your records are lost.", "retry": "Reload" },
   "recovery": {
     "inkConflict": "Annotation changes conflict. Originals are saved; review them in Activity.",
     "inkPending": "Annotations await server confirmation. Originals are saved.",
@@ -345,7 +346,10 @@
     "requiresMcp": "Requires MCP: {{names}}",
     "loading": "Loading skills…",
     "loadError": "Skills could not be loaded. Please try again.",
+    "saveError": "The skill could not be saved. Your draft is unchanged. Please try again.",
     "retry": "Reload",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
     "empty": "No enabled skills yet",
     "noResults": "No matching skills",
     "manage": "Manage skills",

@@ -2,9 +2,11 @@ import { assertPluginAvailable } from '../plugins/availability';
 import { runCloudTask } from '../cloud/tasks';
 import { cloudTransaction } from '../cloud/transactions';
 import { db, type HandoutRow } from '../store/db';
+import { isCloudBlob } from '../store/cloudBlob';
 import { cloud } from '../cloud/state';
 import type { HandoutSection } from '../handout/docx';
 import type { Block } from '../handout/ir';
+import { accountLifetime } from '../client/account-lifecycle';
 
 export function blockToText(b: Block): string {
   switch (b.type) {
@@ -29,12 +31,15 @@ const sequences = new WeakMap<object, WeakMap<HandoutRow, EditSequence>>();
  * blocks subsequent saves and keeps the newest local draft for explicit review. */
 export function persistHandoutEdit(original: HandoutRow, sections: HandoutSection[], summary: string): Promise<void> {
   const database = db, owner = cloud.userId, handoutId = original.id!;
-  const guard = () => { if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
+  const lifetime = accountLifetime(owner);
+  const guard = () => { lifetime.assertCurrent(); if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
+  guard();
   let map = sequences.get(database);
   if (!map) { map = new WeakMap(); sequences.set(database, map); }
   let sequence = map.get(original);
   if (!sequence) {
     sequence = { chain: Promise.resolve(), baseline: (async () => {
+      if (isCloudBlob(original.blob)) return { sectionsJson: original.sectionsJson ?? '', outlineJson: original.outlineJson, blob: original.blob };
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await original.blob.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
       guard();
       const known = await database.table('_cloudBlobs').get(hash);
@@ -64,7 +69,7 @@ export function persistHandoutEdit(original: HandoutRow, sections: HandoutSectio
   });
   st.chain = run.catch(async error => {
     st.error = error;
-    if (database === db && owner === cloud.userId) await database.table('_cloudMeta').update(draftId, { 'value.status': 'conflict', 'value.error': String(error) });
+    if (lifetime.current() && database === db && owner === cloud.userId) await database.table('_cloudMeta').update(draftId, { 'value.status': 'conflict', 'value.error': String(error) });
   });
   return run;
 }

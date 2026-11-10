@@ -696,6 +696,11 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const resolved = path.resolve(filesDir, file.storage_name);
     if (!resolved.startsWith(`${path.resolve(filesDir)}${path.sep}`)) return bad(reply, 404, 'file_not_found');
     if (!fs.existsSync(resolved)) return bad(reply, 404, 'file_not_found');
+    // Lazy <img> consumers can reuse bytes, but must reauthorize on every
+    // revalidation. Never mark account-owned files public or immutable.
+    const etag = `"${file.sha256}"`;
+    reply.header('cache-control', 'private, no-cache').header('etag', etag);
+    if (request.headers['if-none-match']?.split(',').some(value => value.trim() === '*' || value.trim().replace(/^W\//, '') === etag)) return reply.code(304).send();
     reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.original_name)}`);
     reply.type(file.mime_type);
     reply.header('accept-ranges', 'bytes');

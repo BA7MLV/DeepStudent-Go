@@ -45,7 +45,10 @@ export async function addPlugin(page, options) {
   const viewId = options.viewId ?? Object.entries(targets).find(([, v]) => v.surfaces.includes(options.surface))?.[0];
   assert.ok(viewId, `supported view for ${options.surface}`);
   const projectSelector = page.getByLabel('项目上下文', { exact: true });
-  const project = await projectSelector.count() ? await projectSelector.inputValue() : undefined;
+  // AppSelect is now an accessible listbox trigger, not a native <select>.
+  // PluginSlot persists the selected project in its router query.
+  const project = await projectSelector.count() ? await page.evaluate(() => new URLSearchParams(location.hash.split('?')[1] ?? '').get('project') ?? undefined) : undefined;
+  if (project) assert.ok(catalog.scopes.projects.some(row => row.id === project), 'selected project must be server-visible');
   let scope = options.scope ? (() => { const at = options.scope.indexOf(':'); return at < 0 ? { kind: options.scope } : { kind: options.scope.slice(0, at), id: options.scope.slice(at + 1) }; })() : project ? { kind: 'project', id: project } : { kind: 'account' };
   let instanceId;
   await editLayout(page, layout => {

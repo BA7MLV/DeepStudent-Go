@@ -1,6 +1,8 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { saveHandoutReading } from '../client/learning';
 import { applyHandoutReadPos, captureHandoutReadPos, type HandoutReadPos } from './readingPos';
+import { accountLifecycle } from '../client/account-lifecycle';
+import { db } from '../store/db';
 
 /**
  * 讲义的阅读位置：打开时落回上次，滚动时写回。
@@ -50,6 +52,7 @@ export function useHandoutReadingPos({ enabled, handoutId, readPos, scrollRef, d
     if (!enabled || !scroll) return;
     const pos = initialRef.current?.pos ?? null;
     const id = handoutId;
+    const lifetime = accountLifecycle.current(), database = db;
 
     const settleUntil = performance.now() + SETTLE_WINDOW_MS;
     let ownWriteAt = -Infinity;
@@ -77,7 +80,7 @@ export function useHandoutReadingPos({ enabled, handoutId, readPos, scrollRef, d
     };
 
     const write = () => {
-      if (id == null) return;
+      if (id == null || database !== db || lifetime && !lifetime.current()) return;
       const next = captureHandoutReadPos(scroll);
       if (!next) return;
       if (last && last.anchor === next.anchor && Math.abs(last.offset - next.offset) < WRITE_IDLE_PX) return;

@@ -126,8 +126,10 @@ function followResourceProjection<Value>(request: Extract<import('@wangke/contra
     const refresh = () => {
       if (stopped || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) return;
       const snapshot = model.getSnapshot();
-      if (snapshot.status === 'ready' && snapshot.data) changed(snapshot.data as unknown as Value);
-      else if (snapshot.status === 'error') failed(snapshot.error);
+      // Reuse a retained directory while its new stream checks for changes.
+      // The server still authorizes every command and checks file revisions.
+      if (snapshot.data !== undefined) changed(snapshot.data as unknown as Value);
+      if (snapshot.status === 'error') failed(snapshot.error);
     };
     off = model.subscribe(refresh); release = model.acquire(); refresh();
   }).catch(error => { if (!stopped && owner === cloud.userId) failed(error); });

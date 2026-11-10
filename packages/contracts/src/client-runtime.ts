@@ -19,8 +19,21 @@ export type RuntimeRead =
   | { kind: 'executorRecovery'; taskId?: string; operationIds: string[] }
   | { kind: 'interactionRecovery'; taskId: string; sequence: number }
   | { kind: 'catalog' }
+  | { kind: 'pluginScope'; materialId?: string; projectFolderId?: number }
   | { kind: 'tasks' }
   | { kind: 'records'; after: number }
+  | { kind: 'recordKeys'; keys: { table: ProjectionTable; key: string | number }[] }
+  | { kind: 'collectionPage'; table: ProjectionTable; parent?: string | number; cursor?: string }
+  | { kind: 'sessionIndex'; videoId: string; archived: boolean; recentOnly: boolean; cursor?: string }
+  | { kind: 'courseCount' }
+  | { kind: 'courseReadiness'; videoId: string }
+  | { kind: 'courseMetadata'; ids: string[]; covers: boolean }
+  | { kind: 'coverCandidates'; cursor?: string }
+  | { kind: 'courseColorFrame'; videoId: string }
+  | { kind: 'latestHandout'; videoId: string }
+  | { kind: 'skillIndex'; cursor?: string }
+  | { kind: 'studySummary' }
+  | { kind: 'studyOverview'; today: string; from: string; preview: { date: string; seconds: number }[] }
   | { kind: 'fileIntents' }
   | { kind: 'session'; sessionId: number; before?: { createdAt: number; id: number; role?: string }; after?: { createdAt: number; id: number; role?: string } }
   | { kind: 'plugin'; pluginId: string; instanceId: string; revision: number; method: string; args: { [key: string]: RuntimeJson } }
@@ -87,6 +100,53 @@ export interface RuntimeRecord {
   revision: number;
 }
 export interface RuntimeRecordsPage { records: RuntimeRecord[]; cursor: number; more: boolean; epoch: string; highWater: number; reset: boolean }
+/** Independent, opaque collection cursors; never interchangeable with recordsPage. */
+export type ProjectionTable = 'videos' | 'files' | 'segments' | 'frames' | 'handouts' | 'chats' | 'chatSessions'
+  | 'skills' | 'skillRefs' | 'danmakus' | 'folders' | 'cards' | 'subtitleTracks' | 'materialBlocks'
+  | 'materialInk' | 'covers' | 'studyDays' | 'courseFiles' | 'comments';
+export interface CollectionPage {
+  records: RuntimeRecord[];
+  next?: string;
+  version: number;
+  epoch: string;
+}
+/** Head identity a complete multi-page read was verified against. */
+export interface CollectionVersion { table: ProjectionTable; version: number; epoch: string }
+/** Discovery only. Never publish these partial values as skillDefinition rows. */
+export type SkillIndexItem = Omit<LearningSkill, 'body'> & { legacyIds?: number[]; legacyNames?: string[]; refCount: number };
+export interface SkillIndexPage {
+  skills: SkillIndexItem[]; next?: string; version: number; epoch: string;
+}
+/** Aggregate only; snapshot is an owner/epoch/version-bound clear precondition. */
+export interface StudySummary { totalSeconds: number; activeDays: number; snapshot: string }
+/** Explicit-ID display metadata, not complete video/cover records or write baselines. */
+export interface CourseMetadata {
+  items: { id: string; course: { name: string; kind: 'video' | 'material' } | null;
+    cover: { blob: LearningBlob; source: LearningCover['source'] } | null }[];
+  epoch: string;
+}
+/** Bounded backfill keys only; never a course listing or cover bodies. */
+export interface CoverCandidates { ids: string[]; next?: string; version: number; epoch: string }
+/** One complete selected document, never a scan of every historic version. */
+export interface LatestHandout {
+  record: RuntimeRecord | null; epoch: string;
+  media: { courseName: string; frames: { ts: number; blob: LearningBlob }[] };
+}
+export interface StudyOverview {
+  /** Only the requested calendar interval (<=371 days), never full history. */
+  days: { date: string; seconds: number }[];
+  /** Includes the explicitly supplied, non-persisted local timer preview. */
+  stats: { totalSeconds: number; activeDays: number; todaySeconds: number; weekSeconds: number; weekActiveDays: number;
+    currentStreak: number; longestStreak: number; best: { date: string; seconds: number } | null; averageSeconds: number };
+}
+export interface SessionIndexItem {
+  id: number; videoId: string; title: string; pinned: boolean; archived: boolean;
+  createdAt: number; activity: number; hasUser: boolean;
+}
+export interface SessionIndexPage {
+  latestId?: number;
+  sessions: SessionIndexItem[]; next?: string; previous?: string; version: number; epoch: string;
+}
 export interface RuntimeRecordMutation {
   id: string;
   table: string;
@@ -133,13 +193,14 @@ export interface LearningSkillReference { id: number; skillId: number; path: str
 export interface LearningInk { id: string; materialId: string; surface: string; tool: 'pen' | 'highlight'; color: string; width: number; height: number; points: { x: number; y: number; pressure: number }[]; createdAt: number; renderer?: 'freehand-v1'; nib?: 'pressure' | 'ballpoint' | 'brush'; opacity?: number; smoothing?: number; input?: 'touch' | 'pen' | 'mouse'; anchor?: { start: number; end: number; exact: string; prefix: string; suffix: string; unit: number; endUnit?: number; unitLabel: string; source: 'pdf' | 'docx' | 'md' | 'html' }; rects?: { x: number; y: number; w: number; h: number }[] }
 export type ClientLearningEdit = (
   | Extract<LearningProduct, { kind: 'conversationMessage' | 'conversationSession' | 'handoutDocument' }>
-  | { kind: 'skillDefinition'; expected: LearningSkill | null; value: LearningSkill | null }
+  | { kind: 'skillDefinition'; expected: LearningSkill | null; value: LearningSkill | null; referencesSnapshot?: { epoch: string; version: number } }
   | { kind: 'skillReference'; expected: LearningSkillReference | null; value: LearningSkillReference | null }
   | { kind: 'materialAnnotation'; expected: LearningInk | null; value: LearningInk | null }
   | { kind: 'reviewCard'; courseId: string; cardId: number; expected: 0 | 1 | 2; status: 0 | 1 | 2 }
   | { kind: 'handoutReading'; courseId: string; handoutId: number; position: { anchor: string; offset: number } }
   | { kind: 'studyTime'; date: string; seconds: number; updatedAt: number }
   | { kind: 'clearStudyTime'; expected: { date: string; seconds: number; updatedAt: number }[] }
+  | { kind: 'clearStudySnapshot'; snapshot: string }
 ) & { mutationId: string; baseRevision?: number };
 export interface ClientLearningCommand { operationId: string; edits: ClientLearningEdit[] }
 export interface ExecutorResourceCommand {

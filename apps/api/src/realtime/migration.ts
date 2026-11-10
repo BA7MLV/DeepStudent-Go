@@ -1,4 +1,6 @@
 import type Database from 'better-sqlite3';
+import { migrateRecordProjections } from './record-projections.js';
+import { migrateSessionIndex } from './session-index.js';
 
 export function installClientNotifications(db: Database.Database, definitions: readonly (readonly [string, string, string])[]) {
   for (const [table, owner, entity] of definitions) for (const operation of ['INSERT', 'UPDATE', 'DELETE']) {
@@ -17,6 +19,7 @@ export function installClientNotifications(db: Database.Database, definitions: r
 
 /** Notifications share the writer's SQLite transaction; they contain identities, never payloads. */
 export function migrateClientRuntime(db: Database.Database) {
+  migrateRecordProjections(db);
   db.exec(`CREATE TABLE IF NOT EXISTS executor_interaction_recovery (
     command_id INTEGER PRIMARY KEY REFERENCES cloud_task_commands(id) ON DELETE CASCADE,
     snapshot TEXT NOT NULL, phase TEXT NOT NULL, effects TEXT NOT NULL DEFAULT '[]', attempt INTEGER NOT NULL DEFAULT 0
@@ -86,7 +89,15 @@ export function migrateClientRuntime(db: Database.Database) {
     PRIMARY KEY(owner_id,stream,course_id,kind)
   );`);
   // Also repair the notification closure in already-created schema34 databases.
+  migrateSessionIndex(db);
   installClientNotifications(db, [['cloud_permissions', 'ROW.owner_id', 'ROW.id']]);
+  // Collection heads retain both OLD and NEW membership, including deletes.
+  // Observers follow these exact scopes rather than waking for an entire table.
+  for (const operation of ['INSERT', 'UPDATE']) db.exec(`CREATE TRIGGER IF NOT EXISTS client_collection_${operation.toLowerCase()}
+    AFTER ${operation} ON client_collection_heads BEGIN
+      INSERT INTO client_changes(owner_id,domain,entity)
+      VALUES(NEW.owner_id,'record_collection',json_array(NEW.table_name,NEW.parent));
+    END`);
   db.exec(`CREATE TABLE IF NOT EXISTS client_journal_floors (
     owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
@@ -118,6 +129,22 @@ export function migrateClientRuntime(db: Database.Database) {
           FROM client_session_cursors WHERE owner_id=${row}.owner_id AND session_id=json_extract(${row}.value,'$.sessionId');
       END`);
   }
+  // Atomic record UPSERTs need a durable update event too. Moves/tombstones
+  // remove OLD membership and publish NEW atomically; ordinary edits emit one row.
+  for (const row of ['OLD', 'NEW']) {
+    db.exec(`CREATE TRIGGER IF NOT EXISTS session_journal_update_${row.toLowerCase()} AFTER UPDATE ON cloud_records
+      WHEN ${row}.table_name='chats' AND ${row}.value IS NOT NULL AND json_type(${row}.value,'$.sessionId')='integer'
+      ${row === 'OLD' ? `AND (NEW.value IS NULL OR NEW.table_name IS NOT OLD.table_name OR NEW.owner_id IS NOT OLD.owner_id
+        OR json_extract(NEW.value,'$.sessionId') IS NOT json_extract(OLD.value,'$.sessionId')
+        OR json_extract(NEW.value,'$.id') IS NOT json_extract(OLD.value,'$.id'))` : ''}
+      BEGIN
+        INSERT INTO client_session_cursors(owner_id,session_id,cursor) VALUES(${row}.owner_id,json_extract(${row}.value,'$.sessionId'),1)
+          ON CONFLICT(owner_id,session_id) DO UPDATE SET cursor=cursor+1;
+        INSERT INTO client_session_events(owner_id,session_id,cursor,row_id,value)
+          SELECT ${row}.owner_id,json_extract(${row}.value,'$.sessionId'),cursor,json_extract(${row}.value,'$.id'),${row === 'OLD' ? 'NULL' : 'NEW.value'}
+          FROM client_session_cursors WHERE owner_id=${row}.owner_id AND session_id=json_extract(${row}.value,'$.sessionId');
+      END`);
+  }
   installClientNotifications(db, [
     ['resource_files', 'ROW.owner_id', 'ROW.course_id'],
     ['resource_folders', 'ROW.owner_id', 'CAST(ROW.folder_id AS TEXT)'],
@@ -127,8 +154,8 @@ export function migrateClientRuntime(db: Database.Database) {
     ['messages', '(SELECT owner_id FROM threads WHERE id=ROW.thread_id)', 'ROW.thread_id'],
   ]);
   // Route by the affected session while OLD is still available. Looking the
-  // row up later loses deletes/tombstones (CloudRecords replaces via DELETE +
-  // INSERT), and task terminal/deletion notifications need the same guarantee.
+  // row up later loses deletes/tombstones; task terminal/deletion notifications
+  // need the same guarantee. Both atomic UPSERTs and physical deletes are covered.
   for (const operation of ['INSERT', 'UPDATE', 'DELETE']) {
     const rows = operation === 'UPDATE' ? ['OLD', 'NEW'] : [operation === 'DELETE' ? 'OLD' : 'NEW'];
     for (const row of rows) {
@@ -139,8 +166,9 @@ export function migrateClientRuntime(db: Database.Database) {
             THEN json_extract(${row}.record_key,'$') ELSE json_extract(${row}.value,'$.sessionId') END AS TEXT)
           WHERE ${row}.table_name='chatSessions' OR json_type(${row}.value,'$.sessionId')='integer';
         END`);
-      db.exec(`CREATE TRIGGER IF NOT EXISTS client_session_tasks_${operation.toLowerCase()}_${row.toLowerCase()}
-        AFTER ${operation} ON cloud_tasks WHEN ${row}.kind='chat' AND json_type(${row}.input,'$.sessionId')='integer' BEGIN
+      db.exec(`DROP TRIGGER IF EXISTS client_session_tasks_${operation.toLowerCase()}_${row.toLowerCase()}`);
+      db.exec(`CREATE TRIGGER client_session_tasks_${operation.toLowerCase()}_${row.toLowerCase()}
+        AFTER ${operation} ON cloud_tasks WHEN ${row}.kind IN ('chat','qa') AND json_type(${row}.input,'$.sessionId')='integer' BEGIN
           INSERT INTO client_changes(owner_id,domain,entity) VALUES (${row}.owner_id,'chat_session',CAST(json_extract(${row}.input,'$.sessionId') AS TEXT));
         END`);
     }

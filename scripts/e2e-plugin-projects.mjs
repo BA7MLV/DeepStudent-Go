@@ -25,14 +25,15 @@ try {
   await post('/auth/password/login', { password: 'plugin-project-ui-password' });
   const a = await (await post('/resources/folders', { name: '项目A' })).json();
   const b = await (await post('/resources/folders', { name: '项目B' })).json();
-  const materials = [];
+   const materials = [], folderIds = [];
   for (const p of [a, b]) {
     await context.request.put(`${origin}/api/v1/projects/${p.id}/text?path=source.md`, { headers: { origin }, data: { text: '# 项目资料\n\n真实项目上下文', expectedRevision: null } });
-    const listing = await (await context.request.get(`${origin}/api/v1/resources?projectId=${p.id}`)).json(); materials.push(listing.entries.find(e => e.courseId).courseId);
+     const listing = await (await context.request.get(`${origin}/api/v1/resources?projectId=${p.id}`)).json(); materials.push(listing.entries.find(e => e.courseId).courseId); folderIds.push(listing.folderId);
   }
   const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(`${origin}/#/board?project=${a.id}`);
-  await page.getByLabel('项目上下文', { exact: true }).selectOption(a.id);
+  await page.getByLabel('项目上下文', { exact: true }).click();
+  await page.getByRole('option', { name: '项目A', exact: true }).click();
    await assertCreationHint(page);
    await addPlugin(page, { pluginId: 'todo', surface: 'board.main', newContent: true });
   const host = page.getByTestId('board-plugin-todo'); await page.locator('[data-testid="board-plugin-todo"]:not([data-plugin-instance="legacy-todo"])').waitFor(); const id = await host.getAttribute('data-plugin-instance'); assert.notEqual(id, 'legacy-todo');
@@ -42,9 +43,9 @@ try {
   const reader = await context.newPage(); await reader.goto(`${origin}/#/player/${materials[0]}`);
   await reader.getByTestId('panel-tab-plugins').waitFor({ state: 'attached' }); const toggle = reader.getByTestId('study-assistant-toggle'); if (await toggle.isVisible()) await toggle.click(); await reader.getByTestId('panel-tab-plugins').click();
   await reader.locator('[data-plugin-slot="reader.sidepanel"]').frameLocator('iframe').getByText('仅项目A共享', { exact: true }).waitFor();
-  const catalog = await (await context.request.get(`${origin}/api/v1/plugins`)).json();
+   const catalog = await (await context.request.get(`${origin}/api/v1/plugins`)).json();
   const chat = await context.newPage(); await chat.goto(`${origin}/#/chat`); await chat.getByTestId('course-chat-page').waitFor();
-  await chat.evaluate(async project => { const { useCourseChat } = await import('/src/store/courseChat.ts'); await useCourseChat.getState().setProject(project); }, { folderId: catalog.scopes.projectFolders.find(p => p.projectId === a.id).folderId, name: a.name });
+   await chat.evaluate(async project => { const { useCourseChat } = await import('/src/store/courseChat.ts'); await useCourseChat.getState().setProject(project); }, { folderId: folderIds[0], name: a.name });
   await openChatPlugins(chat);
   await chat.locator('[data-plugin-slot="chat.sidepanel"]').frameLocator('iframe').getByText('仅项目A共享', { exact: true }).waitFor();
   await chat.evaluate(async () => { const { useCourseChat } = await import('/src/store/courseChat.ts'); await useCourseChat.getState().setProject(null); });
@@ -59,9 +60,9 @@ try {
   await openReaderPlugins(materials[1]);
   assert.equal(await reader.locator(`[data-plugin-instance="${id}"]`).count(), 0);
   await openReaderPlugins(materials[0]); await mf.getByText('仅资料A覆盖', { exact: true }).waitFor();
-  await page.getByLabel('项目上下文', { exact: true }).selectOption(b.id); await page.locator('[data-plugin-instance="legacy-todo"]').waitFor(); assert.equal(await page.locator(`[data-plugin-instance="${id}"]`).count(), 0);
+   await page.getByLabel('项目上下文', { exact: true }).click(); await page.getByRole('option', { name: '项目B', exact: true }).click(); await page.locator('[data-plugin-instance="legacy-todo"]').waitFor(); assert.equal(await page.locator(`[data-plugin-instance="${id}"]`).count(), 0);
    await addPlugin(page, { pluginId: 'todo', surface: 'board.main', newContent: true }); await page.locator('[data-testid="board-plugin-todo"]:not([data-plugin-instance="legacy-todo"])').waitFor(); const bid = await host.getAttribute('data-plugin-instance'); assert.notEqual(bid, id);
-  await page.getByLabel('项目上下文', { exact: true }).selectOption(a.id); await frame.getByText('仅项目A共享', { exact: true }).waitFor();
+   await page.getByLabel('项目上下文', { exact: true }).click(); await page.getByRole('option', { name: '项目A', exact: true }).click(); await frame.getByText('仅项目A共享', { exact: true }).waitFor();
   await page.reload(); await frame.getByText('仅项目A共享', { exact: true }).waitFor();
   for (const width of [1440, 390, 360]) for (const theme of ['light', 'dark', 'auto']) {
     await page.setViewportSize({ width, height: 1000 });

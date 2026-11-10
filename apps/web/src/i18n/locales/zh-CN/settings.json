@@ -1,4 +1,5 @@
 {
+  "studyRead": { "loadError": "学习记录读取失败。已保留上次汇总，刷新成功前不能清空。", "dashboardLoadError": "学习记录暂时读不出来，刷新成功前先不显示统计；这不代表记录丢失。", "retry": "重新加载" },
   "recovery": {
     "inkConflict": "批注修改有冲突，原稿已保留，请在活动区处理",
     "inkPending": "批注等待服务器确认，原稿已保留",
@@ -345,7 +346,10 @@
     "requiresMcp": "需要 MCP：{{names}}",
     "loading": "正在读取技能…",
     "loadError": "技能读取失败，请重试。",
+    "saveError": "技能保存失败，原稿仍保留，请重试。",
     "retry": "重新加载",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
     "empty": "还没有启用的技能",
     "noResults": "没有找到匹配的技能",
     "manage": "管理技能",

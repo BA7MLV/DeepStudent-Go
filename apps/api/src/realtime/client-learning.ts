@@ -17,7 +17,7 @@ const schemas = {
  * annotations, card decisions, reading position and additive study time. No
  * resource identity, derived products or server task authority is writable. */
 export function clientLearningMutations(records: CloudRecords, owner: string, edits: ClientLearningEdit[]): CloudMutation[] {
-  if (edits.some(edit => edit.kind === 'clearStudyTime') && edits.length !== 1) throw new Error('study_clear_must_be_separate');
+  if (edits.some(edit => edit.kind === 'clearStudyTime' || edit.kind === 'clearStudySnapshot') && edits.length !== 1) throw new Error('study_clear_must_be_separate');
   // Validate dependent documents against prior edits in the same original
   // transaction (e.g. a newly created session followed by its first message).
   // This is only a validation view; CloudRecords applies everything atomically.
@@ -37,6 +37,11 @@ export function clientLearningMutations(records: CloudRecords, owner: string, ed
       return mutation('studyDays', edit.date, null, { date: edit.date, seconds: edit.seconds, updatedAt: edit.updatedAt });
     }
     if (edit.kind === 'clearStudyTime') return clearStudyTimeMutations(records, owner, edit);
+    // The domain verifies the signed aggregate baseline inside its transaction.
+    // Retain the existing complete-set validation and mutation/receipt semantics.
+    if (edit.kind === 'clearStudySnapshot') return clearStudyTimeMutations(records, owner, {
+      kind: 'clearStudyTime', mutationId: edit.mutationId, expected: records.studyDays(owner) as { date: string; seconds: number; updatedAt: number }[],
+    });
     if (edit.kind === 'reviewCard') {
       return cardReviewMutation({ get }, owner, edit);
     }

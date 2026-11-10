@@ -40,7 +40,7 @@ try {
   await call('PUT', `/projects/${fixture.id}/text?path=${encodeURIComponent('资料.md')}`, { text: '# 学习资料\n\nMarkdown 继续使用原来的封面文件样式。', expectedRevision: null });
   await call('PUT', `/projects/${fixture.id}/text?path=${encodeURIComponent('空白.markdown')}`, { text: '', expectedRevision: null });
   process.env.WANGKE_API_PROXY = backend;
-  vite = await createServer({ root: new URL('../apps/web', import.meta.url).pathname, server: { host: '127.0.0.1', port: process.env.RESOURCE_PREVIEW ? 5189 : 0 }, plugins: [{
+  vite = await createServer({ root: new URL('../apps/web', import.meta.url).pathname, cacheDir: path.join(directory, 'vite-cache'), server: { host: '127.0.0.1', port: process.env.RESOURCE_PREVIEW ? 5189 : 0 }, plugins: [{
     name: 'resource-test-login',
     configureServer(server) {
       // Local fixture only: enter a disposable account, before Vite's SPA fallback.
@@ -59,6 +59,14 @@ try {
     const context = await browser.newContext({ locale: 'zh-CN', serviceWorkers: 'block', viewport: { width: 1440, height: 900 } });
     await context.route('https://models.dev/**', route => route.fulfill({ json: {} }));
     page = await context.newPage();
+    page.setDefaultTimeout(30000);
+    const runtimeFrames = [];
+    page.on('websocket', socket => {
+      socket.on('framereceived', frame => {
+        runtimeFrames.push(String(frame.payload).slice(0, 12000));
+        if (runtimeFrames.length > 30) runtimeFrames.shift();
+      });
+    });
     page.on('pageerror', e => errors.push(e.message));
     await page.goto(`${origin}/__fixture_login`);
     await page.getByTestId('resource-list').waitFor({ timeout: 60000 });
@@ -105,9 +113,20 @@ try {
       const tile = [...document.querySelectorAll('[data-testid="resource-entry"]')].find(el => el.textContent.includes('资料.md'));
       const img = tile?.querySelector('.finder-document img');
       return img?.src !== old && img?.complete && img?.naturalWidth > 0;
-    }, originalCover, { timeout: 15000 });
+    }, originalCover, { timeout: 15000 }).catch(async error => {
+      await page.screenshot({ path: path.join(screenshots, 'external-cover-failure.png'), fullPage: true });
+      fs.writeFileSync(path.join(screenshots, 'external-cover-failure.json'), JSON.stringify({ directory, errors,
+        body: await page.locator('body').innerText(), entries: await call('GET', `/resources?projectId=${fixture.id}&path=`),
+        images: await page.locator('.finder-document img').evaluateAll(images => images.map(image => ({ src: image.src, complete: image.complete, width: image.naturalWidth }))) }, null, 2));
+      console.error('External cover evidence:', screenshots); throw error;
+    });
     fs.writeFileSync(path.join(physical, 'Bot 创建的文件.txt'), 'Bot direct filesystem output');
-    await page.getByTestId('resource-entry').filter({ hasText: 'Bot 创建的文件.txt' }).waitFor({ timeout: 15000 });
+    await page.getByTestId('resource-entry').filter({ hasText: 'Bot 创建的文件.txt' }).waitFor({ timeout: 15000 }).catch(async error => {
+      fs.writeFileSync(path.join(screenshots, 'external-create-failure.json'), JSON.stringify({ directory, errors,
+        body: await page.locator('body').innerText(), runtimeFrames,
+        entries: await call('GET', `/resources?projectId=${fixture.id}&path=`) }, null, 2));
+      throw error;
+    });
     await page.locator('input[type=file]').setInputFiles({ name: '上传.txt', mimeType: 'text/plain', buffer: Buffer.from('uploaded') });
     await page.getByTestId('resource-entry').filter({ hasText: '上传.txt' }).waitFor();
     assert.equal(fs.readFileSync(path.join(physical, '上传.txt'), 'utf8'), 'uploaded');
@@ -256,6 +275,24 @@ try {
     await resourceToDelete.waitFor({ state: 'detached' });
     assert.equal(fs.existsSync(markdownPath), false, 'Resource Library deletion removes the source file');
     assert.equal((await call('GET', `/cloud/record?table=videos&key=${encodeURIComponent(JSON.stringify(indexed.courseId))}`)).value, null, 'Resource Library deletion removes the learning record');
+    // The deliberate save conflict stays recoverable, but its reminder must
+    // not trap narrow-screen toolbar actions underneath a permanent card.
+    const retainedConflict = await page.evaluate(async () => {
+      const { useResourceCommands } = await import('/src/client/resource-commands.ts');
+      const { db } = await import('/src/store/db.ts');
+      const issues = useResourceCommands.getState().issues;
+      return { issues, rows: await db.table('_cloudMeta').bulkGet(issues.map(issue => issue.id)) };
+    });
+    assert.equal(retainedConflict.issues.length, 1);
+    assert.equal(retainedConflict.rows[0]?.value.request.operation.text, draft);
+    await page.getByRole('button', { name: '收起提醒', exact: true }).click();
+    await page.getByRole('alert', { name: '资料保存提醒' }).waitFor({ state: 'hidden' });
+    assert.deepEqual(await page.evaluate(async () => {
+      const { useResourceCommands } = await import('/src/client/resource-commands.ts');
+      const { db } = await import('/src/store/db.ts');
+      const issues = useResourceCommands.getState().issues;
+      return { issues, rows: await db.table('_cloudMeta').bulkGet(issues.map(issue => issue.id)) };
+    }), retainedConflict, 'collapsing the notice retains conflict commands and original drafts');
     await page.getByRole('button', { name: '更多操作', exact: true }).click();
     await page.getByRole('menuitem', { name: '导入课程 / B 站视频' }).click();
     await dialog.getByTestId('btn-bili-import').click();

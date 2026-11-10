@@ -7,6 +7,8 @@ import { SystemMaterials } from '../storage/system-materials.js';
 import { taskDto, listOwnerTasks } from '../cloud/tasks.js';
 import { inspectInteraction } from './interaction-recovery.js';
 import { preferencesProjection } from './preferences.js';
+import { RecordProjections } from './record-projections.js';
+import { studyOverview } from './study-overview.js';
 
 export interface RuntimeChange { revision: number; owner_id: string; domain: string; entity: string }
 type ReadKind = RuntimeRead['kind'];
@@ -44,7 +46,14 @@ export function assembleRuntimeDomains(ports: Ports) {
   };
 }
 
-function pluginReads({ plugins, canonical }: Ports): Pick<ReadHandlers, 'catalog' | 'plugin' | 'pluginQueries'> {
+function pluginReads({ plugins, canonical }: Ports): Pick<ReadHandlers, 'catalog' | 'pluginScope' | 'plugin' | 'pluginQueries'> {
+  const scopeChanged = (request: { materialId?: string }, change: RuntimeChange) => {
+    if (change.domain === 'cloud_records' && change.entity.startsWith('videos:')) {
+      try { return plugins.files.scopeUsesMaterial(change.owner_id, JSON.parse(change.entity.slice('videos:'.length)), request); } catch { return false; }
+    }
+    if (change.domain === 'resource_files') return plugins.files.scopeUsesMaterial(change.owner_id, change.entity, request);
+    return catalogChanged(change);
+  };
   const changed = (request: Extract<RuntimeRead, { kind: 'plugin' | 'pluginQueries' }>, change: RuntimeChange) => {
     if (catalogChanged(change)) return true; // Revocation never cancels accepted work.
     if (request.kind === 'plugin' && (request.method === 'state.read' || request.method === 'schedules.read')) {
@@ -75,19 +84,27 @@ function pluginReads({ plugins, canonical }: Ports): Pick<ReadHandlers, 'catalog
     return result;
   };
   return {
-    catalog: { read: owner => ({ plugins: plugins.files.catalog(owner), layout: plugins.files.layout(owner), scopes: plugins.files.scopeCatalog(owner), services: plugins.definitions(owner) }), matches: (_, change) => catalogChanged(change) },
+    catalog: { read: owner => ({ plugins: plugins.files.catalog(owner), layout: plugins.files.layout(owner), scopes: plugins.files.scopeCatalog(owner), services: plugins.definitions(owner) }), matches: (_, change) => scopeChanged({}, change) },
+    pluginScope: { read: (owner, request) => plugins.files.scopeCatalog(owner, request), matches: scopeChanged },
     plugin: { read, matches: changed }, pluginQueries: { read, matches: changed },
   };
 }
 
 function resourceReads({ store, resources }: Ports): Pick<ReadHandlers, 'systemDocument' | 'systemDirectory' | 'courseDocument' | 'resources' | 'resourceTrash'> {
   const files = () => { if (!resources) throw new Error('resource_domain_unavailable'); return resources; };
-  const systemChanged = (_: unknown, change: RuntimeChange) => inDomains(change, ['system_file_entries', 'systemDocument', 'cloud_records']);
+  const recordTable = (change: RuntimeChange, tables: string[]) => change.domain === 'cloud_records' && tables.some(table => change.entity.startsWith(`${table}:`));
+  const systemChanged = (_: unknown, change: RuntimeChange) => inDomains(change, ['system_file_entries', 'systemDocument'])
+    || recordTable(change, ['skills', 'skillRefs']) || change.domain === 'cloud_records' && change.entity === 'preferences:"agentInstructions"';
   return {
     systemDocument: { read: (owner, request) => new SystemMaterials(store).read(owner, request.path), matches: systemChanged },
     systemDirectory: { read: (owner, request) => new SystemMaterials(store).list(owner, request.path, request.offset, request.query), matches: systemChanged },
-    courseDocument: { read: (owner, request) => { const resource = files(), mapped = resource.course(owner, request.courseId); return resource.projects.files.read(mapped.project_id, mapped.path); }, matches: (_, change) => inDomains(change, ['resources', 'projects', 'resource_files', 'resource_trash', 'cloud_records']) },
-    resources: { read: (owner, request) => { const resource = files(); return JSON.parse(JSON.stringify(request.folderId === undefined ? resource.list(owner, request.projectId, request.path, request.archived) : resource.listFolder(owner, request.folderId))); }, matches: (_, change) => inDomains(change, ['resources', 'projects', 'resource_files', 'resource_folders', 'resource_trash', 'cloud_records']) },
+    courseDocument: { read: (owner, request) => { const resource = files(), mapped = resource.course(owner, request.courseId); return resource.projects.files.read(mapped.project_id, mapped.path); }, matches: (request, change) => inDomains(change, ['resources', 'projects', 'resource_trash'])
+      || change.domain === 'resource_files' && change.entity === request.courseId
+      || recordTable(change, ['videos', 'files', 'courseFiles']) && change.entity.endsWith(`:${JSON.stringify(request.courseId)}`) },
+    resources: { read: (owner, request) => { const resource = files(); return JSON.parse(JSON.stringify(request.folderId === undefined ? resource.list(owner, request.projectId, request.path, request.archived) : resource.listFolder(owner, request.folderId))); }, matches: (_, change) => inDomains(change, ['resources', 'projects', 'resource_files', 'resource_folders', 'resource_trash'])
+      // Chat attachments still require migration into the filesystem library.
+      // Learning progress/text chunks and preferences cannot affect a directory.
+      || recordTable(change, ['videos', 'folders', 'files', 'courseFiles', 'chats', 'chatSessions']) },
     resourceTrash: { read: owner => ({ projects: files().trashList(owner) }), matches: (_, change) => inDomains(change, ['resource_trash', 'projects']) },
   };
 }
@@ -108,8 +125,34 @@ function activityReads({ store }: Ports): Pick<ReadHandlers, 'permissions' | 'in
   };
 }
 
-function recordReads({ store, recordsPage, sessionProjection }: Ports): Pick<ReadHandlers, 'preferences' | 'records' | 'fileIntents' | 'session'> {
+function recordReads({ store, recordsPage, sessionProjection }: Ports): Pick<ReadHandlers, 'preferences' | 'records' | 'recordKeys' | 'collectionPage' | 'sessionIndex' | 'courseCount' | 'courseReadiness' | 'courseMetadata' | 'coverCandidates' | 'courseColorFrame' | 'latestHandout' | 'skillIndex' | 'studySummary' | 'studyOverview' | 'fileIntents' | 'session'> {
   return {
+    courseColorFrame: { read: (owner, request) => new RecordProjections(store).courseColorFrame(owner, request.videoId),
+      matches: (request, change) => change.domain === 'record_collection' && change.entity === JSON.stringify(['frames', `parent:${JSON.stringify(request.videoId)}`]) },
+    coverCandidates: { read: (owner, request) => new RecordProjections(store).coverCandidates(owner, request),
+      matches: (_, change) => change.domain === 'cloud_records' && (change.entity.startsWith('videos:') || change.entity.startsWith('covers:')) },
+    courseMetadata: { read: (owner, request) => new RecordProjections(store).courseMetadata(owner, request),
+      matches: (request, change) => change.domain === 'cloud_records' && request.ids.some(id => change.entity === `videos:${JSON.stringify(id)}`
+        || request.covers && change.entity === `covers:${JSON.stringify(id)}`) },
+    latestHandout: { read: (owner, request) => new RecordProjections(store).latestHandout(owner, request.videoId),
+      matches: (request, change) => change.domain === 'record_collection' && ['handouts', 'frames'].some(table => change.entity === JSON.stringify([table, `parent:${JSON.stringify(request.videoId)}`]))
+        || change.domain === 'cloud_records' && change.entity === `videos:${JSON.stringify(request.videoId)}` },
+    studyOverview: { read: (owner, request) => studyOverview(store, owner, request),
+      matches: (_, change) => change.domain === 'record_collection' && change.entity === JSON.stringify(['studyDays', '*']) },
+    studySummary: { read: owner => new RecordProjections(store).studySummary(owner),
+      matches: (_, change) => change.domain === 'record_collection' && change.entity === JSON.stringify(['studyDays', '*']) },
+    skillIndex: { read: (owner, request) => { store.skillRecords.sync(owner); return new RecordProjections(store).skillIndex(owner, request); },
+      matches: (_, change) => change.domain === 'record_collection' && ['skills', 'skillRefs'].some(table => change.entity === JSON.stringify([table, '*']))
+        || change.domain === 'system_file_entries' && change.entity.startsWith('/system/skills/') },
+    courseReadiness: { read: (owner, request) => new RecordProjections(store).courseReadiness(owner, request.videoId),
+      matches: (request, change) => change.domain === 'record_collection' && ['segments', 'materialBlocks'].some(table => change.entity === JSON.stringify([table, `parent:${JSON.stringify(request.videoId)}`])) },
+    courseCount: { read: owner => store.db.prepare("SELECT count(*) AS count FROM cloud_records WHERE owner_id=? AND table_name='videos' AND value IS NOT NULL").get(owner) as { count: number },
+      matches: (_, change) => change.domain === 'record_collection' && change.entity === JSON.stringify(['videos', '*']) },
+    sessionIndex: { read: (owner, request) => new RecordProjections(store).sessionIndex(owner, request), matches: (request, change) => change.domain === 'session_index' && change.entity === request.videoId },
+    recordKeys: { read: (owner, request) => { if (request.keys.some(key => ['skills', 'skillRefs'].includes(key.table))) store.skillRecords.sync(owner); return new RecordProjections(store).keys(owner, request); }, matches: (request, change) => change.domain === 'cloud_records'
+      && request.keys.some(({ table, key }) => change.entity === `${table}:${JSON.stringify(key)}`) },
+    collectionPage: { read: (owner, request) => { if (['skills', 'skillRefs'].includes(request.table)) store.skillRecords.sync(owner); return new RecordProjections(store).page(owner, request); }, matches: (request, change) => change.domain === 'record_collection'
+      && change.entity === JSON.stringify([request.table, request.parent === undefined ? '*' : `parent:${JSON.stringify(request.parent)}`]) },
     preferences: { read: owner => preferencesProjection(store, owner), matches: (_, change) => change.domain === 'cloud_records' && change.entity.startsWith('preferences:') || change.domain === 'system_file_entries' && change.entity === '/system/AGENTS.md' },
     records: { read: (owner, request) => recordsPage(owner, request.after), matches: (_, change) => change.domain === 'cloud_records' },
     fileIntents: { read: owner => ({ intents: store.db.prepare("SELECT id,path,created_at AS createdAt FROM system_file_intents WHERE owner_id=? AND status='conflict' ORDER BY created_at,id LIMIT 100").all(owner) }), matches: (_, change) => change.domain === 'system_file_entries' },

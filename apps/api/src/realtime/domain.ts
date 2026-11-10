@@ -33,6 +33,7 @@ import { clientLearningMutations } from './client-learning.js';
 import { cleanupBotJournal } from './journal-retention.js';
 import { TaskDelegationService } from '../cloud/delegation.js';
 import { CloudConfiguration } from '../cloud/config.js';
+import { RecordProjections, recordsEpoch } from './record-projections.js';
 import type { DelegationCommand } from '@wangke/contracts/client-runtime';
 
 import type {} from './errors.js';
@@ -161,7 +162,12 @@ export class ClientRuntimeDomain implements RuntimeDomain {
         // Darwin's recursive root watcher can coalesce a newly created project
         // directory before it starts observing its children. Pin an active
         // directory watcher before publishing its first baseline as well.
-        directoryWatcher = fs.watch(path.join(this.resources.projects.files.root, watchedProject), { recursive: true }, () => {
+        // Watch the displayed directory directly. Darwin's recursive FSEvents
+        // stream can coalesce adjacent child creations/edits; a non-recursive
+        // directory watch also avoids waking this view for unrelated subtrees.
+        const displayedPath = request.kind === 'resources' ? request.path : '';
+        this.resources.projects.files.list(watchedProject, displayedPath);
+        directoryWatcher = fs.watch(path.join(this.resources.projects.files.root, watchedProject, displayedPath), { recursive: request.kind !== 'resources' }, () => {
           this.store.db.prepare("INSERT INTO client_changes(owner_id,domain,entity) VALUES(?,'resources','filesystem')").run(owner);
           wake();
         });
@@ -180,6 +186,17 @@ export class ClientRuntimeDomain implements RuntimeDomain {
         directoryWatcher.unref();
         directoryWatcher.on('error', error => console.error('system_document_watch_failed', error));
       }
+      if (request.kind === 'skillIndex') {
+        // Discovery must observe authoritative package edits even when no global
+        // records/system-directory stream is retained by the browser.
+        this.store.skillRecords.sync(owner);
+        directoryWatcher = fs.watch(this.store.systemSkills.directory(owner), { recursive: true }, () => {
+          this.store.db.prepare("INSERT INTO client_changes(owner_id,domain,entity) VALUES(?,'system_file_entries','/system/skills/')").run(owner);
+          wake();
+        });
+        directoryWatcher.unref();
+        directoryWatcher.on('error', error => console.error('skill_directory_watch_failed', error));
+      }
       while (!signal.aborted) {
         if (!pending) await new Promise<void>(resolve => { resume = resolve; });
         if (signal.aborted) break;
@@ -189,7 +206,14 @@ export class ClientRuntimeDomain implements RuntimeDomain {
         const next = await this.observedRead(owner, request, signal);
         if (!next || signal.aborted) break;
         if (!previous) yield next;
-        else if (next.revision > previous.revision) yield { type: 'delta', baseRevision: previous.revision, revision: next.revision, changes: diffRuntime(previous.value, next.value) };
+        else {
+          const changes = diffRuntime(previous.value, next.value);
+          if (next.revision > previous.revision) yield { type: 'delta', baseRevision: previous.revision, revision: next.revision, changes };
+          // A filesystem/provider change can become visible without a matching
+          // revision bump. Dropping it here made the client stale forever; a
+          // delta cannot carry it (revision must advance), so replace instead.
+          else if (changes.length) yield { type: 'snapshot', revision: previous.revision, value: next.value };
+        }
         previous = next;
       }
     } finally { directoryWatcher?.close(); this.observers.delete(observer); signal.removeEventListener('abort', wake); }
@@ -367,7 +391,11 @@ export class ClientRuntimeDomain implements RuntimeDomain {
     return TYPERT_REMOTE.methods['clientRuntime/recordsPage'].result.create().parse({ records, cursor: records.at(-1)?.revision ?? Math.min(after, highWater), more: records.length === 200,
       epoch: this.recordsEpoch, highWater, reset: after > highWater });
   }
-  private readonly recordsEpoch = crypto.randomUUID();
+  // A process restart is not a data-generation change. Persist the incarnation
+  // with the database; resetData removes it and future-cursor still detects rollback.
+  private get recordsEpoch() {
+    return recordsEpoch(this.store);
+  }
   async submitTask(owner: string, request: RuntimeTaskSubmit): Promise<RuntimeTask> {
     if (!this.submit) throw new Error('task_admission_unavailable');
     try { return TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(this.submit(owner, request)); }
@@ -558,8 +586,27 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   async editLearning(owner: string, request: ClientLearningCommand): Promise<RuntimeRecordsReceipt> {
     if (!request.edits.length || request.edits.length > 20000) throw new RemoteError('gateway/bad-request', 'Invalid learning edits', {});
+    if (request.edits.some(edit => edit.kind === 'skillDefinition' || edit.kind === 'skillReference')) this.store.skillRecords.sync(owner);
     return this.atomicCommand(owner, request.operationId, { kind: 'learning', edits: request.edits }, () => {
       const records = new CloudRecords(this.store);
+      // The whole reference membership is a CAS precondition, not only the rows
+      // the browser happened to see. An inserted/moved reference after the read
+      // must roll back the package instead of surviving an intended replacement
+      // or becoming orphaned by a concurrent definition deletion.
+      for (const edit of request.edits) {
+        if (edit.kind === 'clearStudySnapshot') {
+          try { new RecordProjections(this.store).assertStudySnapshot(owner, edit.snapshot); }
+          catch { throw new CloudConflict('studyDays', '*', ['snapshot']); }
+        }
+        if (edit.kind !== 'skillDefinition' || !edit.referencesSnapshot) continue;
+        const skillId = (edit.value ?? edit.expected)?.id;
+        const observed = edit.referencesSnapshot;
+        const version = (this.store.db.prepare("SELECT version FROM client_collection_heads WHERE owner_id=? AND table_name='skillRefs' AND parent=?")
+          .get(owner, `parent:${JSON.stringify(skillId)}`) as { version: number } | undefined)?.version ?? 0;
+        if (!skillId || !Number.isSafeInteger(observed.version) || observed.version !== version || observed.epoch !== recordsEpoch(this.store)) {
+          throw new CloudConflict('skillRefs', skillId ?? 0, ['membership']);
+        }
+      }
       // Preserve the original transaction through skill package staging. Applying
       // each row separately can resync pending files against disk between the
       // definition and its references, tombstoning the not-yet-installed package.

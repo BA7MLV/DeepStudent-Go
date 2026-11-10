@@ -26,6 +26,9 @@
 		}
 		@config path /config.js /sw.js /index.html /
 		header @config Cache-Control "no-cache"
+		@biliScript path /wangke-bili-bridge.user.js
+		header @biliScript Content-Type "text/javascript; charset=utf-8"
+		header @biliScript Cache-Control "no-cache"
 		encode zstd gzip
 		try_files {path} /index.html
 		file_server

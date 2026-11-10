@@ -8,6 +8,7 @@ import { PluginHost } from './PluginHost';
 import { PluginCreationHint } from './PluginCreationHint';
 import './plugins.css';
 import { pluginProject } from './scope';
+import { usePluginScope } from './usePluginScope';
 import { useSustained } from '../utils/useSustained';
 import { AppSelect } from '../ui/AppSelect';
 import { Sym } from '../ui/icons';
@@ -15,7 +16,10 @@ import { Sym } from '../ui/icons';
 export interface PluginSlotProps { name: PluginSurface; materialId?: string; projectId?: string; projectFolderId?: number; conversation?: PluginHostContext['conversation']; onlyInstance?: string; manage?: boolean }
 export function PluginSlotView({ name, materialId, projectId: requestedProject, projectFolderId, conversation, onlyInstance, manage = true, useCatalog, serverEnabled }: PluginSlotProps & { serverEnabled: boolean; useCatalog: <T>(select: (value: ReturnType<typeof pluginCatalogSource.getSnapshot>) => T) => T }) {
   const { i18n, t } = useTranslation('interface');
-  const { data, error, status } = useCatalog(value => value);
+  const { t: common } = useTranslation('common');
+  const catalog = useCatalog(value => value);
+  const scoped = usePluginScope(catalog.data, materialId, projectFolderId);
+  const { data } = scoped, error = scoped.error ?? catalog.error, status = catalog.status;
   const [search, setSearch] = useSearchParams();
   const selectable = name === 'board.main' || name === 'app.page';
   const projectId = pluginProject(data, materialId, requestedProject ?? (selectable ? search.get('project') ?? undefined : undefined), projectFolderId);
@@ -31,7 +35,7 @@ export function PluginSlotView({ name, materialId, projectId: requestedProject, 
   return <div ref={ref} className={`plugin-slot plugin-slot--${name.replace('.', '-')}`} data-plugin-slot={name}>
     {selectable && data && !!data.scopes?.projects.length ? <AppSelect label={t('plugins.context')} value={projectId ?? 'all'} options={[{ id: 'all', label: t('plugins.all') }, ...data.scopes.projects.map(p => ({ id: p.id, label: p.name }))]} onChange={value => { const next = new URLSearchParams(search); if (value !== 'all') next.set('project', value); else next.delete('project'); setSearch(next); }} /> : null}
     {manage && data ? <PluginCreationHint /> : null}
-    {error ? <p role="alert">{error}</p> : null}
+    {error ? <p role="alert">{error}{scoped.error ? <button type="button" onClick={scoped.retry}>{common('board.retry')}</button> : null}</p> : null}
     {reconnecting ? <p role="status">{t('plugins.reconnecting')}</p> : null}
     {!data && !error ? <p aria-busy="true">{t('plugins.loading')}</p> : null}
     <div className="plugin-slot__views">{placements.map(p => {

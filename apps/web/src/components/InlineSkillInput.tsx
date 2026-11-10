@@ -80,7 +80,7 @@ const mentions = StateField.define<DecorationSet>({
  * or separate chip row: the replacement widgets decorate copyable @skill text. */
 const InlineSkillInput = forwardRef<InlineSkillInputHandle, Props>(function InlineSkillInput(props, ref) {
   const { t } = useTranslation('settings');
-  const { skills, ready } = useInlineSkills();
+  const { skills, ready, error, retry } = useInlineSkills();
   const host = useRef<HTMLDivElement>(null), editor = useRef<EditorView | null>(null);
   const latest = useRef({ props, skills, ready });
   latest.current = { props, skills, ready };
@@ -212,8 +212,13 @@ const InlineSkillInput = forwardRef<InlineSkillInputHandle, Props>(function Inli
     } finally { external.current = false; }
   }, [props.value, props.skillIds, skills, ready, slots]);
 
-  return <div ref={host} className={`inline-skill-input ${props.className ?? ''}`} data-expanded={props.expanded || undefined}
-    data-testid="composer-skill-chips" />;
+  return <>
+    <div ref={host} className={`inline-skill-input ${props.className ?? ''}`} data-expanded={props.expanded || undefined}
+      data-testid="composer-skill-chips" />
+    {error && <div role="status" className="text-sm text-muted" data-testid="composer-skills-error">
+      {t('skillPicker.loadError')}{' '}<button type="button" onClick={() => void retry().catch(() => {})}>{t('skillPicker.retry')}</button>
+    </div>}
+  </>;
 });
 
 export default InlineSkillInput;

@@ -124,6 +124,12 @@ export interface RecentItem {
   deleteDisabled?: boolean;
 }
 
+interface RecentNavigation {
+  label: string; items: RecentItem[]; loading?: boolean;
+  pagination?: { previous?: () => void; next?: () => void; previousLabel: string; nextLabel: string;
+    busy: boolean; error?: string; retry: () => void; retryLabel: string };
+}
+
 /** 量出 Recent 标题的实际溢出量，供 hover 跑马灯使用。 */
 function measureRecentTitle(row: HTMLElement) {
   const title = row.querySelector<HTMLElement>('.recent-title');
@@ -243,7 +249,7 @@ function Sidebar({
   onNavigate,
 }: {
   rail: NavConfig;
-  recent?: { label: string; items: RecentItem[]; loading?: boolean };
+  recent?: RecentNavigation;
   railFooter?: ReactNode;
   navigationId: string;
   /** 窄屏点完就该收起抽屉，否则菜单盖住刚打开的页面 */
@@ -492,6 +498,15 @@ function Sidebar({
                     </ListBox.Item>
                   ))}
                 </ListBox>
+                {recent.pagination && <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
+                  {recent.pagination.previous && <Button size="sm" variant="ghost" isDisabled={recent.pagination.busy}
+                    data-testid="chat-recent-previous" onPress={recent.pagination.previous}>{recent.pagination.previousLabel}</Button>}
+                  {recent.pagination.next && <Button size="sm" variant="ghost" isDisabled={recent.pagination.busy}
+                    data-testid="chat-recent-next" onPress={recent.pagination.next}>{recent.pagination.nextLabel}</Button>}
+                  {recent.pagination.error && <><span role="status">{recent.pagination.error}</span>
+                    <Button size="sm" variant="ghost" isDisabled={recent.pagination.busy}
+                      onPress={recent.pagination.retry}>{recent.pagination.retryLabel}</Button></>}
+                </div>}
               </div>
             </ScrollShadow>
           </div>
@@ -522,7 +537,7 @@ export function NavigationShell({
   children,
 }: {
   rail: NavConfig;
-  recent: { label: string; items: RecentItem[]; loading?: boolean };
+  recent: RecentNavigation;
   railFooter: ReactNode;
   children: ReactNode;
 }) {

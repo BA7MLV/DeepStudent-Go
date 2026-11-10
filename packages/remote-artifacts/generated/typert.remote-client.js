@@ -401,6 +401,10 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => 
   'updatedAt': z.number(),
   'mcpRequired': z.union([z.undefined(), z.array(z.string())]).optional(),
 })]),
+  'referencesSnapshot': z.union([z.undefined(), z.object({
+  'epoch': z.string(),
+  'version': z.number(),
+})]).optional(),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 }), z.object({
@@ -531,6 +535,11 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => 
 })),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
+}), z.object({
+  'kind': z.literal("clearStudySnapshot"),
+  'snapshot': z.string(),
+  'mutationId': z.string(),
+  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 })])),
 }))
 let _wangke_remote_host_clientRuntime_editLearning_result$schema$value
@@ -592,10 +601,62 @@ const _wangke_remote_host_clientRuntime_read_parameter_0$schema = () => (_wangke
 }), z.object({
   'kind': z.literal("catalog"),
 }), z.object({
+  'kind': z.literal("pluginScope"),
+  'materialId': z.union([z.undefined(), z.string()]).optional(),
+  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
+}), z.object({
   'kind': z.literal("tasks"),
 }), z.object({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.object({
+  'kind': z.literal("recordKeys"),
+  'keys': z.array(z.object({
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'key': z.union([z.string(), z.number()]),
+})),
+}), z.object({
+  'kind': z.literal("collectionPage"),
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'parent': z.union([z.undefined(), z.string(), z.number()]).optional(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("sessionIndex"),
+  'videoId': z.string(),
+  'archived': z.boolean(),
+  'recentOnly': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("courseCount"),
+}), z.object({
+  'kind': z.literal("courseReadiness"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("courseMetadata"),
+  'ids': z.array(z.string()),
+  'covers': z.boolean(),
+}), z.object({
+  'kind': z.literal("coverCandidates"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("courseColorFrame"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("latestHandout"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("skillIndex"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("studySummary"),
+}), z.object({
+  'kind': z.literal("studyOverview"),
+  'today': z.string(),
+  'from': z.string(),
+  'preview': z.array(z.object({
+  'date': z.string(),
+  'seconds': z.number(),
+})),
 }), z.object({
   'kind': z.literal("fileIntents"),
 }), z.object({
@@ -1291,10 +1352,62 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0$schema = () => (_wangk
 }), z.object({
   'kind': z.literal("catalog"),
 }), z.object({
+  'kind': z.literal("pluginScope"),
+  'materialId': z.union([z.undefined(), z.string()]).optional(),
+  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
+}), z.object({
   'kind': z.literal("tasks"),
 }), z.object({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.object({
+  'kind': z.literal("recordKeys"),
+  'keys': z.array(z.object({
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'key': z.union([z.string(), z.number()]),
+})),
+}), z.object({
+  'kind': z.literal("collectionPage"),
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'parent': z.union([z.undefined(), z.string(), z.number()]).optional(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("sessionIndex"),
+  'videoId': z.string(),
+  'archived': z.boolean(),
+  'recentOnly': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("courseCount"),
+}), z.object({
+  'kind': z.literal("courseReadiness"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("courseMetadata"),
+  'ids': z.array(z.string()),
+  'covers': z.boolean(),
+}), z.object({
+  'kind': z.literal("coverCandidates"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("courseColorFrame"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("latestHandout"),
+  'videoId': z.string(),
+}), z.object({
+  'kind': z.literal("skillIndex"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.object({
+  'kind': z.literal("studySummary"),
+}), z.object({
+  'kind': z.literal("studyOverview"),
+  'today': z.string(),
+  'from': z.string(),
+  'preview': z.array(z.object({
+  'date': z.string(),
+  'seconds': z.number(),
+})),
 }), z.object({
   'kind': z.literal("fileIntents"),
 }), z.object({
@@ -2158,6 +2271,10 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema =
   'updatedAt': z.number(),
   'mcpRequired': z.union([z.undefined(), z.array(z.string())]).optional(),
 })]),
+  'referencesSnapshot': z.union([z.undefined(), z.strictObject({
+  'epoch': z.string(),
+  'version': z.number(),
+})]).optional(),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 }), z.strictObject({
@@ -2288,6 +2405,11 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0_strict$schema =
 })),
   'mutationId': z.string(),
   'baseRevision': z.union([z.undefined(), z.number()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("clearStudySnapshot"),
+  'snapshot': z.string(),
+  'mutationId': z.string(),
+  'baseRevision': z.union([z.undefined(), z.number()]).optional(),
 })])),
 }))
 let _wangke_remote_host_clientRuntime_fileIntent_parameter_0_strict$schema$value
@@ -2327,10 +2449,62 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
 }), z.strictObject({
   'kind': z.literal("catalog"),
 }), z.strictObject({
+  'kind': z.literal("pluginScope"),
+  'materialId': z.union([z.undefined(), z.string()]).optional(),
+  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
+}), z.strictObject({
   'kind': z.literal("tasks"),
 }), z.strictObject({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.strictObject({
+  'kind': z.literal("recordKeys"),
+  'keys': z.array(z.strictObject({
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'key': z.union([z.string(), z.number()]),
+})),
+}), z.strictObject({
+  'kind': z.literal("collectionPage"),
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'parent': z.union([z.undefined(), z.string(), z.number()]).optional(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("sessionIndex"),
+  'videoId': z.string(),
+  'archived': z.boolean(),
+  'recentOnly': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("courseCount"),
+}), z.strictObject({
+  'kind': z.literal("courseReadiness"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("courseMetadata"),
+  'ids': z.array(z.string()),
+  'covers': z.boolean(),
+}), z.strictObject({
+  'kind': z.literal("coverCandidates"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("courseColorFrame"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("latestHandout"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("skillIndex"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("studySummary"),
+}), z.strictObject({
+  'kind': z.literal("studyOverview"),
+  'today': z.string(),
+  'from': z.string(),
+  'preview': z.array(z.strictObject({
+  'date': z.string(),
+  'seconds': z.number(),
+})),
 }), z.strictObject({
   'kind': z.literal("fileIntents"),
 }), z.strictObject({
@@ -2876,10 +3050,62 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0_strict$schema = () => 
 }), z.strictObject({
   'kind': z.literal("catalog"),
 }), z.strictObject({
+  'kind': z.literal("pluginScope"),
+  'materialId': z.union([z.undefined(), z.string()]).optional(),
+  'projectFolderId': z.union([z.undefined(), z.number()]).optional(),
+}), z.strictObject({
   'kind': z.literal("tasks"),
 }), z.strictObject({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.strictObject({
+  'kind': z.literal("recordKeys"),
+  'keys': z.array(z.strictObject({
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'key': z.union([z.string(), z.number()]),
+})),
+}), z.strictObject({
+  'kind': z.literal("collectionPage"),
+  'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
+  'parent': z.union([z.undefined(), z.string(), z.number()]).optional(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("sessionIndex"),
+  'videoId': z.string(),
+  'archived': z.boolean(),
+  'recentOnly': z.boolean(),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("courseCount"),
+}), z.strictObject({
+  'kind': z.literal("courseReadiness"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("courseMetadata"),
+  'ids': z.array(z.string()),
+  'covers': z.boolean(),
+}), z.strictObject({
+  'kind': z.literal("coverCandidates"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("courseColorFrame"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("latestHandout"),
+  'videoId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("skillIndex"),
+  'cursor': z.union([z.undefined(), z.string()]).optional(),
+}), z.strictObject({
+  'kind': z.literal("studySummary"),
+}), z.strictObject({
+  'kind': z.literal("studyOverview"),
+  'today': z.string(),
+  'from': z.string(),
+  'preview': z.array(z.strictObject({
+  'date': z.string(),
+  'seconds': z.number(),
+})),
 }), z.strictObject({
   'kind': z.literal("fileIntents"),
 }), z.strictObject({
