@@ -1,3 +1,4 @@
+import type { TaskStatus } from './task-status.js';
 /** Shared cloud protocol. Table names are an allowlist, never SQL identifiers. */
 export type { TaskModelSelection, FrozenTaskModel } from './model-gateway.js';
 export type { ModelUsageSource, ModelUsageCounts, ModelUsageReport } from './model-usage.js';
@@ -133,7 +134,7 @@ export interface CloudTask {
   id: string;
   kind: CloudTaskKind;
   resource: string;
-  status: 'queued' | 'running' | 'waiting_user' | 'waiting_event' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  status: TaskStatus;
   input: Record<string, unknown>;
   progress: Record<string, unknown> | null;
   result: unknown;

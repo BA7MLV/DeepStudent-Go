@@ -1,6 +1,8 @@
 import type { RuntimeTask } from '@wangke/contracts/client-runtime';
+import { isTaskUnfinished } from '@wangke/contracts/task-status';
 
-export const chatTaskActive = (task: Pick<RuntimeTask, 'status'>) => ['queued', 'running', 'waiting_user'].includes(task.status);
+/** 未结束（含 waiting_event）都算活动：等待依赖不是已结束，也不是失败。 */
+export const chatTaskActive = (task: Pick<RuntimeTask, 'status'>) => isTaskUnfinished(task.status);
 
 /** A saved checkpoint is recoverable, not evidence that its task has failed. */
 export function chatTaskState(row: { content: string; interrupted?: boolean; interruptReason?: string; widget?: unknown; widgets?: unknown[]; ask?: unknown; folderPlan?: unknown }, task?: RuntimeTask) {

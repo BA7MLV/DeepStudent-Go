@@ -4,6 +4,7 @@ import { db } from '../store/db';
 import { messageWidgets } from '../harness/widgetLayout';
 import type { WidgetPayload } from '../harness/widgetRuntime';
 import type { CloudTask, CloudTaskKind } from '@wangke/contracts/cloud';
+import { taskAcceptsAnswer, taskOccupiesResource } from '@wangke/contracts/task-status';
 import { liveQuery } from 'dexie';
 import { create } from 'zustand';
 import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
@@ -225,13 +226,13 @@ async function waitTaskWidgetOwner(progress: CloudTask['progress'], signal?: Abo
 }
 export async function cancelResourceTasks(resource: string, kind?: CloudTaskKind) {
   const { tasks } = await cloudRequest<{ tasks: CloudTask[] }>('/tasks');
-  await Promise.all(tasks.filter(t => t.resource === resource && (!kind || t.kind === kind) && ['queued','running','waiting_user'].includes(t.status)).map(t => cloudRequest(`/tasks/${t.id}/cancel`, { method: 'POST' })));
+  await Promise.all(tasks.filter(t => t.resource === resource && (!kind || t.kind === kind) && taskOccupiesResource(t.status)).map(t => cloudRequest(`/tasks/${t.id}/cancel`, { method: 'POST' })));
 }
 export async function commandChatTask(sessionId: number | null, action: string, value?: unknown, taskId?: string): Promise<boolean> {
   const owner = cloud.userId;
   const { tasks } = await cloudRequest<{ tasks: CloudTask[] }>('/tasks');
   if (owner !== cloud.userId) throw new Error('client_account_changed');
-  const task = tasks.find(t => (!taskId || t.id === taskId) && t.resource === `session:${sessionId}` && ['running','waiting_user'].includes(t.status));
+  const task = tasks.find(t => (!taskId || t.id === taskId) && t.resource === `session:${sessionId}` && taskAcceptsAnswer(t.status));
   if (!task) return false;
   await cloudRequest(`/tasks/${task.id}/commands`, { method: 'POST', body: JSON.stringify({ action, value, nonce: crypto.randomUUID() }) });
   return true;

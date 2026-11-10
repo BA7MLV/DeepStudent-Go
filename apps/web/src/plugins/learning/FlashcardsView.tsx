@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { BuiltinViewProps } from '../builtins';
 import type { CardRow } from '../../store/db';
 import { confirmDialog } from '../../ui';
+import { isTaskUnfinished } from '@wangke/contracts/task-status';
 import './learning.css';
 import { useSustained } from '../../utils/useSustained';
 
@@ -50,7 +51,7 @@ function MaterialCards({ materialId, call, snapshot }: { materialId: string; cal
     try { await call('cards.update', { materialId, id, expected: card.status, status }); setError(''); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
-  const running = snapshot?.tasks.some(t => ['queued', 'running', 'waiting_user'].includes(t.status));
+  const running = snapshot?.tasks.some(t => isTaskUnfinished(t.status));
   return <>
     <p className="text-sm text-muted">卡片和审核结果复用原学习记录。生成由服务器执行，关闭此页面后仍会继续；服务器重启中断时可重试。</p>
     {error ? <p role="alert">{error}</p> : null}

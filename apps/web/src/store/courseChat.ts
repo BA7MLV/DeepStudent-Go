@@ -4,6 +4,7 @@ import { patchConversationSession, reviseConversationSession, readConversationSe
 import { learningEdit, learningId, submitLearning } from '../client/learning';
 import { removeConversationMessages, deleteServerSession, forkServerSession } from '../client/conversations';
 import type { CloudTask } from '@wangke/contracts/cloud';
+import { isTaskUnfinished } from '@wangke/contracts/task-status';
 import { useChatNotifications } from './chatNotifications';
 import { readChatPage, readChatHistory } from './chatHistory';
 import { responsePhase, type ProcessPhase } from '../utils/responseProcess';
@@ -249,7 +250,7 @@ export function reflectArtifactEdit(row: ChatRow) {
 export async function reflectCloudTasks(tasks: CloudTask[], dataChanged = false) {
   // Global activity discovers background sessions, never replays message bodies.
   const runningIds = [...new Set([...tasks.filter(task => task.kind === 'chat' && task.input.action !== 'compressContext'
-    && ['queued', 'running', 'waiting_user'].includes(task.status)).map(task => Number(task.input.sessionId)), ...pendingCloudSubmissions.values()])].filter(Boolean);
+    && isTaskUnfinished(task.status)).map(task => Number(task.input.sessionId)), ...pendingCloudSubmissions.values()])].filter(Boolean);
   const previous = useCourseChat.getState().runningIds;
   if (previous.length !== runningIds.length || previous.some(id => !runningIds.includes(id))) useCourseChat.setState({ runningIds });
   for (const id of runningIds) followSession(id);
