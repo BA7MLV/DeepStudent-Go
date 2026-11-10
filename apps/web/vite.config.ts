@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { formatBuildTime } from './src/utils/buildInfo';
 import { dshEsm } from './dsh-esm';
 import { shellPrecache, type BuildManifestChunk } from './pwa-precache';
+import { appDemandByteBudget } from './pwa-byte-budget';
 
 const require = createRequire(import.meta.url);
 const dependencyDirectory = (name: string) => {
@@ -244,6 +245,7 @@ export default defineConfig({
               cacheName: 'app-demand-assets',
               cacheableResponse: { statuses: [200] },
               expiration: { maxEntries: 160, maxAgeSeconds: 30 * 24 * 3600 },
+              plugins: [appDemandByteBudget],
             },
           },
           {

@@ -42,9 +42,12 @@ export async function migrateResourceOutbox() {
   }
 }
 
-export async function readResources(projectId?: string, path = '', archived = true): Promise<ResourceDirectory> {
+export const RESOURCE_PAGE_SIZE = 500;
+
+export async function readResources(projectId?: string, path = '', archived = true, cursor?: string, limit?: number): Promise<ResourceDirectory> {
   const owner = cloud.userId, runtime = await serverRuntime(owner);
-  const value = await runtime.read({ kind: 'resources', ...(projectId ? { projectId } : {}), path, archived });
+  const value = await runtime.read({ kind: 'resources', ...(projectId ? { projectId } : {}), path, archived,
+    ...(cursor === undefined ? {} : { cursor }), ...(limit === undefined ? {} : { limit }) });
   if (owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
   return value.value as unknown as ResourceDirectory;
 }
@@ -91,8 +94,10 @@ async function dispatchResourceCommand(operation: ResourceOperation, blob?: Blob
   return enqueueResourceCommand(operation, blob, operationId);
 }
 
-export function followResources(projectId: string | undefined, path: string, changed: (directory: ResourceDirectory) => void, failed: (error: unknown) => void) {
-  return followResourceProjection({ kind: 'resources', ...(projectId ? { projectId } : {}), path, archived: true }, changed, failed);
+/** The projection always re-reads the FIRST page on change; accumulated pages
+ * are the caller's concern and must be reset when the projection replaces. */
+export function followResources(projectId: string | undefined, path: string, changed: (directory: ResourceDirectory) => void, failed: (error: unknown) => void, limit?: number) {
+  return followResourceProjection({ kind: 'resources', ...(projectId ? { projectId } : {}), path, archived: true, ...(limit === undefined ? {} : { limit }) }, changed, failed);
 }
 
 export function followResourceTrash(changed: (value: { projects: (ProjectDto & { deletedAt: string })[] }) => void, failed: (error: unknown) => void) {

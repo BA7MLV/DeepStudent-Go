@@ -100,6 +100,8 @@
     "test:tasks": "npm run build:api && tsx scripts/test-task-executors.mjs && tsx scripts/test-task-projections.mjs",
     "test:task-projections": "tsx scripts/test-task-projections.mjs",
     "test:task-status": "tsx --test scripts/test-task-status.mjs",
+    "test:pwa-byte-budget": "tsx --test scripts/test-pwa-byte-budget.mjs",
+    "test:resources:pagination": "tsx scripts/test-resource-pagination.mjs",
     "test:server-media": "npm run build:api && tsx scripts/test-media-policy.mjs && tsx scripts/test-server-media.mjs",
     "test:bilibili:server": "npm run build:api && tsx scripts/test-server-bilibili.mjs",
     "test:bilibili:e2e": "npm run build:api && tsx scripts/e2e-bilibili-server.mjs",

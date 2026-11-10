@@ -12,7 +12,7 @@ export type ResponseSegment = {
 export type RuntimeRead =
   | { kind: 'preferences' }
   | { kind: 'permissions' }
-  | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean }
+  | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean; cursor?: string; limit?: number }
   | { kind: 'resourceTrash' }
   | { kind: 'courseDocument'; courseId: string }
   | { kind: 'systemDocument'; path: string }

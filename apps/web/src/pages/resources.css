@@ -38,3 +38,6 @@
 .resource-window[data-mobile='true'] .resource-grid[data-view='list'] .resource-tile { display: flex; }
 .resource-window[data-mobile='true'] .resource-grid[data-view='list'] .resource-open { padding-right: 48px; }
 .resource-window[data-mobile='true'] .resource-grid[data-view='list'] .resource-more { top: 8px; }
+
+/* Load-more control for paged large directories. */
+.resource-pages { display: flex; justify-content: center; padding: 12px 0 4px; }

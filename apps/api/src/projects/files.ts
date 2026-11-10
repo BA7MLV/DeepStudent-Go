@@ -125,6 +125,32 @@ export class ProjectFiles {
     });
   }
 
+  /** Paged listing for large directories. readdir is cheap; the per-entry stat
+   * and course indexing are not, so only the requested page is stat-ed. Names
+   * are ordered by code unit, making the cursor a stable forward offset that
+   * tolerates concurrent deletions (strictly-greater comparison). The legacy
+   * 5000-entry 413 stays for the unpaginated path; the paged path keeps a much
+   * higher readdir safety ceiling instead of stat-ing every file. */
+  listPage(id: string, value = '', cursor?: string, limit = 500): { entries: ProjectFileDto[]; next?: string } {
+    return this.directory(id, this.parts(value, true), directory => {
+      const names = fs.readdirSync(directory);
+      if (names.length > 200000) throw new ProjectError('project_directory_too_large', 413);
+      const visible = names.filter(name => !/[\u0000-\u001f\u007f\\]/.test(name)).sort();
+      const start = cursor === undefined ? 0 : (() => { const at = visible.findIndex(name => name > cursor); return at === -1 ? visible.length : at; })();
+      const page = visible.slice(start, start + limit);
+      const entries: ProjectFileDto[] = [];
+      for (const name of page) {
+        try {
+          const stat = this.stat(path.join(directory, name));
+          entries.push({ name, path: value ? `${value}/${name}` : name, kind: stat.isDirectory() ? 'directory' : 'file', size: stat.size, updatedAt: stat.mtime.toISOString(), revision: revision(stat) });
+        } catch (error) {
+          if (!(error instanceof ProjectError) && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      return { entries, next: start + limit < visible.length ? page[page.length - 1] : undefined };
+    });
+  }
+
   /** Bounded metadata revision for a settled workspace. Never follows links or
    * reads file contents (including sockets/FIFOs created by sandbox commands).
    * Unlike list(), every entry contributes, even an unreadable/special one. */

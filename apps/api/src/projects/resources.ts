@@ -425,6 +425,36 @@ export class ResourceFiles {
     }
     return { project: projectId ? project : null, rootId, path: directory, folderId: this.folderId(owner, id, directory), entries };
   }
+  /** Paged listing for large directories. The filesystem page supplies the
+   * cursor; DB-mapped placements, project scopes and missing courses are
+   * bounded and only attached to the first page so accumulated pages never
+   * duplicate them. */
+  listPage(owner: string, projectId: string | undefined, directory = '', archived = false, cursor?: string, limit = 500): ResourceDirectory {
+    this.migrate(owner);
+    const rootId = this.root(owner), id = projectId ?? rootId;
+    const project = this.projects.get(owner, id);
+    if (process.platform !== 'linux') this.projects.assertNoExecution(id);
+    const page = this.projects.files.listPage(id, directory, cursor, limit);
+    const entries = page.entries.map(file => this.index(owner, id, { ...file, projectId: id }));
+    if (cursor === undefined) {
+      for (const mapped of this.db.prepare('SELECT * FROM resource_files WHERE owner_id=? AND project_id=?').all(owner, id) as Placement[]) {
+        const parent = path.posix.dirname(mapped.path) === '.' ? '' : path.posix.dirname(mapped.path);
+        if (parent !== directory || entries.some(entry => entry.courseId === mapped.course_id || entry.path === mapped.path)) continue;
+        const course = this.records.get(owner, 'videos', mapped.course_id);
+        if (course) entries.push({ name: path.posix.basename(mapped.path), path: mapped.path, projectId: id, kind: 'file', size: course.size ?? 0,
+          updatedAt: new Date(course.createdAt || 0).toISOString(), revision: '', courseId: mapped.course_id, missing: true });
+      }
+      if (!projectId) {
+        for (const scope of this.projects.list(owner).filter(p => p.id !== rootId && (archived || !p.archived))) {
+          entries.push({ name: scope.name, path: '', projectId: scope.id, kind: 'directory', size: 0, updatedAt: scope.updatedAt, revision: scope.updatedAt, scope, ...this.folderMetadata(owner, scope.id, '') });
+        }
+        for (const course of this.rows(owner, 'videos').filter(c => !this.placement(owner, c.id))) {
+          entries.push({ name: course.name, path: '', projectId: rootId, kind: 'file', size: course.size ?? 0, updatedAt: new Date(course.createdAt || 0).toISOString(), revision: '', courseId: course.id, missing: true });
+        }
+      }
+    }
+    return { project: projectId ? project : null, rootId, path: directory, folderId: this.folderId(owner, id, directory), entries, ...(page.next ? { next: page.next } : {}) };
+  }
   private folderMetadata(owner: string, projectId: string, directory: string) {
     const folderId = this.folderId(owner, projectId, directory);
     const color = folderId == null ? undefined : this.records.get(owner, 'folders', folderId)?.color as ResourceFolderColor | undefined;
