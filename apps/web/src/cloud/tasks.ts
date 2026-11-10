@@ -31,7 +31,15 @@ export async function submitCloudTask(kind: CloudTaskKind, resource: string, inp
       const unsettled = await pending();
       if (unsettled.length) throw new Error(unsettled[0].error ?? 'conversation_session_not_confirmed');
     }
-  } else if (!(kind === 'handoutEdit' && input.action === 'persist')) await flushCloud();
+  } else if (!(kind === 'handoutEdit' && input.action === 'persist')) {
+    // Admission only needs local pending writes pushed to the server — the same
+    // contract the chat branch above already follows. A global records pull adds
+    // no admission dependency (the task reads server state, not this mirror);
+    // the completion path owns refreshing the projection afterwards.
+    await flushPreferences();
+    if (account !== cloud.userId) throw new Error('client_account_changed');
+    await drainLearning();
+  }
   // A manual handout edit carries the original complete CAS baseline. Admission
   // checks that baseline transactionally on the server; hydrating the entire
   // account first adds no dependency and must not silently rebase the editor.

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { db, type MaterialBlockRow } from '../store/db';
+import { loadMaterialBlocksSnapshot } from '../client/material-blocks';
 import {
   MR_UNIT_ATTR,
   prepareHtmlDocument,
@@ -164,10 +165,7 @@ const src = await readHtmlText(blob);
       probe.remove();
       const markRgb = /rgba?\(([^)]+)\)/.exec(accent)?.[1]?.replace(/[^\d.,\s]/g, '').trim() ?? '';
       const next = prepareHtmlDocument(src, { remote, markRgb });
-      const rows: MaterialBlockRow[] = await db.materialBlocks
-        .where('materialId')
-        .equals(materialId)
-        .sortBy('idx');
+      const rows: MaterialBlockRow[] = await loadMaterialBlocksSnapshot(materialId, () => { if (cancelled) throw new Error('material_read_cancelled'); });
       if (cancelled) return;
       // 位置标签仍以入库块为准（那边才带「§2.1」这类章节前缀），库里没有才退回「第 N 段」
       const map = new Map<number, string>();

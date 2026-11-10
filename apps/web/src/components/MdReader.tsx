@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Markdown as XMarkdown } from './markdown/Markdown';
 import { Button, Spinner } from '@heroui/react';
 import { db, type MaterialBlockRow } from '../store/db';
+import { loadMaterialBlocksSnapshot } from '../client/material-blocks';
 import { getMaterialFile } from '../store/fileStore';
 import type { MaterialReaderHandle } from '../materials/types';
 import { extractMdUnits } from '../materials/md';
@@ -196,10 +197,7 @@ export default function MdReader({ blob, materialId, initialUnit, handleRef, onU
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const rows: MaterialBlockRow[] = await db.materialBlocks
-        .where('materialId')
-        .equals(materialId)
-        .sortBy('idx');
+      const rows: MaterialBlockRow[] = await loadMaterialBlocksSnapshot(materialId, () => { if (cancelled) throw new Error('material_read_cancelled'); });
       if (cancelled) return;
       const next = new Map<number, string>();
       for (const r of rows) {

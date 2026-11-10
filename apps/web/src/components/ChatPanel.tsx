@@ -53,6 +53,7 @@ import { useMessageDeletion } from './useMessageDeletion';
 import { useChatScroll } from './useChatScroll';
 import ChatHistorySkeleton from './ChatHistorySkeleton';
 import { readChatPage, readChatHistory } from '../store/chatHistory';
+import { materialBlocksSnapshotExist } from '../client/material-blocks';
 import { framePatch } from '../utils/framePatch';
 import { MarkdownCode, MarkdownPre } from './mermaid/markdown';
 import { MarkdownTable } from './MdTable';
@@ -793,10 +794,10 @@ export default function ChatPanel({
       }
       // ── 阅读材料：检索的是文本块（materialBlocks）──
       if (isMaterial) {
-        const blockCount = await db.materialBlocks.where('materialId').equals(videoId).count();
+        const hasBlocks = await materialBlocksSnapshotExist(videoId, () => { if (!current()) throw new Error('material_read_cancelled'); });
         if (!current()) return;
         // 没有可检索文字也能读取图片目录、展示原图或框选提问，不能把整个聊天锁死。
-        if (blockCount === 0) {
+        if (!hasBlocks) {
           setIndexNote(
             materialKind === 'page'
               ? chatText('chatPanel.noSearchText')
@@ -1000,7 +1001,9 @@ export default function ChatPanel({
       if (next === undefined) delete row.mcpServerIds;
       else row.mcpServerIds = next;
     });
-    await (await import('../cloud/sync')).flushCloud();
+    // 只需把这一条会话修订推上去：会话字段是学习命令 journal 的一部分，
+    // 精确排空该实体即可，不再为此拉起全账号 records 周期。
+    await (await import('../client/learning')).drainLearning([`session:${activeId}`]);
     if (historySession.current === activeId) setMcpServerIds(next);
   };
   const updateSkillIds = (next: number[] | undefined) => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Button } from '@heroui/react';
 import { createPortal } from 'react-dom';
 import { db, type MaterialBlockRow } from '../store/db';
+import { loadMaterialBlocksSnapshot } from '../client/material-blocks';
 import { Sym } from '../ui';
 import ReaderProgress from './ReaderProgress';
 import DocSkeleton from './DocSkeleton';
@@ -108,10 +109,7 @@ export default function DocxReader({ blob, materialId, initialUnit, handleRef, o
       if (cancelled) return;
 
       // 数据侧：按 unit 去重（长段落被切成多块时共用一个 unit）
-      const rows: MaterialBlockRow[] = await db.materialBlocks
-        .where('materialId')
-        .equals(materialId)
-        .sortBy('idx');
+      const rows: MaterialBlockRow[] = await loadMaterialBlocksSnapshot(materialId, () => { if (cancelled) throw new Error('material_read_cancelled'); });
       const labelByUnit = new Map<number, string>();
       for (const r of rows) {
         if (!labelByUnit.has(r.unit)) {
