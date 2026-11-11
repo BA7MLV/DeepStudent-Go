@@ -5,6 +5,8 @@ export interface SessionQueueItem<Attachment> {
   /** Stable command identity, also used after reload and explicit retry. */
   operationId?: string;
   state?: 'pending' | 'accepted' | 'uncertain';
+  /** Last submission failure, for restoring the error in its conversation. */
+  error?: string;
   draftOwner?: string;
   action?: 'continue';
   rowId?: number;

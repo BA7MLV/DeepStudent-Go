@@ -345,6 +345,19 @@
     "stop": "停止生成",
     "send": "发送"
   },
+  "chatAttachment": {
+    "preview": "预览附件 {{name}}",
+    "downloadNamed": "下载附件 {{name}}",
+    "clickPreview": "点击预览",
+    "close": "关闭附件预览",
+    "loading": "正在读取附件",
+    "content": "附件正文",
+    "copy": "复制正文",
+    "download": "下载原文件",
+    "failed": "上传失败",
+    "limited": "仅预览部分正文，完整内容请下载原文件。",
+    "fallback": "原文件暂时无法读取，当前显示已保存的正文摘要。"
+  },
   "courseChat": {
     "copy": "复制",
     "forkMenu": "分支出新会话",
@@ -356,7 +369,6 @@
     "insertNow": "立刻插入这条，不等这一轮答完",
     "deleteQueued": "删掉这条排队消息",
     "tooManyAttachments": "每条消息最多 {{count}} 个附件，请移除附件后重新粘贴",
-    "pastedAsFile": "粘贴内容超过 4000 字节，已自动转换为 txt 附件",
     "askEnded": "本次提问已结束，请使用当前问题卡",
     "queueSend": "排队发送",
     "stopKeep": "停止生成（已写出的内容会保留）",

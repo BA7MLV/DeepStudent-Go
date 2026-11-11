@@ -33,6 +33,8 @@ import type { SessionIndexPage } from '@wangke/contracts/client-runtime';
 import { serverRuntime } from '../client/bootstrap';
 import i18n from '../i18n';
 import { readRecordKeys } from '../cloud/sync';
+import { displayChatError } from '../utils/chatError';
+import { taskFailure } from '../utils/taskFailure';
 
 /** Server commands + durable private drafts + disposable page projections.
  * No browser model execution or authoritative conversation writes live here. */
@@ -149,7 +151,24 @@ function sessionQueue() {
   const model = new SessionQueueModel<ChatAttachment>({
     persistence: adapter,
     failed: error => { if (adapter.current()) writeView(activeKey(), { historyError: `待发消息保存失败，已阻止派发，请勿刷新：${error instanceof Error ? error.message : String(error)}` }); },
-    read: readView, replace: (id, queued) => { if (adapter.current()) writeView(id, { queued }); },
+    read: readView, replace: (id, queued) => {
+      if (!adapter.current()) return;
+      const messages = [...readView(id).messages];
+      for (const item of queued) {
+        if (item.state !== 'uncertain') continue;
+        const operationId = item.operationId ?? item.id;
+        const reason = displayChatError(item.error);
+        if (item.action === 'continue') {
+          const index = messages.findIndex(message => message.rowId === item.rowId && !message.streaming);
+          if (index >= 0) messages[index] = { ...messages[index], pendingOperationId: operationId, interrupted: true, interruptReason: reason };
+          continue;
+        }
+        const userKey = `cloud-pending-user-${operationId}`, answerKey = `cloud-pending-answer-${operationId}`;
+        if (!messages.some(message => message.key === userKey)) messages.push({ key: userKey, role: 'user', content: item.text, attachments: item.attachments, explicitSkillIds: item.explicitSkillIds, createdAt: item.createdAt });
+        if (!messages.some(message => message.key === answerKey)) messages.push({ key: answerKey, operationId, role: 'ai', content: i18n.t('chat.failed', { reason }), error: true, createdAt: item.createdAt });
+      }
+      writeView(id, { queued, messages });
+    },
     nextId: () => crypto.randomUUID(),
     send: (id, item) => {
       if (!adapter.current()) return Promise.reject(new Error('client_account_changed'));
@@ -434,11 +453,11 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
       writeView(id, { messages: readView(id).messages.map(message => message.key === userKey || message.key === answerKey ? { ...message, taskId: task.id, syncPending: true } : message) });
     } catch (error) {
       if (!currentScope() || !adapter.current()) return;
-      const turnKey = id ?? key, reason = error instanceof Error ? error.message : String(error);
+      const turnKey = id ?? key, reason = displayChatError(taskFailure(error).reason);
       if (id != null) timeline(id).uncertain(operationId);
       writeView(turnKey, { messages: readView(turnKey).messages.map(message => message.key === answerKey
         ? continuing ? { ...message, streaming: false, interrupted: true, interruptReason: reason }
-          : { ...message, content: `发送失败：${reason}`, streaming: false, error: true } : message), loading: view.loading && key !== 0, historyError: reason });
+          : { ...message, content: i18n.t('chat.failed', { reason }), streaming: false, error: true } : message), loading: view.loading && key !== 0, historyError: null });
       markRunning(turnKey, view.loading && key !== 0);
       if (id != null) { consume(); if (fromComposer) writeView(id, { turnSkillIds: [] }); await sessionQueue().restore(id).catch(() => {}); }
     } finally {
@@ -472,7 +491,7 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
     if (state.loading || !message) return;
     if (message.error && message.operationId && id != null) {
       const item = (await browserChatQueue().list(id)).find(item => (item.operationId ?? item.id) === message.operationId);
-      if (current() && item) await get().send(item.text, undefined, id, undefined, item.attachments ?? [], item.explicitSkillIds ?? [], { ...item, explicitRetry: true });
+      if (current() && item) await get().send(item.text, undefined, id, undefined, item.attachments ?? [], item.explicitSkillIds ?? [], { ...item, modelSelection: taskModelChoice(id), explicitRetry: true });
       return;
     }
     if (id == null || message.rowId == null) return;
@@ -482,14 +501,14 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
       writeView(id, { loading: true, messages: readView(id).messages.map(item => item.key === key ? { ...item, pendingOperationId: operationId } : item) });
       try {
         const settings = getSettings(), selection = taskModelChoice(id);
-        const task = await adapter.submit(id, { id: operationId, operationId, text: '继续回答', action: 'continue', rowId: message.rowId },
+        const task = await adapter.submit(id, { id: operationId, operationId, text: '继续回答', action: 'continue', rowId: message.rowId, modelSelection: selection },
           { sessionId: id, rowId: message.rowId, action: 'continue', ...(selection ? { modelSelection: JSON.parse(JSON.stringify(selection)) } : {}), thinkingLevel: settings.thinkingEnabled ? settings.thinkingEffort : 'none' }, !!message.pendingOperationId);
         if (!current() || !adapter.current()) return;
         followSession(id);
         writeView(id, { messages: readView(id).messages.map(item => item.key === key ? { ...item, taskId: task.id, pendingOperationId: undefined, streaming: true, interrupted: false, interruptReason: undefined } : item) });
       } catch (error) {
         if (!current() || !adapter.current()) return;
-        writeView(id, { loading: false, messages: readView(id).messages.map(item => item.key === key ? { ...item, streaming: false, interrupted: true, interruptReason: String(error) } : item) });
+        writeView(id, { loading: false, messages: readView(id).messages.map(item => item.key === key ? { ...item, streaming: false, interrupted: true, interruptReason: displayChatError(taskFailure(error).reason) } : item) });
         markRunning(id, false); await sessionQueue().restore(id).catch(() => {});
       } finally { if (current()) { pendingCloudSubmissions.delete(operationId); serverSessions.get(id)?.refresh(); } }
       return;

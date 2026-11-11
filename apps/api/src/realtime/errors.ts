@@ -5,7 +5,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'client/forbidden': {};
     'client/conflict': {};
     'client/uncertain': {};
-    'client/domain': { code: string };
+    'client/domain': { code: string; admissionRejected?: boolean };
     'client/record-conflict': { table: string; key: string | number; fields: string[] };
   }
 }

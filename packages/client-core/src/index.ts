@@ -9,6 +9,7 @@ import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
+    'client/domain': { code: string; admissionRejected?: boolean };
     'client/record-conflict': { table: string; key: string | number; fields: string[] };
   }
 }
@@ -397,14 +398,14 @@ export async function createClientRuntime(identity: { server: string; account: s
     submitTask: async (request: RuntimeTaskSubmit) => {
       if (disposed) throw new Error('client_runtime_disposed');
       const result = await ctx.remote.clientRuntime.submitTask(request);
-      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
+      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code, detail: result.error.details });
       if (disposed) throw new Error('client_runtime_disposed');
       return result.value;
     },
     taskAdmission: async (operationId: string) => {
       if (disposed) throw new Error('client_runtime_disposed');
       const result = await ctx.remote.clientRuntime.taskAdmission(operationId);
-      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
+      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code, detail: result.error.details });
       if (disposed) throw new Error('client_runtime_disposed');
       return result.value;
     },

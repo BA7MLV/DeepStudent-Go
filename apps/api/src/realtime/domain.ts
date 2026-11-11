@@ -398,10 +398,18 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   async submitTask(owner: string, request: RuntimeTaskSubmit): Promise<RuntimeTask> {
     if (!this.submit) throw new Error('task_admission_unavailable');
-    try { return TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(this.submit(owner, request)); }
+    let submitted = false;
+    try {
+      const task = this.submit(owner, request);
+      submitted = true;
+      return TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(task);
+    }
     catch (error) {
       if (error instanceof Error && error.message === 'task_nonce_conflict') throw new RemoteError('client/conflict', 'Task operation id reused with different content', {});
-      throw this.failure(error);
+      // Only a synchronous admission failure with no durable task is a known
+      // rejection. Encoding a committed result can fail too; that stays uncertain.
+      const rejected = !submitted && !this.store.db.prepare('SELECT 1 FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, request.operationId);
+      throw this.failure(error, rejected);
     }
   }
   async taskAdmission(owner: string, operationId: string): Promise<RuntimeTaskAdmission> {
@@ -613,11 +621,12 @@ export class ClientRuntimeDomain implements RuntimeDomain {
       return records.apply(owner, clientLearningMutations(records, owner, request.edits));
     });
   }
-  private failure(error: unknown) {
+  private failure(error: unknown, admissionRejected = false) {
     if (error instanceof RemoteError) return error;
     if (error instanceof CloudConflict) return new RemoteError('client/record-conflict', 'Record changes require reconciliation', { table: error.table, key: error.key, fields: error.fields });
     const code = error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : 'domain_failed';
-    return new RemoteError('client/domain', 'Domain request failed', { code });
+    if (code === 'domain_failed') console.error('client_domain_failed', error);
+    return new RemoteError('client/domain', 'Domain request failed', { code, ...(admissionRejected ? { admissionRejected: true } : {}) });
   }
   diagnostics() { return { subscriptions: this.observers.size + this.journals.size, revision: this.cursor, commands: this.inflight.size }; }
   close() { clearInterval(this.timer); clearTimeout(this.fileWake); this.fileWatcher?.close(); for (const observer of [...this.observers, ...this.journals]) observer.wake(); }

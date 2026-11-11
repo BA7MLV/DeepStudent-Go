@@ -1,6 +1,23 @@
 {
   "studyRead": { "loadError": "Study records could not be loaded. The last summary is preserved; clearing is disabled until refreshed.", "dashboardLoadError": "Study records are temporarily unavailable. Statistics are hidden until refreshed; this does not mean your records are lost.", "retry": "Reload" },
   "recovery": {
+    "taskErrors": {
+      "modelNotConfigured": "No chat model is configured. Select a model in Settings, then retry.",
+      "modelPresetNotFound": "The selected model preset is unavailable. Check your model settings.",
+      "modelProviderNotFound": "The selected model provider is unavailable. Check your model settings.",
+      "modelCapabilityUnavailable": "The selected provider does not support chat. Check your model settings.",
+      "invalidModelSelection": "The selected model configuration is invalid. Check your model settings.",
+      "taskFallbackNotSupported": "This task does not support automatic model fallback. Configure a single model, then retry.",
+      "sessionNotFound": "The original conversation is missing or archived. Keep your message and send it in an available conversation.",
+      "pluginUnavailable": "A plugin required by this task is unavailable. Check your plugin settings.",
+      "invalidTask": "The request format is invalid. Keep your message and edit it before sending.",
+      "taskBusy": "Another page may be sending this message. Try again shortly.",
+      "accountChanged": "Your login or connection has changed. Reload the page, then retry.",
+      "authenticationExpired": "Your login has expired. Sign in again, then retry.",
+      "taskConflict": "This request differs from the submitted message. Reload to view the original; do not send it again.",
+      "interrupted": "The request was interrupted. Your message and attachments are saved. Try again shortly.",
+      "generic": "The server could not process this request. Your message and attachments are saved. Try again shortly."
+    },
     "inkConflict": "Annotation changes conflict. Originals are saved; review them in Activity.",
     "inkPending": "Annotations await server confirmation. Originals are saved.",
     "inkConfirmed": "Annotations reflect server-confirmed data.",

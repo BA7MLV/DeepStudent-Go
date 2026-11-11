@@ -23,7 +23,7 @@ import { startCloud } from '/src/cloud/sync.ts';
 import { useCourseChat } from '/src/store/courseChat.ts';
 import CloudActivity from '/src/cloud/Activity.tsx';
 import { serverRuntime, disposeServerRuntime } from '/src/client/bootstrap.ts';
-import { submitCloudTask } from '/src/cloud/tasks.ts';
+import { submitCloudTask, retryPendingTaskCommand, usePendingTaskCommands } from '/src/cloud/tasks.ts';
 window.addEventListener('pagehide', () => console.log('lifecycle:pagehide-before-runtime'), { capture: true });
 await startCloud(window.owner);
 const runtime = await serverRuntime(window.owner);
@@ -34,7 +34,8 @@ await useCourseChat.getState().loadSession(900001);
 window.probe = { state: () => useCourseChat.getState(), load: id => useCourseChat.getState().loadSession(id), invalidate: disposeServerRuntime,
   older: () => useCourseChat.getState().loadOlder(), diagnostics: async () => (await serverRuntime(window.owner)).diagnostics(),
   sessionDiagnostics: async id => (await serverRuntime(window.owner)).session(id).diagnostics(),
-   submit: (operationId = 'session-lost-response-operation') => submitCloudTask('chat', 'session:900001', { sessionId: 900001, text: 'retained lost-response draft' }, operationId) };
+   retry: retryPendingTaskCommand, pending: () => usePendingTaskCommands.getState().commands,
+   submit: (operationId = 'session-lost-response-operation', input = {}) => submitCloudTask('chat', 'session:900001', { sessionId: 900001, text: 'retained lost-response draft', ...input }, operationId) };
 function Conversation() { const messages = useCourseChat(s => s.messages); return React.createElement('pre', { id: 'messages' }, JSON.stringify(messages)); }
 createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode, null, React.createElement(CloudActivity), React.createElement(Conversation)));
 document.body.dataset.ready = 'yes';`;
@@ -101,7 +102,8 @@ document.body.dataset.ready = 'yes';`;
   await page.route('**/api/clientRuntime/submitTask', async route => { await route.fetch(); await route.abort('failed'); });
   const failedSubmit = await page.evaluate(async () => { try { await probe.submit(); return false; } catch { return true; } });
   assert.equal(failedSubmit, true);
-  await page.getByRole('button', { name: '核对收据并使用原命令重试' }).waitFor();
+  await page.waitForFunction(() => probe.pending().length === 1);
+  assert.equal(await page.locator('[data-testid="cloud-activity"] section[data-operation-id]').count(), 0, 'submission failures never create a side recovery card');
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, 'session-lost-response-operation').n, 1);
   await page.unroute('**/api/clientRuntime/submitTask');
   assert.equal((await context.request.get(`${origin}/__session`, { timeout: 10000 })).status(), 200, 'fixture server still serves the document before reload');
@@ -121,7 +123,7 @@ document.body.dataset.ready = 'yes';`;
     throw error;
   } finally { clearTimeout(stackTimer); void debuggerSession.detach().catch(() => {}); }
   await page.locator('body[data-ready="yes"]').waitFor({ timeout: 60000 });
-  assert.equal(await page.getByRole('button', { name: '核对收据并使用原命令重试' }).count(), 0, 'accepted lost response reconciles on restart');
+  assert.equal(await page.evaluate(() => probe.pending().length), 0, 'accepted lost response reconciles on restart');
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, 'session-lost-response-operation').n, 1, 'restart never dispatches a second task');
   // A request lost before admission is a different recovery case: startup may
   // only read its receipt. Only this explicit UI action can resubmit the draft.
@@ -132,12 +134,38 @@ document.body.dataset.ready = 'yes';`;
   const submissionsBeforeMissingReload = requests.filter(path => path === '/api/clientRuntime/submitTask').length;
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.locator('body[data-ready="yes"]').waitFor({ timeout: 60000 });
-  await page.getByRole('button', { name: '核对收据并使用原命令重试', exact: true }).waitFor();
+  await page.waitForFunction(() => probe.pending().length === 1);
   assert.equal(requests.filter(path => path === '/api/clientRuntime/submitTask').length, submissionsBeforeMissingReload, 'missing admission restart must never dispatch');
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, 'session-missing-admission-operation').n, 0);
-  await page.getByRole('button', { name: '核对收据并使用原命令重试', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: '发送尚未确认。原命令已保留' }).waitFor({ state: 'hidden' });
+  await page.evaluate(() => probe.retry('session-missing-admission-operation'));
+  assert.equal(await page.evaluate(() => probe.pending().length), 0);
   assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, 'session-missing-admission-operation').n, 1, 'explicit retry reuses the original operation once');
+  // A definite admission rejection is not a lost response. Show the actual
+  // reason, preserve it over reload, then retry the exact command after repair.
+  const rejectedOperation = 'session-rejected-model-operation';
+  const wordRequest = '请你把这个变成 word。';
+  assert.equal(await page.evaluate(async ({ operationId, text }) => {
+    try { await probe.submit(operationId, { text, modelSelection: { modelRef: { providerId: 'repaired-provider', model: 'fixture' } } }); return false; }
+    catch { return true; }
+  }, { operationId: rejectedOperation, text: wordRequest }), true);
+  assert.equal((await page.evaluate(() => probe.pending()[0])).failure.reason, 'model_provider_not_found');
+  assert.equal(await page.locator('[data-testid="cloud-activity"] section[data-operation-id]').count(), 0);
+  assert.equal(await page.getByText('Domain request failed', { exact: true }).count(), 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cloud_tasks WHERE nonce=?').get(rejectedOperation).n, 0);
+  const submissionsBeforeRejectedReload = requests.filter(path => path === '/api/clientRuntime/submitTask').length;
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.locator('body[data-ready="yes"]').waitFor({ timeout: 60000 });
+  assert.equal((await page.evaluate(() => probe.pending()[0])).failure.rejected, true);
+  await page.evaluate(operationId => probe.retry(operationId).catch(() => {}), rejectedOperation);
+  assert.equal(requests.filter(path => path === '/api/clientRuntime/submitTask').length, submissionsBeforeRejectedReload + 1, 'reload is read-only; explicit rejected retry makes one attempt');
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cloud_tasks WHERE nonce=?').get(rejectedOperation).n, 0);
+  const configured = configuration.get(owner);
+  configuration.save(owner, { ...configured, providers: [...configured.providers, { ...configured.providers[0], id: 'repaired-provider' }] });
+  await page.evaluate(operationId => probe.retry(operationId), rejectedOperation);
+  assert.equal(await page.evaluate(() => probe.pending().length), 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cloud_tasks WHERE nonce=?').get(rejectedOperation).n, 1);
+  const repairedTask = store.db.prepare('SELECT input FROM cloud_tasks WHERE nonce=?').get(rejectedOperation);
+  assert.equal(JSON.parse(repairedTask.input).text, wordRequest, 'repair retry retains original Word request');
   const performanceSession = await context.newCDPSession(page);
   await performanceSession.send('Performance.enable');
   const beforeInvalidation = await performanceSession.send('Performance.getMetrics');

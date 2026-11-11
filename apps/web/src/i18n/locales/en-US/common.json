@@ -345,6 +345,19 @@
     "stop": "Stop",
     "send": "Send"
   },
+  "chatAttachment": {
+    "preview": "Preview attachment {{name}}",
+    "downloadNamed": "Download attachment {{name}}",
+    "clickPreview": "Click to preview",
+    "close": "Close attachment preview",
+    "loading": "Loading attachment",
+    "content": "Attachment content",
+    "copy": "Copy text",
+    "download": "Download original",
+    "failed": "Upload failed",
+    "limited": "Only part of the text is shown. Download the original for the full content.",
+    "fallback": "The original is unavailable. Showing the saved text excerpt."
+  },
   "courseChat": {
     "copy": "Copy",
     "forkMenu": "Branch a new session",
@@ -356,7 +369,6 @@
     "insertNow": "Insert this now, without waiting for the current reply",
     "deleteQueued": "Delete this queued message",
     "tooManyAttachments": "Up to {{count}} attachments per message; remove one before pasting again",
-    "pastedAsFile": "The pasted content exceeds 4000 bytes and was attached as a .txt file",
     "askEnded": "This question has ended; use the current question card",
     "queueSend": "Queue and send",
     "stopKeep": "Stop (keeps what has been written)",

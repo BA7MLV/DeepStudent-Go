@@ -1,5 +1,26 @@
 import i18n from '../i18n';
 
+const taskErrors = {
+  model_not_configured: 'modelNotConfigured',
+  model_preset_not_found: 'modelPresetNotFound',
+  model_provider_not_found: 'modelProviderNotFound',
+  model_capability_unavailable: 'modelCapabilityUnavailable',
+  invalid_model_selection: 'invalidModelSelection',
+  invalid_model_reference: 'invalidModelSelection',
+  task_fallback_not_supported: 'taskFallbackNotSupported',
+  session_not_found: 'sessionNotFound',
+  plugin_unavailable: 'pluginUnavailable',
+  invalid_task: 'invalidTask',
+  task_admission_uncertain: 'taskBusy',
+  client_account_changed: 'accountChanged',
+  client_runtime_disposed: 'accountChanged',
+  client_unauthenticated: 'authenticationExpired',
+  'Authentication expired': 'authenticationExpired',
+  'Task operation id reused with different content': 'taskConflict',
+  domain_failed: 'generic',
+  'Domain request failed': 'generic',
+} as const;
+
 /**
  * Provider/browser errors are not guaranteed to be localized. Keep useful
  * provider details, but translate the common transport messages that users
@@ -8,6 +29,16 @@ import i18n from '../i18n';
 export function displayChatError(reason?: string): string {
   const text = reason?.trim();
   if (!text) return i18n.t('chat.requestNotCompleted');
+
+  // The gateway folds carrier exceptions into a message containing its internal
+  // endpoint. Translate the underlying failure, not that implementation detail.
+  const carrier = text.match(/^client api: [\w/-]+ failed: (.+)$/s);
+  if (carrier) return displayChatError(carrier[1]);
+
+  if (Object.hasOwn(taskErrors, text)) {
+    return i18n.t(`settings:recovery.taskErrors.${taskErrors[text as keyof typeof taskErrors]}`);
+  }
+  if (/^(?:AbortError: )?(?:(?:the|this) (?:operation|request) was aborted|.*user aborted.*|signal is aborted.*|aborted)\.?$/i.test(text)) return i18n.t('settings:recovery.taskErrors.interrupted');
 
   if (/^(load failed|failed to fetch|network request failed)$/i.test(text)) {
     return i18n.t('chat.errors.loadFailed');

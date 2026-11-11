@@ -7,7 +7,6 @@ import { useLibraryRevision } from '../pipelines/folderPlan';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { useJobStore } from '../store/jobs';
 import { useCloudActivity } from './activityStore';
-import { usePendingTaskCommands, retryPendingTaskCommand } from './tasks';
 import FileIntentRecovery from './FileIntentRecovery';
 import PreferenceRecovery from './PreferenceRecovery';
 import LearningRecovery from './LearningRecovery';
@@ -20,9 +19,6 @@ export default function CloudActivity() {
   const error = useCloudSync(s => s.error);
   const syncedAt = useCloudSync(s => s.syncedAt);
   const [online, setOnline] = useState(() => navigator.onLine);
-  const commands = usePendingTaskCommands(s => s.commands);
-  const [retrying, setRetrying] = useState<string>();
-  const [retryError, setRetryError] = useState('');
   useEffect(() => {
     const changed = () => setOnline(navigator.onLine);
     window.addEventListener('online', changed); window.addEventListener('offline', changed);
@@ -105,15 +101,5 @@ export default function CloudActivity() {
     <LearningRecovery />
     <ResourceSaveNotice />
     {error ? <p role="alert" className="bg-surface p-3 text-danger">{error}</p> : null}
-    {commands.map(({ command }) => <section key={command.operationId} role="alert" className="bg-surface p-3">
-      <p>发送尚未确认。原命令已保留，未自动重复执行。</p>
-      {typeof command.input.text === 'string' ? <p>{command.input.text.slice(0, 200)}</p> : null}
-      <button type="button" disabled={!!retrying} onClick={() => {
-        setRetrying(command.operationId); setRetryError('');
-        void retryPendingTaskCommand(command.operationId).catch(error => setRetryError(error instanceof Error ? error.message : String(error)))
-          .finally(() => setRetrying(undefined));
-      }}>{retrying === command.operationId ? '正在核对…' : '核对收据并使用原命令重试'}</button>
-    </section>)}
-    {retryError ? <p role="alert" className="bg-surface p-3">{retryError}</p> : null}
   </div>;
 }

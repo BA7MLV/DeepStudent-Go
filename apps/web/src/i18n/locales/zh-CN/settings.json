@@ -1,6 +1,23 @@
 {
   "studyRead": { "loadError": "学习记录读取失败。已保留上次汇总，刷新成功前不能清空。", "dashboardLoadError": "学习记录暂时读不出来，刷新成功前先不显示统计；这不代表记录丢失。", "retry": "重新加载" },
   "recovery": {
+    "taskErrors": {
+      "modelNotConfigured": "尚未配置聊天模型，请先在设置中选择模型后重试。",
+      "modelPresetNotFound": "所选模型预设已不可用，请在模型设置中检查预设。",
+      "modelProviderNotFound": "所选模型的供应商已不可用，请在模型设置中检查配置。",
+      "modelCapabilityUnavailable": "所选供应商不支持聊天，请在模型设置中检查配置。",
+      "invalidModelSelection": "所选模型配置无效，请检查模型设置。",
+      "taskFallbackNotSupported": "当前任务不支持多模型自动切换，请在模型设置中改用单一模型后重试。",
+      "sessionNotFound": "原会话已不存在或已归档，请保留消息并在可用会话中重新发送。",
+      "pluginUnavailable": "此任务需要的插件不可用，请检查插件设置。",
+      "invalidTask": "发送内容格式无效，请保留消息并重新编辑。",
+      "taskBusy": "另一页面可能正在发送这条消息，请稍后再试。",
+      "accountChanged": "登录状态或连接已更新，请刷新页面后重试。",
+      "authenticationExpired": "登录已过期，请重新登录后重试。",
+      "taskConflict": "这次发送与已提交的内容不一致。请刷新页面查看原消息，不要重复发送。",
+      "interrupted": "请求已中断，消息和附件仍保留，请稍后重试。",
+      "generic": "服务器暂时无法处理这次请求，消息和附件仍保留，请稍后重试。"
+    },
     "inkConflict": "批注修改有冲突，原稿已保留，请在活动区处理",
     "inkPending": "批注等待服务器确认，原稿已保留",
     "inkConfirmed": "批注以服务器已确认资料为准",

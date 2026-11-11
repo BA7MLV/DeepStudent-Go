@@ -10,10 +10,11 @@ import { create } from 'zustand';
 import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
 import { flushPreferences } from './preferences';
 import { drainLearning, type LearningCommandRow } from '../client/learning';
+import { taskFailure, type TaskFailure } from '../utils/taskFailure';
 
-interface PendingTaskCommand { command: RuntimeTaskSubmit; createdAt: number }
+interface PendingTaskCommand { command: RuntimeTaskSubmit; createdAt: number; failure?: TaskFailure }
 export const usePendingTaskCommands = create<{ commands: PendingTaskCommand[] }>()(() => ({ commands: [] }));
-const rememberUncertain = (command: RuntimeTaskSubmit, createdAt: number) => usePendingTaskCommands.setState(state => ({ commands: [...state.commands.filter(item => item.command.operationId !== command.operationId), { command, createdAt }] }));
+const rememberUncertain = (command: RuntimeTaskSubmit, createdAt: number, failure?: TaskFailure) => usePendingTaskCommands.setState(state => ({ commands: [...state.commands.filter(item => item.command.operationId !== command.operationId), { command, createdAt, failure }] }));
 const forgetUncertain = (operationId: string) => usePendingTaskCommands.setState(state => ({ commands: state.commands.filter(item => item.command.operationId !== operationId) }));
 
 export async function submitCloudTask(kind: CloudTaskKind, resource: string, input: Record<string, unknown>, operationId: string = crypto.randomUUID()): Promise<CloudTask> {
@@ -70,8 +71,9 @@ export async function submitCloudTask(kind: CloudTaskKind, resource: string, inp
     if (account === cloud.userId && isCurrentServerRuntime(runtime)) forgetUncertain(operationId);
     return task;
   } catch (error) {
-    await database.table('_cloudMeta').put({ id, command, status: 'uncertain', createdAt: existing?.createdAt ?? Date.now() });
-    if (account === cloud.userId && isCurrentServerRuntime(runtime)) rememberUncertain(command, existing?.createdAt ?? Date.now());
+    const failure = taskFailure(error);
+    await database.table('_cloudMeta').put({ id, command, status: 'uncertain', failure, createdAt: existing?.createdAt ?? Date.now() });
+    if (account === cloud.userId && isCurrentServerRuntime(runtime)) rememberUncertain(command, existing?.createdAt ?? Date.now(), failure);
     throw error;
   }
 }
@@ -102,7 +104,7 @@ export async function reconcileTaskAdmissions(): Promise<string[]> {
       forgetUncertain(operationId);
     } else {
       uncertain.push(operationId);
-      rememberUncertain(command.command, command.createdAt);
+      rememberUncertain(command.command, command.createdAt, command.failure);
     }
   }
   return uncertain;

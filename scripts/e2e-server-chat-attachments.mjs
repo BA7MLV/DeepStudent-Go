@@ -106,6 +106,10 @@ try {
   release();
   await page.waitForFunction(() => document.querySelectorAll('[data-testid="chat-attachment-draft"] [data-state="ready"]').length === 2);
   assert.equal(uploads, 2);
+  await page.getByRole('button', { name: '预览附件 拖入的原题.txt', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="chat-document-preview"] pre')?.textContent === 'DRAGGED_FILE_MARKER：原题第一题，选项 A B C D。');
+  await page.keyboard.press('Escape');
+  await page.getByTestId('chat-document-preview').waitFor({ state: 'hidden' });
   // Optional crop: cancelling is non-destructive; keyboard resize uses original
   // pixels; a failed replacement keeps the original ready and the editor open.
   const cropButton = page.getByRole('button', { name: '裁切图片 示意图.png', exact: true });
@@ -168,11 +172,29 @@ try {
   await page.getByText('已读取拖入的资料，第 1 次回答。', { exact: false }).first().waitFor();
   await page.reload();
   await page.getByTestId('course-chat-page').waitFor({ timeout: 60000 });
+  await page.evaluate(async () => { const { applyLocale } = await import('/src/i18n/index.ts'); applyLocale('zh-CN'); });
   await page.getByText('已读取拖入的资料，第 1 次回答。', { exact: false }).first().waitFor({ timeout: 30000 });
   await page.getByTestId('chat-message-attachments').waitFor();
   const thumbnail = page.getByTestId('chat-message-attachments').locator('.chat-image');
   const thumbnailBox = await thumbnail.boundingBox();
   assert.ok(thumbnailBox.width <= 97 && thumbnailBox.height <= 97, 'sent user photos stay thumbnail-sized');
+  const documentCard = page.getByTestId('chat-message-attachments').locator('.chat-document');
+  const documentBox = await documentCard.boundingBox();
+  assert.ok(documentBox.width <= 273 && documentBox.height < 140, 'sent document cards stay compact');
+  await documentCard.getByRole('button', { name: '预览附件 拖入的原题.txt', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('[data-testid="chat-document-preview"] pre')?.textContent === 'DRAGGED_FILE_MARKER：原题第一题，选项 A B C D。');
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: '下载原文件', exact: true }).click();
+  assert.equal((await download).suggestedFilename(), '拖入的原题.txt');
+  await page.getByRole('button', { name: '关闭附件预览', exact: true }).click();
+  const textFile = row.attachments.find(file => !file.dataUrl);
+  const unavailableUrl = `**/api/v1/files/${textFile.serverId}`;
+  await page.route(unavailableUrl, route => route.fulfill({ status: 503, json: { error: 'fixture_unavailable' } }));
+  await documentCard.getByRole('button', { name: '预览附件 拖入的原题.txt', exact: true }).click();
+  await page.getByTestId('chat-document-preview').getByText('原文件暂时无法读取，当前显示已保存的正文摘要。', { exact: true }).waitFor();
+  assert.match(await page.getByTestId('chat-document-preview').locator('pre').innerText(), /DRAGGED_FILE_MARKER/);
+  await page.keyboard.press('Escape');
+  await page.unroute(unavailableUrl);
   await thumbnail.click();
   await page.getByTestId('chat-image-viewer').waitFor();
   await page.getByRole('button', { name: '关闭图片预览', exact: true }).click();
