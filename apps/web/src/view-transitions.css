@@ -1,0 +1,46 @@
+/* Same-document View Transitions 的全局节奏。时长沿用 transitions.css 的语义 token，
+   手机取整档，桌面（≥1024px，侧栏常驻的断点）取约三分之二。曲线统一用产品的 settle 曲线。 */
+:root {
+  --vt-ease: var(--ease-smooth-out);
+  /* 页面级共享元素（卡片长成播放器、磁贴长成标题行） */
+  --vt-page-dur: 600ms;
+  /* 面内状态切换（学习助手开合、筛选变化）只做短交叉淡化 */
+  --vt-panel-dur: 350ms;
+}
+@media (min-width: 1024px) {
+  :root {
+    --vt-page-dur: 400ms;
+    --vt-panel-dur: 250ms;
+  }
+}
+
+/* 共享元素：旧帧在前 30% 内让位，新帧等移动过半后再进场。 */
+::view-transition-group(*),
+::view-transition-image-pair(*) {
+  animation-duration: var(--vt-page-dur);
+  animation-timing-function: var(--vt-ease);
+}
+::view-transition-old(*) {
+  animation-duration: calc(var(--vt-page-dur) * 0.3);
+  animation-timing-function: var(--vt-ease);
+}
+::view-transition-new(*) {
+  animation-delay: calc(var(--vt-page-dur) * 0.45);
+  animation-duration: calc(var(--vt-page-dur) * 0.55);
+  animation-timing-function: var(--vt-ease);
+  animation-fill-mode: both;
+}
+
+/* 没挂名字的其余内容只做一次短交叉淡化，把「变化」留给共享元素。 */
+::view-transition-group(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--vt-panel-dur);
+  animation-delay: 0ms;
+  animation-timing-function: var(--ease-in-out);
+}
+
+/* 学习助手开合这类面内切换整页只淡化，不做页面级位移。 */
+::view-transition-group(study-assistant-head) {
+  animation-duration: var(--vt-panel-dur);
+}

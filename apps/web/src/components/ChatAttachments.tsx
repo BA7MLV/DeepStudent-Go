@@ -6,6 +6,7 @@ import { downloadAttachment, readAttachmentBlob } from '../chat/prepareAttachmen
 import { Hint, Sym, toast } from '../ui';
 import { prefersReducedMotion } from '../utils/motion';
 import ImagePreview from './ImagePreview';
+import { markImagePreviewSource } from './imagePreviewSource';
 import ImageGallery from './ImageGallery';
 import AttachmentUploadStatus from './AttachmentUploadStatus';
 import ImageCropButton from './ImageCropButton';
@@ -36,7 +37,7 @@ function ChatImage({ file, images, draft = false }: { file: ChatAttachment; imag
   const stacked = !draft && images.length > 1;
   return <>
     <Button variant="ghost" className={draft ? 'chat-image chat-image--draft' : 'chat-image'} aria-label={stacked ? `查看 ${images.length} 张图片` : `预览图片 ${file.name}`}
-      onPress={() => { navigate(Math.max(0, images.findIndex((image) => image.id === file.id))); setOpen(true); }}>
+      onPress={event => { markImagePreviewSource(event.target); navigate(Math.max(0, images.findIndex((image) => image.id === file.id))); setOpen(true); }}>
       <img src={file.dataUrl} alt={file.name} loading={draft ? 'eager' : 'lazy'} decoding="async" />
     </Button>
     <ImagePreview isOpen={open} onOpenChange={setOpen} title={current.name} contentKey={current.id}
