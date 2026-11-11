@@ -176,7 +176,7 @@
 .finder-drag-preview { position: fixed; left: -1000px; top: 0; z-index: 50; display: flex; align-items: center; gap: 8px; max-width: 240px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--foreground); box-shadow: 0 4px 6px -1px rgb(0 0 0 / .1); opacity: .9; pointer-events: none; }
 .finder-drag-preview .finder-item__icon { flex-shrink: 0; width: 40px; height: 40px; margin: 0; border: 0; }
 .finder-drag-preview .finder-folder-icon { width: 40px; height: 36px; }
-.finder-drag-preview .finder-document { width: 26px; height: 34px; }
+.finder-drag-preview .finder-document { --finder-fold: 0px; width: 26px; height: 34px; }
 .finder-drag-preview .finder-video { width: 40px; height: 28px; }
 .finder-drag-preview .finder-file-placeholder { padding: 4px; }
 .finder-drag-preview .finder-file-extension, .finder-drag-preview .finder-document::after { display: none; }
@@ -189,9 +189,13 @@
 .finder-move-notice [data-slot='button'] { flex-shrink: 0; font-size: 12px; }
 .finder-folder-icon { width: 112px; height: 96px; flex-shrink: 0; filter: drop-shadow(0 2px 1px rgb(0 0 0 / 20%)); }
 
-.finder-document { position: relative; display: block; width: 74px; height: 96px; background: #fff; color: #899099; border: 1px solid #d6d8dc; border-radius: var(--radius-xs) var(--radius-panel) var(--radius-xs) var(--radius-xs); box-shadow: 0 2px 2px rgb(0 0 0 / 15%); }
-.finder-document::after { content: ''; position: absolute; top: -1px; right: -1px; width: 17px; height: 17px; background: linear-gradient(45deg, #e2e4e7 50%, var(--surface) 51%); border-radius: 0 0 0 var(--radius-xs); box-shadow: -1px 1px 1px rgb(0 0 0 / 12%); }
-.finder-document img { width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
+.finder-document { --finder-fold: 17px; position: relative; display: block; width: 74px; height: 96px; color: #899099; border: 1px solid transparent; border-radius: var(--radius-xs); filter: drop-shadow(0 2px 1px rgb(0 0 0 / 15%)); }
+/* Cut the paper and cover, not the whole icon: pinned badges may extend outside it.
+   The missing corner must reveal the actual hover/selection background, not --surface. */
+.finder-document::before { content: ''; position: absolute; inset: -1px; background: #fff; border: 1px solid #d6d8dc; border-radius: inherit; clip-path: polygon(0 0, calc(100% - var(--finder-fold)) 0, 100% var(--finder-fold), 100% 100%, 0 100%); }
+.finder-document::after { content: ''; position: absolute; top: -1px; right: -1px; width: var(--finder-fold); height: var(--finder-fold); background: #e2e4e7; clip-path: polygon(0 0, 0 100%, 100% 100%); border-radius: 0 0 0 var(--radius-xs); }
+.finder-document img { position: relative; width: 100%; height: 100%; object-fit: contain; border-radius: inherit; clip-path: polygon(0 0, calc(100% - max(0px, var(--finder-fold) - 1px)) 0, 100% max(0px, var(--finder-fold) - 1px), 100% 100%, 0 100%); }
+.finder-document > .finder-file-placeholder { position: relative; }
 .finder-file-placeholder { display: flex; flex-direction: column; gap: 4px; padding: 20px 12px 12px; height: 100%; }
 .finder-file-placeholder i { height: 2px; background: #d1d5db; }
 .finder-file-placeholder i:nth-child(3n) { width: 75%; }
@@ -215,7 +219,7 @@
 .finder-items--list .finder-item[data-focus-visible='true'] { outline: 2px solid var(--accent); outline-offset: 2px; }
 .finder-items--list .finder-item__icon { width: 28px; height: 28px; margin: 0; border: 0; }
 .finder-items--list .finder-folder-icon { width: 28px; height: 25px; }
-.finder-items--list .finder-document { width: 18px; height: 24px; border-radius: var(--radius-xs); }
+.finder-items--list .finder-document { --finder-fold: 0px; width: 18px; height: 24px; border-radius: var(--radius-xs); }
 .finder-items--list .finder-document::after, .finder-items--list .finder-file-extension, .finder-items--list .finder-file-placeholder i, .finder-items--list .finder-file-pin { display: none; }
 .finder-items--list .finder-file-placeholder { padding: 0; font-size: 16px; }
 .finder-items--list .finder-video { width: 26px; height: 19px; border-width: 1px; }

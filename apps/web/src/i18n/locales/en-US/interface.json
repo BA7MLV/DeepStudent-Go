@@ -1,4 +1,5 @@
 {
+  "materialReader": { "fit": "Fit", "fitPage": "Fit page" },
   "imageCrop": {
     "orientation": "Image orientation", "rotateLeft": "Rotate left", "rotateRight": "Rotate right",
     "title": "Crop image", "open": "Crop image {{name}}", "loading": "Loading crop editor", "imageLoading": "Loading image", "close": "Close crop editor",
