@@ -8,6 +8,7 @@ import { resumePendingTranscriptions } from './pipelines/transcribeQueue';
 import { backfillCovers } from './pipelines/coverQueue';
 import { startStudyTracking } from './store/studyTime';
 import './app-viewport.css';
+import './view-transitions.css';
 import SettingsModal from './components/SettingsModal';
 import { preloadOnIntent } from './utils/preload';
 import { FeedbackHost, PageLoader } from './ui';

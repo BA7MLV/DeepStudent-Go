@@ -1,6 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Modal } from '@heroui/react';
 import { MODAL_CONTAINER_CLASS, Sym } from '../ui';
+import { prefersReducedMotion } from '../utils/viewTransition';
+import { takeImagePreviewSourceRect } from './imagePreviewSource';
 import './image-preview.css';
 
 type PreviewContent =
@@ -48,7 +50,31 @@ function PreviewPane({ title, content, status, footer, onOpenChange, onDownload,
   const [intrinsic, setIntrinsic] = useState({ width: 0, height: 0 });
   const scroll = useRef<HTMLDivElement>(null);
   const svgRoot = useRef<HTMLDivElement>(null);
+  const eventsRoot = useRef<HTMLDivElement>(null);
   const svg = content?.kind === 'svg' ? content.svg : undefined;
+
+  // FLIP：弹层从被点的缩略图位置长出来（见 imagePreviewSource.ts），
+  // 头尾工具条等「只有终态才有的内容」等卡片基本展开后再进场。
+  useLayoutEffect(() => {
+    if (prefersReducedMotion()) return;
+    const src = takeImagePreviewSourceRect();
+    const dialog = eventsRoot.current?.querySelector<HTMLElement>('.image-preview');
+    if (!src || !dialog || src.width <= 0) return;
+    const dst = dialog.getBoundingClientRect();
+    if (dst.width <= 0 || dst.height <= 0) return;
+    const sx = src.width / dst.width;
+    const sy = src.height / dst.height;
+    if (!Number.isFinite(sx) || !Number.isFinite(sy) || sx <= 0 || sy <= 0) return;
+    const radius = parseFloat(getComputedStyle(dialog).borderTopLeftRadius) || 0;
+    dialog.animate([
+      { transform: `translate(${src.left - dst.left}px, ${src.top - dst.top}px) scale(${sx}, ${sy})`, borderRadius: `${radius * Math.min(sx, sy)}px`, transformOrigin: 'top left' },
+      { transform: 'none', borderRadius: `${radius}px`, transformOrigin: 'top left' },
+    ], { duration: 500, easing: 'cubic-bezier(.32, .72, 0, 1)' });
+    dialog.querySelectorAll<HTMLElement>('.image-preview__header, .image-preview__footer').forEach((chrome) => {
+      chrome.animate([{ opacity: 0 }, { opacity: 0, offset: 0.45 }, { opacity: 1 }],
+        { duration: 500, easing: 'ease-in-out' });
+    });
+  }, []);
 
   useLayoutEffect(() => {
     const el = scroll.current;
@@ -82,7 +108,7 @@ function PreviewPane({ title, content, status, footer, onOpenChange, onDownload,
   };
   const hasGallery = !!navigation && navigation.total > 1;
 
-  return <div className="image-preview-events"
+  return <div ref={eventsRoot} className="image-preview-events"
     onKeyDown={(event) => {
       if (PLAYER_KEY_RE.test(event.key)) event.stopPropagation();
       if (event.altKey || event.ctrlKey || event.metaKey) return;

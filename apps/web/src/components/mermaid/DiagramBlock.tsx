@@ -1,7 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Button, Skeleton, Dropdown, Label } from '@heroui/react';
 import { Sym } from '../../ui';
 import { copyWithFeedback } from '../../utils/copyFeedback';
+import { markImagePreviewSource } from '../imagePreviewSource';
 import { toStandaloneSvg } from './mermaidRender';
 import type { SvgProgress } from './svgRender';
 import type { DiagramShape } from './diagramSchema';
@@ -95,6 +96,7 @@ export default function DiagramBlock({
 }: DiagramBlockProps) {
   const [showSource, setShowSource] = useState(false);
   const [zoomOpen, setZoomOpen] = useState(false);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   const copySource = useCallback(async () => {
     await copyWithFeedback(source, copyToast);
@@ -138,7 +140,7 @@ export default function DiagramBlock({
             <Dropdown.Popover placement="bottom end">
               <Dropdown.Menu aria-label="图形操作" onAction={(key) => {
                 if (key === 'copy') void copySource();
-                else if (key === 'zoom') setZoomOpen(true);
+                else if (key === 'zoom') { markImagePreviewSource(canvasRef.current); setZoomOpen(true); }
                 else if (key === 'download') download();
                 else if (key === 'download-json') downloadJson();
                 else if (key === 'source') setShowSource((v) => !v);
@@ -163,7 +165,7 @@ export default function DiagramBlock({
         <>
           {/* 画布先出，提示退成一行小字：空图也有正确的宽高比（viewBox 一到手就定了），
               所以整块不会随着内容增长来回跳。追加过程见 LiveSvg / DiagramCanvas。 */}
-          <div className="xmd-mermaid-canvas" data-testid={`${testId}-canvas`}>
+          <div ref={canvasRef} className="xmd-mermaid-canvas" data-testid={`${testId}-canvas`}>
             {stream.kind === 'svg' ? (
               <LiveSvg rootAttrs={stream.progress.rootAttrs} elements={stream.progress.elements} />
             ) : (

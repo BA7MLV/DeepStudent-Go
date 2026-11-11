@@ -6,6 +6,7 @@ import { focusChatComposer } from './chatComposerFocus';
 import { useTranslation } from 'react-i18next';
 import type { PluginCatalog } from '../plugins/catalog';
 import { hasBoardComponents, navigationEntries } from '../plugins/layout';
+import { preloadChunk } from '../utils/viewTransition';
 
 /**
  * 应用级导航的唯一来源：宽屏常驻左侧栏，窄屏由顶栏汉堡按钮弹成 Drawer
@@ -56,6 +57,8 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
       hint: text('nav.botHint'),
       icon: <Sym name="smart_toy" />,
       onClick: () => {
+        // Bot 面板是懒加载的：先热 chunk 再开面板，避免入口点下去后面板迟一拍凭空弹出。
+        preloadChunk(() => import('../pages/BotWorkspace'));
         useBotPanel.getState().setOpen(true);
         navigate('/');
       },

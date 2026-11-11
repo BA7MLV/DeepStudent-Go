@@ -144,6 +144,8 @@ function measureRecentTitle(row: HTMLElement) {
 export interface PageShellProps {
   /** 顶部标题栏标题 */
   title: string;
+  /** 给标题挂 view-transition-name，让上一屏的对应元素（卡片标题、磁贴名）长成它 */
+  titleTransitionName?: string;
   /** 标题下方的小字副标题（showcase 里是「Updated Just now」这类状态行） */
   subtitle?: ReactNode;
   /** 传了就显示返回按钮（左上角，回调里自己 navigate） */
@@ -636,6 +638,7 @@ export function NavigationShell({
 
 export function PageShell({
   title,
+  titleTransitionName,
   subtitle,
   onBack,
   actions,
@@ -788,6 +791,7 @@ export function PageShell({
                 id={titleId}
                 data-testid="page-title"
                 className="truncate text-base leading-[1.3] font-semibold"
+                style={titleTransitionName ? { viewTransitionName: titleTransitionName } : undefined}
                 {...overflowTitleProps}
               >
                 {title}

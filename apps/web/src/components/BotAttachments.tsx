@@ -5,6 +5,7 @@ import { serverClient } from '../api/serverClient';
 import { attachmentSize } from '../chat/attachments';
 import { Sym } from '../ui';
 import ImagePreview from './ImagePreview';
+import { markImagePreviewSource } from './imagePreviewSource';
 import ImageGallery from './ImageGallery';
 import AttachmentUploadStatus from './AttachmentUploadStatus';
 import ImageCropButton from './ImageCropButton';
@@ -67,7 +68,7 @@ function AttachmentImage({ name, url, local, draft = false, images }: ImageItem 
   const stacked = !!images && images.length > 1;
   return <>
     <Button variant="ghost" className={draft ? 'chat-image chat-image--draft' : 'chat-image'} aria-label={stacked ? `查看 ${images.length} 张图片` : `预览图片 ${name}`}
-      onPress={() => { if (failed && !stacked) retry(); else setOpen(true); }}>
+      onPress={event => { if (failed && !stacked) retry(); else { markImagePreviewSource(event.target); setOpen(true); } }}>
       {failed ? <span role="status">图片加载失败，点击重试</span> : source ? <img src={source} alt={name} decoding="async" onError={() => setFailed(true)} /> : <Spinner size="sm" aria-label="图片加载中" />}
     </Button>
     {open && <AttachmentImageViewer images={images ?? [{ name, url, local }]} onClose={() => setOpen(false)} />}

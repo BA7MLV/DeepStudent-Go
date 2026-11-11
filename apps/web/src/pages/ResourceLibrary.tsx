@@ -19,6 +19,7 @@ import { projectError } from '../projects/errors';
 import ProjectSettings from '../projects/ProjectSettings';
 import ResourceTrash from '../projects/ResourceTrash';
 import ImagePreview from '../components/ImagePreview';
+import { markImagePreviewSource } from '../components/imagePreviewSource';
 import { formatSize } from '../utils/format';
 import { probeDuration } from '../utils/mediaDuration';
 import { startTranscription } from '../pipelines/transcribeQueue';
@@ -405,6 +406,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
                   setSelection(current => { const next = new Set(current); const key = keyOf(entry); if (next.has(key)) next.delete(key); else next.add(key); return next; });
                   return;
                 }
+                if (!entry.missing && isImage(entry.name)) markImagePreviewSource(event.currentTarget);
                 void open(entry);
               }} title={entry.scope?.workspacePath ?? entry.path}>
                 {entry.kind === 'directory' ? <FolderIcon color={entry.color} /> : <ResourceFileIcon entry={entry} />}
