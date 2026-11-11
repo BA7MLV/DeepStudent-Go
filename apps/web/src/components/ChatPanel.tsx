@@ -11,7 +11,9 @@ import { parseMaterialImageHref } from '../materials/imageRefs';
 import { Markdown as XMarkdown } from './markdown/Markdown';
 import { systemMaterialPath } from '../materials/systemFiles';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import { db, type ChatImage, type ChatSessionRow, type ChatToolCall, type QuizState } from '../store/db';
+import { db, type ChatImage, type ChatSessionRow, type ChatToolCall, type QuizState, type FrameRow } from '../store/db';
+import { loadCollection } from '../client/collections';
+import { readRecordKeys } from '../cloud/sync';
 import { useSettings } from '../store/settings';
 import { estimateTokens } from '../harness/context';
 import { PROMPTS } from '../harness/prompts';
@@ -194,7 +196,7 @@ function FrameThumb({
     if (!frame) return;
     let cancelled = false;
     let objUrl: string | null = null;
-    void db.frames.get(frame.id).then((row) => {
+    void (cloud.enabled ? readRecordKeys<FrameRow>('frames', [frame.id]).then(rows => rows[0]) : db.frames.get(frame.id)).then((row) => {
       if (cancelled || !row) return;
       const remote = cloudBlobUrl(row.blob);
       if (!remote) objUrl = URL.createObjectURL(row.blob as Blob);
@@ -590,7 +592,7 @@ export default function ChatPanel({
     if (deletionState.current.loading || deletionState.current.activeId !== activeId
       || activeId == null || !message || message.streaming || message.rowId == null) return false;
     const remove = async () => {
-      const row = await database.chats.get(message.rowId!);
+      const row = await readConversationMessage(message.rowId!);
       if (!current()) return false;
       if (!row || row.sessionId !== activeId) return false;
       await removeConversationMessage(message.rowId!);
@@ -633,7 +635,7 @@ export default function ChatPanel({
     const picks = [...message.quiz.picks]; picks[qi] = oi;
     const quiz = { ...message.quiz, picks };
     try {
-      const row = await database.chats.get(message.rowId);
+      const row = await readConversationMessage(message.rowId);
       if (database !== db || lifetime && !lifetime.current()) return;
       if (!row || JSON.stringify(row.quiz) !== JSON.stringify(message.quiz)) throw new Error(chatText('chatPanel.quizChanged'));
       await editMessage(row, { ...row, quiz });
@@ -725,11 +727,13 @@ export default function ChatPanel({
 
   /** 读取讲义抽帧元数据（幻灯片帧，blob 不进状态） */
   const loadFramesMeta = useCallback(async () => {
-    const rows = await db.frames
+    const database = db, owner = cloud.userId;
+    const rows = cloud.enabled ? (await loadCollection<FrameRow>('frames', videoId)).filter(row => row.kind === 'slide').sort((a, b) => a.ts - b.ts) : await db.frames
       .where('videoId')
       .equals(videoId)
       .filter((r) => r.kind === 'slide')
       .sortBy('ts');
+    if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
     const meta = rows.map((r) => ({ id: r.id!, ts: r.ts }));
     setFramesMeta(meta);
     return meta;
@@ -1170,6 +1174,8 @@ export default function ChatPanel({
    * 要改中间那一步应该用「分支」。
    */
   const retryMessage = async (key: string) => {
+    const database = db, lifetime = accountLifecycle.current();
+    try {
     if (loading || activeId == null) return;
     const idx = msgs.findIndex((m) => m.key === key);
     const message = msgs[idx];
@@ -1213,6 +1219,9 @@ export default function ChatPanel({
     await removeConversationMessages([...(message.rowId != null ? [message.rowId] : []), userRow.id!]);
     setMsgs((prev) => prev.filter((m) => m.key !== message.key && m.rowId !== userRow.id));
     await send(userRow.content, undefined, userRow.explicitSkillIds ?? []);
+    } catch (error) {
+      if (database === db && (!lifetime || lifetime.current())) toast.error(error instanceof Error ? error.message : chatText('chatPanel.answerSaveFailed'));
+    }
   };
 
   /** 从某条消息处分叉出新会话（复制到这条为止，原会话不动）。 */

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import i18n from '../i18n';
 import { MAX_CHAT_ATTACHMENTS, type ChatAttachment } from '../chat/attachments';
 import { prepareAttachment, removeAttachmentFile } from '../chat/prepareAttachment';
+import { accountLifecycle } from '../client/account-lifecycle';
 
 export const ATTACHMENTS_PENDING_ERROR = '请等待附件就绪，或重试 / 移除失败的附件后发送';
 
@@ -38,6 +39,7 @@ function hasPendingItem(get: () => AttachmentDraft, item: PendingAttachment): bo
 
 export const useChatAttachments = create<AttachmentDraft>((set, get) => {
   const process = async (item: PendingAttachment) => {
+    const lifetime = accountLifecycle.current();
     const hasItem = () => {
       const state = get();
       const items = state.sessionKey === item.sessionKey ? state.items : state.parked[item.sessionKey] ?? [];
@@ -54,6 +56,7 @@ export const useChatAttachments = create<AttachmentDraft>((set, get) => {
     patch({ error: undefined, phase: '加载中' });
     try {
       const value = await prepareAttachment(item.id, item.file, (phase) => patch({ phase }));
+      if (lifetime && !lifetime.current()) return;
       if (!hasItem()) {
         await removeAttachmentFile(value);
         return;
@@ -124,12 +127,27 @@ export const useChatAttachments = create<AttachmentDraft>((set, get) => {
     },
     remove: async (id) => {
       const item = get().items.find((row) => row.id === id);
+      if (!item) return;
+      const lifetime = accountLifecycle.current();
       set((state) => ({ items: state.items.map((row) => row.id === id ? { ...row, value: undefined, phase: '移除中' } : row) }));
       try {
         if (item?.value) await removeAttachmentFile(item.value);
-        set((state) => ({ items: state.items.filter((row) => row.id !== id), error: null }));
-      } catch { set((state) => ({ items: state.items.map((row) => row.id === id && item ? item : row), error: '附件移除失败，请检查服务连接后重试' })); }
+        if (lifetime && !lifetime.current()) return;
+        set((state) => {
+          if (state.sessionKey === item.sessionKey) return { items: state.items.filter((row) => row.id !== id), error: null };
+          return { parked: { ...state.parked, [item.sessionKey]: (state.parked[item.sessionKey] ?? []).filter(row => row.id !== id) } };
+        });
+      } catch {
+        if (lifetime && !lifetime.current()) return;
+        set((state) => state.sessionKey === item.sessionKey
+          ? { items: state.items.map((row) => row.id === id ? item : row), error: '附件移除失败，请检查服务连接后重试' }
+          : { parked: { ...state.parked, [item.sessionKey]: (state.parked[item.sessionKey] ?? []).map(row => row.id === id ? item : row) } });
+      }
     },
     consume: (ids) => set((state) => ({ items: state.items.filter((row) => !ids.includes(row.id)), error: null })),
   };
 });
+
+// Discard view-owned drafts, not files: an uncertain submission may already
+// reference an uploaded file. The server's reference-aware archive owns GC.
+accountLifecycle.onDisposed(() => useChatAttachments.setState({ sessionKey: '0', items: [], parked: {}, error: null }));

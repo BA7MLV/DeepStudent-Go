@@ -22,6 +22,8 @@ import { registerGatewayRoutes } from './gateway/routes.js';
 import { CloudRecords } from './cloud/records.js';
 import { CloudConfiguration } from './cloud/config.js';
 import { receiveFile, byteRange, fileOperationId } from './cloud/files.js';
+import { ensureImageReference, attachmentFileInUse } from './cloud/attachment-images.js';
+import { migrateChatAttachmentReferences, migrateTerminalTaskAttachmentReferences } from './cloud/attachment-migration.js';
 import { registerCloudRoutes } from './cloud/routes.js';
 import { registerBilibiliRoutes } from './bilibili/routes.js';
 import { SystemMaterials } from './storage/system-materials.js';
@@ -646,6 +648,19 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     return { id: row.id, originalName: row.original_name, mimeType: row.mime_type, sizeBytes: row.size_bytes, sha256: row.sha256, createdAt: row.created_at };
   }
   app.get('/api/v1/files/config', async () => ({ maxFileBytes }));
+  app.post<{ Querystring: { afterRevision?: string } }>('/api/v1/files/migrate-chat-attachments', async (request, reply) => {
+    if (!checkOrigin(request, reply)) return;
+    const user = requireAuth(request, reply); if (!user) return;
+    const afterRevision = request.query.afterRevision === undefined ? 0 : Number(request.query.afterRevision);
+    if (!Number.isSafeInteger(afterRevision) || afterRevision < 0) return bad(reply, 400, 'invalid_migration_cursor');
+    return migrateChatAttachmentReferences(store, cloudRecords, filesDir, user.id, 20, afterRevision);
+  });
+  app.post<{ Querystring: { afterId?: string } }>('/api/v1/files/migrate-task-attachments', async (request, reply) => {
+    if (!checkOrigin(request, reply)) return;
+    const user = requireAuth(request, reply); if (!user) return;
+    if (request.query.afterId !== undefined && request.query.afterId.length > 100) return bad(reply, 400, 'invalid_migration_cursor');
+    return migrateTerminalTaskAttachmentReferences(store, filesDir, user.id, 20, request.query.afterId);
+  });
   app.get('/api/v1/files', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     return { files: (store.db.prepare('SELECT * FROM files WHERE owner_id=? ORDER BY created_at DESC LIMIT 500').all(user.id) as any[]).map(fileDto) };
@@ -687,12 +702,17 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
         throw error;
       }
     }
-    return reply.code(201).send(await receiveFile(store, filesDir, user.id, body, originalName, mimeType, maxFileBytes, declaredSize));
+    const file = await receiveFile(store, filesDir, user.id, body, originalName, mimeType, maxFileBytes, declaredSize);
+    const metadata = /^image\/(png|jpeg|webp|gif)$/.test(file.mimeType)
+      ? await ensureImageReference(store, filesDir, user.id, file.id, () => { if (session(request)?.id !== user.id) throw new Error('file_account_changed'); }) : {};
+    return reply.code(201).send({ ...file, ...metadata });
   });
   app.get<{ Params: { id: string } }>('/api/v1/files/:id', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     const file = store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(request.params.id, user.id) as any;
     if (!file) return bad(reply, 404, 'file_not_found');
+    const previewOwner = store.db.prepare('SELECT f.owner_id FROM attachment_images a LEFT JOIN files f ON f.id=a.original_id WHERE a.preview_id=?').get(file.id) as { owner_id: string | null } | undefined;
+    if (previewOwner && previewOwner.owner_id !== user.id) return bad(reply, 404, 'file_not_found');
     const resolved = path.resolve(filesDir, file.storage_name);
     if (!resolved.startsWith(`${path.resolve(filesDir)}${path.sep}`)) return bad(reply, 404, 'file_not_found');
     if (!fs.existsSync(resolved)) return bad(reply, 404, 'file_not_found');
@@ -718,8 +738,14 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const user = requireAuth(request, reply); if (!user) return;
     const file = store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(request.params.id, user.id) as any;
     if (!file) return bad(reply, 404, 'file_not_found');
+    if (attachmentFileInUse(store, user.id, file.id)) return bad(reply, 409, 'file_in_use');
+    const preview = store.db.prepare('SELECT f.id,f.storage_name FROM attachment_images a JOIN files f ON f.id=a.preview_id WHERE a.original_id=? AND f.owner_id=?').get(file.id, user.id) as { id: string; storage_name: string } | undefined;
     store.db.prepare('DELETE FROM files WHERE id=? AND owner_id=?').run(file.id, user.id);
     fs.rmSync(path.join(filesDir, file.storage_name), { force: true });
+    if (preview && !attachmentFileInUse(store, user.id, preview.id)) {
+      store.db.prepare('DELETE FROM files WHERE id=? AND owner_id=?').run(preview.id, user.id);
+      fs.rmSync(path.join(filesDir, preview.storage_name), { force: true });
+    }
     return { deleted: true };
   });
   app.get<{ Params: { id: string }; Querystring: { beforeSeq?: string } }>('/api/v1/threads/:id/snapshot', async (request, reply) => {

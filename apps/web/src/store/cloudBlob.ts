@@ -14,7 +14,7 @@ export const isCloudBlob = (value: StoredBlob): value is CloudBlobReference => !
 const MAX_BYTES = 32 * 1024 * 1024;
 const MAX_ENTRIES = 128;
 const MAX_CONCURRENT = 4;
-interface CacheRow { id: string; blob: Blob }
+interface CacheRow { id: string; blob: Blob; etag?: string }
 interface CacheMeta { id: string; size: number; usedAt: number }
 interface Downloads { lifetime: AccountLifetime; pending: Map<string, Promise<Blob>>; active: number; waiting: (() => void)[] }
 let downloads: Downloads | undefined;
@@ -46,13 +46,6 @@ export async function resolveCloudBlob(value: StoredBlob, signal?: AbortSignal):
     pending = (async () => {
       const cached = await cloudRetry(database, () => database.table<CacheRow>('_fileCache').get(id));
       state.lifetime.assertCurrent();
-      if (cached) {
-        void cloudTransaction(database, [database.table('_fileCacheMeta')], async () => {
-          state.lifetime.assertCurrent();
-          await database.table('_fileCacheMeta').update(id, { usedAt: Date.now() });
-        }).catch(() => {});
-        return cached.blob;
-      }
       while (state.active >= MAX_CONCURRENT) {
         await new Promise<void>(resolve => state.waiting.push(resolve));
         state.lifetime.assertCurrent();
@@ -62,7 +55,27 @@ export async function resolveCloudBlob(value: StoredBlob, signal?: AbortSignal):
       try {
         const response = await fetch(apiUrl(`/api/v1/files/${encodeURIComponent(id)}`), {
           credentials: 'include', signal: AbortSignal.any([state.lifetime.signal, AbortSignal.timeout(30_000)]),
+          // Bytes are immutable, authorization is not. Bypass the browser's
+          // freshness cache and let the authenticated route validate before 304.
+          cache: 'no-store', headers: cached?.etag ? { 'If-None-Match': cached.etag } : undefined,
         });
+        state.lifetime.assertCurrent();
+        if (response.status === 304 && cached?.etag) {
+          await cloudTransaction(database, [database.table('_fileCacheMeta')], async () => {
+            state.lifetime.assertCurrent();
+            await database.table('_fileCacheMeta').update(id, { usedAt: Date.now() });
+          }).catch(() => {});
+          state.lifetime.assertCurrent();
+          return cached.blob;
+        }
+        if ([401, 403, 404].includes(response.status)) {
+          await cloudTransaction(database, [database.table('_fileCache'), database.table('_fileCacheMeta')], async () => {
+            state.lifetime.assertCurrent();
+            await database.table('_fileCache').delete(id);
+            await database.table('_fileCacheMeta').delete(id);
+          }).catch(() => {});
+          state.lifetime.assertCurrent();
+        }
         if (!response.ok) throw new Error(i18n.t('fileLoadFailed', { ns: 'common', status: response.status }));
         const blob = await response.blob();
         state.lifetime.assertCurrent();
@@ -72,7 +85,7 @@ export async function resolveCloudBlob(value: StoredBlob, signal?: AbortSignal):
           state.lifetime.assertCurrent();
           const table = database.table<CacheRow>('_fileCache');
           const metadata = database.table<CacheMeta>('_fileCacheMeta');
-          await table.put({ id, blob });
+          await table.put({ id, blob, etag: response.headers.get('etag') ?? undefined });
           await metadata.put({ id, size: blob.size, usedAt: Date.now() });
           const rows = await metadata.orderBy('usedAt').toArray();
           let bytes = rows.reduce((total, row) => total + row.size, 0), count = rows.length;

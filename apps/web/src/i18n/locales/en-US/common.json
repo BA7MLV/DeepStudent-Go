@@ -1,16 +1,18 @@
 {
+  "dataDelivery": {
+    "retryFailed": "Unable to regenerate. Please retry: {{reason}}",
+    "widgetCancelled": "Interactive explanation cancelled",
+    "imageLoadFailed": "Unable to load image",
+    "previewMissing": "No preview is available. Open the original image.",
+    "previewInvalid": "The image service returned invalid preview metadata. Update the server and retry.",
+    "inkLoadFailed": "Unable to load annotations. Retry before writing."
+  },
   "courseMetadata": { "loadFailed": "Course details could not be loaded. This does not mean the courses were deleted.", "retry": "Retry" },
   "appTitle": "DeepStudent Go",
   "fileLoadFailed": "Unable to load file ({{status}})",
   "clipboard": {
     "copied": "Copied",
     "failed": "Copy failed. Please try again."
-  },
-  "localHistory": {
-    "open": "Export local history",
-    "close": "Close local history export",
-    "loading": "Loading local export tools…",
-    "loadFailed": "Local export tools could not load. Reconnect to the site and refresh to retry; your originals are unchanged."
   },
   "settings": "Settings",
   "board": {

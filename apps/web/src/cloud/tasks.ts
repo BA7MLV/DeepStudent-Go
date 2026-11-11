@@ -1,5 +1,5 @@
 import { cloud, cloudRequest } from './state';
-import { flushCloud } from './sync';
+import { readRecordKeys, refreshRecordScope, reconcileTaskEffects } from './sync';
 import { db } from '../store/db';
 import { messageWidgets } from '../harness/widgetLayout';
 import type { WidgetPayload } from '../harness/widgetRuntime';
@@ -7,7 +7,7 @@ import type { CloudTask, CloudTaskKind } from '@wangke/contracts/cloud';
 import { taskAcceptsAnswer, taskOccupiesResource } from '@wangke/contracts/task-status';
 import { liveQuery } from 'dexie';
 import { create } from 'zustand';
-import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
+import type { RuntimeTaskSubmit, RuntimeTask } from '@wangke/contracts/client-runtime';
 import { flushPreferences } from './preferences';
 import { drainLearning, type LearningCommandRow } from '../client/learning';
 import { taskFailure, type TaskFailure } from '../utils/taskFailure';
@@ -65,8 +65,13 @@ export async function submitCloudTask(kind: CloudTaskKind, resource: string, inp
     // model or external tool is inferred from a missing network response.
     const receipt = existing ? await runtime.taskAdmission(operationId) : undefined;
     assertCurrent();
+    const before = (await runtime.read({ kind: 'recordHead' })).value as { epoch: string };
+    assertCurrent();
     const task = receipt?.status === 'accepted' ? receipt.task : await runtime.submitTask(command);
     assertCurrent();
+    const after = (await runtime.read({ kind: 'recordHead' })).value as { epoch: string };
+    assertCurrent();
+    if (!receipt && before.epoch === after.epoch) await database.table('_cloudMeta').put({ id: `task-generation:${task.id}`, value: before.epoch });
     await database.table('_cloudMeta').put({ id, command, status: 'accepted', taskId: task.id, createdAt: existing?.createdAt ?? Date.now() });
     if (account === cloud.userId && isCurrentServerRuntime(runtime)) forgetUncertain(operationId);
     return task;
@@ -146,6 +151,7 @@ export async function waitCloudTask<T>(task: CloudTask, onProgress?: (p: any) =>
   signal?.throwIfAborted();
   if (!cloud.enabled || cloud.userId !== account) throw new Error('client_account_changed');
   const runtime = await serverRuntime(account);
+  const database = db;
   signal?.throwIfAborted();
   const assertCurrent = () => {
     if (!isCurrentServerRuntime(runtime) || !cloud.enabled || cloud.userId !== runtime.identity.account) throw new Error('client_account_changed');
@@ -189,23 +195,58 @@ export async function waitCloudTask<T>(task: CloudTask, onProgress?: (p: any) =>
     assertCurrent();
     if (!await syncTaskWidgets(completed.progress)) await waitTaskWidgetOwner(completed.progress, observationSignal);
     assertCurrent();
+    // Effects have no wire epoch yet. Only compare them when this browser has
+    // durable admission-generation evidence, and the terminal task was read
+    // between matching head identities. Recovery without proof uses an explicit
+    // scoped refresh, never a global body feed or a silent no-op.
+    const before = (await runtime.read({ kind: 'recordHead' })).value as { epoch: string };
+    assertCurrent();
+    const terminal = (await runtime.read({ kind: 'task', taskId: completed.id })).value as unknown as RuntimeTask;
+    const after = (await runtime.read({ kind: 'recordHead' })).value as { epoch: string };
+    assertCurrent();
+    if (before.epoch !== after.epoch) throw new Error('records_generation_changed');
+    const admissionEpoch = (await database.table('_cloudMeta').get(`task-generation:${completed.id}`))?.value;
+    assertCurrent();
     if (completed.kind === 'handoutEdit' && completed.input.action === 'persist') {
       const handoutId = (completed.result as { handoutId?: number } | null)?.handoutId;
       if (!Number.isSafeInteger(handoutId) || handoutId !== completed.input.handoutId) throw new Error('handout_receipt_invalid');
       await (await import('./sync')).readRecordKeys('handouts', [handoutId!]);
-    } else if (completed.effects !== undefined) {
+    } else if (terminal.effects !== undefined && admissionEpoch === after.epoch) {
       // The task carried its own terminal receipt: reconcile exactly those
       // record versions. An empty receipt means the task wrote no records.
-      // A generation change mid-read returns false and falls back to the full
-      // cycle rather than mixing epochs into the legacy mirror.
-      if (completed.effects.length && !(await (await import('./sync')).reconcileTaskEffects(completed.effects))) await flushCloud();
-    } else await flushCloud();
+      // A generation race instead requests an explicit bounded task scope;
+      // revisions from different epochs are never compared or published.
+      if (terminal.effects.length && !(await reconcileTaskEffects(terminal.effects, after.epoch))) await refreshTaskScope(terminal);
+    } else await refreshTaskScope(terminal);
     observationSignal.throwIfAborted();
     assertCurrent();
     return completed.result as T;
   } finally {
     observing = false; pending = undefined;
   }
+}
+
+/** Legacy/overflow receipts do not authorize downloading the account. Resolve
+ * their finite named output scope or fail visibly, retaining durable recovery. */
+export async function refreshTaskScope(task: CloudTask | RuntimeTask) {
+  const input = task.input;
+  const courseId = typeof input.videoId === 'string' ? input.videoId : typeof input.materialId === 'string' ? input.materialId
+    : task.resource.startsWith('course:') ? task.resource.slice(7) : undefined;
+  const sessionId = typeof input.sessionId === 'number' ? input.sessionId : task.resource.startsWith('session:') ? Number(task.resource.slice(8)) : undefined;
+  if ((task.kind === 'chat' || task.kind === 'qa') && Number.isSafeInteger(sessionId)) {
+    await Promise.all([readRecordKeys('chatSessions', [sessionId!]), refreshRecordScope('chats', sessionId!)]); return;
+  }
+  const scopes = { transcribe: ['segments', 'subtitleTracks'], handout: ['handouts', 'frames'], cards: ['cards'], comments: ['comments'], danmaku: ['danmakus'], material: ['materialBlocks'] } as const;
+  if (courseId && task.kind in scopes) {
+    await readRecordKeys('videos', [courseId]);
+    for (const table of scopes[task.kind as keyof typeof scopes]) await refreshRecordScope(table, courseId);
+    return;
+  }
+  if (courseId && task.kind === 'cover') { await Promise.all([readRecordKeys('videos', [courseId]), readRecordKeys('covers', [courseId])]); return; }
+  // These compute-only tasks do not commit business records. Persist handout
+  // editing is handled above, never inferred from a missing result key.
+  if (task.kind === 'modelOnce' || task.kind === 'artifactEdit' || task.kind === 'handoutEdit' && input.action !== 'persist') return;
+  throw new Error(`task_scope_refresh_unavailable:${task.kind}`);
 }
 
 /** A server receipt is durable remotely, but an iframe's owner must also exist

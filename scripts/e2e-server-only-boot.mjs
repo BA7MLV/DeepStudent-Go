@@ -11,7 +11,7 @@ try {
     cacheDir: path.join(directory, 'cache'), server: { host: '127.0.0.1', port: 0, watch: null, hmr: false } });
   await web.listen();
   browser = await chromium.launch({ headless: true });
-  for (const scenario of ['missing-api', 'static-status', 'unavailable', 'network-error']) {
+  for (const scenario of ['login', 'setup', 'missing-api', 'static-status', 'unavailable', 'network-error']) {
     const page = await browser.newPage();
     const appRequests = [];
     const historyRequests = [];
@@ -22,20 +22,22 @@ try {
       const databases = indexedDB.databases.bind(indexedDB);
       indexedDB.databases = () => { window.historyScans++; return databases(); };
     });
+    await page.route('**/api/v1/bootstrap/status', route => route.fulfill({ contentType: 'application/json',
+      body: JSON.stringify({ initialized: scenario !== 'setup', hasPasskey: false }) }));
+    await page.route('**/api/v1/auth/session', route => route.fulfill({ contentType: 'application/json',
+      body: JSON.stringify({ authenticated: false, user: null }) }));
     await page.route('**/api/v1/cloud/status', route => scenario === 'network-error' ? route.abort()
       : route.fulfill({ status: scenario === 'missing-api' ? 404 : scenario === 'unavailable' ? 503 : 200,
-        contentType: 'application/json', body: JSON.stringify({ cloud: false }) }));
+        contentType: 'application/json', body: JSON.stringify({ cloud: scenario === 'login' || scenario === 'setup' }) }));
     await page.goto(web.resolvedUrls.local[0]);
-    await page.locator('input[type="password"]').waitFor();
+    await page.locator(`main.ob[data-step="${scenario === 'setup' ? 'welcome' : 'login'}"]`).waitFor();
     assert.deepEqual(appRequests, [], `${scenario} must not load the static application`);
-    assert.deepEqual(historyRequests, [], `${scenario} must not eagerly load history export`);
+    assert.deepEqual(historyRequests, [], `${scenario} must not load history export`);
     assert.equal(await page.evaluate(() => window.historyScans), 0, 'no startup database enumeration');
-    await page.getByTestId('open-local-history').click();
-    await page.getByTestId('local-history-export').waitFor();
-    await page.waitForFunction(() => window.historyScans > 0);
-    assert.ok(historyRequests.length > 0, 'explicit action loads the export tool');
-    assert.deepEqual(appRequests, [], 'local export must not start the application');
+    assert.equal(await page.getByTestId('open-local-history').count(), 0, 'no unauthenticated history export entry');
+    assert.equal(await page.getByTestId('local-history-export').count(), 0, 'no unauthenticated history export panel');
+    assert.equal(await page.getByRole('button', { name: /导出|export/i }).count(), 0, 'no data export buttons before login');
     await page.close();
   }
-  console.log('PASS server-only boot: missing API, cloud=false, 503 and network failure remain behind the account gate');
+  console.log('PASS server-only boot: login, setup and server failures expose no unauthenticated history export or database enumeration');
 } finally { await browser?.close(); await web?.close(); }

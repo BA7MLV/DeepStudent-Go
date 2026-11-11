@@ -7,6 +7,9 @@ export interface ChatAttachment {
   mimeType: string;
   size: number;
   serverId?: string;
+  previewServerId?: string;
+  width?: number;
+  height?: number;
   text?: string;
   dataUrl?: string;
   truncated?: boolean;
@@ -27,12 +30,12 @@ export function attachmentText(content: string, attachments: readonly ChatAttach
 
 export function attachmentMessage(row: { role: 'user' | 'assistant'; content: string; attachments?: ChatAttachment[] }): ChatMessage {
   const text = attachmentText(row.content, row.attachments);
-  const images = row.role === 'user' ? row.attachments?.filter(file => file.dataUrl) ?? [] : [];
+  const images = row.role === 'user' ? row.attachments?.filter(file => file.mimeType.startsWith('image/') && (file.serverId || file.dataUrl)) ?? [] : [];
   return {
     role: row.role,
     content: images.length ? [
       { type: 'text', text },
-      ...images.map(file => ({ type: 'image_url' as const, image_url: { url: file.dataUrl! } })),
+      ...images.map(file => ({ type: 'image_url' as const, image_url: { url: file.serverId ? `attachment-file:${file.serverId}` : file.dataUrl! } })),
     ] : text,
   };
 }

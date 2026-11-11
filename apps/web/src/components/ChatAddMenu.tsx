@@ -47,7 +47,12 @@ export default function ChatAddMenu({ disabled, onSelectProject, onSkillInsert }
     setError(''); setBusy(true); setQuery(''); setCoursesOpen(true);
     setSelected(useCourseChat.getState().contextCourses.map((course) => course.id));
     try {
-      const [rows, folders] = await Promise.all([db.videos.orderBy('createdAt').reverse().toArray(), db.folders.toArray()]);
+      const { cloud } = await import('../cloud/state');
+      const database = db, owner = cloud.userId;
+      const { loadCollection } = await import('../client/collections');
+      const [rows, folders] = cloud.enabled ? await Promise.all([loadCollection<import('../store/db').VideoRow>('videos', undefined), loadCollection<import('../store/db').FolderRow>('folders', undefined)])
+        : await Promise.all([database.videos.orderBy('createdAt').reverse().toArray(), database.folders.toArray()]);
+      if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
       const scope = folderCourseScope(folders, rows, project?.folderId);
       setCourses(rows.filter(row => !scope || scope.has(row.id)).map(({ id, name }) => ({ id, name })));
     }

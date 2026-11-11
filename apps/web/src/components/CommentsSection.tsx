@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { Tooltip } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import { db, type CommentRow } from '../store/db';
+import { type CommentRow } from '../store/db';
+import { useCourseCollection, CourseCollectionError } from './useCourseCollection';
 import { runComments, type CommentsProgress } from '../pipelines/comments';
 import { usePluginAvailable } from '../plugins/catalog';
 import {
@@ -50,31 +51,15 @@ interface Props {
 export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOpenChange }: Props) {
   const { t } = useTranslation('interface');
   const available = usePluginAvailable('material-tools');
-  const [rows, setRows] = useState<Row[]>([]);
+  const { rows, ready: loaded, error: readError, reload } = useCourseCollection<Row>('comments', videoId);
   /** 首次读回之前为 false —— 折叠态那行「还没有讨论」与展开态空态都靠它门控（不变量 I1） */
-  const [loaded, setLoaded] = useState(false);
   const [open, setOpen] = useState(true);
   const [sort, setSort] = useState<CommentSort>('hot');
   const [progress, setProgress] = useState<CommentsProgress | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
   const commentsId = useId();
 
-  const reload = useCallback(async () => {
-    try {
-      const rs = await db.comments.where('videoId').equals(videoId).sortBy('time');
-      setRows(rs.filter((r): r is Row => r.id != null));
-    } catch (e) {
-      // 读失败按「确实为空」收尾，别把界面永远留在骨架/空白上（不变量 I5）
-      setErrorText(formatCaughtError(e));
-    } finally {
-      setLoaded(true);
-    }
-  }, [videoId]);
-
-  useEffect(() => {
-    setLoaded(false);
-    void reload();
-  }, [reload]);
+  useEffect(() => { if (readError) setErrorText(readError); }, [readError]);
 
   const showSkeleton = useSkeletonGate(!loaded);
 
@@ -162,7 +147,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
                 <LoadingButton
                   loading={running}
                   variant="primary"
-                  isDisabled={!available || hasSubtitles !== true}
+                  isDisabled={!loaded || !available || hasSubtitles !== true}
                   onPress={start}
                   data-testid="comments-generate"
                 >
@@ -205,6 +190,7 @@ export default function CommentsSection({ videoId, playerRef, hasSubtitles, onOp
           )}
 
           <PersistentError title="讨论生成失败" text={errorText} onClose={() => setErrorText(null)} />
+          <CourseCollectionError error={readError} retry={reload} />
 
           <div className="comments-body" data-testid="comments-list">
             <SkeletonReveal show={showSkeleton} skeleton={<CueSkeleton rows={6} />}>

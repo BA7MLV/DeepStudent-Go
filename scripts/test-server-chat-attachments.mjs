@@ -10,6 +10,7 @@ import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { CloudTaskRunner, taskDto } from '../apps/api/src/cloud/tasks.ts';
 import { receiveFile } from '../apps/api/src/cloud/files.ts';
+import { normalizeChatAttachments } from '../apps/api/runtime/chat-attachments.ts';
 
 const directory = fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/var/tmp', 'opencode', 'server-chat-attachments-'));
 const filesDir = path.join(directory, 'files');
@@ -68,6 +69,7 @@ try {
     await upload('diagram.png', 'image/png', png, { dataUrl: `data:image/png;base64,${png.toString('base64')}` }),
   ];
   const image = attachments[3].dataUrl;
+  const persistedAttachments = normalizeChatAttachments(store, owner, attachments);
   const checkAll = body => {
     const payload = JSON.stringify(body.messages);
     for (const marker of ['TXT_MARKER', 'PDF_QUESTION_MARKER', 'DOCX_MARKER', '仅包含前 12000 字', image]) assert.ok(payload.includes(marker), `missing attachment ${marker.slice(0, 40)}`);
@@ -79,9 +81,10 @@ try {
   script = [body => { checkAll(body); assert.ok(JSON.stringify(body.messages).includes('请分析这些附件。')); }];
   const first = await run(10, { attachments }); // attachments only
   const user = records.get(owner, 'chats', first.result.userRowId);
-  assert.deepEqual(user.attachments, attachments);
+  assert.deepEqual(user.attachments, persistedAttachments);
   assert.equal(user.content, '请分析这些附件。');
-  assert.ok(JSON.stringify(user.modelTrace).includes(image));
+  assert.ok(JSON.stringify(user.modelTrace).includes(`attachment-file:${attachments[3].serverId}`));
+  assert.ok(!JSON.stringify(user).includes('data:image/'));
   assert.equal(rows(10).length, 2);
 
   script = [checkAll];
@@ -98,12 +101,12 @@ try {
   script = [checkAll];
   await run(10, { action: 'continue', rowId: answer.id });
   assert.equal(rows(10).length, before, 'continuation must not duplicate the attachment turn');
-  assert.deepEqual(records.get(owner, 'chats', user.id).attachments, attachments);
+  assert.deepEqual(records.get(owner, 'chats', user.id).attachments, persistedAttachments);
 
   session(20);
   script = [checkAll];
   await run(20, { text: user.content, attachments: user.attachments }); // retry/fork payload
-  assert.deepEqual(rows(20).find(row => row.role === 'user').attachments, attachments);
+  assert.deepEqual(rows(20).find(row => row.role === 'user').attachments, persistedAttachments);
 
   session(30);
   const foreign = await upload('private.txt', 'text/plain', Buffer.from('private'), { text: 'PRIVATE' }, other);
@@ -111,8 +114,8 @@ try {
     [{ ...attachments[0], serverId: undefined }, /尚未上传成功/],
     [{ ...attachments[0], serverId: crypto.randomUUID() }, /不存在或无权访问/],
     [foreign, /不存在或无权访问/],
-    [{ ...attachments[3], dataUrl: 'https://internal.invalid/image.png' }, /图片格式无效/],
-    [{ ...attachments[0], text: 'x'.repeat(12001) }, /正文超过上限/],
+    [{ ...attachments[3], serverId: 'https://internal.invalid/image.png' }, /不存在或无权访问/],
+    [{ ...attachments[0], text: 'x'.repeat(12001) }, /正文或描述无效/],
     [{ ...attachments[0], text: '' }, /没有可读取的内容/],
   ];
   const count = requests;

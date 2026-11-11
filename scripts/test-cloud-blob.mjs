@@ -30,9 +30,15 @@ test('demand-only file loading, bounded caching and account fences', async t => 
       assert.match(cloudBlobUrl({ $file: 'image id', type: 'image/png' }), /\/api\/v1\/files\/image%20id$/);
       assert.equal(cloudBlobUrl(local), undefined);
     });
-    await t.test('concurrent readers share one GET and reuse disk after lifetime replacement', async () => {
+    await t.test('concurrent readers share one GET; disk bytes require authenticated 304 after lifetime replacement', async () => {
       const db = await account(); let calls = 0;
-      globalThis.fetch = async () => { calls++; return new Response('bytes'); };
+      globalThis.fetch = async (_url, init) => {
+        calls++;
+        assert.equal(init.credentials, 'include'); assert.equal(init.cache, 'no-store');
+        if (calls === 1) return new Response('bytes', { headers: { etag: '"immutable-hash"' } });
+        assert.equal(init.headers['If-None-Match'], '"immutable-hash"');
+        return new Response(null, { status: 304 });
+      };
       const ref = { $file: 'immutable', type: 'image/png' };
       const blobs = await Promise.all(Array.from({ length: 12 }, () => resolveCloudBlob(ref)));
       assert.equal(calls, 1);
@@ -41,7 +47,40 @@ test('demand-only file loading, bounded caching and account fences', async t => 
       assert.equal(await db.table('_fileCache').count(), 1);
       accountLifecycle.invalidate();
       assert.equal(await (await resolveCloudBlob(ref)).text(), 'bytes');
-      assert.equal(calls, 1, 'warm read is persistent, not just a memory Map');
+      assert.equal(calls, 2, 'persistent bytes are reused only after current server authorization');
+      assert.equal(await db.table('_fileCache').count(), 1);
+    });
+    await t.test('cached files cannot bypass same-account revocation or offline authorization checks', async () => {
+      const db = await account();
+      for (const status of [401, 403, 404]) {
+        const id = `revoked-${status}`;
+        globalThis.fetch = async () => new Response('secret', { headers: { etag: '"hash"' } });
+        assert.equal(await (await resolveCloudBlob({ $file: id })).text(), 'secret');
+        globalThis.fetch = async (_url, init) => {
+          assert.equal(init.headers['If-None-Match'], '"hash"');
+          return new Response('', { status });
+        };
+        await assert.rejects(resolveCloudBlob({ $file: id }), new RegExp(String(status)));
+        assert.equal(await db.table('_fileCache').get(id), undefined);
+        assert.equal(await db.table('_fileCacheMeta').get(id), undefined);
+        globalThis.fetch = async () => { throw new TypeError('offline'); };
+        await assert.rejects(resolveCloudBlob({ $file: id }), /offline/);
+      }
+      globalThis.fetch = async () => new Response('cached', { headers: { etag: '"hash"' } });
+      await resolveCloudBlob({ $file: 'offline-warm' });
+      globalThis.fetch = async () => { throw new TypeError('offline'); };
+      await assert.rejects(resolveCloudBlob({ $file: 'offline-warm' }), /offline/, 'offline does not imply authorization');
+    });
+    await t.test('legacy cache rows without ETag are revalidated with a full response', async () => {
+      const db = await account();
+      await db.table('_fileCache').put({ id: 'legacy', blob: new Blob(['old']) });
+      await db.table('_fileCacheMeta').put({ id: 'legacy', size: 3, usedAt: 1 });
+      globalThis.fetch = async (_url, init) => {
+        assert.equal(init.headers, undefined);
+        return new Response('current', { headers: { etag: '"new"' } });
+      };
+      assert.equal(await (await resolveCloudBlob({ $file: 'legacy' })).text(), 'current');
+      assert.equal((await db.table('_fileCache').get('legacy')).etag, '"new"');
     });
     await t.test('at most four downloads; cancelling a waiter does not cancel another reader', async () => {
       await account(); let active = 0, peak = 0, calls = 0;

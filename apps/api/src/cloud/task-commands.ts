@@ -10,23 +10,41 @@ import { freezeTaskModel, requireNativeTaskModel } from '../agent/task-model.js'
 import { handoutEditBaseline, parseHandoutPersist } from './handout-edit.js';
 import { admitContextCompression } from '../../runtime/context-compression.js';
 import { parseBiliImport } from '../bilibili/input.js';
+import { normalizeChatAttachments } from '../../runtime/chat-attachments.js';
+
+/** Compare user intent, not mutable server-derived metadata or the current file
+ * index. A receipt replay must not need the original to remain present forever. */
+function taskIntent(input: Record<string, unknown>, kind: string) {
+  const { _pluginProviders: _providers, ...intent } = input;
+  if (kind === 'chat' && intent.action === 'compressContext') delete intent.compressionBaseline;
+  if (kind === 'chat' && Array.isArray(intent.attachments)) intent.attachments = intent.attachments.map(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    const file = value as Record<string, unknown>;
+    return { id: file.id, serverId: file.serverId,
+      ...(file.text !== undefined ? { text: file.text } : {}),
+      ...(file.description !== undefined ? { description: file.description } : {}),
+      ...(file.truncated !== undefined && file.truncated !== false ? { truncated: file.truncated } : {}),
+      ...(!file.serverId && file.dataUrl !== undefined ? { dataUrl: file.dataUrl } : {}) };
+  });
+  return intent;
+}
 
 /** Durable admission shared by HTTP compatibility and generated commands. No
  * model is invoked here; the executor later claims the committed queue row. */
 export function submitOwnerTask(store: DatabaseStore, records: CloudRecords, configuration: CloudConfiguration, owner: string, command: RuntimeTaskSubmit) {
   if (!command || !TASK_KINDS.includes(command.kind) || !command.operationId || command.operationId.length > 100 || !command.resource || command.resource.length > 256 || !command.input || Array.isArray(command.input)) throw new Error('invalid_task');
-  const input: Record<string, unknown> = new PluginFiles(store).admitTask(owner, command.kind, command.input);
-  const resource = ['chat', 'qa'].includes(command.kind) ? `session:${Number(input.sessionId)}` : typeof input.videoId === 'string' ? `course:${input.videoId}` : command.resource;
+  const resource = ['chat', 'qa'].includes(command.kind) ? `session:${Number(command.input.sessionId)}` : typeof command.input.videoId === 'string' ? `course:${command.input.videoId}` : command.resource;
   return store.transaction(() => {
     const previous = store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, command.operationId) as { kind: string; resource: string; input: string } | undefined;
     if (previous) {
       const previousInput = JSON.parse(previous.input);
-      if (command.kind === 'chat' && input.action === 'compressContext') delete previousInput.compressionBaseline;
-      if (previous.kind !== command.kind || previous.resource !== resource || !isDeepStrictEqual(previousInput, input)) throw new Error('task_nonce_conflict');
+      if (previous.kind !== command.kind || previous.resource !== resource || !isDeepStrictEqual(taskIntent(previousInput, command.kind), taskIntent(command.input, command.kind))) throw new Error('task_nonce_conflict');
       return taskDto(previous);
     }
     // Validate the new request after durable nonce lookup: retrying a completed
     // operation must return its old receipt even after history has moved on.
+    const input: Record<string, unknown> = new PluginFiles(store).admitTask(owner, command.kind, command.input);
+    if (command.kind === 'chat' && input.attachments !== undefined) input.attachments = normalizeChatAttachments(store, owner, input.attachments);
     if (command.kind === 'bilibiliImport') {
       const bili = parseBiliImport(input);
       if (bili.folderId !== undefined && !store.db.prepare('SELECT 1 FROM resource_folders WHERE owner_id=? AND folder_id=?').get(owner, bili.folderId)) throw new Error('invalid_bilibili_folder');

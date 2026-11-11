@@ -1,7 +1,7 @@
 /** Node execution consumes environment-neutral packages, never Web application sources. */
 import fs from 'node:fs/promises';
 import { attachmentMessage } from '@wangke/study-core/chat/attachments';
-import { taskChatAttachments } from './chat-attachments.js';
+import { taskChatAttachments, resolveAttachmentMessages } from './chat-attachments.js';
 import { sessionSkills, skillHistoryBudget, assertSkillRequestBudget } from './skills.js';
 import { sessionMcp } from './mcp.js';
 import { compareChatRows, nextChatTurnTimes } from '@wangke/study-core/chat-order';
@@ -427,7 +427,7 @@ async function runServerAgent(
       const requestMessages = reconcileSkillMessages(out);
       assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, requestMessages, false);
       const options: ChatOptions = {
-        messages: requestMessages,
+        messages: resolveAttachmentMessages(context, requestMessages),
         cacheKey, onRequest,
         tools,
         temperature: 0.3,
@@ -616,7 +616,7 @@ async function runServerAgent(
   const finalMessages = reconcileSkillMessages(out);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, finalMessages, false);
   try {
-    const options: ChatOptions = { messages: finalMessages, cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, signal: context.signal, thinkingLevel };
+    const options: ChatOptions = { messages: resolveAttachmentMessages(context, finalMessages), cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, signal: context.signal, thinkingLevel };
     options.max_tokens = Math.min(4096, chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target)));
     final = await chatStream(target, options,
       delta => { appendAnswer(delta); report('answer', maxRounds + 1); },
@@ -1027,7 +1027,7 @@ async function continueChat(context: TaskContext) {
   };
   snapshot(true, undefined, true);
   try {
-    const options: ChatOptions = { messages, signal: context.signal, thinkingLevel: taskThinkingLevel(context),
+    const options: ChatOptions = { messages: resolveAttachmentMessages(context, messages), signal: context.signal, thinkingLevel: taskThinkingLevel(context),
       cacheKey: `study:${context.owner}:${sessionId}`, onRequest: request => { requests.push(request); } };
     options.max_tokens = chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target));
     const message = await chatStream(target, options,

@@ -57,6 +57,10 @@ async function runOne(videoId: string): Promise<void> {
 }
 
 export async function resumePendingTranscriptions(): Promise<void> {
+  // Cloud execution/queue recovery is durable on the server. Activity's shared
+  // tasks model already restores progress; a partial business cache must never
+  // infer which courses to submit again (potentially charging a second run).
+  if (cloud.enabled) return;
   const database = db, owner = cloud.userId;
   const rows = await database.videos.filter(v => v.kind !== 'material' && v.fileDeleted !== 1 && !v.transcriptionPaused && (v.status === 'new' || v.status === 'transcribing')).toArray();
   for (const row of rows) {

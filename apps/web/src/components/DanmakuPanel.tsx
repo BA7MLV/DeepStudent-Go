@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Tooltip } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import { db, type DanmakuRow } from '../store/db';
+import { type DanmakuRow } from '../store/db';
+import { useCourseCollection, CourseCollectionError } from './useCourseCollection';
 import { runDanmaku, type DanmakuProgress } from '../pipelines/danmaku';
 import { usePluginAvailable } from '../plugins/catalog';
 import { fmtTime } from '../utils/vtt';
@@ -21,33 +22,16 @@ interface Props {
 
 export default function DanmakuPanel({ videoId, playerRef, hasSubtitles }: Props) {
   const available = usePluginAvailable('material-tools');
-  const [items, setItems] = useState<DanmakuRow[]>([]);
+  const { rows: items, ready: loaded, error: readError, reload } = useCourseCollection<DanmakuRow>('danmakus', videoId);
   /**
    * 首次读回之前为 false —— 空态只在 `loaded && 真的为空` 时出现。
    * 判据不能是 `items.length === 0`：reload 是异步 IndexedDB 读，首帧数组必然为空，
    * 有弹幕的课程会先闪一下空态（不变量 I1）。
    */
-  const [loaded, setLoaded] = useState(false);
   const [progress, setProgress] = useState<DanmakuProgress | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    try {
-      const rows = await db.danmakus.where('videoId').equals(videoId).sortBy('time');
-      setItems(rows);
-    } catch (e) {
-      // 读失败按「确实为空」收尾，别把界面永远留在骨架/空白上（不变量 I5）
-      setErrorText(formatCaughtError(e));
-    } finally {
-      setLoaded(true);
-    }
-  }, [videoId]);
-
-  useEffect(() => {
-    // 切视频先回到「未知」态，避免拿上一门课的弹幕列表当本课的空/满判据
-    setLoaded(false);
-    void reload();
-  }, [reload]);
+  useEffect(() => { if (readError) setErrorText(readError); }, [readError]);
 
   const showSkeleton = useSkeletonGate(!loaded);
 
@@ -79,7 +63,7 @@ export default function DanmakuPanel({ videoId, playerRef, hasSubtitles }: Props
             <LoadingButton
               loading={running}
               variant="primary"
-              isDisabled={!available || hasSubtitles !== true}
+               isDisabled={!loaded || !available || hasSubtitles !== true}
               onPress={start}
               data-testid="dm-generate"
             >
@@ -99,6 +83,7 @@ export default function DanmakuPanel({ videoId, playerRef, hasSubtitles }: Props
       )}
 
       <PersistentError title="弹幕生成失败" text={errorText} onClose={() => setErrorText(null)} />
+      <CourseCollectionError error={readError} retry={reload} />
 
       <PanelBody testId="dm-list">
         <SkeletonReveal show={showSkeleton} skeleton={<CueSkeleton rows={8} />}>

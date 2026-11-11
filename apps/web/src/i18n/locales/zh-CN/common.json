@@ -1,16 +1,18 @@
 {
+  "dataDelivery": {
+    "retryFailed": "重新生成失败，请重试：{{reason}}",
+    "widgetCancelled": "交互讲解已取消",
+    "imageLoadFailed": "图片加载失败",
+    "previewMissing": "此图片没有预览，请打开查看原图",
+    "previewInvalid": "图片服务未返回有效预览或尺寸，请更新服务后重试",
+    "inkLoadFailed": "批注读取失败，请重试后再书写。"
+  },
   "courseMetadata": { "loadFailed": "课程信息暂时无法读取，未加载不表示课程已删除。", "retry": "重试" },
   "appTitle": "DeepStudent Go",
   "fileLoadFailed": "无法加载文件（{{status}}）",
   "clipboard": {
     "copied": "已复制",
     "failed": "复制失败，请重试"
-  },
-  "localHistory": {
-    "open": "导出本机历史原稿",
-    "close": "收起本机历史导出",
-    "loading": "正在加载本机导出工具…",
-    "loadFailed": "本机导出工具未能加载。请恢复站点连接后刷新重试；原稿未改变。"
   },
   "settings": "设置",
   "board": {

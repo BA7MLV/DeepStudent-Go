@@ -42,7 +42,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
 export interface ThreadDetail extends ThreadDto { messages: MessageDto[]; participants?: AgentProfileDto[]; approvals?: ApprovalDto[]; questions?: ThreadQuestionDto[]; runs?: ThreadRunDto[]; running?: boolean }
 export interface Session { authenticated: boolean; user: { id: string; name: string } | null }
-export interface FileDto { id: string; originalName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string }
+export interface FileDto { id: string; originalName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string; previewServerId?: string; width?: number; height?: number }
 export interface ApprovalDto { id: string; messageId: string; threadId: string; runId?: string | null; status: 'pending' | 'approved' | 'rejected'; createdAt: string; resolvedAt: string | null; resolution: string | null }
 export interface ThreadQuestionDto { id: string; runId: string; messageId: string; status: 'pending' | 'answered'; createdAt: string; answeredAt: string | null; answerMessageId: string | null }
 export interface ThreadRunDto { id: string; status: string; errorCode: string | null; wakeAt: string | null }
