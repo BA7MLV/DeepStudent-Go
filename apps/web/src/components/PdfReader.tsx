@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Dropdown, Input, TextField } from '@heroui/react';
+import { useTranslation } from 'react-i18next';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import {
   openPdf,
@@ -53,18 +54,21 @@ interface Props {
 }
 
 export default function PdfReader({ fileUrl, initialUnit, handleRef, onUnitChange }: Props) {
+  const { t } = useTranslation('interface', { keyPrefix: 'materialReader' });
   const ink = useMaterialInk();
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [outline, setOutline] = useState<OutlineEntry[]>([]);
   const [numPages, setNumPages] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  /** 内容区可用宽度（不含内边距）：页面宽度 = 它 × zoom */
-  const [avail, setAvail] = useState(0);
-  /** height/width，按页记录；未测到的页先用 A4 比例占位 */
+  /** 阅读区可用尺寸（不含内边距），工具条换行、全屏和窗口变化时重新测量。 */
+  const [avail, setAvail] = useState({ width: 0, height: 0 });
+  /** height/width，按页记录；未测到的页先用打开页的比例占位 */
   const [aspects, setAspects] = useState<number[]>([]);
   const [visible, setVisible] = useState<ReadonlySet<number>>(() => new Set());
   const [current, setCurrent] = useState(1);
-  const [zoom, setZoom] = useState(1);
+  /** null 表示自动适配整页；手动缩放后不再被高度变化覆盖。 */
+  const [manualZoom, setManualZoom] = useState<number | null>(null);
+  const [fitAspect, setFitAspect] = useState(1.414);
   const [areaMode, setAreaMode] = useState(false);
   const [jumpDraft, setJumpDraft] = useState('');
 
@@ -81,6 +85,7 @@ export default function PdfReader({ fileUrl, initialUnit, handleRef, onUnitChang
     setError(null);
     setDoc(null);
     setNumPages(0);
+    setManualZoom(null);
     (async () => {
       try {
         const d = await openPdf(fileUrl);
@@ -89,9 +94,16 @@ export default function PdfReader({ fileUrl, initialUnit, handleRef, onUnitChang
           return;
         }
         opened = d;
+        // 先测量实际打开的页，避免横版文档 / 断点续读先按 A4 渲染再跳变。
+        const first = Math.min(Math.max(1, Math.floor(initialUnit || 1)), d.numPages);
+        const page = await d.getPage(first);
+        if (cancelled) return;
+        const viewport = page.getViewport({ scale: 1 });
+        const aspect = viewport.height / viewport.width;
+        setFitAspect(aspect);
         setDoc(d);
         setNumPages(d.numPages);
-        setAspects(new Array(d.numPages).fill(0));
+        setAspects(new Array(d.numPages).fill(aspect));
         void readPdfOutline(d).then((o) => !cancelled && setOutline(o));
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -103,14 +115,15 @@ export default function PdfReader({ fileUrl, initialUnit, handleRef, onUnitChang
     };
   }, [fileUrl]);
 
-  // ── 容器宽度 ──────────────────────────────────────────────────────────────
+  // ── 容器尺寸 ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const measure = () => {
       const cs = getComputedStyle(el);
-      const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-      setAvail(Math.max(120, el.clientWidth - pad));
+      const width = Math.max(1, el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight));
+      const height = Math.max(1, el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom));
+      setAvail((prev) => prev.width === width && prev.height === height ? prev : { width, height });
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -118,7 +131,10 @@ export default function PdfReader({ fileUrl, initialUnit, handleRef, onUnitChang
     return () => ro.disconnect();
   }, []);
 
-  const pageWidth = Math.max(120, Math.round(avail * zoom));
+  const fitZoom = avail.width > 0 ? Math.min(1, avail.height / (avail.width * fitAspect)) : 1;
+  const zoom = manualZoom ?? fitZoom;
+  // 向下取整，避免适配高度时因舍入多出一行像素。
+  const pageWidth = Math.max(1, Math.floor(avail.width * zoom));
   const pageHeightOf = useCallback(
     (n: number) => Math.round(pageWidth * (aspects[n - 1] > 0 ? aspects[n - 1] : 1.414)),
     [pageWidth, aspects],
@@ -309,19 +325,31 @@ export default function PdfReader({ fileUrl, initialUnit, handleRef, onUnitChang
           variant="tertiary"
           data-testid="reader-zoom-out"
           aria-label="缩小"
-          onPress={() => setZoom((z) => Math.max(0.5, Math.round((z - 0.1) * 10) / 10))}
+          onPress={() => setManualZoom(Math.max(0.01, Math.round((zoom - 0.1) * 100) / 100))}
         >
           <Sym name="zoom_out" />
         </Button>
-        <span className="mr-bar__pos">{Math.round(zoom * 100)}%</span>
+        <span className="mr-bar__pos" data-testid="reader-zoom-level">{Math.round(zoom * 100)}%</span>
         <Button
           isIconOnly
           variant="tertiary"
           data-testid="reader-zoom-in"
           aria-label="放大"
-          onPress={() => setZoom((z) => Math.min(3, Math.round((z + 0.1) * 10) / 10))}
+          onPress={() => setManualZoom(Math.min(3, Math.round((zoom + 0.1) * 100) / 100))}
         >
           <Sym name="zoom_in" />
+        </Button>
+        <Button
+          variant="tertiary"
+          data-testid="reader-zoom-fit"
+          aria-label={t('fitPage')}
+          aria-pressed={manualZoom === null}
+          onPress={() => {
+            setFitAspect(aspects[current - 1] || fitAspect);
+            setManualZoom(null);
+          }}
+        >
+          {t('fit')}
         </Button>
         {outline.length > 0 && (
           <Dropdown>

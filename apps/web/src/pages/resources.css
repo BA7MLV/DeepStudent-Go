@@ -18,7 +18,7 @@
 .resource-grid[data-view='list'] .resource-open > svg { width: 30px; height: 30px; }
 .resource-grid[data-view='list'] .resource-open > span:not(.resource-file-icon) { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; }
 .resource-grid[data-view='list'] .resource-open > .resource-file-icon { flex: 0 0 30px; width: 30px; height: 30px; }
-.resource-grid[data-view='list'] .resource-file-icon .finder-document { width: 18px; height: 24px; border-radius: var(--radius-xs); }
+.resource-grid[data-view='list'] .resource-file-icon .finder-document { --finder-fold: 0px; width: 18px; height: 24px; border-radius: var(--radius-xs); }
 .resource-grid[data-view='list'] .resource-file-icon .finder-video { width: 26px; height: 19px; border-width: 1px; }
 .resource-grid[data-view='list'] .resource-file-icon .finder-document::after,
 .resource-grid[data-view='list'] .resource-file-icon .finder-file-extension,

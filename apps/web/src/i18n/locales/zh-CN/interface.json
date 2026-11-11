@@ -1,4 +1,5 @@
 {
+  "materialReader": { "fit": "适配", "fitPage": "适配页面" },
   "imageCrop": {
     "orientation": "图片方向", "rotateLeft": "向左旋转", "rotateRight": "向右旋转",
     "title": "裁切图片", "open": "裁切图片 {{name}}", "loading": "加载裁切工具", "imageLoading": "图片加载中", "close": "关闭裁切",
