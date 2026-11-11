@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "warn"
+  },
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/*.generated.*", "packages/dsh-typert-protocol-source/**"]
+}

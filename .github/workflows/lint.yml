@@ -1,0 +1,32 @@
+name: lint
+
+on:
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "scripts/**"
+      - ".oxlintrc.json"
+      - "AGENTS.md"
+      - "package.json"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Lint (oxlint + anti-slop ratchet)
+        run: npm run lint
+      - name: Workspace boundaries
+        run: npm run check:boundaries
+      - name: Web typecheck
+        run: npm run typecheck -w @wangke/web
+      - name: Build web + startup budget
+        run: npm run build:web && npm run test:boot:budget
+      - name: i18n consistency
+        run: npm run check:i18n
