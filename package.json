@@ -87,6 +87,8 @@
     "test:web-search:e2e": "tsx scripts/e2e-web-search.mjs",
     "test:mcp:e2e": "tsx scripts/e2e-mcp-files.mjs",
     "test:sandbox": "node scripts/test-sandbox.mjs",
+    "test:chat-shell": "npm run build:api && tsx scripts/test-chat-shell.mjs",
+    "test:chat-shell:e2e": "npm run build:api && tsx scripts/e2e-native-chat-shell.mjs",
     "test:sandbox-output": "tsx --test scripts/test-sandbox-output.mjs",
     "test:cloud": "tsx scripts/test-cloud.mjs",
     "test:cloud:transactions": "tsx --test scripts/test-cloud-transactions.mjs",

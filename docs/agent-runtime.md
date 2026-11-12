@@ -84,6 +84,19 @@ See [Project workspaces](project-workspaces.md) for the API and upgrade behavior
 
 ## Execution boundary
 
+### 普通 Chat 的 Shell
+
+资料库普通 Chat（`chatSessions` / `cloud_tasks(kind=chat)`）也可在原有模型工具循环内调用 `shell`，无需切换 Bot。课程 Q&A 和委派子任务不开放此工具，正文“继续回答”也不会执行命令。部署仍使用同一 `SANDBOX_URL` / `SANDBOX_TOKEN` 和执行镜像；未配置时明确返回 `sandbox_not_configured`，绝不退回 API 主机执行。
+
+- 工作区由服务端根据账户与会话确定，使用独立 Docker named volume；同一会话跨轮保留文件，不同账户/会话（包括分叉会话）不共享。课程文件夹只约束学习检索，不会因此成为可写挂载。模型不能指定其他项目、主机目录或 `systemWrite`。账户 `/system` 只读，读取禁止时不能使用此 Shell；读取需确认时也会触发本次审批。
+- 沿用全局 Shell / 删除权限、单次破坏性操作审批、1–600秒时限和容器资源/输出限制。`network` 默认 `false`，显式 `true` 还须全局允许联网；批准不能覆盖明确禁止。精确命令、联网设置、时限写入已有 `cloud_permissions`，审批一次性消费；聊天输入区提供批准/拒绝卡片，设置页仍可审批。等待时重查权限，撤销、取消和会话删除阻止执行。停止任务会中止请求并请求 broker 确认容器清理。重启沿用 Chat 中断策略，不自动重放可能已产生副作用的命令。
+- 每条命令启动新容器，进程、`cd`、`export` 不延续；依赖放 `/workspace`，无需模型后台执行入口。命令结果（stdout/stderr 预览、退出码及截断/终止信息）回到同一轮模型，并作为工具记录保存。Chat 暂不使用 Bot 的完整日志 artifact；大输出应在命令内重定向到文件后分段读取。
+- 本次仅接入 Shell 执行：上传附件原件不会自动复制进卷，沙盒生成文件暂不能直接注册为聊天下载附件；模型提示词明确这两个限制，不能编造附件路径或下载链接。已有附件提取与图片输入流程保持不变。命名卷不在现有应用文件备份中，与历史 Bot 命名卷一样需要单独管理。
+
+验证：`npm run test:chat-shell`；真实容器隔离与清理仍由 `npm run test:sandbox` 覆盖（需要 Docker）。
+
+### Bot execution
+
 - Project sessions bind-mount one selected `FILES_DIR/projects/<project-id>` at `/workspace`. Ordinary Web/IM BOT conversations default to their owner's dedicated `Bot` resource folder. Incoming attachments and workspace tools share this directory; task subdirectories stay inside it. An exact `projectId` on `workspace`, `shell` or `study_upload_file` selects another owner resource project for that operation; shell mounts that target at `/workspace`. Legacy thread volumes remain on disk but are no longer the default for Bot profiles.
 - Each shell step runs in a fresh non-root container with Node, Python, bash, git and curl. The root filesystem is read-only; the selected owner resource project and temporary directory are writable. The **entire owner-scoped `/system` is read-only by default**, including Skills. `shell({systemWrite:true,...})` grants a writable mount of all owner `/system` for that command, **without approval for creates/edits/Skill installs**, even with shell/read/write `ask` policies; later commands do not inherit access. File/directory deletion still requires exact one-shot approval: the Bot must set `requiresApproval=true`, including for scripts, and common destructive commands/Python/Node calls are also detected. Global read/write/remove/shell denials still apply, as do target project denials, archive and network restrictions. The authenticated API checks the persisted scope/arguments and any required approval before calling the private broker. **Command-text checks are defense in depth, not a filesystem deletion boundary for arbitrary programs with writable mounts**; indirect/obfuscated deletion cannot be reliably inferred. No application credentials or other account directories are mounted.
 - New sandbox images include `wangke-save SOURCE TARGET` for staged generated artifacts: meaningful workspace-relative names, atomic no-overwrite publication, numbered conflicts and reuse of identical output at the requested/numbered path. Generate `/tmp` inputs and publish in the same shell step, then register the returned path with `study_upload_file`. This is a safe default workflow, not a restriction on arbitrary Python writes; see [file naming and saving](project-workspaces.md#bot-生成文件的安全保存).

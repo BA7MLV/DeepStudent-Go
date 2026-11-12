@@ -259,7 +259,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   const bad = (reply: FastifyReply, code: number, error: string) => reply.code(code).send({ error });
   const pruneAttempts = () => { const cutoff = Date.now() - 15 * 60_000; for (const [ip, value] of attempts) if (value.until < cutoff && value.seen < cutoff) attempts.delete(ip); while (attempts.size > 10_000) attempts.delete(attempts.keys().next().value!); };
 
-   const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch, mcp,
+   const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch, mcp, sandbox: options.sandbox, sandboxCleanup: options.sandboxCleanup,
      canStart: () => !held && !draining,
    });
    registerBilibiliRoutes(app, { store, configuration: cloudConfig, requireAuth, checkOrigin, fetch: options.fetch });

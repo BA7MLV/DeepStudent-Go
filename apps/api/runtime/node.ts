@@ -4,6 +4,7 @@ import { attachmentMessage } from '@wangke/study-core/chat/attachments';
 import { taskChatAttachments } from './chat-attachments.js';
 import { sessionSkills, skillHistoryBudget, assertSkillRequestBudget } from './skills.js';
 import { sessionMcp } from './mcp.js';
+import { sessionShell } from './chat-shell.js';
 import { compareChatRows, nextChatTurnTimes } from '@wangke/study-core/chat-order';
 import { beginResponseSegment, nextResponseRound, type ResponseSegment } from '@wangke/study-core/response-order';
 import { folderCourseScope } from '@wangke/study-core/folder-scope';
@@ -928,6 +929,7 @@ async function chat(context: TaskContext) {
   if (!Number.isSafeInteger(sessionId)) throw new Error('聊天会话不存在');
   const session = context.records.get(context.owner, 'chatSessions', sessionId);
   if (!session) throw new Error('聊天会话不存在');
+  const shell = sessionShell(context);
   const mcp = await sessionMcp(context);
   const skills = sessionSkills(context, session, input.explicitSkillIds, mcp.serverNames);
   const attachments = taskChatAttachments(context);
@@ -938,7 +940,7 @@ async function chat(context: TaskContext) {
   const system = `你是 DeepStudent Go 学习资料库助手。服务器负责模型请求、检索、任务和数据保存；你可以通过工具读取用户自己的课程数据。\n\n规则：涉及用户课程、学习进度或课程内容时必须先调用工具，不能编造；通用问题直接回答。引用课程内容时保留工具返回的课程名、courseId 和时间/页码。用简洁自然的中文回答。\n\n${SERVER_WIDGET_RULE}`;
   const project = session.projectFolderId == null ? undefined : context.records.get(context.owner, 'folders', session.projectFolderId);
   const current = attachmentMessage({ role: 'user', content: `${project ? runtimeContext({ project: { folderId: project.id, name: project.name } }) : ''}${text}`, attachments });
-  const systemWithSkills = system + skills.prompt;
+  const systemWithSkills = system + shell.prompt + skills.prompt;
   const target = targetFor(context);
   const recent = await modelHistory(history, session, skillHistoryBudget(target.capabilities?.contextWindow ?? 131072, [{ role: 'system', content: systemWithSkills }, current], skills.messages));
   const messages: ChatMessage[] = skills.reconcile([{ role: 'system', content: systemWithSkills }, ...recent.messages, ...skills.messages, current]);
@@ -963,7 +965,7 @@ async function chat(context: TaskContext) {
     result.widgets = assistantRow.widgets ?? [];
     return { rowId: assistantId, userRowId: userId, ...widgetFields(result) };
   };
-  const result = await runServerAgent(context, target, messages, [...libraryTools(courses.length > 0), ...mcp.tools], mcp.wrap(skills.wrap(libraryExecutor(context, session))), persist, [...skills.traces, ...mcp.traces], mcp.label);
+  const result = await runServerAgent(context, target, messages, [...libraryTools(courses.length > 0), ...shell.tools, ...mcp.tools], mcp.wrap(skills.wrap(shell.wrap(libraryExecutor(context, session)))), persist, [...skills.traces, ...mcp.traces], mcp.label);
   persist(result, false);
   return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...(result.ask ? { ask: result.ask } : {}), ...responseFields(result) };
 }

@@ -1,4 +1,14 @@
 {
+  "chatShell": {
+    "title": "允许这次聊天运行命令吗？",
+    "scope": "仅本会话工作目录可写，账户系统资料只读。联网：{{network}} · 时限：{{seconds}}秒",
+    "networkOn": "开启",
+    "networkOff": "关闭",
+    "command": "查看完整命令",
+    "approve": "仅允许这一次",
+    "reject": "拒绝",
+    "loadFailed": "命令审批暂时无法加载，请重新连接，或停止这轮回答后重试。"
+  },
   "courseMetadata": { "loadFailed": "课程信息暂时无法读取，未加载不表示课程已删除。", "retry": "重试" },
   "appTitle": "DeepStudent Go",
   "fileLoadFailed": "无法加载文件（{{status}}）",

@@ -17,11 +17,14 @@ import { modelUsageReport } from '../agent/model-observations.js';
 import type { WebSearchService } from '../web-search/service.js';
 import { PluginFiles } from '../plugins/files.js';
 import type { McpManager } from '../mcp/manager.js';
+import type { SandboxExecutor, SandboxCleanup } from '../agent/sandbox.js';
 import { submitOwnerTask } from './task-commands.js';
 import { TaskDelegationService } from './delegation.js';
 import { validateAskAnswer, type AskUserData, type AskUserAnswer } from '@wangke/study-core/ask-user';
 
 interface Dependencies {
+  sandbox?: SandboxExecutor;
+  sandboxCleanup?: SandboxCleanup;
   mcp?: McpManager;
   webSearch?: WebSearchService;
   store: DatabaseStore; records: CloudRecords; configuration: CloudConfiguration;
@@ -33,7 +36,7 @@ interface Dependencies {
 
 export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   const { store, records, configuration, requireAuth, checkOrigin } = deps;
-  const runner = new CloudTaskRunner(store, { records, configuration, filesDir: deps.filesDir, fetch: deps.fetch, webSearch: deps.webSearch, mcp: deps.mcp });
+  const runner = new CloudTaskRunner(store, { records, configuration, filesDir: deps.filesDir, fetch: deps.fetch, webSearch: deps.webSearch, mcp: deps.mcp, sandbox: deps.sandbox, sandboxCleanup: deps.sandboxCleanup });
   const fail = (reply: FastifyReply, code: number, error: string) => reply.code(code).send({ error });
   const configurationError = (reply: FastifyReply, e: unknown) => e instanceof ModelConfigurationError
     ? reply.code(e.status).send({ error: e.message, issues: e.issues })
