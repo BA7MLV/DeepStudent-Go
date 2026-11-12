@@ -14,6 +14,7 @@ import { modelTrace, replayTrace, messageTokens, runtimeContext, splitSystemProm
 import { cachePolicy, stableTools } from '@wangke/study-core/model/cache';
 import type { ModelRequestRecord } from '@wangke/study-core/model/usage';
 import type { ModelTarget } from '@wangke/study-core/model/types';
+import { refineSessionTitle } from './session-title.js';
 import { generateText, type TextSegment } from '@wangke/study-core/generation/text';
 import { rewriteBlock, type RewriteContext } from '@wangke/study-core/handout/rewrite';
 import type { Block } from '@wangke/study-core/handout/ir';
@@ -920,6 +921,7 @@ async function qa(context: TaskContext) {
   };
   const result = await runServerAgent(context, target, messages, [...qaTools(kind), ...mcp.tools], mcp.wrap(skills.wrap(qaExecutor(context, videoId, kind))), persist, [...skills.traces, ...mcp.traces], mcp.label);
   persist(result, false);
+  if (title) await refineSessionTitle(context, sessionId, title, target, text, result.content, modelFetch(context));
   return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...responseFields(result) };
 }
 
@@ -969,6 +971,7 @@ async function chat(context: TaskContext) {
   };
   const result = await runServerAgent(context, target, messages, [...libraryTools(courses.length > 0), ...shell.tools, ...mcp.tools], mcp.wrap(skills.wrap(shell.wrap(libraryExecutor(context, session)))), persist, [...skills.traces, ...mcp.traces], mcp.label);
   persist(result, false);
+  if (title) await refineSessionTitle(context, sessionId, title, target, text, result.content, modelFetch(context));
   return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...(result.ask ? { ask: result.ask } : {}), ...responseFields(result) };
 }
 
