@@ -125,6 +125,15 @@ try {
     assert.equal(await zoom(), '1.5');
     await page.keyboard.press('-');
     assert.equal(await zoom(), '1');
+    await dialog.locator('.image-preview__content').hover();
+    await page.mouse.wheel(0, -300);
+    assert(Number(await zoom()) > 1, `滚轮向上应放大（实得 ${await zoom()}）`);
+    assert(await dialog.locator('.image-preview__scroll').evaluate((el) => el.scrollTop > 0), '滚轮缩放应以光标为锚点滚动');
+    await page.mouse.wheel(0, 300);
+    const wheeled = Number(await zoom());
+    assert(Math.abs(wheeled - 1) < 0.02, `滚轮向下应缩回原比例（实得 ${wheeled}）`);
+    await page.keyboard.press('0');
+    assert.equal(await zoom(), '1');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Tab');
     assert(await dialog.evaluate((el) => el.contains(document.activeElement)), 'Tab stays within the modal');

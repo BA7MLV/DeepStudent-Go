@@ -123,8 +123,10 @@ export function BotAttachmentDraft({ files, sending, onRemove, onRetry, onReplac
     {files.map(item => isImage({ originalName: item.file.name, mimeType: item.file.type }) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.error ? 'error' : item.uploaded && !item.editing ? 'ready' : 'loading'}>
       <AttachmentImage name={item.file.name} local={item.file} draft />
       {(!item.uploaded || item.error) && <AttachmentUploadStatus label="图片上传中" error={item.error} onRetry={() => onRetry(item.id)} />}
-      <ImageCropButton file={item.file} isDisabled={sending || !item.uploaded || !!item.error || item.editing} onSave={file => onReplace(item.id, file)} />
-      <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={sending || item.editing} onPress={() => onRemove(item.id)}><Sym name="close" /></Button>
+      <div className="chat-image-draft__actions">
+        <ImageCropButton file={item.file} isDisabled={sending || !item.uploaded || !!item.error || item.editing} onSave={file => onReplace(item.id, file)} />
+        <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={sending || item.editing} onPress={() => onRemove(item.id)}><Sym name="close" /></Button>
+      </div>
     </div> : <div key={item.id} className="chat-attachments__item" data-testid="chat-attachment" data-state={item.error ? 'error' : item.uploaded ? 'ready' : 'loading'}>
       {!item.uploaded && !item.error ? <Spinner size="sm" aria-label="附件上传中" /> : <Sym name="description" />}
       <span className="chat-attachments__info"><span>{item.file.name}</span><small>{attachmentSize(item.file.size)} · {item.error ? '上传失败' : item.uploaded ? '待发送' : '上传中'}</small>{item.error && <span role="alert" className="chat-attachments__error">{item.error}</span>}</span>

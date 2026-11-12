@@ -146,8 +146,10 @@ function ChatAttachmentDraftContent() {
   return <div className="chat-attachments" data-testid="chat-attachment-draft" aria-label="待发送附件">
     {items.map((item) => (item.value && isImageAttachment(item.value) || /^image\/(png|jpeg|webp|gif)$/.test(item.file.type) || /\.(png|jpe?g|webp|gif)$/i.test(item.file.name)) ? <div key={item.id} className="chat-image-draft" data-testid="chat-attachment" data-state={item.error ? 'error' : item.value && !item.editing ? 'ready' : 'loading'}>
       {item.value && isImageAttachment(item.value) && !item.error ? <ChatImage file={item.value} images={images} draft /> : <PendingImage file={item.file} removing={item.phase === '移除中'} error={item.error} onRetry={() => retry(item.id)} />}
-      <ImageCropButton file={item.file} isDisabled={!item.value || !!item.error || item.editing} onSave={file => replace(item.id, file)} />
-      <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={item.editing || item.phase === '移除中'} onPress={() => void remove(item.id)}><Sym name="close" /></Button>
+      <div className="chat-image-draft__actions">
+        <ImageCropButton file={item.file} isDisabled={!item.value || !!item.error || item.editing} onSave={file => replace(item.id, file)} />
+        <Button isIconOnly size="sm" variant="secondary" className="chat-image-draft__remove" aria-label={`移除附件 ${item.file.name}`} isDisabled={item.editing || item.phase === '移除中'} onPress={() => void remove(item.id)}><Sym name="close" /></Button>
+      </div>
     </div> : <div key={item.id} className="chat-attachments__item chat-document" data-testid="chat-attachment" data-state={item.error ? 'error' : item.value ? 'ready' : 'loading'}>
       <ChatDocument file={item.value ?? { id: item.id, name: item.file.name, size: item.file.size, mimeType: item.file.type }} local={item.file}
         loading={!item.value && !item.error} error={item.error} status={item.error ? t('chatAttachment.failed') : item.value ? undefined : item.phase}>
