@@ -39,6 +39,7 @@ import { registerMcpRoutes } from './mcp/routes.js';
 import { WebSearchConfiguration } from './web-search/config.js';
 import { WebSearchService } from './web-search/service.js';
 import { registerWebSearchRoutes } from './web-search/routes.js';
+import { registerLinkIconRoutes } from './web-links/icons.js';
 import { ProjectRepository } from './projects/repository.js';
 import { ProjectError } from './projects/files.js';
 import { registerProjectRoutes } from './projects/routes.js';
@@ -278,6 +279,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     study.register(pluginTool(pluginService));
    registerMcpRoutes(app, { manager: mcp, store, records: cloudRecords, requireAuth, checkOrigin });
    registerWebSearchRoutes(app, { service: webSearch, store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin });
+   registerLinkIconRoutes(app, { requireAuth, checkOrigin, fetch: options.fetch });
    registerProjectRoutes(app, { projects, requireAuth, checkOrigin, maxFileBytes, stopProject: (id) => {
      const runs = store.db.prepare(`SELECT r.id FROM runs r JOIN threads t ON t.id=r.thread_id
        LEFT JOIN bot_workspaces b ON b.owner_id=t.owner_id AND t.mode='bot'

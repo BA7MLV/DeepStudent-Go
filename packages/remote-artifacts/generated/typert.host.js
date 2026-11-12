@@ -1159,8 +1159,12 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
   'path': z.string(),
   'revision': z.string(),
 }), z.object({
-  'kind': z.union([z.literal("trash"), z.literal("restore"), z.literal("deleteTrash")]),
+  'kind': z.union([z.literal("trash"), z.literal("deleteTrash")]),
   'projectId': z.string(),
+}), z.object({
+  'kind': z.literal("restore"),
+  'projectId': z.string(),
+  'expectedDeletedAt': z.union([z.undefined(), z.string()]).optional(),
 }), z.object({
   'kind': z.literal("saveCourseText"),
   'courseId': z.string(),
@@ -2997,8 +3001,12 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0_strict$schem
   'path': z.string(),
   'revision': z.string(),
 }), z.strictObject({
-  'kind': z.union([z.literal("trash"), z.literal("restore"), z.literal("deleteTrash")]),
+  'kind': z.union([z.literal("trash"), z.literal("deleteTrash")]),
   'projectId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("restore"),
+  'projectId': z.string(),
+  'expectedDeletedAt': z.union([z.undefined(), z.string()]).optional(),
 }), z.strictObject({
   'kind': z.literal("saveCourseText"),
   'courseId': z.string(),
@@ -4157,7 +4165,7 @@ export const TYPERT = {
           },
           {
             "name": "ResourceOperation",
-            "declaration": "export type ResourceOperation = { kind: 'importLibraryBlob'; sourceId: string; size: number; sha256: string; contentType: string; } | { kind: 'importLibrary'; library: import('./library-import.js').LibraryImport; } | { kind: 'createFolder'; name: string; } | { kind: 'createDirectory'; projectId: string; path: string; } | { kind: 'upload'; projectId: string; path: string; size: number; sha256: string; contentType: string; } | { kind: 'recordMediaDuration'; courseId: string; duration: number; } | { kind: 'recordPlayback'; courseId: string; position: number; finished?: boolean; } | { kind: 'recordReadingPosition'; courseId: string; unit: number; } | { kind: 'setReadingView'; courseId: string; view: 'raw' | 'blocks'; } | { kind: 'setCourseSkills'; courseId: string; pin: number[]; drop: number[]; } | { kind: 'setCoursePinned'; courseId: string; pinned: boolean; } | { kind: 'pauseTranscription'; courseId: string; } | { kind: 'setVideoSource'; courseId: string; source: { bvid: string; aid: number; cid: number; page: number; }; } | { kind: 'importSubtitles'; courseId: string; primary: boolean; segments: { idx: number; start: number; end: number; text: string; status: 0 | 1; cues?: { start: number; end: number; text: string; }[]; }[]; tracks: { lang: string; lanDoc: string; primary?: 0 | 1; cues: { start: number; end: number; text: string; }[]; }[]; } | { kind: 'renameFolder'; projectId: string; name: string; } | { kind: 'folderColor'; projectId: string; path: string; color: ResourceFolderColor; } | { kind: 'move'; projectId: string; path: string; targetProjectId: string; target: string; revision: string; } | { kind: 'remove'; projectId: string; path: string; revision: string; } | { kind: 'trash' | 'restore' | 'deleteTrash'; projectId: string; } | { kind: 'saveCourseText'; courseId: string; text: string; expected: string; } | { kind: 'saveMarkdown'; courseId: string; text: string; expected: string; name?: string; folderId?: number; createOnly?: boolean; } | { kind: 'organizeCourses'; folders: { name: string; courseIds: string[]; }[]; } | { kind: 'moveLibrarySelection'; placements: { key: string; parent: number | null; target: number | null; }[]; } | { kind: 'saveProjectText'; projectId: string; path: string; text: string; expectedRevision: string | null; };"
+            "declaration": "export type ResourceOperation = { kind: 'importLibraryBlob'; sourceId: string; size: number; sha256: string; contentType: string; } | { kind: 'importLibrary'; library: import('./library-import.js').LibraryImport; } | { kind: 'createFolder'; name: string; } | { kind: 'createDirectory'; projectId: string; path: string; } | { kind: 'upload'; projectId: string; path: string; size: number; sha256: string; contentType: string; } | { kind: 'recordMediaDuration'; courseId: string; duration: number; } | { kind: 'recordPlayback'; courseId: string; position: number; finished?: boolean; } | { kind: 'recordReadingPosition'; courseId: string; unit: number; } | { kind: 'setReadingView'; courseId: string; view: 'raw' | 'blocks'; } | { kind: 'setCourseSkills'; courseId: string; pin: number[]; drop: number[]; } | { kind: 'setCoursePinned'; courseId: string; pinned: boolean; } | { kind: 'pauseTranscription'; courseId: string; } | { kind: 'setVideoSource'; courseId: string; source: { bvid: string; aid: number; cid: number; page: number; }; } | { kind: 'importSubtitles'; courseId: string; primary: boolean; segments: { idx: number; start: number; end: number; text: string; status: 0 | 1; cues?: { start: number; end: number; text: string; }[]; }[]; tracks: { lang: string; lanDoc: string; primary?: 0 | 1; cues: { start: number; end: number; text: string; }[]; }[]; } | { kind: 'renameFolder'; projectId: string; name: string; } | { kind: 'folderColor'; projectId: string; path: string; color: ResourceFolderColor; } | { kind: 'move'; projectId: string; path: string; targetProjectId: string; target: string; revision: string; } | { kind: 'remove'; projectId: string; path: string; revision: string; } | { kind: 'trash' | 'deleteTrash'; projectId: string; } | { kind: 'restore'; projectId: string; expectedDeletedAt?: string; } | { kind: 'saveCourseText'; courseId: string; text: string; expected: string; } | { kind: 'saveMarkdown'; courseId: string; text: string; expected: string; name?: string; folderId?: number; createOnly?: boolean; } | { kind: 'organizeCourses'; folders: { name: string; courseIds: string[]; }[]; } | { kind: 'moveLibrarySelection'; placements: { key: string; parent: number | null; target: number | null; }[]; } | { kind: 'saveProjectText'; projectId: string; path: string; text: string; expectedRevision: string | null; };"
           },
           {
             "name": "ResponseSegment",

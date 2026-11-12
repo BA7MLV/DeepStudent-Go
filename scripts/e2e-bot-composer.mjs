@@ -184,6 +184,33 @@ try {
   assert.equal(batch.caption, '两个附件');
   await page.unroute('**/api/v1/files');
 
+  // The server accepted the message, but its response was lost. Keep the
+  // failure at the composer and reuse its nonce on an explicit resend.
+  let loseResponse = true;
+  const sendNonces = [];
+  const uncertainSend = async route => {
+    if (route.request().method() !== 'POST') { await route.continue(); return; }
+    sendNonces.push(route.request().postDataJSON().clientNonce);
+    const response = await route.fetch();
+    if (loseResponse) { loseResponse = false; await route.fulfill({ status: 500, json: { error: 'fixture_lost_acknowledgement' } }); }
+    else await route.fulfill({ response });
+  };
+  await page.route(`**/api/v1/threads/${thread.id}/messages`, uncertainSend);
+  const beforeUncertain = store.db.prepare("SELECT COUNT(*) n FROM messages WHERE thread_id=? AND role='user'").get(thread.id).n;
+  await input.fill('回执丢失时不要重复发送');
+  await input.press('Enter');
+  await panel.getByTestId('bot-action-error').waitFor();
+  assert.equal(await input.inputValue(), '回执丢失时不要重复发送');
+  await page.waitForTimeout(8500);
+  assert.equal(await panel.getByTestId('bot-action-error').isVisible(), true, 'failure is not an expiring toast');
+  await input.press('Enter');
+  await page.waitForFunction(() => !document.querySelector('[data-testid="bot-action-error"]'));
+  assert.equal(sendNonces.length, 2);
+  assert.equal(typeof sendNonces[0], 'string');
+  assert.equal(sendNonces[1], sendNonces[0], 'explicit resend reuses the original delivery identity');
+  assert.equal(store.db.prepare("SELECT COUNT(*) n FROM messages WHERE thread_id=? AND role='user'").get(thread.id).n, beforeUncertain + 1);
+  await page.unroute(`**/api/v1/threads/${thread.id}/messages`, uncertainSend);
+
   const rejected = await post(`/threads/${thread.id}/messages`, { clientNonce: 'invalid-batch', kind: 'attachment', content: JSON.stringify({ attachments: [{ fileId: file.id }, { fileId: 'not-owned' }] }) });
   assert.equal(rejected.status(), 400, 'the HTTP boundary validates every file, not only the first');
   assert.equal(store.db.prepare("SELECT 1 FROM messages WHERE client_nonce='invalid-batch'").get(), undefined);

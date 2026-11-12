@@ -23,7 +23,7 @@ export default function PersistentError({ title, text, onClose }: Props) {
       icon={<Sym name="error" />}
       title={title}
       testId="persistent-error"
-      description={<div className="persistent-error__desc">{text}</div>}
+      description={<div className="persistent-error__desc whitespace-pre-wrap break-words">{text}</div>}
       action={
         <>
           {configProblem && (

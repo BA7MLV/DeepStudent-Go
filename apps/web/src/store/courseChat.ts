@@ -6,6 +6,7 @@ import { removeConversationMessages, deleteServerSession, forkServerSession } fr
 import type { CloudTask } from '@wangke/contracts/cloud';
 import { isTaskUnfinished } from '@wangke/contracts/task-status';
 import { useChatNotifications } from './chatNotifications';
+import { ChatCompletionTracker } from './chatCompletion';
 import { readChatPage, readChatHistory } from './chatHistory';
 import { responsePhase, type ProcessPhase } from '../utils/responseProcess';
 import { getSettings } from './settings';
@@ -85,7 +86,7 @@ export interface CourseChatStore extends SessionView {
   loadSession(id: number): Promise<void>; createSession(): Promise<void>;
   deleteSessionById(id: number): Promise<boolean>; deleteSession(): Promise<boolean>;
   renameSession(id: number, title: string): Promise<void>; setPinned(id: number, pinned: boolean): Promise<void>;
-  setArchived(id: number, archived: boolean): Promise<boolean>; refreshArchived(): Promise<void>;
+  setArchived(id: number, archived: boolean, expected?: ChatSessionRow): Promise<boolean>; refreshArchived(): Promise<void>;
   setDraft(text: string): void;
   send(text: string, mode?: SendMode, target?: number, resume?: ResumeRequest, attachments?: ChatAttachment[], skills?: number[], queuedCommand?: QueuedMessage & { explicitRetry?: boolean }): Promise<void>;
   setSkillIds(ids: number[] | undefined): void; setTurnSkillIds(ids: number[]): void;
@@ -108,6 +109,7 @@ const EMPTY_VIEW: SessionView = {
 };
 const DRAFT_STATE = { ...EMPTY_VIEW, activeId: null, loaded: true };
 const pendingCloudSubmissions = new Map<string, number>();
+const completions = new ChatCompletionTracker();
 const historyLoads = new Map<number, Promise<void>>();
 const serverSessions = new Map<number, ReturnType<typeof followServerSession>>();
 const retainedSessions = new Map<number, ReturnType<typeof followServerSession>>();
@@ -207,6 +209,9 @@ function sessionQueue() {
 export async function flushChatQueue() { await sessionQueue().flush(); }
 function clearAccountView() {
   accountGeneration++;
+  completions.clear();
+  useChatNotifications.getState().bindOwner(null);
+  toast.clear();
   for (const stop of serverSessions.values()) stop(); serverSessions.clear();
   retainedSessions.clear(); sessionUse.clear(); sessionUseSequence = 0;
   useCourseChat.clearModels(); historyLoads.clear(); pendingCloudSubmissions.clear(); queueBinding = undefined;
@@ -223,6 +228,7 @@ async function applySessionPage(id: number, page: { rows: ChatRow[]; hasOlder: b
   if ([...pendingCloudSubmissions.values()].includes(id)) return;
   const before = readView(id);
   const tasks = page.tasks?.filter(task => task.input.action !== 'compressContext') ?? before.tasks;
+  completions.observe(tasks.map(task => ({ ...task, input: { ...task.input, sessionId: id } })), sessionId => useChatNotifications.getState().complete(sessionId));
   useCourseChat.model(id).set({ tasks }, true);
   let messages = timeline(id).reconcile(before.messages, page.rows);
   for (const task of tasks) {
@@ -289,6 +295,7 @@ export function reflectArtifactEdit(row: ChatRow) {
 }
 export async function reflectCloudTasks(tasks: CloudTask[], dataChanged = false) {
   // Global activity discovers background sessions, never replays message bodies.
+  completions.observe(tasks.filter(task => task.kind === 'chat'), id => useChatNotifications.getState().complete(id));
   const runningIds = [...new Set([...tasks.filter(task => task.kind === 'chat' && task.input.action !== 'compressContext'
     && isTaskUnfinished(task.status)).map(task => Number(task.input.sessionId)), ...pendingCloudSubmissions.values()])].filter(Boolean);
   const previous = useCourseChat.getState().runningIds;
@@ -309,6 +316,7 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
   sendMode: 'queue', courseCount: null, archivedSessions: [],
   bootstrap: async () => {
     if (get().ready) return;
+    useChatNotifications.getState().bindOwner(cloud.userId ?? null);
     const current = captureScope();
     const [sessions, count, pendingDraft] = await Promise.all([unarchivedSessions(), readCourseCount(), browserChatQueue().list(0)]);
     if (!current()) return;
@@ -402,10 +410,13 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
   deleteSession: async () => { const id = get().activeId; return id == null ? false : get().deleteSessionById(id); },
   renameSession: async (id, title) => { if (title.trim()) await patchSession(id, row => { row.title = title.trim(); }); },
   setPinned: async (id, pinned) => { await patchSession(id, row => { if (pinned) row.pinned = true; else delete row.pinned; }); },
-  setArchived: async (id, archived) => {
+  setArchived: async (id, archived, expected) => {
     if (get().runningIds.includes(id)) return false;
     const current = captureScope(), wasActive = get().activeId === id;
-    await patchSession(id, row => { if (archived) row.archived = true; else delete row.archived; });
+    await patchSession(id, row => {
+      if (expected && JSON.stringify(row) !== JSON.stringify(expected)) throw new Error(i18n.t('interface:feedback.archivedChanged'));
+      if (archived) row.archived = true; else delete row.archived;
+    });
     if (!current()) return false;
     if (archived) { serverSessions.get(id)?.(); serverSessions.delete(id); useChatNotifications.getState().dismiss(id); void useChatAttachments.getState().discard(id); }
     const sessions = await unarchivedSessions(); if (!current()) return false;
@@ -650,7 +661,9 @@ async function unarchivedSessions() {
   return (await db.chatSessions.where('videoId').equals(LIBRARY_ASSISTANT_ID).sortBy('createdAt')).filter(row => !row.archived);
 }
 async function patchSession(id: number, mutate: (row: ChatSessionRow) => void) {
-  const current = captureScope(); await reviseConversationSession(id, mutate); if (!current()) return;
+  const current = captureScope();
+  if (!await reviseConversationSession(id, mutate)) throw new Error(i18n.t('chatPanel.sessionUnavailable'));
+  if (!current()) return;
   const fresh = await readConversationSession(id); if (!current() || !fresh) return;
   useCourseChat.setState(state => {
     const archived = new Map(state.archivedSessions.map(row => [row.id, row]));

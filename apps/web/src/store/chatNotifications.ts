@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 interface ChatNotifications {
+  owner: string | null;
+  bindOwner: (owner: string | null) => void;
   unreadIds: number[];
   /** activeId 在资料页仍会保留，只有对话页实际展示才算查看。 */
   viewingId: number | null;
@@ -11,6 +13,8 @@ interface ChatNotifications {
 }
 
 export const useChatNotifications = create<ChatNotifications>()(persist((set, get) => ({
+  owner: null,
+  bindOwner: owner => { if (get().owner !== owner) set({ owner, unreadIds: [], viewingId: null }); },
   unreadIds: [],
   viewingId: null,
   setViewing: (id) => set((state) => ({
@@ -20,7 +24,7 @@ export const useChatNotifications = create<ChatNotifications>()(persist((set, ge
   })),
   complete: (id) => {
     const state = get();
-    if (id <= 0 || state.unreadIds.includes(id)) return;
+    if (!Number.isSafeInteger(id) || id <= 0 || state.unreadIds.includes(id)) return;
     if (state.viewingId === id && document.visibilityState === 'visible') return;
     set({ unreadIds: [...state.unreadIds, id] });
   },
@@ -31,6 +35,7 @@ export const useChatNotifications = create<ChatNotifications>()(persist((set, ge
   },
 }), {
   name: 'deepstudent-chat-notifications',
-  version: 1,
-  partialize: (state) => ({ unreadIds: state.unreadIds }),
+  version: 2,
+  migrate: () => ({ owner: null, unreadIds: [] }),
+  partialize: (state) => ({ owner: state.owner, unreadIds: state.unreadIds }),
 }));

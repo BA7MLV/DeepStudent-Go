@@ -270,13 +270,14 @@ export class ProjectFiles {
 
   move(id: string, value: string, targetId: string, target: string, expected: string) {
     if (id === targetId && (target === value || target.startsWith(`${value}/`))) throw new ProjectError('invalid_project_path');
-    this.mutate([id, targetId], () => this.parent(id, value, source => this.parent(targetId, target, destination => {
+    return this.mutate([id, targetId], () => this.parent(id, value, source => this.parent(targetId, target, destination => {
       const stat = this.stat(source);
       if (!this.matches(id, value, expected, revision(stat))) throw new ProjectError('project_file_conflict', 409);
       try { fs.lstatSync(destination); throw new ProjectError('project_file_exists', 409); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       if (this.journal) this.journal.move({ id, path: value }, { id: targetId, path: target });
       else fs.renameSync(source, destination);
+      return { revision: revision(this.stat(destination)), kind: stat.isFile() ? 'file' as const : 'directory' as const };
     })));
   }
 

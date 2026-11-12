@@ -27,6 +27,9 @@ import { useIsMobile } from '../utils/useMobile';
 import { useMarqueeSelection } from '../utils/useMarqueeSelection';
 import { canDropResourceInto, createFolderSpringLoader, RESOURCE_DRAG_TYPE } from '../utils/resourceDrag';
 import BiliImportTasks from '../bilibili/ImportTasks';
+import PersistentError from '../components/PersistentError';
+import { accountLifecycle } from '../client/account-lifecycle';
+import { useResourceFeedback } from '../store/resourceFeedback';
 import './library.css';
 import '../projects/projects.css';
 import './resources.css';
@@ -81,10 +84,13 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const cursorRef = useRef<string | undefined>(undefined);
   const searchGeneration = useRef(0);
   const [error, setError] = useState('');
+  const operationError = useResourceFeedback(state => state.error);
+  const setOperationError = useResourceFeedback(state => state.setError);
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const showSkeleton = useSkeletonGate(loading);
   const [busy, setBusy] = useState(false);
+  const operationLock = useRef(false);
   const [query, setQuery] = useState('');
   const [trashOpen, setTrashOpen] = useState(false);
   const [view, setView] = useState<'icons' | 'list'>('icons');
@@ -171,12 +177,33 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     springLoader.cancel();
     setDropTarget(null);
   }, [locationKey, busy, loading, data?.project?.archived, springLoader]);
-  const perform = async (action: () => Promise<unknown>) => {
-    if (busy) return;
+  const perform = async (action: () => Promise<unknown>, context = '') => {
+    if (operationLock.current) return;
+    operationLock.current = true;
+    const lifetime = accountLifecycle.current();
     setBusy(true);
+    setOperationError(null);
     try { await action(); refresh(); }
-    catch (error) { toast.error(projectError(error)); }
-    finally { setBusy(false); }
+    catch (error) { if (!lifetime || lifetime.current()) { setOperationError(`${context ? `${context}：` : ''}${projectError(error)} ${text('feedback.checkBeforeRetry')}`); refresh(); } }
+    finally { operationLock.current = false; setBusy(false); }
+  };
+  const offerUndo = (message: string, undo: () => Promise<unknown>) => {
+    const lifetime = accountLifecycle.current();
+    let used = false;
+    const id = toast.success(message, { timeout: 8000, actionProps: { children: text('feedback.undo'), onPress: () => {
+      if (used || operationLock.current) return;
+      used = true; toast.close(id);
+      void perform(async () => { lifetime?.assertCurrent(); await undo(); }, text('feedback.undo'));
+    } } });
+  };
+  const moveEntry = async (entry: ResourceEntry, targetProjectId: string, target: string) => {
+    const result = await resourceCommand({ kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId, target, revision: entry.revision });
+    // Only the command receipt can authorize the reverse CAS. A subsequent
+    // directory lookup could accidentally adopt somebody else's newer edit.
+    if (entry.kind === 'file' && result && typeof result === 'object' && 'revision' in result && typeof result.revision === 'string') {
+      const revision = result.revision;
+      return () => resourceCommand({ kind: 'move', projectId: targetProjectId, path: target, targetProjectId: entry.projectId, target: entry.path, revision });
+    }
   };
   const createFolder = async () => {
     const name = await promptDialog({ headline: t('newFolder'), confirmText: t('save'), cancelText: t('cancel'), validate: value => validName(value) ? t('errors.invalid_project_path') : null });
@@ -190,10 +217,12 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
     if (!data || !files.length) return;
     await perform(async () => {
       const errors: string[] = [];
+      let uploaded = 0;
       for (const file of files) {
         try {
           const id = projectId ?? data.rootId;
           await serverClient.uploadProjectFile(id, join(directory, file.name), file);
+          uploaded++;
           if (file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|flv|ts|m2ts|mpeg|mpg|wmv|3gp|rmvb|rm)$/i.test(file.name)) {
             const entry = await findEntryByName(id, directory, file.name);
             if (entry?.courseId) {
@@ -202,13 +231,13 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
               if (duration) await (await import('../client/resources')).recordMediaDuration(entry.courseId, duration);
               enqueueCover(entry.courseId);
               startTranscription(entry.courseId);
-              toast.info(`《${file.name}》已上传，正在浏览器中自动生成字幕，请保持页面打开`);
             }
           }
         }
         catch (error) { errors.push(`${file.name}: ${projectError(error)}`); }
       }
-      if (errors.length) throw new Error(errors.join('\n'));
+      if (errors.length) setOperationError(`${errors.join('\n')}\n${text('feedback.checkBeforeRetry')}`);
+      if (uploaded) toast.success(text('feedback.uploaded', { count: uploaded }));
     });
   };
   const upload = (event: ChangeEvent<HTMLInputElement>) => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void uploadFiles(files); };
@@ -239,20 +268,29 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
   const rename = async (entry: ResourceEntry) => {
     const name = await promptDialog({ headline: t('rename'), defaultValue: entry.name, confirmText: t('save'), cancelText: t('cancel'), validate: value => validName(value) ? t('errors.invalid_project_path') : null });
     if (!name || name === entry.name) return;
-    await perform(() => resourceCommand(entry.scope ? { kind: 'renameFolder', projectId: entry.projectId, name } : { kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId: entry.projectId, target: join(directory, name), revision: entry.revision }));
+    await perform(async () => {
+      if (entry.scope) await resourceCommand({ kind: 'renameFolder', projectId: entry.projectId, name });
+      else {
+        const undo = await moveEntry(entry, entry.projectId, join(directory, name));
+        if (undo) offerUndo(`${t('rename')} · ${name}`, undo);
+      }
+    }, entry.name);
   };
   const remove = async (entry: ResourceEntry) => {
     if (entry.scope) {
       await perform(async () => {
-        await resourceCommand({ kind: 'trash', projectId: entry.projectId });
-        toast.success(t('movedToTrash'));
-      });
+        const result = await resourceCommand({ kind: 'trash', projectId: entry.projectId });
+        if (result && typeof result === 'object' && 'deletedAt' in result && typeof result.deletedAt === 'string') {
+          const expectedDeletedAt = result.deletedAt;
+          offerUndo(t('movedToTrash'), () => resourceCommand({ kind: 'restore', projectId: entry.projectId, expectedDeletedAt }));
+        } else toast.success(t('movedToTrash'));
+      }, entry.name);
       return;
     }
     if (!await confirmDialog({ headline: t('deleteConfirm', { name: entry.name }), description: t('removeHint'), confirmText: t('delete'), cancelText: t('cancel'), danger: true })) return;
     await perform(() => entry.courseId
       ? serverClient.deleteResourceFile(entry.projectId, entry.path, entry.revision)
-      : serverClient.deleteProjectFile(entry.projectId, entry.path, entry.revision));
+      : serverClient.deleteProjectFile(entry.projectId, entry.path, entry.revision), entry.name);
   };
   const moveInto = (event: React.DragEvent, id: string, path: string) => {
     event.preventDefault(); event.stopPropagation();
@@ -264,10 +302,20 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
       if (!entries.length || entries.some(entry => !canDropResourceInto(entry, id, path))) { finishResourceDrag(); return; }
       finishResourceDrag(true);
       void perform(async () => {
-        for (const entry of entries) {
-          await resourceCommand({ kind: 'move', projectId: entry.projectId, path: entry.path, targetProjectId: id, target: join(path, entry.name), revision: entry.revision });
+        const undos: Array<() => Promise<unknown>> = [];
+        try {
+          for (const entry of entries) {
+            const undo = await moveEntry(entry, id, join(path, entry.name));
+            if (undo) undos.push(undo);
+          }
+        } finally {
+          if (undos.length) offerUndo(text('feedback.moved', { count: undos.length }), async () => {
+            // Each reverse move has its own frozen revision; stop at the first
+            // conflict, rather than overwriting or replaying the original batch.
+            for (const undo of undos.reverse()) await undo();
+          });
         }
-      });
+      }, entries.map(entry => entry.name).join('、'));
     } catch { /* Unrelated drag payload. */ }
   };
   const entries = [...(data?.entries ?? []), ...appended].filter(entry => entry.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory') || a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -281,7 +329,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
       setAppended(previous => [...previous, ...page.entries]);
       cursorRef.current = page.next;
       setNextCursor(page.next);
-    } catch (error) { toast.error(projectError(error)); }
+    } catch (error) { setOperationError(projectError(error)); }
     finally { setLoadingMore(false); }
   };
   /**
@@ -364,6 +412,10 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
         <input ref={input} type="file" multiple hidden onChange={upload} />
       </header>
       {error && <div role="alert" className="project-error resource-notice">{error}<Button size="sm" onPress={refresh}>{t('retry')}</Button></div>}
+      {!editor && operationError && <div className="resource-notice">
+        <PersistentError title={text('feedback.actionFailed')} text={operationError} onClose={() => setOperationError(null)} />
+        <Button size="sm" variant="tertiary" onPress={refresh}>{t('refresh')}</Button>
+      </div>}
       {readOnly && <p className="resource-notice">{t('readOnly')}</p>}
       <div className="finder-canvas" data-testid="resource-list" aria-busy={loading || busy}
         onPointerDown={mobile ? undefined : marquee.onPointerDown}
@@ -443,6 +495,7 @@ export default function ResourceLibrary({ onImport }: { onImport: (folderId?: nu
           <Drawer.Dialog className="project-editor" data-testid="resource-file-editor">
             <Drawer.Header><Drawer.Heading>{editor.revision === null ? t('newFile') : editor.path}</Drawer.Heading><Drawer.CloseTrigger aria-label={t('cancel')} /></Drawer.Header>
             <Drawer.Body><div className="project-form">
+              <PersistentError title={text('feedback.actionFailed')} text={operationError} onClose={() => setOperationError(null)} />
               {editor.revision === null && <TextField><Label>{t('filename')}</Label><Input value={editor.path} onChange={e => setEditor({ ...editor, path: e.target.value })} placeholder="notes.md" /></TextField>}
               <TextField><Label>{t('content')}</Label><TextArea className="project-text-editor" rows={15} value={editor.text} readOnly={readOnly} onChange={e => setEditor({ ...editor, text: e.target.value })} /></TextField>
             </div></Drawer.Body>

@@ -242,6 +242,7 @@
     "rejected": "已拒绝",
     "approvalFailed": "审批没有提交成功",
     "reactFailed": "没能点赞",
+    "reacted": "已点赞",
     "passkey": "添加 Passkey",
     "passkeyAdded": "Passkey 已添加",
     "passkeyUnsupported": "这个浏览器不支持 Passkey",

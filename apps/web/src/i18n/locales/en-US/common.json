@@ -242,6 +242,7 @@
     "rejected": "Declined",
     "approvalFailed": "Couldn't submit the approval",
     "reactFailed": "Couldn't react",
+    "reacted": "Reaction added",
     "passkey": "Add Passkey",
     "passkeyAdded": "Passkey added",
     "passkeyUnsupported": "This browser doesn't support Passkeys",

@@ -1,4 +1,13 @@
 {
+  "feedback": {
+    "subtitleServer": "字幕由服务器处理：优先使用 B 站自带字幕，否则使用配置的语音识别模型。任务提交成功后，关闭页面不影响处理；识别服务可能收费。",
+    "dismiss": "关闭提示",
+    "botSyncFailed": "Bot 设置未能同步", "policyUncertain": "保存结果未确认：{{message}}。请重新读取服务器设置后检查。", "permissionSyncFailed": "权限列表同步失败：{{message}}", "approvalUncertain": "{{message}}。请先刷新状态，再决定是否重试。", "reloadSettings": "重新读取服务器设置", "refreshStatus": "刷新状态",
+    "readFailed": "读取材料失败：{{message}}", "fileUnavailable": "暂未找到材料文件，问答记录仍然保留。", "retry": "重试", "documentSyncFailed": "资料未能同步", "documentUpdateFailed": "资料更新失败：{{message}}", "positionFailed": "阅读位置保存失败：{{message}}。继续阅读时会再次保存。", "viewFailed": "阅读视图保存失败：{{message}}。请重新选择视图。",
+    "importCancelUncertain": "取消结果未确认。请检查任务状态；任务仍在运行时可再次取消。", "skillsFailed": "技能操作未完成", "skillsImported": "已导入 {{count}} 个技能",
+    "undo": "撤销", "actionFailed": "操作未完成", "checkBeforeRetry": "请先刷新检查结果，再决定是否重试；未确认的操作可在同步恢复面板中核对。",
+    "uploaded": "已上传 {{count}} 个文件", "moved": "已移动 {{count}} 个文件", "archivedChanged": "会话已发生变化，请在已归档对话中检查后恢复。"
+  },
   "materialReader": { "fit": "适配", "fitPage": "适配页面" },
   "imageCrop": {
     "orientation": "图片方向", "rotateLeft": "向左旋转", "rotateRight": "向右旋转",

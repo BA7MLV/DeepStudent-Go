@@ -984,14 +984,14 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
     if (!provider) return;
     if ((!serverManaged && !provider.apiKey.trim()) || !provider.baseUrl.trim()) {
       triggerKeyError(providerId);
-      toast.warning(t('models.fillUrlKeyFirst'));
+      setProviderError(t('models.fillUrlKeyFirst'));
       return;
     }
+    setProviderError('');
     try {
-      const ids = await refreshProviderModels(provider);
-      if (ids) toast.success(ids.length ? t('models.fetchedModels', { count: ids.length }) : t('models.emptyModelList'));
+      await refreshProviderModels(provider);
     } catch (error) {
-      toast.warning(t('models.fetchFailed', { message: error instanceof Error ? error.message : String(error) }));
+      setProviderError(t('models.fetchFailed', { message: error instanceof Error ? error.message : String(error) }));
     }
   };
 
@@ -1169,6 +1169,7 @@ export default function ModelsModule({ serverManaged = false, discoveryProviders
               removable={serverManaged || settings.providers.length > 1}
               onToggle={() => undefined}
               onChange={(patch) => {
+                setProviderError('');
                 settings.update({ providers: settings.providers.map((x) => (x.id === selectedProvider.id ? { ...x, ...patch } : x)) });
               }}
               onRemove={() => void confirmRemove(selectedProvider)}

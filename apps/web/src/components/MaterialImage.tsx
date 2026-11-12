@@ -5,6 +5,7 @@ import { imageSourceKind, materialSourceHref, parseMaterialImageHref } from '../
 import type { LoadedMaterialImage } from '../materials/images';
 import { fmtTime } from '../utils/vtt';
 import ImagePreview from './ImagePreview';
+import { WebsiteLink } from './markdown/WebsiteLink';
 import './material-image.css';
 
 /** Deduplicate simultaneous references, but retain neither file blobs nor blob URLs globally. */
@@ -110,7 +111,7 @@ function RemoteImage({ src, alt }: { src: string; alt?: string }) {
   return <img src={src} alt={alt} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} />;
 }
 
-export function SourceImageLink({ href, children, title, target, rel }: ComponentProps & { href?: string }) {
+export function SourceImageLink({ href, children, ...props }: ComponentProps & { href?: string }) {
   if (href?.startsWith('#source-image/')) return <MaterialImage href={href} label={children} linkOnly />;
-  return <a href={href} title={typeof title === 'string' ? title : undefined} target={typeof target === 'string' ? target : undefined} rel={typeof rel === 'string' ? rel : undefined}>{children}</a>;
+  return <WebsiteLink {...props} href={href}>{children}</WebsiteLink>;
 }

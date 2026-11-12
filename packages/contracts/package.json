@@ -10,6 +10,7 @@
     ".": { "types": "./src/index.ts", "default": "./dist/index.js" },
     "./cloud": { "types": "./src/cloud.ts", "default": "./dist/cloud.js" },
     "./web-search": { "types": "./src/web-search.ts", "default": "./dist/web-search.js" },
+    "./web-links": { "types": "./src/web-links.ts", "default": "./dist/web-links.js" },
     "./gateway": { "types": "./src/gateway.ts", "default": "./dist/gateway.js" },
     "./mcp": { "types": "./src/mcp.ts", "default": "./dist/mcp.js" },
     "./projects": { "types": "./src/projects.ts", "default": "./dist/projects.js" },

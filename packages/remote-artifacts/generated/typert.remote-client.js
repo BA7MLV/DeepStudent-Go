@@ -1159,8 +1159,12 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
   'path': z.string(),
   'revision': z.string(),
 }), z.object({
-  'kind': z.union([z.literal("trash"), z.literal("restore"), z.literal("deleteTrash")]),
+  'kind': z.union([z.literal("trash"), z.literal("deleteTrash")]),
   'projectId': z.string(),
+}), z.object({
+  'kind': z.literal("restore"),
+  'projectId': z.string(),
+  'expectedDeletedAt': z.union([z.undefined(), z.string()]).optional(),
 }), z.object({
   'kind': z.literal("saveCourseText"),
   'courseId': z.string(),
@@ -2997,8 +3001,12 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0_strict$schem
   'path': z.string(),
   'revision': z.string(),
 }), z.strictObject({
-  'kind': z.union([z.literal("trash"), z.literal("restore"), z.literal("deleteTrash")]),
+  'kind': z.union([z.literal("trash"), z.literal("deleteTrash")]),
   'projectId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("restore"),
+  'projectId': z.string(),
+  'expectedDeletedAt': z.union([z.undefined(), z.string()]).optional(),
 }), z.strictObject({
   'kind': z.literal("saveCourseText"),
   'courseId': z.string(),

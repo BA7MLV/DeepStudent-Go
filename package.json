@@ -15,6 +15,8 @@
   "type": "module",
   "packageManager": "npm@11.16.0",
   "scripts": {
+    "test:feedback": "tsx --test scripts/test-feedback.mjs && tsx scripts/test-feedback-undo.mjs",
+    "test:feedback:e2e": "tsx scripts/e2e-feedback.mjs",
     "generate:remote": "node scripts/generate-remote.mjs",
     "test:server-only:boot": "node scripts/e2e-server-only-boot.mjs",
     "test:server-only:app": "tsx scripts/e2e-server-only-app.mjs",
@@ -95,6 +97,8 @@
     "test:create-mode:e2e": "tsx scripts/e2e-plugin-navigation.mjs",
     "test:web-search": "tsx scripts/test-web-search.mjs",
     "test:web-search:e2e": "tsx scripts/e2e-web-search.mjs",
+    "test:link-chips": "npm run build -w @wangke/contracts && tsx scripts/test-link-chips.mjs",
+    "test:link-chips:e2e": "node scripts/e2e-link-chips.mjs",
     "test:mcp:e2e": "tsx scripts/e2e-mcp-files.mjs",
     "test:sandbox": "node scripts/test-sandbox.mjs",
     "test:sandbox:admission": "node --test scripts/test-sandbox-admission.mjs",

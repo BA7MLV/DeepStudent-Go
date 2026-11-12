@@ -3,6 +3,7 @@ import { MCP_PATH } from '@wangke/contracts/system';
 import { useSearchParams } from 'react-router-dom';
 import { liveQuery } from 'dexie';
 import { Button } from '@heroui/react';
+import { useTranslation } from 'react-i18next';
 import { db, type VideoRow } from '../store/db';
 import { cloud } from '../cloud/state';
 import { followDocument } from '../client/resources';
@@ -10,7 +11,8 @@ import { getMaterialFile } from '../store/fileStore';
 import { useSettings } from '../store/settings';
 import { AGENT_INSTRUCTIONS_FILE_ID, getSystemMaterialFile, systemMaterialPath, loadSystemMaterialFile, useSystemDocuments } from '../materials/systemFiles';
 import { formatCaughtError } from '../utils/errorText';
-import { Sym, toast, useSkeletonGate } from '../ui';
+import { Sym, useSkeletonGate } from '../ui';
+import PersistentError from './PersistentError';
 import type { HtmlView, MaterialReaderHandle } from '../materials/types';
 import PdfReader from './PdfReader';
 import DocxReader from './DocxReader';
@@ -41,6 +43,7 @@ export default function MaterialReader(props: Props) {
 }
 
 function DocumentMaterialReader({ material, handleRef }: Props) {
+  const { t } = useTranslation('interface');
   const [searchParams] = useSearchParams();
   const requested = Number(searchParams.get('unit'));
   const requestedUnit = Number.isSafeInteger(requested) && requested > 0 ? requested : undefined;
@@ -48,6 +51,11 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
   const [fileUrl, setFileUrl] = useState<string>('');
   const [blob, setBlob] = useState<Blob | null>(null);
   const [missing, setMissing] = useState(false);
+  const [readError, setReadError] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [positionError, setPositionError] = useState<string | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const [loading, setLoading] = useState(true);
   const shellRef = useRef<HTMLDivElement>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -77,6 +85,9 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
     let cancelled = false;
     setLoading(true);
     setMissing(false);
+    setReadError(null);
+    setUpdateError(null); setPositionError(null); setViewError(null);
+    setBlob(null); setFileUrl('');
     (async () => {
       const b = await getMaterialFile(materialId);
       if (cancelled) return;
@@ -93,15 +104,14 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
       setLoading(false);
     })().catch((e) => {
       if (cancelled) return;
-      setMissing(true);
+      setReadError(formatCaughtError(e));
       setLoading(false);
-      toast.error(`读取材料失败：${formatCaughtError(e)}`);
     });
     return () => {
       cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [materialId, format]);
+  }, [materialId, format, retry]);
 
   // Reviews change this same Markdown file. The editor keeps its draft and checks its
   // original snapshot before saving, rather than overwriting concurrent answers.
@@ -111,17 +121,19 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
     return followDocument(path ? { kind: 'systemDocument', path } : { kind: 'courseDocument', courseId: materialId }, document => {
       const content = document.content ?? document.text;
       if (content !== undefined) setBlob(new Blob([content], { type: 'text/markdown' }));
-    }, error => toast.error(`资料更新失败：${formatCaughtError(error)}`));
-  }, [materialId, format]);
+      setUpdateError(null);
+    }, error => setUpdateError(t('feedback.documentUpdateFailed', { message: formatCaughtError(error) })));
+  }, [materialId, format, retry, t]);
 
   /** 断点续读：阅读位置写回 videos.lastUnit（与视频的 lastPosition 对称） */
   const onUnitChange = useCallback(
     (unit: number) => {
       if (systemMaterialPath(materialId)) return;
       void import('../client/resources').then(({ recordReadingPosition }) => recordReadingPosition(materialId, unit))
-        .catch(error => toast.error(`阅读位置保存失败：${formatCaughtError(error)}`));
+        .then(() => setPositionError(null))
+        .catch(error => setPositionError(t('feedback.positionFailed', { message: formatCaughtError(error) })));
     },
-    [materialId],
+    [materialId, t],
   );
 
   /** HTML 的阅读视图（原样 / 分段）写回 videos.htmlView —— 非索引字段，与 lastUnit 同一惯例 */
@@ -129,9 +141,10 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
     (htmlView: HtmlView) => {
       if (systemMaterialPath(materialId)) return;
       void import('../client/resources').then(({ setReadingView }) => setReadingView(materialId, htmlView))
-        .catch(error => toast.error(`阅读视图保存失败：${formatCaughtError(error)}`));
+        .then(() => setViewError(null))
+        .catch(error => setViewError(t('feedback.viewFailed', { message: formatCaughtError(error) })));
     },
-    [materialId],
+    [materialId, t],
   );
 
   if (loading) {
@@ -148,13 +161,14 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
     );
   }
 
-  if (missing) {
+  if (missing || readError) {
     return (
       <div className="mr-shell">
         <div className="mr-root">
-          <div className="mr-hint" data-testid="reader-file-missing">
+          <div className="mr-hint" role="alert" data-testid={readError ? 'reader-file-error' : 'reader-file-missing'}>
             <Sym name="error" />
-            材料文件已删除，问答记录仍然保留。
+            <span>{readError ? t('feedback.readFailed', { message: readError }) : t('feedback.fileUnavailable')}</span>
+            <Button size="sm" variant="tertiary" onPress={() => setRetry(value => value + 1)}>{t('feedback.retry')}</Button>
           </div>
         </div>
       </div>
@@ -170,6 +184,7 @@ function DocumentMaterialReader({ material, handleRef }: Props) {
       </Button>
     }>
     <div className="mr-shell" ref={shellRef} data-fullscreen={fullscreen || undefined}>
+      <PersistentError title={t('feedback.documentSyncFailed')} text={[updateError, positionError, viewError].filter(Boolean).join('\n')} onClose={() => { setUpdateError(null); setPositionError(null); setViewError(null); }} />
       {/*
         「不能检索」必须显式说明：否则用户会以为「问答坏了」，而真实原因在材料自己身上。
         扫描件（仅 PDF：有页面但无文本层）与无正文（压根没内容）是两回事，

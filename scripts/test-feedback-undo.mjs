@@ -1,0 +1,52 @@
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { DatabaseStore } from '../apps/api/src/storage/database.ts';
+import { ProjectRepository } from '../apps/api/src/projects/repository.ts';
+import { ResourceFiles } from '../apps/api/src/projects/resources.ts';
+import { executeResourceCommand } from '../apps/api/src/realtime/resources.ts';
+import { resourceScope } from '../apps/api/src/realtime/resource-workflows.ts';
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-feedback-undo-'));
+const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system'));
+const projects = new ProjectRepository(store, path.join(directory, 'projects'));
+const resources = new ResourceFiles(projects, path.join(directory, 'files'));
+const owner = crypto.randomUUID();
+store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run(owner, 'Feedback fixture', new Date().toISOString());
+const scope = resourceScope(resources, owner);
+const command = operation => ({ operationId: `feedback-${crypto.randomUUID()}`, operation, scope });
+const execute = request => executeResourceCommand(resources, owner, request);
+const run = operation => execute(command(operation));
+try {
+  resources.list(owner);
+  const folder = run({ kind: 'createFolder', name: 'Undo fixture' });
+  run({ kind: 'saveProjectText', projectId: folder.id, path: 'a.txt', text: 'original', expectedRevision: null });
+  const move = () => run({ kind: 'move', projectId: folder.id, path: 'a.txt', targetProjectId: folder.id, target: 'b.txt', revision: projects.files.read(folder.id, 'a.txt').revision });
+  const undo = revision => command({ kind: 'move', projectId: folder.id, path: 'b.txt', targetProjectId: folder.id, target: 'a.txt', revision });
+  const first = move();
+  assert.equal(first.revision, projects.files.read(folder.id, 'b.txt').revision, 'receipt freezes the actual post-move revision');
+  const reverse = undo(first.revision);
+  execute(reverse); execute(reverse);
+  assert.equal(projects.files.read(folder.id, 'a.txt').text, 'original', 'Undo is receipt-idempotent');
+  const second = move();
+  run({ kind: 'saveProjectText', projectId: folder.id, path: 'b.txt', text: 'newer content', expectedRevision: second.revision });
+  assert.throws(() => execute(undo(second.revision)), error => error.details?.code === 'project_file_conflict');
+  assert.equal(projects.files.read(folder.id, 'b.txt').text, 'newer content', 'Undo cannot adopt a newer destination revision');
+  const latest = projects.files.read(folder.id, 'b.txt').revision;
+  run({ kind: 'saveProjectText', projectId: folder.id, path: 'a.txt', text: 'new occupant', expectedRevision: null });
+  assert.throws(() => execute(undo(latest)), error => error.details?.code === 'project_file_exists');
+  assert.equal(projects.files.read(folder.id, 'a.txt').text, 'new occupant');
+
+  projects.update(owner, folder.id, { archived: true });
+  const trashed = run({ kind: 'trash', projectId: folder.id });
+  assert.equal(typeof trashed.deletedAt, 'string');
+  assert.throws(() => run({ kind: 'restore', projectId: folder.id, expectedDeletedAt: 'stale' }), error => error.details?.code === 'project_file_conflict');
+  run({ kind: 'restore', projectId: folder.id, expectedDeletedAt: trashed.deletedAt });
+  assert.equal(projects.get(owner, folder.id).archived, true, 'trash Undo restores the previous archived state');
+  const trashedAgain = run({ kind: 'trash', projectId: folder.id });
+  assert.notEqual(trashedAgain.deletedAt, trashed.deletedAt);
+  assert.throws(() => run({ kind: 'restore', projectId: folder.id, expectedDeletedAt: trashed.deletedAt }), error => error.details?.code === 'project_file_conflict', 'an old toast cannot undo a later trash operation');
+  console.log('Feedback Undo: frozen move receipts, idempotence, edit/name conflicts and trash CAS passed.');
+} finally { store.close(); fs.rmSync(directory, { recursive: true, force: true }); }

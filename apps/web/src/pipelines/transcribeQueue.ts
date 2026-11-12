@@ -5,25 +5,24 @@ import { isJobActive, useJobStore } from '../store/jobs';
 import { runTranscription } from './transcribe';
 import { isCancel } from '../utils/cancel';
 import { formatCaughtError } from '../utils/errorText';
-import { toast } from '../ui';
 
 /** Observers only; the server owns execution, concurrency and durable queueing. */
 const signals = new Map<string, AbortController>();
 export function startTranscription(videoId: string, opts: { resume?: boolean } = {}): void {
   const state = useJobStore.getState();
   if (isJobActive(state.jobs[videoId])) return;
-  state.upsert(videoId, { phase: 'queued', message: opts.resume ? '等待续跑…' : '排队中…', done: 0, total: 0, error: undefined, resume: !!opts.resume });
+  state.upsert(videoId, { phase: 'queued', message: opts.resume ? '等待续跑…' : '排队中…', done: 0, total: 0, error: undefined, actionError: undefined, resume: !!opts.resume });
   void runOne(videoId);
 }
 
 export function cancelTranscription(videoId: string): void {
-  signals.get(videoId)?.abort();
+  useJobStore.getState().upsert(videoId, { actionError: undefined });
   const database = db, owner = cloud.userId;
   void cancelResourceTasks(`course:${videoId}`, 'transcribe').then(async () => {
     if (database !== db || owner !== cloud.userId) return;
     await (await import('../client/resources')).resourceCommand({ kind: 'pauseTranscription', courseId: videoId });
-    if (database === db && owner === cloud.userId) markCanceled(videoId);
-  }).catch(e => { if (database === db && owner === cloud.userId) toast.error(e.message); });
+    if (database === db && owner === cloud.userId) { signals.get(videoId)?.abort(); markCanceled(videoId); }
+  }).catch(e => { if (database === db && owner === cloud.userId) useJobStore.getState().upsert(videoId, { actionError: formatCaughtError(e) }); });
 }
 function markCanceled(videoId: string): void {
   useJobStore.getState().upsert(videoId, { phase: 'canceled', message: '已取消' });
@@ -41,9 +40,6 @@ async function runOne(videoId: string): Promise<void> {
     }, { signal: controller.signal });
     if (!current()) return;
     useJobStore.getState().upsert(videoId, { phase: 'done', message: '字幕生成完成' });
-    const row = await database.videos.get(videoId);
-    if (!current()) return;
-    toast.success(`《${row?.name ?? '视频'}》字幕生成完成`);
     window.setTimeout(() => {
       if (database === db && owner === cloud.userId && useJobStore.getState().jobs[videoId]?.phase === 'done') useJobStore.getState().drop(videoId);
     }, 2000);
@@ -52,7 +48,6 @@ async function runOne(videoId: string): Promise<void> {
     if (isCancel(e) || controller.signal.aborted) { markCanceled(videoId); return; }
     const text = formatCaughtError(e);
     useJobStore.getState().upsert(videoId, { phase: 'error', message: '转写失败', error: text });
-    toast.error(`字幕转写失败：${text}`);
   } finally { if (signals.get(videoId) === controller) signals.delete(videoId); }
 }
 
