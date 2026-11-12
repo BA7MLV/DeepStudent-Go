@@ -126,6 +126,8 @@ const executeNodeTask: TaskExecutor = async context => {
 };
 
 interface RunnerOptions {
+  sandbox?: TaskContext['sandbox'];
+  sandboxCleanup?: TaskContext['sandboxCleanup'];
   mcp?: TaskContext['mcp'];
   webSearch?: WebSearchService;
   records?: CloudRecords;
@@ -304,6 +306,8 @@ export class CloudTaskRunner {
         webSearch: this.options.webSearch,
         mcp: this.options.mcp,
         pluginService: this.pluginService,
+        sandbox: this.options.sandbox,
+        sandboxCleanup: this.options.sandboxCleanup,
         configuration: this.options.configuration ?? new CloudConfiguration(this.store, path.join(directory, 'config')),
         filesDir: this.options.filesDir ?? process.env.FILES_DIR ?? path.join(directory, 'files'),
         signal, fetch: async (url, init) => {

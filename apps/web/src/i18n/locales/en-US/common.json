@@ -7,6 +7,16 @@
     "previewInvalid": "The image service returned invalid preview metadata. Update the server and retry.",
     "inkLoadFailed": "Unable to load annotations. Retry before writing."
   },
+  "chatShell": {
+    "title": "Allow this chat to run a command?",
+    "scope": "Only this chat’s workspace is writable; the account notebook is read-only. Network: {{network}} · Deadline: {{seconds}}s",
+    "networkOn": "on",
+    "networkOff": "off",
+    "command": "View exact command",
+    "approve": "Allow once",
+    "reject": "Reject",
+    "loadFailed": "Command approval could not be loaded. Reconnect or stop this response and retry."
+  },
   "courseMetadata": { "loadFailed": "Course details could not be loaded. This does not mean the courses were deleted.", "retry": "Retry" },
   "appTitle": "DeepStudent Go",
   "fileLoadFailed": "Unable to load file ({{status}})",

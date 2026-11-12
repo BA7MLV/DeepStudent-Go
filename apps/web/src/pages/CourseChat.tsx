@@ -19,6 +19,7 @@ import ChatAddMenu from '../components/ChatAddMenu';
 import InlineSkillInput, { type ComposerPaste, type InlineSkillInputHandle } from '../components/InlineSkillInput';
 import SkillMessageContent from '../components/SkillMessageContent';
 import ChatProjectPicker from '../components/ChatProjectPicker';
+import ChatShellApproval from '../components/ChatShellApproval';
 import { projectDisplayName } from '../projects/chatProjects';
 import ComposerExpand from '../components/ComposerExpand';
 import { ChatComposer, ChatComposerTools } from '../components/ChatComposer';
@@ -1118,6 +1119,7 @@ export default function CourseChat() {
               <span /><span /><span /><span />
             </div>
             <ChatSyncStatus key={activeId ?? 'draft'} />
+            <ChatShellApproval key={`shell-${activeId ?? 'draft'}`} />
             {/* 回到底部：用户往上滚去读历史时，浮在输入卡正上方。
                 默认隐藏，显隐由消息流的 scroll 监听直接写 `data-show`（见组件里的
                 onScroll）—— 它每滚一下都在变，不挂 state、不带动整棵消息树重渲。

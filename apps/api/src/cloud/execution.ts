@@ -10,6 +10,7 @@ import { ProjectRepository } from '../projects/repository.js';
 import type { WebSearchService } from '../web-search/service.js';
 import type { PluginService } from '../plugins/service.js';
 import type { McpManager } from '../mcp/manager.js';
+import type { SandboxExecutor, SandboxCleanup } from '../agent/sandbox.js';
 
 export type ExecutorKind = 'node';
 export interface TaskContext {
@@ -29,6 +30,9 @@ export interface TaskContext {
   webSearch?: WebSearchService;
   mcp?: McpManager;
   pluginService?: PluginService;
+  /** Host-only execution ports, never deserialized from task input. */
+  sandbox?: SandboxExecutor;
+  sandboxCleanup?: SandboxCleanup;
   checkActive(): void;
   report(progress: Record<string, unknown>): void;
 }
