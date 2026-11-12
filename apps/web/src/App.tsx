@@ -68,7 +68,7 @@ export default function App() {
   useEffect(() => startStudyTracking(), []);
 
   // 指向导航时预取目标，不在看板空闲期间下载所有播放器/阅读器。
-  useEffect(() => preloadOnIntent({ '/library': pages.library, '/player': pages.player, '/study': pages.study }), []);
+  useEffect(() => preloadOnIntent({ '/library': pages.library, '/player': pages.player, '/study': pages.study, '/board': pages.tasks }), []);
 
   // 启动时把上次没转完的视频接着转（刷新/关页会中断任务，但已完成段落了库，续跑不重复计费）
   useEffect(() => {

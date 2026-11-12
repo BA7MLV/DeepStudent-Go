@@ -175,6 +175,7 @@
     "test:ui-radii:e2e": "node scripts/e2e-ui-radii.mjs",
     "test:onboarding": "tsx --test scripts/test-onboarding.mjs",
     "check:boundaries": "node scripts/check-boundaries.mjs",
+    "lint": "oxlint --config .oxlintrc.json apps/web/src apps/api/src packages && node scripts/lint-anti-slop.mjs",
     "test:boundaries": "node scripts/test-boundaries.mjs",
     "test:release-drain": "tsx scripts/test-release-drain.mjs && tsx scripts/test-server-drain.mjs && node scripts/test-api-signals.mjs",
     "test:release-recovery": "npm run build:api && tsx --test scripts/test-release-recovery.mjs scripts/test-release-docker.mjs && tsx scripts/test-release-staging.mjs",
@@ -192,6 +193,8 @@
     "test:handout:demand": "tsx scripts/e2e-handout-demand.mjs",
     "test:loading": "tsx --test scripts/test-cloud-blob.mjs && tsx scripts/e2e-loading.mjs",
     "test:loading:production": "tsx scripts/e2e-loading-production.mjs",
+    "test:boot:metrics": "node scripts/e2e-boot-metrics.mjs",
+    "test:boot:budget": "node --test scripts/test-boot-budget.mjs",
     "test:loading:projections": "tsx scripts/test-record-projections.mjs && tsx scripts/test-session-index.mjs",
     "test:loading:pwa": "tsx --test scripts/test-pwa-precache.mjs && tsx scripts/e2e-pwa-demand.mjs",
     "test:pwa-update:e2e": "node scripts/e2e-pwa-update.mjs",
@@ -214,6 +217,7 @@
     "@typescript/typescript6": "^6.0.2",
     "esbuild": "^0.21.5",
     "fake-indexeddb": "^6.2.5",
+    "oxlint": "^1.93.0",
     "playwright": "^1.63.0",
     "tsx": "^4.23.15",
     "turbo": "2.11.10",
@@ -221,8 +225,12 @@
     "ws": "^8.22.0"
   },
   "overrides": {
-    "@deepseek-ai/dsh-client-connection": { "zod": "4.6.7" },
-    "@deepseek-ai/dsh-typert-registry": { "zod": "4.6.7" }
+    "@deepseek-ai/dsh-client-connection": {
+      "zod": "4.6.7"
+    },
+    "@deepseek-ai/dsh-typert-registry": {
+      "zod": "4.6.7"
+    }
   },
   "allowScripts": {
     "esbuild@0.21.5": true,
