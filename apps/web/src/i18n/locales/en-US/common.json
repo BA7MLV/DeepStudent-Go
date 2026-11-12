@@ -112,6 +112,7 @@
   },
   "serverUnavailable": "The server is temporarily unavailable. Please refresh and try again.",
   "newVersionReady": "A new version is ready. Refresh to update.",
+  "refreshNow": "Refresh now",
   "language": {
     "label": "Interface language / 语言",
     "auto": "Follow system",

@@ -101,17 +101,6 @@ const server = http.createServer(async (req, res) => {
   const scope = body.projectId ? `project:${body.projectId}` : `thread:${body.threadId}`;
   if (active.has(scope) || executions.has(body.executionId) || active.size >= 8) return reply(409, { error: 'sandbox_busy' });
   if (!readingFile && body.projectId !== undefined && !fs.existsSync(path.join(process.env.SANDBOX_PROJECTS_DIR, body.projectId))) return reply(400, { error: 'invalid_project_workspace' });
-  if (!readingFile) {
-    // Quota is enforced before admission: an over-quota workspace blocks new
-    // commands until the user clears it, so a runaway script cannot wedge the
-    // host disk. Reads stay available for inspection and recovery.
-    let used;
-    try { used = await workspaceBytes(body); } catch { return reply(503, { error: 'sandbox_unavailable' }); }
-    if (used > quotaBytes) {
-      console.info(JSON.stringify({ event: 'sandbox.quota_exceeded', executionId: body.executionId, scope, used, quotaBytes }));
-      return reply(409, { error: 'sandbox_workspace_quota_exceeded' });
-    }
-  }
   const name = `wangke-exec-${body.executionId}`;
   let resolveDone;
   const execution = { name, cancelled: false, stop: null, done: new Promise(resolve => { resolveDone = resolve; }) };
@@ -122,6 +111,19 @@ const server = http.createServer(async (req, res) => {
   };
   execution.finish = finish;
   active.set(scope, execution); executions.set(body.executionId, execution);
+  if (!readingFile) {
+    // Reserve scope, ID and capacity BEFORE asynchronous quota inspection.
+    // Otherwise two requests can both pass admission while Docker is measuring.
+    let used;
+    try { used = await workspaceBytes(body); }
+    catch { finish(); return reply(503, { error: 'sandbox_unavailable' }); }
+    if (used > quotaBytes) {
+      console.info(JSON.stringify({ event: 'sandbox.quota_exceeded', executionId: body.executionId, scope, used, quotaBytes }));
+      finish();
+      return reply(409, { error: 'sandbox_workspace_quota_exceeded' });
+    }
+    if (res.destroyed || execution.cancelled) { finish(); return reply(409, { error: 'execution_cancelled' }); }
+  }
   let args;
   try { args = sandboxArgs(body, body.projectId ? await projectRoot(body.projectId) : undefined, readingFile ? undefined : await systemFilesRoot()); }
   catch { finish(); return reply(400, { error: 'invalid_project_workspace' }); }
@@ -197,7 +199,9 @@ const server = http.createServer(async (req, res) => {
     }
   });
 });
-server.listen(Number(process.env.PORT ?? 3001), process.env.HOST || '0.0.0.0');
+server.listen(Number(process.env.PORT ?? 3001), process.env.HOST || '0.0.0.0', () => {
+  console.info(JSON.stringify({ event: 'sandbox.listening', port: server.address().port }));
+});
 process.on('SIGTERM', async () => {
   server.close();
   await Promise.all([...active.values()].map(async execution => { execution.cancelled = true; execution.stop?.(); await execution.done; }));

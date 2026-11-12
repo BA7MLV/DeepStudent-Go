@@ -41,16 +41,16 @@ export function boundedRequest(payload: ObjectValue, endpoint: string, defaultOu
   else if (endpoint.endsWith('messages')) body.max_tokens = output;
   else if (completionLimit || /^(o[134](?:-|$)|gpt-5)/.test(String(body.model))) body.max_completion_tokens = output;
   else body.max_tokens = output;
-  let images = 0;
+  let imageTokens = 0;
   const image = (data: unknown) => {
-    if (typeof data !== 'string' || data.length > 28 * 1024 * 1024) throw new Error('unsupported_budgeted_image');
+    if (typeof data !== 'string') throw new Error('unsupported_budgeted_image');
     const bytes = Buffer.from(data, 'base64'), size = dimensions(bytes);
-    // No unbounded remote URLs, video/audio or huge decompression dimensions.
-    // 16384/image is a deliberately high policy envelope for <=2048² raster
-    // images, not base64 text tokens. Unknown vendor billing can still exceed
-    // it: settlement detects this and stops subsequent execution.
-    if (!size || size.some(n => n < 1 || n > 2048) || ++images > 4) throw new Error('unsupported_budgeted_image');
-    return '[bounded raster image]';
+    // Estimation only: preparation owns decoding, image count, safety and model
+    // limits. Reserve conservatively against the ACTUAL transmitted dimensions,
+    // not base64 text length or a fixed <=2048 envelope. This is not vendor billing.
+    if (!size || size.some(n => n < 1)) throw new Error('unsupported_budgeted_image');
+    imageTokens += Math.max(16384, Math.ceil(size[0] / 32) * Math.ceil(size[1] / 32) * 4);
+    return '[raster image]';
   };
   const estimateView = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(estimateView);
@@ -63,15 +63,12 @@ export function boundedRequest(payload: ObjectValue, endpoint: string, defaultOu
     if (['image_url', 'input_image'].includes(String(value.type))) {
       const url = object(value.image_url) ? value.image_url.url : value.image_url;
       if (typeof url !== 'string' || !/^data:image\/(png|jpeg|gif|webp);base64,/.test(url)) throw new Error('unsupported_budgeted_image');
-      // The bounded 2048² raster reservation includes high-detail processing;
-      // low detail loses small text in screenshots and study material.
-      if (object(value.image_url)) value.image_url.detail = 'high'; else value.detail = 'high';
       return { ...value, image_url: image(url.slice(url.indexOf(',') + 1)) };
     }
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, estimateView(v)]));
   };
   const view = estimateView(body);
-  const input = textTokens(view) + images * 16384;
+  const input = textTokens(view) + imageTokens;
   return { body, input, output, total: input + output, estimated: true as const };
 }
 export function checkRequestCapacity(total: number, capacity: number) { if (total > capacity) throw new BudgetBlocked('context_capacity_exceeded'); }

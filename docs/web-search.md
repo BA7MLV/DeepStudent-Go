@@ -2,7 +2,9 @@
 
 入口：**设置 → 联网搜索**（`#/settings/websearch`），需要连接本项目后端。搜索和网页读取默认关闭，可分别开启。设置按账号保存，设备间共用；API 密钥由服务器使用已有 AES-256-GCM 凭据能力加密，公开 API 不回传密钥。
 
-支持 Tavily、Brave Search 和自托管 SearXNG。添加供应商、填写密钥或地址、启用供应商、选择默认项，再启用搜索并保存。SearXNG 需要开启 `search.formats: [html, json]`，地址由后端访问，允许管理员明确配置的内网服务。修改服务地址或供应商类型不会把旧密钥带到新目的地。
+支持 Tavily、Brave Search、元宝搜索和自托管 SearXNG。添加供应商、填写密钥或地址、启用供应商、选择默认项，再启用搜索并保存。SearXNG 需要开启 `search.formats: [html, json]`，地址由后端访问，允许管理员明确配置的内网服务。修改服务地址或供应商类型不会把旧密钥带到新目的地。
+
+元宝搜索只需填写一个 **服务 API KEY**：先在[元宝搜索控制台](https://console.cloud.tencent.com/wsapi/index)开通服务并创建 API KEY，再点击「添加 元宝搜索」，粘贴 Key、启用并设为默认供应商，开启联网搜索后保存。无需 SecretId/SecretKey、区域或自定义地址。后端按[官方 API KEY 文档](https://cloud.tencent.com/document/product/1806/130615)请求 `https://api.wsa.cloud.tencent.com/SearchPro`，使用 Bearer 鉴权；仅发送 `Query` 以兼容极速/标准/旗舰版，在本地按工具 limit 截取结果。支持标准摘要、动态摘要和发布时间，未开通、资源不可用及密钥错误不会触发临时故障回退。
 
 “测试搜索”使用已保存的设置执行真实搜索，会使用相应供应商额度。临时错误回退默认关闭；开启后按配置顺序尝试其他已启用供应商，仅网络故障、超时、429 和部分 5xx 触发回退，认证错误、空结果不切换。单次调用总期限 25 秒，每供应商 12 秒，每账号最多同时执行 4 个请求。
 
@@ -26,5 +28,7 @@
 ## 验证
 
 `npx tsx scripts/test-web-search.mjs` 覆盖配置加密、账号隔离、冲突、供应商请求/结果、回退规则、取消、大小限制、URL/重定向保护、来源持久化及 Bot 工具循环。
+
+构建前端后运行 `npx tsx scripts/e2e-yuanbao-search.mjs`，独立验证元宝搜索的桌面/手机配置、单 Key 保存与回读、搜索来源展示及未开通服务提示；上游使用模拟响应，不消耗真实额度。
 
 构建后运行 `npx tsx scripts/e2e-web-search.mjs`，覆盖桌面/手机设置与卡片、密钥保存、关闭用户页面后的资料库/视频/阅读真实 Node 后台任务，以及路由身份、兼容浏览器任务范围、停用和冲突检查。测试使用模拟供应商，不消耗真实密钥额度。

@@ -32,8 +32,9 @@ try {
   const png = await sharp({ create: { width: 1, height: 1, channels: 3, background: 'white' } }).png().toBuffer();
   const large = await sharp({ create: { width: 3000, height: 4000, channels: 3, background: 'white' } }).png().toBuffer();
   const normalized = await prepareVisionImage(large);
-  assert.equal(normalized.width, 1536); assert.equal(normalized.height, 2048);
-  assert.equal((await sharp(normalized.bytes).metadata()).format, 'jpeg');
+  assert.ok(normalized.width > 2048); assert.ok(normalized.height > 2048);
+  assert.ok(normalized.width * normalized.height <= 10_000_000);
+  assert.equal((await sharp(normalized.bytes).metadata()).format, 'png');
   await assert.rejects(prepareVisionImage(Buffer.from('corrupt')), /vision_image_invalid/);
   fs.mkdirSync(path.join(root, 'files'));
   const file = await receiveFile(store, path.join(root, 'files'), owner, Readable.from([png]), 'tiny.png', 'image/png', 1000);
@@ -104,7 +105,9 @@ try {
   const remoteImage = { model: 'fake', messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://private.invalid/img' } }] }] };
   assert.throws(() => boundedRequest(remoteImage, 'chat/completions'), /unsupported_budgeted_image/);
   const huge = Buffer.from(png); huge.writeUInt32BE(9999, 16);
-  assert.throws(() => boundedRequest({ model: 'fake', input: [{ type: 'input_image', image_url: `data:image/png;base64,${huge.toString('base64')}` }] }, 'responses'), /unsupported_budgeted_image/);
+  const hugeBody = { model: 'fake', input: [{ type: 'input_image', image_url: `data:image/png;base64,${huge.toString('base64')}` }] };
+  assert.ok(boundedRequest(hugeBody, 'responses').input > 16384, 'estimator does not enforce dimension policy');
+  await assert.rejects(plain('https://fake.invalid/v1/responses', { body: JSON.stringify(hugeBody) }), /model_image_invalid/, 'preparation strictly rejects a forged PNG header');
   // No budget release on missing SSE usage; each physical call has a record.
   const stream = accountedFetch(ledger, a, config.get(owner, true).providers, async () => new Response('data: [DONE]\n', { headers: { 'content-type': 'text/event-stream' } }));
   await (await stream('https://fake.invalid/v1/chat/completions', { body: '{"model":"fake"}' })).text();

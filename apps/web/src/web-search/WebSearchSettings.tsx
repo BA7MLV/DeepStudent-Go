@@ -11,10 +11,10 @@ import './web-search.css';
 import settingsMessages from '../i18n/locales/zh-CN/settings.json';
 import { SettingsConflictRecovery, SettingsSaveBar } from '../components/settings/SettingsActions';
 
-const kinds: SearchProviderKind[] = ['tavily', 'brave', 'searxng'];
-const names = { tavily: 'Tavily', brave: 'Brave Search', searxng: 'SearXNG' };
+const kinds: SearchProviderKind[] = ['tavily', 'brave', 'searxng', 'yuanbao'];
 export default function WebSearchSettings() {
   const { t } = useTranslation('settings');
+  const names: Record<SearchProviderKind, string> = { tavily: 'Tavily', brave: 'Brave Search', searxng: 'SearXNG', yuanbao: t('webSearch.yuanbao') };
   const [config, setConfig] = useState<WebSearchConfig>();
   const [saved, setSaved] = useState('');
   const [error, setError] = useState('');
@@ -72,6 +72,7 @@ export default function WebSearchSettings() {
           <label className="web-settings__label">{t('webSearch.name')}<Input value={p.name} maxLength={80} onChange={e => provider(p.id, { name: e.target.value })} /></label>
           {p.kind === 'searxng' ? <><label className="web-settings__label">{t('webSearch.serverUrl')}<Input type="url" value={p.baseUrl ?? ''} placeholder="https://search.example.org" onChange={e => provider(p.id, { baseUrl: e.target.value })} /></label><p className="text-sm text-muted">{t('webSearch.searxHint')}</p></> : null}
           <label className="web-settings__label">{t('webSearch.key')}<Input type="password" autoComplete="new-password" value={p.apiKey ?? ''} placeholder={p.configured ? t('webSearch.keySaved') : t('webSearch.keyPlaceholder')} onChange={e => provider(p.id, { apiKey: e.target.value || undefined })} /></label>
+          {p.kind === 'yuanbao' ? <p className="text-sm text-muted">{t('webSearch.yuanbaoHint')} <a href="https://console.cloud.tencent.com/wsapi/index" target="_blank" rel="noopener noreferrer">{t('webSearch.yuanbaoConsole')}</a></p> : null}
           {p.configured ? <Button size="sm" variant="ghost" onPress={() => provider(p.id, { apiKey: '', configured: false, enabled: false })}>{t('webSearch.clearKey')}</Button> : null}
           <Switch isSelected={p.enabled} onChange={enabled => provider(p.id, { enabled })}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{t('webSearch.providerEnabled')}</span></Switch.Content></Switch>
         </div>)}

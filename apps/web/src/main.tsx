@@ -94,13 +94,19 @@ function render() {
 }
 
 // PWA autoUpdate：新 SW 在后台接管后，老页面仍在跑旧版本。这里给一条轻提示，
-// 把「改了怎么还是旧的」变成「刷新即可更新」；首次安装激活不提示。
+// 提供手动刷新入口，不自动打断当前操作；首次安装激活不提示。
 if ('serviceWorker' in navigator) {
   let hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController) { hadController = true; return; }
     hadController = true;
-    toast.info(i18n.t('newVersionReady'));
+    toast.info(i18n.t('newVersionReady'), {
+      timeout: 0,
+      actionProps: {
+        children: i18n.t('refreshNow'),
+        onPress: () => window.location.reload(),
+      },
+    });
   });
 }
 

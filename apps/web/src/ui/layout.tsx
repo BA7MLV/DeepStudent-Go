@@ -217,9 +217,9 @@ function NavigationItem({ item, active, compact = false, onNavigate }: {
     'data-testid': item.testId,
     title: item.hint ?? item.label,
   };
-  const content = compact ? item.icon : <>
+  const content = <>
     <span className="page-shell__nav-icon" aria-hidden="true">{item.icon}</span>
-    <span className="min-w-0 truncate" {...overflowTitleProps}>{item.label}</span>
+    {!compact && <span className="min-w-0 truncate" {...overflowTitleProps}>{item.label}</span>}
   </>;
 
   if (item.to !== undefined) {
@@ -572,8 +572,13 @@ export function NavigationShell({
       className={`sidebar-control relative shrink-0 rounded-full${railCollapsed ? ' page-shell__nav-logo' : ''}`}
       data-testid="nav-rail-toggle" aria-label={railCollapsed ? '展开侧边栏' : '收起侧边栏'}
       aria-expanded={!railCollapsed} aria-pressed={railCollapsed} onPress={toggleRail}>
-      {railCollapsed ? <BrandLogo /> : <Sym name="panel_left" />}
-      <DotBadge open={hasUnread} className="nav-unread" label="有已完成的会话未查看" testId="nav-unread-dot" />
+      {({ isHovered, isFocusVisible }) => <>
+        {railCollapsed ? <span className="t-icon-swap" data-state={isHovered || isFocusVisible ? 'b' : 'a'} aria-hidden="true">
+          <span className="t-icon" data-icon="a"><BrandLogo /></span>
+          <span className="t-icon" data-icon="b"><Sym name="panel_left" /></span>
+        </span> : <Sym name="panel_left" />}
+        <DotBadge open={hasUnread} className="nav-unread" label="有已完成的会话未查看" testId="nav-unread-dot" />
+      </>}
     </Button>
   );
 

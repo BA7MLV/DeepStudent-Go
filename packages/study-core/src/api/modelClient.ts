@@ -271,7 +271,7 @@ export interface ToolDef {
 
 export type ContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } };
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' | 'original' } };
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -436,7 +436,7 @@ function responsesContent(content: ChatMessage['content']): unknown {
   if (!Array.isArray(content)) return content ?? '';
   return content.map((part) => part.type === 'text'
     ? { type: 'input_text', text: part.text }
-    : { type: 'input_image', image_url: part.image_url.url });
+    : { type: 'input_image', image_url: part.image_url.url, ...(part.image_url.detail ? { detail: part.image_url.detail } : {}) });
 }
 
 export function requestBody(t: ModelTarget, opts: ChatOptions, messages: ChatMessage[], stream: boolean): Record<string, unknown> {

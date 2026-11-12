@@ -112,6 +112,7 @@
   },
   "serverUnavailable": "服务器暂时不可用，请刷新重试",
   "newVersionReady": "新版本已就绪，刷新页面后即可更新",
+  "refreshNow": "立即刷新",
   "language": {
     "label": "界面语言 / Language",
     "auto": "跟随系统",

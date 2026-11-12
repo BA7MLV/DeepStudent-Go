@@ -52,6 +52,7 @@ import { delegationTool, TaskWaitSuspended } from './delegation.js';
 import { TaskStepBudget } from '../src/agent/task-step-budget.js';
 import { modelSettings } from '../src/agent/model-settings.js';
 import { chatOutputTokens, truncationRetryTokens } from './chat-output-budget.js';
+import { prepareModelImages } from '../src/agent/image-preparation.js';
 
 /** Text-source handouts; video tasks use the server pixel/DOCX pipeline. */
 async function studyHandout(context: TaskContext) {
@@ -427,7 +428,7 @@ async function runServerAgent(
       const requestMessages = reconcileSkillMessages(out);
       assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, requestMessages, false);
       const options: ChatOptions = {
-        messages: resolveAttachmentMessages(context, requestMessages),
+        messages: await prepareModelImages(resolveAttachmentMessages(context, requestMessages), target, context.signal),
         cacheKey, onRequest,
         tools,
         temperature: 0.3,
@@ -499,7 +500,8 @@ async function runServerAgent(
       out.pop();
       if (text) out.push({ role: 'assistant', content: text });
       const limits = modelSettings(context.store, context.owner, context.configuration.get(context.owner), target);
-      const available = chatOutputTokens(target, { messages: reconcileSkillMessages(out), tools, signal: context.signal, thinkingLevel }, limits);
+      const messages = await prepareModelImages(resolveAttachmentMessages(context, reconcileSkillMessages(out)), target, context.signal);
+      const available = chatOutputTokens(target, { messages, tools, signal: context.signal, thinkingLevel }, limits);
       const raised = truncationRetryTokens(lastOutputTokens, available, limits.outputSource, raisedRetries);
       if (raised) { nextOutputTokens = raised; raisedRetries++; }
       for (const call of message.tool_calls) {
@@ -616,7 +618,7 @@ async function runServerAgent(
   const finalMessages = reconcileSkillMessages(out);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, finalMessages, false);
   try {
-    const options: ChatOptions = { messages: resolveAttachmentMessages(context, finalMessages), cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, signal: context.signal, thinkingLevel };
+    const options: ChatOptions = { messages: await prepareModelImages(resolveAttachmentMessages(context, finalMessages), target, context.signal), cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, signal: context.signal, thinkingLevel };
     options.max_tokens = Math.min(4096, chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target)));
     final = await chatStream(target, options,
       delta => { appendAnswer(delta); report('answer', maxRounds + 1); },
@@ -1027,7 +1029,7 @@ async function continueChat(context: TaskContext) {
   };
   snapshot(true, undefined, true);
   try {
-    const options: ChatOptions = { messages: resolveAttachmentMessages(context, messages), signal: context.signal, thinkingLevel: taskThinkingLevel(context),
+    const options: ChatOptions = { messages: await prepareModelImages(resolveAttachmentMessages(context, messages), target, context.signal), signal: context.signal, thinkingLevel: taskThinkingLevel(context),
       cacheKey: `study:${context.owner}:${sessionId}`, onRequest: request => { requests.push(request); } };
     options.max_tokens = chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target));
     const message = await chatStream(target, options,

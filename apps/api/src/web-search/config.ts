@@ -22,7 +22,7 @@ export class WebSearchConfiguration {
       if (typeof input.enabled !== 'boolean' || typeof input.fetchEnabled !== 'boolean' || typeof input.fallback !== 'boolean' || typeof input.providerId !== 'string' || !Array.isArray(input.providers) || input.providers.length > 12) throw new WebSearchError('web_invalid_config');
       const ids = new Set<string>();
       const providers: SearchProvider[] = input.providers.map(p => {
-        if (!p || typeof p.id !== 'string' || !/^[\w-]{1,64}$/.test(p.id) || ids.has(p.id) || !['tavily', 'brave', 'searxng'].includes(p.kind) || typeof p.enabled !== 'boolean' || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 80) throw new WebSearchError('web_invalid_config');
+        if (!p || typeof p.id !== 'string' || !/^[\w-]{1,64}$/.test(p.id) || ids.has(p.id) || !['tavily', 'brave', 'searxng', 'yuanbao'].includes(p.kind) || typeof p.enabled !== 'boolean' || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 80) throw new WebSearchError('web_invalid_config');
         ids.add(p.id);
         const old = previous.providers.find(row => row.id === p.id);
         let baseUrl: string | undefined;

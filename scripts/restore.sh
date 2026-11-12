@@ -21,6 +21,7 @@ if [ -f "$DATA_DIR/releases/last-success.json" ]; then echo "Managed installatio
 case "$DATA_DIR" in /|""|.) echo "refusing unsafe data directory" >&2; exit 1;; esac
 mkdir -p "$DATA_DIR"
 DATA_DIR="$(cd -- "$DATA_DIR" && pwd -P)"
+case "$DATA_DIR" in /|"") echo "refusing unsafe data directory" >&2; exit 1;; esac
 
 while IFS= read -r entry; do
   entry="${entry#./}"

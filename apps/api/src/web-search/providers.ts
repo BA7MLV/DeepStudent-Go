@@ -24,6 +24,33 @@ export const searchAdapters: Record<SearchProviderKind, SearchAdapter> = {
     request: (p, query) => ({ url: `${p.baseUrl}/search?${new URLSearchParams({ q: query, format: 'json' })}`, init: { headers: p.apiKey ? { authorization: `Bearer ${p.apiKey}` } : undefined } }),
     results: body => rows((body as { results?: unknown })?.results),
   },
+  yuanbao: {
+    // Query alone works with all editions, including lite (which does not support Cnt).
+    request: (p, query) => ({ url: 'https://api.wsa.cloud.tencent.com/SearchPro', init: { method: 'POST', headers: { authorization: `Bearer ${p.apiKey}`, 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify({ Query: query }) } }),
+    results: body => {
+      const value = body as { Response?: { Pages?: unknown; Error?: { Code?: unknown } }; Error?: { Code?: unknown } };
+      const error = value?.Response?.Error ?? value?.Error;
+      // Tencent can return API errors in a successful HTTP response. Never expose its raw message.
+      if (error) {
+        const code = typeof error.Code === 'string' ? error.Code.split('.')[0] : '';
+        switch (code) {
+          case 'UnauthorizedOperation': case 'AuthFailure': throw new WebSearchError('web_auth_failed', 401);
+          case 'RequestLimitExceeded': throw new WebSearchError('web_rate_limited', 429);
+          case 'ResourceNotFound': throw new WebSearchError('web_service_not_enabled', 400);
+          case 'ResourceUnavailable': throw new WebSearchError('web_service_unavailable', 400);
+          case 'InvalidParameter': case 'InvalidParameterValue': throw new WebSearchError('web_invalid_arguments');
+          default: throw new WebSearchError('web_provider_failed', 502);
+        }
+      }
+      return rows(value?.Response?.Pages).slice(0, 100).map(raw => {
+        let page: unknown;
+        try { page = typeof raw === 'string' ? JSON.parse(raw) : null; } catch { throw new WebSearchError('web_invalid_response', 502); }
+        if (!page || typeof page !== 'object' || Array.isArray(page)) throw new WebSearchError('web_invalid_response', 502);
+        const row = page as Record<string, unknown>;
+        return { url: row.url, title: row.title, content: typeof row.content === 'string' && row.content.trim() ? row.content : row.passage, published_date: row.date };
+      });
+    },
+  },
 };
 function text(value: unknown, limit: number): string {
   if (typeof value !== 'string') return '';

@@ -4,6 +4,8 @@ import { modelUsage } from '@wangke/study-core/model/usage';
 import { modelRequestPolicy, type ModelRequestOptions } from './model-policy.js';
 import { agentHttpInit } from './http.js';
 import { observeModelFetch } from './model-observations.js';
+import { prepareModelImages } from './image-preparation.js';
+import { savedModelOverrides } from './model-preferences.js';
 export { modelUsage } from '@wangke/study-core/model/usage';
 
 type JsonObject = Record<string, unknown>;
@@ -70,7 +72,10 @@ export class ModelClient {
       const payload: unknown = JSON.parse(init.body);
       if (!object(payload)) throw new Error('invalid_model_body');
       const model = this.ledger.model(attribution.owner, { providerId: attribution.provider, model: attribution.model });
-      const request = boundedRequest(payload as JsonObject, url, model.outputTokens);
+      const protocol = new URL(url).pathname.endsWith('/messages') ? 'anthropic-messages' : 'openai-chat';
+      const capabilities = this.ledger.store ? savedModelOverrides(this.ledger.store, attribution.owner, attribution.provider, attribution.model) : undefined;
+      const prepared = options.imagesPrepared ? payload : await prepareModelImages(payload, { protocol, capabilities }, init.signal ?? undefined);
+      const request = boundedRequest(prepared as JsonObject, url, model.outputTokens);
       checkRequestCapacity(request.total, Math.min(model.contextTokens, this.ledger.limits(attribution.owner, attribution.run).contextTokens));
       reserveTokens = request.total;
       init = { ...init, body: JSON.stringify(request.body) };
