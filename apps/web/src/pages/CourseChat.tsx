@@ -18,7 +18,9 @@ import { MarkdownCode, MarkdownPre } from '../components/mermaid/markdown';
 import { MarkdownTable } from '../components/MdTable';
 import WidgetStreamFrame from '../components/WidgetStreamFrame';
 import ChatAddMenu from '../components/ChatAddMenu';
-import InlineSkillInput, { type ComposerPaste, type InlineSkillInputHandle } from '../components/InlineSkillInput';
+import type { ComposerPaste, InlineSkillInputHandle } from '../components/InlineSkillInput';
+// CodeMirror 全家桶(~130KB gzip)只服务这个输入框,懒加载别让对话首屏静态依赖它。
+const InlineSkillInput = lazy(() => import('../components/InlineSkillInput'));
 import SkillMessageContent from '../components/SkillMessageContent';
 import ChatProjectPicker from '../components/ChatProjectPicker';
 import ChatShellApproval from '../components/ChatShellApproval';
@@ -575,13 +577,13 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
       <div className="course-chat__composer-context"><ChatAttachmentDraft /></div>
       <ChatAddMenu disabled={!loaded || !!pendingAsk} onSelectProject={onSelectProject} onSkillInsert={() => composerRef.current?.focus()} />
       <ComposerExpand visible={composerOverflow} key={`expand-${activeId ?? 'draft'}`} value={draft} onChange={changeDraft}
-        renderInput={className => <InlineSkillInput expanded autoFocus className={className} label={chatText('chatPanel.fullMessage')}
-          value={draft} onChange={changeDraft} skillIds={turnSkillIds} availableSkillIds={availableSkillIds} onSkillsChange={setTurnSkillIds} onPaste={handlePaste} />} />
+        renderInput={className => <Suspense fallback={null}><InlineSkillInput expanded autoFocus className={className} label={chatText('chatPanel.fullMessage')}
+          value={draft} onChange={changeDraft} skillIds={turnSkillIds} availableSkillIds={availableSkillIds} onSkillsChange={setTurnSkillIds} onPaste={handlePaste} /></Suspense>} />
       <div className="course-chat__composer-body">
-        <InlineSkillInput ref={composerRef} documentKey={activeId} label={t('composer.message')} description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')}
+        <Suspense fallback={null}><InlineSkillInput ref={composerRef} documentKey={activeId} label={t('composer.message')} description={t(touch ? 'composer.touchHelp' : 'composer.desktopHelp')}
           value={draft} onChange={changeDraft} skillIds={turnSkillIds} availableSkillIds={availableSkillIds} onSkillsChange={setTurnSkillIds}
           onPaste={handlePaste} onFocus={pinIfSticking} disabled={!loaded} placeholder={t(touch ? 'composer.touchPlaceholder' : 'composer.placeholder')}
-          onOverflowChange={setComposerOverflow} onSubmit={submit} />
+          onOverflowChange={setComposerOverflow} onSubmit={submit} /></Suspense>
       </div>
       <ChatComposerTools className="course-chat__composer-tools" aria-label={t('composer.tools')} orientation="horizontal">
         <PluginActions surface="chat.composer.actions" projectFolderId={project?.folderId} conversation={activeId == null ? undefined : { kind: 'local-chat', id: String(activeId) }} />

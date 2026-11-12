@@ -14,28 +14,24 @@ import { appDemandByteBudget } from './pwa-byte-budget';
 const require = createRequire(import.meta.url);
 
 /**
- * 样式表优先调度（build 产物）：FCP 之前浏览器要等渲染阻塞的 stylesheet 下载完，
- * 弱网下入口 JS（~500KB gzip）会和它抢同一条带宽。该插件把入口 module script 与
- * 其 modulepreload 从静态标签改为「stylesheet 加载完成后」再注入的内联 loader，
- * CSS 先独占带宽画首帧（boot-splash），随后 JS 再开始下载。dev 模式不介入。
+ * 样式表非阻塞调度（build 产物）：旧方案把入口 JS 推迟到 56KB CSS 下载完之后才开始下载，
+ * 串行化了弱网启动。启动骨架（boot-splash）的样式本来就内联在 index.html 里，不依赖这份 CSS，
+ * 所以这里把 stylesheet 改成非阻塞（media=print + onload 切回 all）：CSS 与入口 JS 并行下载、
+ * 都不阻塞首帧；JS 侧在 root.render 之前等待 CSS 就绪（见 main.tsx 的 cssReady），避免正文 FOUC。
+ * dev 模式不介入。
  */
-function stylesheetFirstBoot(): Plugin {
+function cssNonBlockingBoot(): Plugin {
   return {
-    name: 'wangke-stylesheet-first-boot',
+    name: 'wangke-css-nonblocking-boot',
     apply: 'build',
     transformIndexHtml: {
       order: 'post',
       handler(html: string, ctx: { bundle?: Record<string, unknown> }) {
         if (!ctx.bundle) return html;
-        const scriptMatch = html.match(/<script type="module"[^>]* src="([^"]+)"[^>]*><\/script>/);
-        if (!scriptMatch) return html;
-        const entry = scriptMatch[1];
-        const preloads = [...html.matchAll(/<link rel="modulepreload"[^>]* href="([^"]+)"[^>]*>/g)].map((match) => match[1]);
-        let rewritten = html.replace(scriptMatch[0], '').replace(/<link rel="modulepreload"[^>]* href="[^"]+"[^>]*>\s*/g, '');
-        const loader = `<script>(function(){var e=${JSON.stringify(entry)},p=${JSON.stringify(preloads)};var s=function(){for(var i=0;i<p.length;i++){var l=document.createElement('link');l.rel='modulepreload';l.crossOrigin='anonymous';l.href=p[i];document.head.appendChild(l);}var t=document.createElement('script');t.type='module';t.crossOrigin='anonymous';t.src=e;document.head.appendChild(t);};var c=document.querySelector('link[rel="stylesheet"]');if(c&&!c.sheet){var d=false,f=function(){if(d)return;d=true;s();};c.addEventListener('load',f,{once:true});c.addEventListener('error',f,{once:true});setTimeout(f,3000);}else s();})();</script>`;
-        const head = rewritten.indexOf('</head>');
-        rewritten = head >= 0 ? rewritten.slice(0, head) + loader + rewritten.slice(head) : rewritten + loader;
-        return rewritten;
+        return html.replace(/<link rel="stylesheet"([^>]*)>/g, (tag, attrs: string) => {
+          if (attrs.includes('data-wangke-boot-css')) return tag;
+          return `<link rel="stylesheet"${attrs} data-wangke-boot-css media="print" onload="this.media='all';this.dataset.wangkeCssDone='1'">`;
+        });
       },
     },
   };
@@ -228,7 +224,7 @@ function buildInfo() {
 export default defineConfig({
   plugins: [
     dshEsm(),
-    stylesheetFirstBoot(),
+    cssNonBlockingBoot(),
     serveOrt(),
     serveUserscript(),
     pdfjsAssets(),

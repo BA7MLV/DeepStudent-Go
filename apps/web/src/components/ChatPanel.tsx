@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { liveQuery } from 'dexie';
 import { cloudBlobUrl } from '../store/cloudBlob';
 import { appendConversationSession, removeConversationMessage, reviseConversationSession, readConversationSession, readConversationMessage } from '../store/conversationProducts';
@@ -64,7 +64,9 @@ import { MarkdownTable } from './MdTable';
 import { MarkdownStreamingProvider } from './markdown/streaming';
 import TaskModelPicker from './TaskModelPicker';
 import SkillPicker from './SkillPicker';
-import InlineSkillInput, { type InlineSkillInputHandle } from './InlineSkillInput';
+import type { InlineSkillInputHandle } from './InlineSkillInput';
+// CodeMirror 全家桶(~130KB gzip)只服务这个输入框,懒加载别让对话首屏静态依赖它。
+const InlineSkillInput = lazy(() => import('./InlineSkillInput'));
 import SkillMessageContent from './SkillMessageContent';
 import QuizCard from './QuizCard';
 import { canUpdateQuizPick, type QuizPick } from '../harness/quiz';
@@ -1573,9 +1575,10 @@ export default function ChatPanel({
         )}
         <div className="chat-composer__row">
           <ComposerExpand visible={composerOverflow} key={activeId} value={input} onChange={setInput}
-            renderInput={className => <InlineSkillInput expanded autoFocus className={className} label={chatText('chatPanel.fullMessage')}
-              value={input} onChange={setInput} skillIds={turnSkillIds} availableSkillIds={skillIds} onSkillsChange={setTurnSkillIds} />} />
+            renderInput={className => <Suspense fallback={null}><InlineSkillInput expanded autoFocus className={className} label={chatText('chatPanel.fullMessage')}
+              value={input} onChange={setInput} skillIds={turnSkillIds} availableSkillIds={skillIds} onSkillsChange={setTurnSkillIds} /></Suspense>} />
           <div className="chat-input" data-testid="chat-input">
+            <Suspense fallback={null}>
             <InlineSkillInput
               documentKey={activeId}
               label={chatText('chatPanel.composerLabel')}
@@ -1591,6 +1594,7 @@ export default function ChatPanel({
               onFocus={pinList}
               onSubmit={() => void send(input)}
             />
+            </Suspense>
           </div>
           <div className="chat-composer__tools">
           <Dropdown isOpen={addOpen} onOpenChange={setAddOpen}>

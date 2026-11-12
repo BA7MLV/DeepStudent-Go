@@ -60,15 +60,17 @@ test('persist merge and all update/import paths normalize the language', () => {
   assert.equal(pickSyncSettings(getSettings()).uiLanguage, 'auto', 'sync preference, not device-resolved locale');
 });
 
-test('both bundled namespaces translate immediately without a network request', async () => {
-  const { default: i18n } = await import('../apps/web/src/i18n/index.ts');
+test('fallback locale is bundled; the other locale translates after its on-demand chunk loads', async () => {
+  globalThis.document = { documentElement: { lang: '', dir: '' }, title: '' };
+  const { default: i18n, applyLocale } = await import('../apps/web/src/i18n/index.ts');
   assert.equal(i18n.isInitialized, true);
   assert.equal(i18n.t('settings'), '设置');
-  await i18n.changeLanguage('en-US');
+  await applyLocale('en-US');
   assert.equal(i18n.t('settings'), 'Settings');
   assert.equal(i18n.t('appearance.fontScale', { ns: 'settings' }), 'Text size');
-  await i18n.changeLanguage('zh-CN');
+  await applyLocale('zh-CN');
   assert.equal(i18n.t('appearance.fontScale', { ns: 'settings' }), '字号');
+  delete globalThis.document;
 });
 
 test('store + system-language sync updates HTML and title, with explicit preferences taking priority', async () => {
@@ -81,6 +83,8 @@ test('store + system-language sync updates HTML and title, with explicit prefere
   try {
     assert.equal(document.documentElement.lang, 'en-US');
     assert.equal(document.documentElement.dir, 'ltr');
+    // en-US 文案在动态 chunk 里,标题在 chunk 到达后才写入。
+    await new Promise(resolve => setTimeout(resolve, 50));
     assert.equal(document.title, 'DeepStudent Go');
     navigator.languages = ['zh-CN'];
     window.dispatchEvent(new Event('languagechange'));

@@ -5,7 +5,7 @@ import { cloudTransaction } from './transactions';
 import { normalizeUiLanguage } from '../i18n/locale';
 import { normalizeAgentInstructions } from '../harness/agentInstructions';
 import { markCloudApply, type OutboxRow } from './cache';
-import { DurableCommands, type DurableCommand } from '@wangke/client-core';
+import type { DurableCommand, DurableCommands } from '@wangke/client-core';
 import type { PreferencesCommand, PreferencesProjection, RuntimeJson } from '@wangke/contracts/client-runtime';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 import { accountLifetime, type AccountLifetime } from '../client/account-lifecycle';
@@ -37,6 +37,7 @@ async function preferenceCommands() {
   lifetime.assertCurrent();
   if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed');
   if (commands?.lifetime === lifetime) return commands.drain;
+  const { DurableCommands } = await import('@wangke/client-core');
   const mutateJournal = (write: () => Promise<unknown>) => cloudTransaction(database, [database.table('_cloudMeta')], async () => {
     lifetime.assertCurrent();
     await write();

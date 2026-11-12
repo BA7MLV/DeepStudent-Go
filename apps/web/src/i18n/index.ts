@@ -18,11 +18,25 @@ void i18n.use(initReactI18next).init({
   react: { useSuspense: false },
 });
 
-export function applyLocale(locale: AppLocale): void {
-  if (i18n.language !== locale) void i18n.changeLanguage(locale);
+const localeBundles: Partial<Record<AppLocale, () => Promise<{ default: Record<string, object> }>>> = {
+  'en-US': () => import('./en-US'),
+};
+async function ensureResources(locale: AppLocale): Promise<void> {
+  if (locale === FALLBACK_LOCALE || i18n.hasResourceBundle(locale, 'common')) return;
+  const load = localeBundles[locale];
+  if (!load) return;
+  const { default: bundles } = await load();
+  for (const [namespace, bundle] of Object.entries(bundles)) i18n.addResourceBundle(locale, namespace, bundle, true, true);
+}
+
+export function applyLocale(locale: AppLocale): Promise<void> {
   document.documentElement.lang = locale;
   document.documentElement.dir = i18n.dir(locale);
-  document.title = i18n.t('appTitle');
+  // 非回退语言的文案在动态 chunk 里,到齐后再切换,避免一屏回退语言夹杂。
+  return ensureResources(locale).then(() => {
+    if (i18n.language !== locale) void i18n.changeLanguage(locale);
+    document.title = i18n.t('appTitle');
+  });
 }
 
 export default i18n;

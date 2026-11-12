@@ -1,13 +1,16 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Button, Input, Label, Spinner, TextField } from '@heroui/react';
-import { PageLoader } from '../ui';
+import { PageLoader } from '../ui/page-loader';
 import { startAuthentication } from '@simplewebauthn/browser';
 import { useTranslation } from 'react-i18next';
 import { serverClient, ServerApiError } from '../api/serverClient';
 import { startCloud } from './sync';
 import { useSettings } from '../store/settings';
-import { FeedbackHost, Sym } from '../ui';
-import LanguageSelect from '../components/LanguageSelect';
+import { FeedbackHost } from '../ui/feedback';
+import { Sym } from '../ui/icons';
+// 直连模块而不走 `../ui` barrel,避免 layout.tsx(react-router-dom)被拉进入口;
+// LanguageSelect 的 Select/ListBox(react-aria combobox/overlays)只有登录页用,懒加载。
+const LanguageSelect = lazy(() => import('../components/LanguageSelect'));
 import { consumeBootstrapLink } from './bootstrapLink';
 import OnboardingFigure, { loadFigures } from './onboarding/OnboardingFigure';
 const ModelSetup = lazy(() => import('./onboarding/ModelSetup'));
@@ -142,7 +145,7 @@ export default function CloudGate({ initialized, authenticated, hasPasskey = fal
           <div className="ob__bar-start">
             {back && <Button isIconOnly variant="ghost" aria-label={t('onboarding.back')} isDisabled={busy} onPress={() => go(back, 'back')}><Sym name="chevron_left" /></Button>}
           </div>
-          <div className="ob__bar-end"><LanguageSelect /></div>
+          <div className="ob__bar-end"><Suspense fallback={null}><LanguageSelect /></Suspense></div>
         </header>
 
         <div className="ob__scene" key={step} data-direction={direction}>

@@ -30,7 +30,10 @@ import './md-table.css';
 import { apiUrl } from './api/base';
 import { consumeBootstrapLink } from './cloud/bootstrapLink';
 import DatabaseNotice from './cloud/DatabaseNotice';
-import { PageLoader, toast } from './ui';
+// 不走 `./ui` barrel:barrel 会把 layout.tsx(react-router-dom)与 feedback.tsx(HeroUI)
+// 一并拉进入口首屏,这里只需要两件轻量实现。
+import { PageLoader } from './ui/page-loader';
+import { toast } from './ui/toast';
 
 // Consume once, outside React rendering (including StrictMode), before API calls.
 const bootstrapSecret = consumeBootstrapLink(location, history);
@@ -60,6 +63,17 @@ if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
 const root = ReactDOM.createRoot(document.getElementById('root')!);
 
+// CSS 走的是非阻塞调度（见 vite.config.ts 的 cssNonBlockingBoot）,与 JS 并行下载;
+// React 首帧渲染前等它就绪,避免正文 FOUC。骨架屏样式内联在 index.html,不受影响。
+const bootCss = document.querySelector<HTMLLinkElement>('link[data-wangke-boot-css]');
+const cssReady: Promise<void> = bootCss && !bootCss.dataset.wangkeCssDone
+  ? new Promise((resolve) => {
+    bootCss.addEventListener('load', () => resolve(), { once: true });
+    bootCss.addEventListener('error', () => resolve(), { once: true });
+    setTimeout(resolve, 3000);
+  })
+  : Promise.resolve();
+
 /** 同步主题类与 HeroUI 强调色令牌，实际配色由 CSS 变量控制。 */
 // 首帧兜底：boot() 要等会话状态接口返回才能决定渲染登录页还是应用，在此之前
 // 先渲染与 index.html 内联启动骨架同款的扫光 loading，避免弱网下白屏。
@@ -86,11 +100,11 @@ function Root() {
 }
 
 function render() {
-  root.render(
+  void cssReady.then(() => root.render(
     <React.StrictMode>
       <Root />
     </React.StrictMode>,
-  );
+  ));
 }
 
 // PWA autoUpdate：新 SW 在后台接管后，老页面仍在跑旧版本。这里给一条轻提示，
@@ -117,7 +131,12 @@ async function boot() {
     const status = await response.json().catch(() => null);
     if (!response.ok || status?.cloud !== true) throw new Error(i18n.t('serverUnavailable'));
     const [bootstrap, session] = await Promise.all([serverClient.bootstrapStatus(), serverClient.session()]);
-    if (session.authenticated && session.user) await startCloud(session.user.id, { background: true });
+    if (session.authenticated && session.user) {
+      // 已登录的下一帧必然是 App + 默认路由(对话页),与 startCloud 并行拉分包,
+      // 别让「同步本地阶段 → 渲染 Gate → 再下载 App → 再下载 CourseChat」串成瀑布。
+      void Promise.all([import('./App'), import('./pages/CourseChat')]).catch(() => {});
+      await startCloud(session.user.id, { background: true });
+    }
     window.addEventListener('cloud-session-expired', stopCloud);
     bootView = <CloudGate initialized={bootstrap.initialized} authenticated={session.authenticated} hasPasskey={bootstrap.hasPasskey} initialSecret={bootstrap.initialized ? '' : bootstrapSecret} />;
   } catch (error) {
