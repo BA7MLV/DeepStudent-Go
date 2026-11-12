@@ -47,7 +47,7 @@ P2 要补上「交互」：来宾在 iPad 上做的动作（提问、制卡审�
 | `chat.ev` | host→guest | `{ to, turnId, kind: 'reasoning'\|'delta'\|'round'\|'tool'\|'stop', text?, round? }` | 流事件（对应 `AgentCallbacks` 七个回调） |
 | `chat.card` | host→guest | `{ to, turnId, kind: 'quiz'\|'widget', payload }` | 题卡 / 图卡（工具回执旁路，见 §3.3） |
 | `chat.done` | host→guest | `{ to, turnId, content, reasoning?, reasoningMs?, quiz?, widget? }` | 一轮结束 |
-| `chat.err` | host→guest | `{ to, turnId, message }` | 失败（网络/模型/护栏），也要能落库成一条 assistant |
+| `chat.err` | host→guest | `{ to, turnId, message }` | 失败（网络/模型/护栏）。**不落库**——主机聊天记录不该被链路抖动塞满错误噪音，且那些行会占下一次的历史预算 |
 | `version.err` | host→guest | `{ host: 2, you: 1 }` | 版本不匹配，来宾据此显示明确错误 |
 
 `welcome` 帧补 `hostVersion` 字段；guest 侧握手失败不再显示「主机已离线」这种误导文案。

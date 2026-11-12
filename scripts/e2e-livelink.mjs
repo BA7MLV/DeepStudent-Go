@@ -71,15 +71,24 @@
  *   · OPFS 写入（saveVideoFile）与 DB 播种都是异步的，播种后从 host 页回读一次
  *     `getCourseFile(id).size` 当作「文件真的落盘了」的闸门。
  */
-import { setTimeout as delay } from 'node:timers/promises';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { WebSocketServer } from 'ws';
+// 桩中继 / ffmpeg fixture / 记分器 / 小工具都搬进了共享装置：P2 的 e2e 要用同一份桩
+// （两份桩必然漂移，而漂移的后果是「桩放行了真中继会丢的帧」，那种问题在 e2e 里恒绿 ——
+// 详见 livelink-e2e-harness.mjs 的文件头）。本文件的**断言一条没动**，只是换了个取法。
+import {
+  createReporter,
+  createStubRelay,
+  makeWebmFixture,
+  readPairCode,
+  liveUrlFor,
+  dumpGuest,
+  preflight,
+  delay,
+} from './livelink-e2e-harness.mjs';
 // ⚠️ 这里**不 import 任何协议版本**：桩中继合成的两帧是控制帧（ctl 形状），与 app 的
 // PROTOCOL_VERSION 无关（见 live-relay/src/index.ts 与 protocol.ts 的 decodeControlFrame）。
 // 在测试里 import PROTOCOL_VERSION 恰好是把两个部署物的生命周期重新绑在一起 ——
@@ -87,9 +96,11 @@ import { WebSocketServer } from 'ws';
 // 不会让任何断言变红。
 
 const BASE = process.env.BASE_URL || 'http://localhost:5173';
-/** 桩中继端口。避开 dev(5173)/preview(4173)，也避开本机常见的 8080/3000。 */
-const RELAY_PORT = 8899;
-const RELAY = `ws://127.0.0.1:${RELAY_PORT}`;
+/**
+ * 桩中继端口。避开 dev(5173)/preview(4173)，也避开本机常见的 8080/3000。
+ * 与 P2 那条（8901）分开：两条 e2e 可以同时跑而互不抢端口。
+ */
+const RELAY_PORT = Number(process.env.E2E_RELAY_PORT || 8899);
 /** mp4 门 fixture 的文件大小（确定性伪随机字节，本机 Chrome 播不了是预期）。 */
 const MP4_SIZE = 3 * 1024 * 1024;
 /**
@@ -107,213 +118,27 @@ const MP4_COURSE = '实时链路测试课 mp4';
 const WEBM_COURSE = '实时链路测试课 webm';
 const SUB_TEXT = '第一段：实时链路从这里开始';
 
-let failed = 0;
+// 记分器搬进共享装置（失败只记不抛，中途抛会把后面所有断言一起淹掉）
+const report = createReporter();
+const { ok, skip, check } = report;
 /** 真解码这一步的最终状态：'ran' | 'skipped' | 'n/a'，只用于汇总里说清验过什么。 */
 let LAST_WEBM_STATE = 'n/a';
-const ok = (msg) => console.log(`   ✓ ${msg}`);
-const fail = (msg) => {
-  failed++;
-  console.error(`   ❌ ${msg}`);
-};
-const skip = (msg) => console.log(`   ⚠ 跳过：${msg}`);
-async function check(name, fn) {
-  try {
-    await fn();
-    ok(name);
-  } catch (e) {
-    fail(`${name}\n      ${e.message}`);
-  }
-}
-
-/**
- * 读配对码。mdui-text-field 的真值有三种可能的落点（React 受控 value 属性、
- * shadow DOM 里的 input.value、宿主属性），逐个试——只试一种的话，mdui 版本
- * 一升级就会让这条读成空串，而空串会让后面所有断言以「配对码格式不对」的
- * 面貌红掉，把真正的原因（取值方式变了）盖住。
- */
-async function readPairCode(page) {
-  return (
-    await page
-      .locator('[data-testid="live-code"]')
-      .evaluate((el) => {
-        const inner = el.shadowRoot?.querySelector('input,textarea');
-        return el.value ?? el.getAttribute('value') ?? inner?.value ?? '';
-      })
-      .catch(() => '')
-  ).trim();
-}
-
-/** 构造 guest 链接（单独抽出来，断言 host 展示的码与 URL 里的 pair 是同一个）。 */
-function liveUrlFor(code) {
-  return `${BASE}/#/live?relay=${encodeURIComponent(RELAY)}&pair=${encodeURIComponent(code)}`;
-}
-
-/**
- * guest 页面上的 live-* 节点快照。**只在断言失败时打**（见 dumpGuest）。
- *
- * 为什么需要它：「课程项不出现」有两种完全不同的成因 —— 没连上（URL / 端口 /
- * 中继没起）与连上了但拉不到索引（host 读库失败）。两者的修法没有交集，
- * 而症状在日志里都只是「waitForSelector 超时」。这个快照一次说清是哪种。
- */
-async function guestSnapshot(page) {
-  return page
-    .evaluate(() => ({
-      url: location.href,
-      nodes: [...document.querySelectorAll('[data-testid^="live-"]')].map((el) => ({
-        id: el.getAttribute('data-testid'),
-        txt: (el.textContent || '').slice(0, 100),
-      })),
-      body: (document.body.innerText || '').slice(0, 200),
-    }))
-    .catch((e) => ({ err: String(e).slice(0, 200) }));
-}
-
-/** 断言失败时调：把 guest 快照附在失败信息后面，省得回头再跑一遍看现场。 */
-async function dumpGuest(page, label) {
-  const snap = await guestSnapshot(page);
-  console.log(`   [诊断·${label}] ${JSON.stringify(snap)}`);
-}
 
 // ───────────────────────────── 1. 桩中继 ─────────────────────────────
 /**
- * 进程内桩中继：只做协议级三件事（配对 / 转发 / host 断线广播），
- * 与真 DO 的 `fetch`(登记+host-link-up) / `webSocketMessage`(原样转发) /
- * `webSocketClose`(host-link-down) 三条路径对应。
+ * 进程内桩中继：只做协议级三件事（配对 / 转发 / host 断线广播），与真 DO 的
+ * `fetch`(登记+host-link-up) / `webSocketMessage`(原样转发) / `webSocketClose`
+ * (host-link-down) 三条路径对应。
  *
  * `stats` 是这条 e2e 的**观测面**：range 帧数、载荷总字节、每个 range 请求的
  * {start,len}、host-link-down 广播次数。它们同时是断言依据（见 part 4/6）。
+ * 实现在 livelink-e2e-harness.mjs（与 P2 共用，理由见那边的文件头）。
  */
-const stats = {
-  rangeFrames: 0,
-  /** 视频 range 的载荷字节（**只算低半区 rid**；高半区是单元分片，另计 unitBytes） */
-  rangeBytes: 0,
-  /** host 单元分片的载荷字节（gzip 后的索引 / 字幕 / 封面），不是视频文件字节 */
-  unitBytes: 0,
-  /** 每个 video.range 请求的 {start,len}（视频面协议级断言的原始记录） */
-  rangeRequests: [],
-  /** 二进制帧（含 12 字节头）的 rid 清单，用于确认 rid 不与单元分片撞车 */
-  binaryRids: [],
-  /** host 实际发出的 range 帧 {rid, seq, bytes}（反推服务区间用；只含视频 range） */
-  rangeResponses: [],
-  /** rid → video.range 请求 {start, len, videoId, at}（完整性断言的请求侧） */
-  rangeRequested: new Map(),
-  /** rid → 已收到的应答帧数（完整性断言的应答侧） */
-  rangeServed: new Map(),
-  hostLinkDown: 0,
-  hostLinkDownPayloads: [],
-  /** 转发的文本帧路由（诊断用：确认 index/unit 真的过了中继） */
-  textTypes: [],
-};
+const relay = createStubRelay({ port: RELAY_PORT, label: '中继' });
+const RELAY = relay.relayUrl;
+const stats = relay.stats;
+const wss = relay.wss;
 
-const rooms = new Map(); // code → { host, guests:Set }
-const wss = new WebSocketServer({ port: RELAY_PORT });
-
-wss.on('connection', (ws, req) => {
-  const url = new URL(req.url, 'http://x');
-  const room = url.searchParams.get('room')?.trim();
-  const role = url.searchParams.get('role');
-  if (!room || (role !== 'host' && role !== 'guest')) {
-    ws.close(4000, 'bad params');
-    return;
-  }
-  if (!rooms.has(room)) rooms.set(room, { host: null, guests: new Set() });
-  const r = rooms.get(room);
-  if (role === 'host') r.host = ws;
-  else r.guests.add(ws);
-  console.log(`   [中继] ${role} 进房 ${room}（host=${r.host ? 1 : 0}, guests=${r.guests.size}）`);
-
-  ws.on('message', (data, isBinary) => {
-    // 视频面的 range 响应是二进制帧（12 字节头 rid u32 + seq f64 + 载荷）。
-    // Node 侧 data 是 Buffer；ws 的 isBinary 标记必须原样带给 send，否则对端
-    // 会把二进制帧当文本收——protocol.ts 的 decodeBinaryFrame 对非 ArrayBuffer
-    // 一律返 null，链路像死了一样但没有任何报错（mse.ts 文件头钉过这条）。
-    if (isBinary && data.length >= 12) {
-      const rid = data.readUInt32LE(0);
-      const seq = data.readDoubleLE(4);
-      const bytes = data.length - 12;
-      stats.binaryRids.push(rid);
-      if (rid < 0x80000000) {
-        // 低半区 = guest 的 mse.ts 生成的 range rid，即**视频文件字节**
-        stats.rangeFrames++;
-        stats.rangeBytes += bytes;
-        // 记下「host 实际发出来的区间」：一个 rid 可能被切成多帧（host 的
-        // handleVideoRange 按 RANGE_CHUNK 循环发），首帧的 seq 就是请求的 start，
-        // 后续帧的 seq 递增。拿到 {rid, seq, len} 三元组才能反推 host 有没有
-        // 按请求的区间回数据（而不是回了一段别的）。
-        stats.rangeResponses.push({
-          rid,
-          seq,
-          bytes,
-          // 载荷指纹：用来与 host 文件同区间做「逐字节一致」比对。只存摘要不存
-          // 字节 —— 11MB 的文件随便几帧就把内存吃光，而摘要足以判定一致性
-          // （碰撞概率在这个量级上可以忽略，且我们同时比 len）。
-          sha: createHash('sha1').update(data.subarray(12)).digest('hex').slice(0, 16),
-        });
-        // 完整性断言的应答侧：这个 rid 至少有一帧回来了（0 字节的 EOF 帧也算）
-        stats.rangeServed.set(rid, (stats.rangeServed.get(rid) ?? 0) + 1);      } else {
-        // 高半区 = host 的单元分片（rid 从 0x80000000 起）。它的载荷是 gzip 后的
-        // 索引 / 字幕 / 封面，**不是视频文件字节** —— 早先并进 rangeBytes 计数，
-        // 把「转发载荷不超过文件 size」顶出了假红（见文件头字节记账）。
-        stats.unitBytes += bytes;
-      }
-    }
-    if (!isBinary) {
-      // 记录帧类型帮诊断：index.req/unit.req 有没有真的过中继
-      try {
-        const f = JSON.parse(data.toString());
-        stats.textTypes.push(f.t);
-        if (f.t === 'video.range' || f.t === 'video.open') {
-          stats.rangeRequests.push({ t: f.t, id: f.id, start: f.start, len: f.len, videoId: f.videoId });
-          if (f.t === 'video.range') {
-            // 完整性断言的请求侧。id 是字符串（协议契约），rid 路由按数字，这里
-            // 显式转成数字才能与二进制帧头的 rid 对上
-            stats.rangeRequested.set(Number(f.id), {
-              start: f.start,
-              len: f.len,
-              videoId: f.videoId,
-              at: Date.now(),
-            });
-          }
-        }
-      } catch {
-        /* 坏帧：桩与真中继一样不解析、照样转发（中继只搬运，取舍 1） */
-      }
-    }
-    // 异角色转发，同角色互不可见（真 DO 的 webSocketMessage 同款）
-    const targets = role === 'host' ? [...r.guests] : r.host ? [r.host] : [];
-    for (const t of targets) {
-      if (t.readyState === ws.OPEN) t.send(data, { binary: isBinary });
-    }
-  });
-
-  ws.on('close', () => {
-    if (role === 'host') {
-      r.host = null;
-      // host 断开：向全体 guest 广播 host-link-down（真 DO 的 webSocketClose）。
-      // 帧内容与 live-relay/src/index.ts 的 HOST_LINK_DOWN 常量逐字节一致。
-      // ctl: 1 写死：控制帧不跟 app 协议版本走，桩里要是顺手写成
-      // `{ v: PROTOCOL_VERSION, ... }`，guest 的 decodeControlFrame 就解不出它（它不看
-      // 版本），「主机已离线」的提示静默失效，而下面那条帧字节断言还照样绿。
-      const payload = JSON.stringify({ ctl: 1, t: 'host-link-down', id: 'relay' });
-      for (const g of r.guests) {
-        if (g.readyState === ws.OPEN) {
-          g.send(payload);
-          stats.hostLinkDown++;
-          stats.hostLinkDownPayloads.push(payload);
-        }
-      }
-      console.log(`   [中继] host 断开，向 ${r.guests.size} 台 guest 广播 host-link-down`);
-    } else {
-      r.guests.delete(ws);
-      console.log(`   [中继] guest 断开（剩 ${r.guests.size} 台）`);
-    }
-  });
-});
-
-wss.on('error', (e) => {
-  console.error(`桩中继监听失败（端口 ${RELAY_PORT}）：${e.message}`);
-  process.exit(1);
-});
 
 // ───────────────────────────── 2. fixture ─────────────────────────────
 /** 确定性伪随机：同一个 seed 在任何机器上产出同一串字节（可复现 + 可复跑）。 */
@@ -330,57 +155,6 @@ function seededBytes(size, seed = 0x9e3779b9) {
     out[i] = s & 0xff;
   }
   return out;
-}
-
-/**
- * ffmpeg 可执行文件路径；找不到返回 null（真解码那步据此跳过）。
- *
- * 支持 `E2E_FFMPEG` 覆盖：这是**给自己留的测试口**——上面那条「ffmpeg 缺失时
- * 跳过真解码」的降级路径必须真的能跑一遍才算验证过（否则它只是个注释）。
- * 把它指向一个不存在的路径就能触发降级，不用为了测降级去卸载 ffmpeg。
- */
-function findFfmpeg() {
-  if (process.env.E2E_FFMPEG !== undefined) {
-    return process.env.E2E_FFMPEG === '' ? null : process.env.E2E_FFMPEG;
-  }
-  const candidates = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg', 'ffmpeg'];
-  for (const c of candidates) {
-    try {
-      if (c === 'ffmpeg' || existsSync(c)) return c;
-    } catch {
-      /* 继续找下一个 */
-    }
-  }
-  return null;
-}
-
-/**
- * 用 ffmpeg 造 video-only webm/vp9 fixture。
- *
- * `-an`（无音频轨）不是顺手加的：本机 Chrome 155 实测带音频轨的容器 MSE 全灭
- * （vp9+opus → video error 3），video-only 才能真播。
- *
- * **duration=45 / 2000kbps 是为了把文件顶过 8MB**（终审 A 的照妖镜，见文件头）：
- * 8MB 是 guest 的 WINDOW_BYTES，也是「一次填充拆几个请求、并发打不打满」的分水岭。
- * 纯 `testsrc` 只有 318kbps（内容太规整），45s 才 1.8MB —— 一轮就拉完，多 chunk /
- * 窗口滑动 / 并发排队一条路径都撞不到。加一道时序噪声（`noise=alls=25:allf=t`）把
- * 码率顶到目标值，产物约 11MB，一次填充必然拆成 8+ 个 1MB 请求。
- */
-async function makeWebmFixture(dir) {
-  const ffmpeg = findFfmpeg();
-  if (!ffmpeg) return { path: null, reason: '找不到 ffmpeg（试过 /opt/homebrew/bin、/usr/local/bin、/usr/bin、PATH）' };
-  const out = join(dir, 'webm-vp9.webm');
-  const args = [
-    '-y', '-f', 'lavfi', '-i', 'testsrc=duration=45:size=640x360:rate=15',
-    '-vf', 'noise=alls=25:allf=t',
-    '-c:v', 'libvpx', '-b:v', '2000k', '-an', out,
-  ];
-  await new Promise((resolve, reject) => {
-    const p = spawn(ffmpeg, args, { stdio: 'ignore' });
-    p.on('error', reject);
-    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg 退出码 ${code}`))));
-  });
-  return { path: existsSync(out) ? out : null, reason: existsSync(out) ? '' : 'ffmpeg 报告成功但产物不存在' };
 }
 
 /** mp4 门 fixture：ftyp 头 + 3MB 确定性伪随机字节。构造而成，不需要 ffmpeg。 */
@@ -535,31 +309,11 @@ const browser = await chromium.launch({
   args: ['--autoplay-policy=no-user-gesture-required'],
 });
 
-/**
- * 预检：dev 服务在不在。
- *
- * 不在就**明确报错并退出**，而不是让第一个 page.goto 抛一个裸的
- * ERR_EMPTY_RESPONSE —— 那条栈信息指向 seedHost 内部，看不出来「其实是没起
- * 服务」。编排器（e2e-all.mjs）会复用端口上已有的服务，端口被别的项目占着时
- *  复用的是别家的页面，症状同样是这个错。先探一次能一次说清。
- */
-async function preflight() {
-  try {
-    const res = await fetch(BASE, { method: 'GET', signal: AbortSignal.timeout(5000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  } catch (e) {
-    console.error(`\n❌ 连不上 dev 服务 ${BASE}（${e.message}）`);
-    console.error('   先起服务：npm run dev（或设 BASE_URL 指向已起的那份）');
-    console.error('   端口被别的项目占用时会复用到别家页面，症状也是这个错。\n');
-    process.exit(1);
-  }
-}
-
 let tmpDir = null;
 let hostCtx = null;
 let guestCtx = null;
 try {
-  await preflight();
+  await preflight(BASE);
   tmpDir = mkdtempSync(join(tmpdir(), 'live-e2e-'));
   const mp4Bytes = makeMp4Fixture();
   const webm = await makeWebmFixture(tmpDir);
@@ -623,14 +377,14 @@ try {
     // hash 路由（HashRouter）下 query 串在 `location.hash` 里，不在 URL 的
     // search 里 —— `new URL(liveUrl).searchParams` 会返回 null，看着像「码没
     // 传过去」，其实是取值方式错了。从 hash 后半段解析。
-    const hash = liveUrlFor(codeTrim).slice(liveUrlFor(codeTrim).indexOf('#') + 1);
+    const hash = liveUrlFor(BASE, codeTrim, RELAY).slice(liveUrlFor(BASE, codeTrim, RELAY).indexOf('#') + 1);
     const pair = new URLSearchParams(hash.slice(hash.indexOf('?'))).get('pair');
     assert.equal(pair, codeTrim);
   });
 
   // ── 3.2 配对：guest 进房 ──
   console.log('4. guest 经配对码进房');
-  const liveUrl = liveUrlFor(codeTrim);
+  const liveUrl = liveUrlFor(BASE, codeTrim, RELAY);
   console.log(`   guest 链接 = ${liveUrl}`);
   await guestPage.goto(liveUrl, { waitUntil: 'domcontentloaded' });
 
@@ -1089,10 +843,10 @@ if (LAST_WEBM_STATE === 'skipped') {
 } else if (LAST_WEBM_STATE === 'ran') {
   console.log('真解码：已验（webm buffered 无洞 + 覆盖 ≥75% 时长 + currentTime 推进 + 每个 rid 都有应答帧）');
 }
-console.log(`断言失败 ${failed} 项`);
-if (failed === 0) {
+console.log(`断言失败 ${report.failedCount()} 项（通过 ${report.passedCount()} 项）`);
+if (report.failedCount() === 0) {
   console.log('\n✅ e2e-livelink 全链路通过');
   process.exit(0);
 }
-console.error(`\n⚠️ 有 ${failed} 项断言失败`);
+console.error(`\n⚠️ 有 ${report.failedCount()} 项断言失败`);
 process.exit(3);
