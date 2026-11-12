@@ -615,7 +615,7 @@ function WidgetSessionBlock({ payload, dark, onPrompt, rowId, readingKey, disabl
       </div>}
       <div className="widget-block__stage" data-loading={!ready ? '' : undefined}>
       {!ready && !failed && <WidgetStreamFrame html={payload.html} dark={dark} minHeight={height} testId="widget-static-preview" />}
-      {doc && <iframe
+      {doc && !failed && <iframe
         ref={frameRef}
         className="widget-block__frame"
         title={payload.title || '交互图形'}

@@ -97,8 +97,8 @@ try {
   await desktop.getByTestId('nav-rail-toggle').click();
   await desktop.getByTestId('nav-rail-compact').waitFor();
   assert.equal(await desktop.getByTestId('nav-rail-toggle').getAttribute('aria-label'), '展开侧边栏');
-  near((await desktop.getByTestId('nav-rail-toggle').locator('svg').boundingBox()).width, 24, '折叠后也使用较小 Logo');
   await desktop.mouse.move(0, 0);
+  near((await desktop.getByTestId('nav-rail-toggle').locator('svg[viewBox="182 192 650 650"]').boundingBox()).width, 24, '折叠后也使用较小 Logo');
   assert.equal(await desktop.getByTestId('nav-rail-chat').evaluate((el) => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)', '折叠后新会话也不突出显示');
   for (const id of ['nav-rail-chat', 'nav-rail-home']) {
     const box = await desktop.getByTestId(id).boundingBox();

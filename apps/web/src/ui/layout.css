@@ -303,11 +303,29 @@
   background: transparent;
 }
 
-/* Button 默认把内部 SVG 缩成 1em，品牌标记不跟随普通图标尺寸。 */
-.page-shell__nav-logo[data-testid] > svg {
+/* 两个图形叠在同一固定槽位里切换，不改变按钮与下方导航的布局。 */
+.page-shell__nav-logo .t-icon-swap {
   width: 24px;
   height: 24px;
   flex-shrink: 0;
+}
+
+.page-shell__nav-logo .t-icon {
+  display: grid;
+  place-items: center;
+}
+
+/* Button 默认把内部 SVG 缩成 1em，品牌 24px、导航图标 20px 不跟随字号缩小。 */
+.page-shell__nav-logo[data-testid] .t-icon > svg {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.page-shell__nav-logo[data-testid] .t-icon[data-icon='a'] > svg {
+  width: 24px;
+  height: 24px;
 }
 
 [data-testid='nav-back'] {
@@ -971,7 +989,7 @@
 }
 
 /* 覆盖 Button 对后代 SVG 的响应式缩放与负 margin，避免动作行和导航行错位。 */
-.page-shell__nav-item .page-shell__nav-icon > svg {
+:is(.page-shell__nav-item, .page-shell__rail-icon) .page-shell__nav-icon > svg {
   width: 20px;
   height: 20px;
   margin: 0;

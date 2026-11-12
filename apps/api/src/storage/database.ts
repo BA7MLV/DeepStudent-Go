@@ -10,6 +10,7 @@ import { migrateClientRuntime } from '../realtime/migration.js';
 import { ensureLearningResults } from '../plugins/learning-results.js';
 import { migrateFileIntents } from './file-intents.js';
 import { migrateTaskModels } from './task-model.js';
+import { attachmentImageSchema } from '../cloud/attachment-images.js';
 
 const MIGRATIONS: Array<[number, string]> = [
   [1, `
@@ -568,6 +569,7 @@ export class DatabaseStore {
         expected.exec(MCP_FILE_MIGRATION);
          expected.exec(SKILL_RECORDS_MIGRATION);
          migrateFileIntents(expected);
+         attachmentImageSchema(expected);
         const groups = [
           { version: 13, tables: ['gateway_accounts', 'gateway_pairings', 'gateway_bindings', 'gateway_inbox', 'gateway_outbox', 'bot_reminders'], extra: [['cloud_tasks', 'parent_run_id'], ['cloud_tasks', 'parent_step_id'], ['approvals', 'cloud_permission_id']], sql: MIGRATIONS.find(([v]) => v === 13)![1] },
           { version: 14, tables: ['gateway_projection_failures'], extra: [], sql: MIGRATIONS.find(([v]) => v === 14)![1] },
@@ -655,6 +657,7 @@ export class DatabaseStore {
          // server/plugin starts; runtime activation must not mutate the schema.
          ensureLearningResults(this);
           migrateFileIntents(this.db);
+          attachmentImageSchema(this.db);
           this.db.exec(`
             CREATE TABLE IF NOT EXISTS chat_resource_roots (
               owner_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

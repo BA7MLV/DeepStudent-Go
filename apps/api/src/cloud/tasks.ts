@@ -41,8 +41,28 @@ function progressDto(row: any, detail: TaskListDetail): CloudTask['progress'] {
 }
 
 export function taskDto(row: any, detail: TaskListDetail = 'full'): CloudTask {
-  return { id: row.id, kind: row.kind, resource: row.resource, status: row.status, input: JSON.parse(row.input),
-    progress: progressDto(row, detail), result: detail === 'full' && row.result ? JSON.parse(row.result) : null,
+  return buildTaskDto(row, detail, false);
+}
+
+/** UI payload only. Recursively exclude historical private vision bytes from all
+ * delivery modes, including QA input.images and nested trace/progress envelopes.
+ * Stored input remains unchanged; execution below explicitly requests full data. */
+function taskUiValue(value: any): any {
+  if (typeof value === 'string' && /^data:image\/[^;,]+;base64,/i.test(value)) return undefined;
+  if (Array.isArray(value)) return value.map(taskUiValue).filter(item => item !== undefined);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, taskUiValue(item)]).filter(([, item]) => item !== undefined));
+}
+
+function buildTaskDto(row: any, detail: TaskListDetail, execution: boolean): CloudTask {
+  const chat = row.kind === 'chat' || row.kind === 'qa';
+  const ui = (value: any) => execution || !chat ? value : taskUiValue(value);
+  const input = JSON.parse(row.input);
+  const uiInput = execution ? input : chat && detail === 'activity'
+    ? Object.fromEntries(['sessionId', 'videoId', 'action', 'rowId'].filter(key => input[key] !== undefined).map(key => [key, input[key]]))
+    : taskUiValue(input);
+  return { id: row.id, kind: row.kind, resource: row.resource, status: row.status, input: execution ? input : uiInput,
+    progress: ui(progressDto(row, detail)), result: detail === 'full' && row.result ? ui(JSON.parse(row.result)) : null,
     // Media tasks now execute in the Node runtime. Persisted historical receipts
     // must obey the current wire contract too, or one cover breaks watchTasks.
     error: row.error, createdAt: row.created_at, executor: row.executor === 'media' ? 'node' : row.executor ?? undefined,
@@ -82,7 +102,9 @@ export function listOwnerTasks(store: DatabaseStore, owner: string, detail: Task
         ELSE t.progress END AS progress`;
   const columns = detail === 'full'
     ? 't.*'
-    : `t.id,t.kind,t.resource,t.status,t.input,${progressColumn},t.created_at,t.executor,t.error,t.parent_run_id`;
+    : `t.id,t.kind,t.resource,t.status,${detail === 'activity' ? `CASE WHEN t.kind IN ('chat','qa') THEN json_object(
+        'sessionId',json_extract(t.input,'$.sessionId'),'videoId',json_extract(t.input,'$.videoId'),
+        'action',json_extract(t.input,'$.action'),'rowId',json_extract(t.input,'$.rowId')) ELSE t.input END AS input` : 't.input'},${progressColumn},t.created_at,t.executor,t.error,t.parent_run_id`;
   return (store.db.prepare(`SELECT ${columns}, a.name AS bot_name, json_extract(v.value,'$.name') AS resource_name
     FROM cloud_tasks t
     LEFT JOIN runs r ON r.id=t.parent_run_id
@@ -232,7 +254,7 @@ export class CloudTaskRunner {
             continue;
           }
         }
-        const task = taskDto(row);
+         const task = buildTaskDto(row, 'full', true);
         const video = typeof task.input.videoId === 'string' ? this.records.get(row.owner_id, 'videos', task.input.videoId) : null;
         const selected = executorFor(task, video);
         const computing = this.store.db.prepare("SELECT COUNT(*) AS count FROM cloud_tasks WHERE status='running'").get() as { count: number };
@@ -254,7 +276,7 @@ export class CloudTaskRunner {
     // runs' effects are already persisted and must not be lost.
     const effects: TaskContext['effects'] = parseTaskEffects(row.effects).effects ?? [];
     try {
-      const task = taskDto(row);
+      const task = buildTaskDto(row, 'full', true);
       if (row.parent_run_id) {
         const policy = this.options.configuration?.taskPolicy(row.owner_id, row.id);
         if (!policy || policy.read !== 'allow' || JSON.parse(row.input).delegation !== true && policy.write !== 'allow') throw new Error('bot_child_permission_required');

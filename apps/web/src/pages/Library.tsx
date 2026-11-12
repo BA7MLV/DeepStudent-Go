@@ -392,6 +392,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const deleteZoneRef = useRef<HTMLDivElement>(null);
   // 顺序导入链：多个文件排队逐个写入，避免并发写存储互相拖慢
   const chainRef = useRef<Promise<void>>(Promise.resolve());
+  const importBatch = useRef({ pending: 0, succeeded: 0 });
   const nativeInputRef = useRef<HTMLInputElement>(null);
   // HTML5 拖放（桌面/iPad 从「文件」App 拖入）的悬停高亮
   const [dropActive, setDropActive] = useState(false);
@@ -709,7 +710,6 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         await flushResourceCommands();
         lifetime.assertCurrent();
         setTasks(previous => previous.filter(task => task.key !== key));
-        toast.success(tr('library.t.imported', { name: file.name }));
         return true;
       }
     } catch (e) {
@@ -725,8 +725,16 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
 
   const enqueue = (file: File, subtitles?: SubtitleBundle, biliSource?: BiliVideoSource) => {
     const key = uuid();
+    importBatch.current.pending++;
     setTasks((prev) => [...prev, { key, name: file.name, status: 'queued', percent: 0 }]);
-    chainRef.current = chainRef.current.then(async () => { await importOne(file, key, subtitles, biliSource); });
+    chainRef.current = chainRef.current.then(async () => {
+      if (await importOne(file, key, subtitles, biliSource)) importBatch.current.succeeded++;
+      if (--importBatch.current.pending === 0) {
+        const count = importBatch.current.succeeded;
+        importBatch.current.succeeded = 0;
+        if (count && courseAccess.current()) toast.success(i18n.t('interface:feedback.uploaded', { count }));
+      }
+    });
   };
 
   /** 清空 B 站导入弹窗的草稿（关弹窗 / 导入成功后都调） */
@@ -918,7 +926,6 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     const accepted = files.filter(isImportable);
     const skipped = files.filter((f) => !isImportable(f));
     if (skipped.length > 0) toast.warning(tr('library.t.skippedUnsupported', { count: skipped.length }));
-    if (files.length > 1) toast.info(tr('library.t.acceptedFiles', { count: accepted.length }));
     if (accepted.length > 0) setImportOpen(false);
     for (const f of accepted) enqueue(f);
   };
@@ -934,11 +941,10 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     const files = Array.from(e.dataTransfer?.files ?? []);
     if (files.length === 0) return;
     setImportOpen(false);
-    for (const f of files) {
-      if (!isImportable(f)) {
-        toast.warning(tr('library.t.fileUnsupported', { name: f.name }));
-        continue;
-      }
+    const accepted = files.filter(isImportable);
+    const skipped = files.length - accepted.length;
+    if (skipped) toast.warning(tr('library.t.skippedUnsupported', { count: skipped }));
+    for (const f of accepted) {
       enqueue(f);
     }
   };

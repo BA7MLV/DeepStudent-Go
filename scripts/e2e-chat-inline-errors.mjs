@@ -1,0 +1,82 @@
+/** Real app + API: errors stay in the conversation; model changes work on retry. */
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { chromium } from 'playwright';
+import { createServer } from 'vite';
+
+const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/chat-inline-errors-');
+Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
+const { buildServer } = await import('../apps/api/src/server.ts');
+const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');
+const app = buildServer({ dbPath: path.join(directory, 'db.sqlite') });
+let web, browser, store;
+try {
+  const api = await app.listen({ host: '127.0.0.1', port: 0 });
+  web = await createServer({ root: path.resolve('apps/web'), configFile: path.resolve('apps/web/vite.config.ts'), cacheDir: path.join(directory, 'vite-cache'), server: { host: '127.0.0.1', port: 0, watch: null, hmr: false, proxy: { '/api': { target: api, ws: true, changeOrigin: false } } } });
+  await web.listen();
+  const origin = web.resolvedUrls.local[0].replace(/\/$/, '');
+  browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'zh-CN' });
+  const password = 'inline-errors-password-123';
+  assert.equal((await context.request.post(origin + '/api/v1/bootstrap/initialize', { headers: { 'x-bootstrap-secret': fs.readFileSync(process.env.BOOTSTRAP_SECRET_FILE, 'utf8').trim() }, data: { adminPassword: password } })).status(), 201);
+  assert.equal((await context.request.post(origin + '/api/v1/auth/password/login', { data: { password } })).status(), 200);
+  const config = await (await context.request.get(origin + '/api/v1/cloud/config')).json();
+  assert.equal((await context.request.put(origin + '/api/v1/cloud/config', { data: { ...config, providers: [{ id: 'fixture', name: '测试模型', protocol: 'openai-chat', baseUrl: 'https://never-called.invalid/v1', apiKey: 'fixture-only', serves: ['chat'], catalogId: '' }], llmModel: { providerId: 'fixture', model: 'fixture-a' } } })).status(), 200);
+  store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
+  const page = await context.newPage(), errors = [], submissions = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('request', request => { if (request.url().endsWith('/api/clientRuntime/submitTask')) submissions.push(request.postDataJSON()); });
+  await page.route('https://models.dev/**', route => route.fulfill({ json: {} }));
+  await page.goto(origin);
+  await page.getByTestId('course-chat-page').waitFor({ timeout: 60000 });
+  const selectModel = (providerId, model) => page.evaluate(async ({ providerId, model }) => {
+    const { useTaskModel, taskModelKey } = await import('/src/store/taskModel.ts');
+    const { useCourseChat } = await import('/src/store/courseChat.ts');
+    useTaskModel.getState().set(taskModelKey(useCourseChat.getState().activeId), { modelRef: { providerId, model } });
+  }, { providerId, model });
+  await selectModel('unavailable-provider', 'broken-model');
+  const input = page.getByRole('textbox', { name: '给 AI 助手发送消息' });
+  const wordRequest = '请你把这个变成 word。';
+  await input.fill(wordRequest); await input.press('Enter');
+  const failure = page.getByTestId('chat-answer-failed');
+  await failure.filter({ hasText: '所选模型的供应商已不可用' }).waitFor();
+  assert.equal(await page.evaluate(async () => (await import('/src/store/courseChat.ts')).useCourseChat.getState().historyError), null, 'send errors are not also shown as history-sync errors');
+  assert.equal(await page.getByTestId('cloud-activity').locator('section[data-operation-id]').count(), 0);
+  assert.equal(await page.getByText(/发送尚未确认|核对收据并使用原命令重试|Domain request failed/).count(), 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM cloud_tasks').get().n, 0);
+  const operationId = submissions[0].payload.args.request.operationId;
+  // Reload preserves the error in its conversation, without a side recovery card.
+  await page.reload();
+  await failure.filter({ hasText: '所选模型的供应商已不可用' }).waitFor({ timeout: 60000 });
+  assert.equal(submissions.length, 1, 'reload never repeats a failed send');
+  await selectModel('fixture', 'fixture-b');
+  const accepted = page.waitForResponse(response => response.url().endsWith('/api/clientRuntime/submitTask'));
+  await failure.getByTestId('chat-error-continue').click();
+  assert.equal((await accepted).status(), 200);
+  await failure.waitFor({ state: 'detached' });
+  assert.equal(submissions.length, 2);
+  const task = store.db.prepare('SELECT nonce,input,model_snapshot FROM cloud_tasks').get();
+  assert.equal(task.nonce, operationId);
+  assert.equal(JSON.parse(task.input).text, wordRequest);
+  assert.deepEqual(JSON.parse(task.model_snapshot).candidates, [{ providerId: 'fixture', model: 'fixture-b' }], 'retry uses the newly chosen model, not the rejected model');
+  assert.equal(await page.getByTestId('cloud-activity').locator('section[data-operation-id]').count(), 0);
+  assert.equal(await page.getByTestId('course-chat-messages').getByText(wordRequest, { exact: true }).count(), 1, 'model retry does not duplicate the user message');
+  // An unknown outcome is NOT permission to change an in-flight request's model.
+  await page.getByTestId('nav-rail-chat').click();
+  await selectModel('fixture', 'fixture-a');
+  await page.route('**/api/clientRuntime/submitTask', route => route.abort('failed'));
+  await input.fill('保留未知发送的原模型'); await input.press('Enter');
+  await failure.waitFor();
+  await page.unroute('**/api/clientRuntime/submitTask');
+  await selectModel('fixture', 'fixture-b');
+  const unknownAccepted = page.waitForResponse(response => response.url().endsWith('/api/clientRuntime/submitTask'));
+  await failure.getByTestId('chat-error-continue').click();
+  assert.equal((await unknownAccepted).status(), 200);
+  await failure.waitFor({ state: 'detached' });
+  const unknown = store.db.prepare("SELECT model_snapshot FROM cloud_tasks WHERE json_extract(input,'$.text')=?").get('保留未知发送的原模型');
+  assert.deepEqual(JSON.parse(unknown.model_snapshot).candidates, [{ providerId: 'fixture', model: 'fixture-a' }]);
+  assert.deepEqual(errors, []);
+  await page.screenshot({ path: path.join(directory, 'inline-retry.png'), animations: 'disabled' });
+  console.log(`PASS real chat: inline error only, reload preservation, switch-model retry, no duplicate message/task, unknown outcome keeps frozen model. Evidence: ${directory}`);
+} finally { await browser?.close(); await web?.close(); await app.close(); store?.close(); }

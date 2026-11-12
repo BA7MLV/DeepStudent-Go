@@ -23,6 +23,7 @@ export type RuntimeRead =
   | { kind: 'pluginScope'; materialId?: string; projectFolderId?: number }
   | { kind: 'tasks' }
   | { kind: 'records'; after: number }
+  | { kind: 'recordHead' }
   | { kind: 'recordKeys'; keys: { table: ProjectionTable; key: string | number }[] }
   | { kind: 'collectionPage'; table: ProjectionTable; parent?: string | number; cursor?: string }
   | { kind: 'sessionIndex'; videoId: string; archived: boolean; recentOnly: boolean; cursor?: string }
@@ -165,7 +166,9 @@ export interface RuntimeRecordMutation {
   baseRevision?: number;
 }
 export interface RuntimeRecordsCommit { operationId: string; mutations: RuntimeRecordMutation[] }
-export interface RuntimeRecordsReceipt { accepted: string[]; versions: { table: string; key: string | number; revision: number }[] }
+/** Account-scoped invalidation metadata, never a replay cursor or a record feed. */
+export interface RuntimeRecordHead { epoch: string; version: number }
+export interface RuntimeRecordsReceipt { epoch?: string; accepted: string[]; versions: { table: string; key: string | number; revision: number }[] }
 /** Local cache adapter input only; never a server write protocol. */
 export type ExecutorArtifactChange = RuntimeRecordMutation & { permissionId?: string };
 export interface LearningBlob { $file: string; type?: string }

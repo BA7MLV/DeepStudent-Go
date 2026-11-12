@@ -19,7 +19,7 @@ export function publicUrl(raw: unknown): URL {
   return url;
 }
 /** Check DNS in the connection lookup itself: no validation/connection rebinding gap. */
-const dispatcher = new Agent({ connections: 4, connect: { timeout: 10000,
+export const publicWebDispatcher = new Agent({ connections: 4, connect: { timeout: 10000,
   lookup(hostname, options, callback) {
     lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
       if (error) { callback(error, '', 4); return; }
@@ -34,7 +34,7 @@ const dispatcher = new Agent({ connections: 4, connect: { timeout: 10000,
 export async function fetchPage(raw: unknown, signal: AbortSignal, fetcher: typeof fetch = fetch): Promise<WebFetchResult> {
   let url = publicUrl(raw);
   for (let hop = 0; hop <= 4; hop++) {
-    const response = await fetcher(url.href, { redirect: 'manual', signal, headers: { accept: 'text/html, text/plain, application/json', 'user-agent': 'Wangke-WebReader/1.0' }, dispatcher } as RequestInit);
+    const response = await fetcher(url.href, { redirect: 'manual', signal, headers: { accept: 'text/html, text/plain, application/json', 'user-agent': 'Wangke-WebReader/1.0' }, dispatcher: publicWebDispatcher } as RequestInit);
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       await response.body?.cancel();
       const location = response.headers.get('location');

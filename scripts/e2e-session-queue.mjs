@@ -156,26 +156,24 @@ document.body.dataset.ready = 'yes';`;
   assert.equal(evidence.requests.length-beforeRace,1,'one dispatch across two real tabs, not merely Host deduplication');
   evidence.assertions.push('two real tabs atomically claim one original command; exactly one submit HTTP');
 
-  const activityButton = (tab, text) => tab.locator('#activity section').filter({ has: tab.getByText(text, { exact: true }) }).getByRole('button', { name: '核对收据并使用原命令重试', exact: true });
   const reloadReady = async tab => { await tab.reload(); await tab.locator('body[data-ready="yes"]').waitFor({timeout:60000}); };
-  // Real CloudActivity component/button → retryPendingTaskCommand, competing
-  // with the production chat store in another tab (not an adapter-only probe).
+  // Recovery stays a private port, not a global side card. Exercise its race
+  // with the production queue; the full inline UI is e2e-chat-inline-errors.mjs.
   const lostActivity = await page.evaluate(() => probe.enqueue('Activity accepted response loss'));
   await reloadReady(second);
   await page.route('**/api/clientRuntime/submitTask',async route => { await route.fetch(); await route.abort('failed'); });
   await page.evaluate(id => probe.send(id).catch(() => {}),lostActivity.id);
   await page.unroute('**/api/clientRuntime/submitTask');
   await page.evaluate(() => probe.mountActivity());
-  await activityButton(page,lostActivity.text).waitFor();
+  assert.equal(await page.locator('#activity section[data-operation-id]').count(),0);
   const lostRequests = evidence.requests.length;
-  await Promise.all([activityButton(page,lostActivity.text).click(), second.evaluate(id => probe.send(id).catch(() => {}),lostActivity.id)]);
-  await activityButton(page,lostActivity.text).waitFor({state:'detached'});
+  await Promise.all([page.evaluate(id => probe.retry(id).catch(() => {}),lostActivity.operationId), second.evaluate(id => probe.send(id).catch(() => {}),lostActivity.id)]);
   assert.equal(count(lostActivity.operationId),1);
   assert.equal(evidence.requests.length,lostRequests,'accepted loss: Activity and queue both query, neither submits');
   assert.notEqual(store.db.prepare('SELECT status FROM cloud_tasks WHERE nonce=?').get(lostActivity.operationId).status,'cancelled','accepted steer receipt recovery must not cancel original task');
   await Promise.all([reloadReady(page),reloadReady(second)]);
   assert.equal(evidence.requests.length,lostRequests);
-  evidence.assertions.push('REAL Activity button + other-tab chat queue: accepted response loss, zero retry HTTP, one task, reload remains read-only');
+  evidence.assertions.push('private retry + other-tab chat queue: accepted response loss, zero retry HTTP, one task, no side recovery card');
 
   for (const winner of ['activity','queue']) {
     const item = await page.evaluate(text => probe.enqueue(text),`Activity missing race ${winner}`);
@@ -187,7 +185,7 @@ document.body.dataset.ready = 'yes';`;
     assert.equal(evidence.requests.length,beforeRecovery,'missing admission does not dispatch on reload');
     assert.equal(count(item.operationId),0);
     await page.evaluate(() => probe.mountActivity());
-    await activityButton(page,item.text).waitFor();
+    assert.equal(await page.locator('#activity section[data-operation-id]').count(),0);
     let reached, release;
     const intercepted = new Promise(resolve => { reached = resolve; });
     const held = new Promise(resolve => { release = resolve; });
@@ -195,11 +193,11 @@ document.body.dataset.ready = 'yes';`;
     await winningTab.route('**/api/clientRuntime/submitTask',async route => {
       const response = await route.fetch(); reached(); await held; await route.fulfill({response});
     });
-    const winningAction = winner === 'activity' ? activityButton(page,item.text).click()
+    const winningAction = winner === 'activity' ? page.evaluate(id => probe.retry(id),item.operationId)
       : second.evaluate(id => probe.send(id).catch(() => {}),item.id);
     await intercepted;
     if (winner === 'activity') await second.evaluate(id => probe.send(id).catch(() => {}),item.id);
-    else { await activityButton(page,item.text).click(); await page.locator('#activity').getByText('task_admission_uncertain',{exact:true}).waitFor(); }
+    else assert.match(await page.evaluate(id => probe.retry(id).then(() => '',error => error.message),item.operationId),/task_admission_uncertain/);
     release(); await winningAction;
     await winningTab.unroute('**/api/clientRuntime/submitTask');
     await page.waitForFunction(async id => (await probe.meta()).find(row => row.id === 'task-command:'+id)?.status === 'accepted',item.operationId);
@@ -209,7 +207,7 @@ document.body.dataset.ready = 'yes';`;
     assert.equal(evidence.requests.length-beforeRecovery,1);
     assert.equal(count(item.operationId),1);
     assert.equal(await page.evaluate(id => probe.state().queued.some(item => item.id === id),item.id),false);
-    evidence.assertions.push(`REAL Activity/queue missing cross-entry race (${winner} wins): original operation, one HTTP/one task including reload`);
+    evidence.assertions.push(`private retry/queue missing cross-entry race (${winner} wins): original operation, one HTTP/one task including reload`);
   }
 
   const nonchatId = crypto.randomUUID();
@@ -219,12 +217,12 @@ document.body.dataset.ready = 'yes';`;
   await reloadReady(page);
   const nonchatBefore = evidence.requests.length;
   await page.evaluate(() => probe.mountActivity());
-  await activityButton(page,'nonchat original').click();
-  await page.locator('#activity section').filter({hasText:'nonchat original'}).waitFor({state:'detached'});
+  await page.evaluate(id => probe.retry(id),nonchatId);
+  assert.equal(await page.locator('#activity section[data-operation-id]').count(),0);
   assert.equal(evidence.requests.length-nonchatBefore,1,JSON.stringify({nonchatId, tasks:count(nonchatId), recent:evidence.requests.slice(-3), meta:await page.evaluate(id => probe.meta().then(rows => rows.find(row => row.id === 'task-command:'+id)),nonchatId)}));
   assert.equal(count(nonchatId),1);
   assert.equal(evidence.requests.at(-1).payload.args.request.kind,'modelOnce');
-  evidence.assertions.push('non-chat Activity retry still uses original kind/input/operation and normal recovery');
+  evidence.assertions.push('non-chat private retry still uses original kind/input/operation without a side recovery card');
   await page.evaluate(() => probe.unmountActivity());
 
   for (const invalidate of ['runtime','account']) {
@@ -233,7 +231,7 @@ document.body.dataset.ready = 'yes';`;
     await page.evaluate(id => probe.send(id).catch(() => {}),item.id);
     await page.unroute('**/api/clientRuntime/submitTask');
     await page.evaluate(() => probe.mountActivity());
-    await activityButton(page,item.text).waitFor();
+    assert.equal(await page.locator('#activity section[data-operation-id]').count(),0);
     let reached, release;
     const intercepted = new Promise(resolve => { reached = resolve; });
     const held = new Promise(resolve => { release = resolve; });
@@ -242,19 +240,19 @@ document.body.dataset.ready = 'yes';`;
       await route.fulfill({response}).catch(() => {}); // old runtime may abort its fetch
     });
     const before = evidence.requests.length;
-    await activityButton(page,item.text).click();
+    const pendingRetry = page.evaluate(id => probe.retry(id).then(() => '',error => error.message),item.operationId);
     await intercepted;
     if (invalidate === 'runtime') await page.evaluate(() => probe.retireRuntime());
     else await page.evaluate(() => probe.switchAccount());
     release();
-    await page.locator('#activity').getByText(/client_account_changed|abort/i).waitFor();
+    assert.match(await pendingRetry,/client_account_changed|abort/i);
     await page.unroute('**/api/clientRuntime/taskAdmission');
     assert.equal(evidence.requests.length,before,'retired Activity retry cannot submit through generic fallback');
     assert.equal(count(item.operationId),0);
     await reloadReady(page);
     assert.equal(evidence.requests.length,before);
     assert.equal(await page.evaluate(id => probe.state().queued.find(item => item.id === id)?.text,item.id),item.text);
-    evidence.assertions.push(`real Activity retry with delayed missing receipt rejects retired ${invalidate}, zero HTTP, original durable draft survives reload`);
+    evidence.assertions.push(`private retry with delayed missing receipt rejects retired ${invalidate}, zero HTTP, original durable draft survives reload`);
   }
 
   new CloudRecords(store).apply(owner, [
@@ -272,17 +270,14 @@ document.body.dataset.ready = 'yes';`;
   await reloadReady(page);
   assert.equal(evidence.requests.length,beforeContinueReload);
   await page.evaluate(() => probe.mountActivity());
-  // Continue's canonical input intentionally has no text; Activity renders its
-  // standard recovery prompt, not the queue item's presentation label.
-  const continueAlert = page.locator('#activity section:not(:has(p:nth-of-type(2)))');
-  await continueAlert.getByRole('button',{name:'核对收据并使用原命令重试',exact:true}).click();
-  await continueAlert.waitFor({state:'detached'});
+  assert.equal(await page.locator('#activity section[data-operation-id]').count(),0);
+  await page.evaluate(id => probe.retry(id),continuation.operationId);
   assert.equal(evidence.requests.length-beforeContinueReload,1);
   assert.equal(count(continuation.operationId),1);
   assert.deepEqual(evidence.requests.at(-1).payload.args.request,continuation,'Activity resumes frozen continue command, not a new chat turn');
   await reloadReady(page);
   assert.equal(evidence.requests.length-beforeContinueReload,1);
-  evidence.assertions.push('production retryMessage continuation → missing response → reload → real Activity original row/action recovery, one submit/one task');
+  evidence.assertions.push('production retryMessage continuation → missing response → reload → private original row/action recovery, one submit/one task');
   await ready(page);
 
   // Offline drafts retain raw local blobs, but have no local model executor.

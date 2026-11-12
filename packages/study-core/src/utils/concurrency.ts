@@ -93,6 +93,7 @@ export async function adaptivePool<T>(
   let i = 0;
   let inflight = 0;
   let failed = false;
+  let hasError = false;
   let firstErr: unknown;
   return new Promise((resolve, reject) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -103,7 +104,7 @@ export async function adaptivePool<T>(
       if (i >= items.length) {
         if (inflight === 0) {
           cleanup();
-          if (firstErr) reject(firstErr);
+          if (hasError) reject(firstErr);
           else resolve();
         }
         return;
@@ -117,7 +118,7 @@ export async function adaptivePool<T>(
       while (inflight < limiter.current && i < items.length) {
         const idx = i++;
         inflight++;
-        fn(items[idx], idx).then(
+        Promise.resolve().then(() => fn(items[idx], idx)).then(
           () => {
             inflight--;
             limiter.onSuccess();
@@ -130,7 +131,7 @@ export async function adaptivePool<T>(
               cleanup();
               reject(e);
             } else {
-              firstErr ??= e;
+              if (!hasError) { hasError = true; firstErr = e; }
               tick();
             }
           },

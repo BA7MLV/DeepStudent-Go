@@ -3,6 +3,8 @@ import type { ModelPurpose } from '@wangke/contracts/cloud';
 export type ModelRequestOptions = {
   attempts?: number; timeoutMs?: number; chainMs?: number; ordinary?: boolean;
   purpose?: ModelPurpose; firstTokenMs?: number; idleMs?: number; streamTotalMs?: number;
+  /** Internal Gateway handoff only; never read from a request body/header. */
+  imagesPrepared?: boolean;
 };
 
 export type ModelRequestPolicy = {

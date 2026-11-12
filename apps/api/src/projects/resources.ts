@@ -319,17 +319,22 @@ export class ResourceFiles {
     if (id === this.root(owner) || this.db.prepare('SELECT 1 FROM bot_workspaces WHERE project_id=?').get(id)) throw new ProjectError('protected_resource_folder', 409);
     this.projects.assertIdle(id);
     if (this.db.prepare("SELECT 1 FROM runs r JOIN threads t ON t.id=r.thread_id WHERE t.project_id=? AND r.status IN ('queued','running','waiting_user','paused')").get(id)) throw new ProjectError('project_busy', 409);
+    // Also advance the project's version so a restore + re-trash in the same
+    // millisecond cannot reuse an old toast's compare-and-swap token.
+    const deletedAt = new Date(Math.max(Date.now(), Date.parse(project.updatedAt) + 1)).toISOString();
     this.projects.store.transaction(() => {
-      this.db.prepare('INSERT INTO resource_trash(project_id,owner_id,archived,deleted_at) VALUES(?,?,?,?)').run(id, owner, Number(project.archived), new Date().toISOString());
-      this.db.prepare('UPDATE projects SET archived=1 WHERE id=?').run(id);
+      this.db.prepare('INSERT INTO resource_trash(project_id,owner_id,archived,deleted_at) VALUES(?,?,?,?)').run(id, owner, Number(project.archived), deletedAt);
+      this.db.prepare('UPDATE projects SET archived=1,updated_at=? WHERE id=?').run(deletedAt, id);
     });
+    return { deletedAt };
   }
 
-  restoreTrash(owner: string, id: string) {
-    const row = this.db.prepare('SELECT archived FROM resource_trash WHERE owner_id=? AND project_id=?').get(owner, id) as { archived: number } | undefined;
+  restoreTrash(owner: string, id: string, expectedDeletedAt?: string) {
+    const row = this.db.prepare('SELECT archived,deleted_at FROM resource_trash WHERE owner_id=? AND project_id=?').get(owner, id) as { archived: number; deleted_at: string } | undefined;
     if (!row) throw new ProjectError('project_not_found', 404);
+    if (expectedDeletedAt !== undefined && row.deleted_at !== expectedDeletedAt) throw new ProjectError('project_file_conflict', 409);
     this.projects.store.transaction(() => {
-      this.db.prepare('UPDATE projects SET archived=0 WHERE id=?').run(id);
+      this.db.prepare('UPDATE projects SET archived=? WHERE id=?').run(expectedDeletedAt === undefined ? 0 : row.archived, id);
       this.db.prepare('DELETE FROM resource_trash WHERE owner_id=? AND project_id=?').run(owner, id);
     });
   }
@@ -684,7 +689,7 @@ export class ResourceFiles {
       const existing = this.db.prepare('SELECT folder_id FROM resource_folders WHERE owner_id=? AND project_id=? AND path=?').get(owner, targetId, target + folder.path.slice(filename.length)) as { folder_id: number } | undefined;
       if (existing && existing.folder_id !== folder.folder_id) throw new ProjectError('project_file_exists', 409);
     }
-    this.projects.files.move(id, filename, targetId, target, revision);
+    const result = this.projects.files.move(id, filename, targetId, target, revision);
     moved();
     this.projects.store.transaction(() => {
       for (const folder of folders) {
@@ -701,5 +706,6 @@ export class ResourceFiles {
         if (row.path === filename || row.path.startsWith(`${filename}/`)) this.remember(owner, row.course_id, targetId, target + row.path.slice(filename.length), row.source_file);
       }
     });
+    return result;
   }
 }

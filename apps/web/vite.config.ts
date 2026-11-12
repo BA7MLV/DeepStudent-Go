@@ -22,6 +22,17 @@ const dependencyDirectory = (name: string) => {
   return directory;
 };
 
+let buildManifestPath = path.resolve(__dirname, 'dist/.vite/manifest.json');
+function resolveBuildManifest(): Plugin {
+  return {
+    name: 'resolve-pwa-build-manifest',
+    configResolved(config) {
+      buildManifestPath = path.resolve(config.root, config.build.outDir,
+        typeof config.build.manifest === 'string' ? config.build.manifest : '.vite/manifest.json');
+    },
+  };
+}
+
 /**
  * dev 模式下直接以静态文件方式提供 onnxruntime-web 的 wasm/mjs。
  * 否则 vite 会给 ort 内部的动态 import 追加 ?import 并拒绝服务 public 目录文件。
@@ -104,7 +115,7 @@ function pdfjsAssets(): Plugin {
   const SUBS = ['cmaps', 'standard_fonts'];
   /** 真实输出目录。**不能写死 'dist'**：`--outDir` 或将来换目录时，
    *  copy 会落到一个没人访问的地方，现象是「构建成功但 PDF 里中文全空白」。
-   *  configResolved 拿到的是已解析的绝对路径。 */
+   *  outDir 仍可能是相对路径，需要按 config.root 解析。 */
   let outDir = path.resolve(__dirname, 'dist');
   const contentType = (f: string) => {
     if (f.endsWith('.ttf')) return 'font/ttf';
@@ -126,7 +137,7 @@ function pdfjsAssets(): Plugin {
   return {
     name: 'serve-pdfjs-assets',
     configResolved(config) {
-      if (config.build.outDir) outDir = config.build.outDir;
+      outDir = path.resolve(config.root, config.build.outDir);
     },
     configureServer(server) {
       server.middlewares.use(middleware);
@@ -191,6 +202,7 @@ export default defineConfig({
     serveOrt(),
     serveUserscript(),
     pdfjsAssets(),
+    resolveBuildManifest(),
     react(),
     // Tailwind v4（HeroUI v3 的样式基底）：扫描 src 生成工具类，
     // 同时处理 @heroui/styles 里的 @import "tailwindcss"
@@ -229,7 +241,7 @@ export default defineConfig({
         // 改成下面的**运行时 CacheFirst**：正则匹配不到只是不缓存，绝不会让构建挂掉。
         globPatterns: ['**/*.{js,css,svg}'],
         manifestTransforms: [entries => shellPrecache(entries, JSON.parse(fs.readFileSync(
-          new URL('./dist/.vite/manifest.json', import.meta.url), 'utf8')) as Record<string, BuildManifestChunk>)],
+          buildManifestPath, 'utf8')) as Record<string, BuildManifestChunk>)],
         // config.js 是运行时配置（web 容器启动时按 API_BASE_URL 重写），不能被 SW 缓存成旧值。
         globIgnores: ['config.js'],
         navigateFallback: undefined,
@@ -323,7 +335,7 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
-    // Opt in for full-stack development; static-only mode keeps local attachment storage.
+    // API is required; opt in to its development proxy rather than a static execution mode.
     proxy: process.env.WANGKE_API_PROXY ? { '/api': { target: process.env.WANGKE_API_PROXY, changeOrigin: false, ws: true } } : undefined,
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',

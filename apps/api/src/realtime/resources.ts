@@ -148,10 +148,10 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
       case 'createDirectory': resources.projects.writable(owner, operation.projectId); resources.projects.files.mkdir(operation.projectId, operation.path); break;
       case 'renameFolder': result = resources.projects.update(owner, operation.projectId, { name: operation.name }); break;
       case 'folderColor': result = resources.setFolderColor(owner, operation.projectId, operation.path, operation.color); break;
-      case 'move': resources.move(owner, operation.projectId, operation.path, operation.targetProjectId, operation.target, operation.revision); result = { moved: true }; break;
+      case 'move': result = { moved: true, ...resources.move(owner, operation.projectId, operation.path, operation.targetProjectId, operation.target, operation.revision) }; break;
       case 'remove': resources.remove(owner, operation.projectId, operation.path, operation.revision); result = { deleted: true }; break;
-      case 'trash': resources.trash(owner, operation.projectId); break;
-      case 'restore': resources.restoreTrash(owner, operation.projectId); break;
+      case 'trash': result = resources.trash(owner, operation.projectId); break;
+      case 'restore': resources.restoreTrash(owner, operation.projectId, operation.expectedDeletedAt); break;
       case 'deleteTrash': resources.deleteTrash(owner, operation.projectId); break;
       case 'saveCourseText': result = resources.saveText(owner, operation.courseId, operation.text, operation.expected); break;
       case 'saveMarkdown': result = resources.saveMarkdown(owner, operation); break;

@@ -1,16 +1,18 @@
 {
+  "dataDelivery": {
+    "retryFailed": "重新生成失败，请重试：{{reason}}",
+    "widgetCancelled": "交互讲解已取消",
+    "imageLoadFailed": "图片加载失败",
+    "previewMissing": "此图片没有预览，请打开查看原图",
+    "previewInvalid": "图片服务未返回有效预览或尺寸，请更新服务后重试",
+    "inkLoadFailed": "批注读取失败，请重试后再书写。"
+  },
   "courseMetadata": { "loadFailed": "课程信息暂时无法读取，未加载不表示课程已删除。", "retry": "重试" },
   "appTitle": "DeepStudent Go",
   "fileLoadFailed": "无法加载文件（{{status}}）",
   "clipboard": {
     "copied": "已复制",
     "failed": "复制失败，请重试"
-  },
-  "localHistory": {
-    "open": "导出本机历史原稿",
-    "close": "收起本机历史导出",
-    "loading": "正在加载本机导出工具…",
-    "loadFailed": "本机导出工具未能加载。请恢复站点连接后刷新重试；原稿未改变。"
   },
   "settings": "设置",
   "board": {
@@ -110,6 +112,7 @@
   },
   "serverUnavailable": "服务器暂时不可用，请刷新重试",
   "newVersionReady": "新版本已就绪，刷新页面后即可更新",
+  "refreshNow": "立即刷新",
   "language": {
     "label": "界面语言 / Language",
     "auto": "跟随系统",
@@ -239,6 +242,7 @@
     "rejected": "已拒绝",
     "approvalFailed": "审批没有提交成功",
     "reactFailed": "没能点赞",
+    "reacted": "已点赞",
     "passkey": "添加 Passkey",
     "passkeyAdded": "Passkey 已添加",
     "passkeyUnsupported": "这个浏览器不支持 Passkey",
@@ -345,6 +349,19 @@
     "stop": "停止生成",
     "send": "发送"
   },
+  "chatAttachment": {
+    "preview": "预览附件 {{name}}",
+    "downloadNamed": "下载附件 {{name}}",
+    "clickPreview": "点击预览",
+    "close": "关闭附件预览",
+    "loading": "正在读取附件",
+    "content": "附件正文",
+    "copy": "复制正文",
+    "download": "下载原文件",
+    "failed": "上传失败",
+    "limited": "仅预览部分正文，完整内容请下载原文件。",
+    "fallback": "原文件暂时无法读取，当前显示已保存的正文摘要。"
+  },
   "courseChat": {
     "copy": "复制",
     "forkMenu": "分支出新会话",
@@ -356,7 +373,6 @@
     "insertNow": "立刻插入这条，不等这一轮答完",
     "deleteQueued": "删掉这条排队消息",
     "tooManyAttachments": "每条消息最多 {{count}} 个附件，请移除附件后重新粘贴",
-    "pastedAsFile": "粘贴内容超过 4000 字节，已自动转换为 txt 附件",
     "askEnded": "本次提问已结束，请使用当前问题卡",
     "queueSend": "排队发送",
     "stopKeep": "停止生成（已写出的内容会保留）",

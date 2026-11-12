@@ -556,7 +556,7 @@ const CourseChatInputRegion = memo(function CourseChatInputRegion({ composerRef,
     if (!file) return;
     event.preventDefault();
     if (attachments.items.length >= MAX_CHAT_ATTACHMENTS) { toast.error(chatText('courseChat.tooManyAttachments', { count: MAX_CHAT_ATTACHMENTS })); return; }
-    attachments.add([file]); toast.info(chatText('courseChat.pastedAsFile'));
+    attachments.add([file]);
   };
   const submit = () => { setVoiceEditVersion(version => version + 1); void send(useCourseChat.getState().draft, 'queue'); };
   const changeDraft = (value: string) => { setVoiceEditVersion(version => version + 1); setDraft(value); };
@@ -909,7 +909,7 @@ export default function CourseChat() {
                   ) : (
                     <div className="course-chat__bubble course-chat__bubble--ai" data-dust-surface>
                       <>
-                        {message.error && !message.streaming && canRetry && (
+                        {message.error && !message.streaming && (
                           <div className="course-chat__failed" data-testid="chat-answer-failed" role="alert">
                             <Sym name="error" aria-hidden="true" />
                             <span className="course-chat__failed-text">{displayChatFailure(message.content)}</span>
@@ -924,7 +924,7 @@ export default function CourseChat() {
                                 {chatText('chat.openModelSettings')}
                               </Button>
                             )}
-                            <Button
+                            {canRetry && <Button
                               size="sm"
                               variant="ghost"
                               className="course-chat__failed-continue"
@@ -932,8 +932,8 @@ export default function CourseChat() {
                               isDisabled={loading}
                               onPress={() => void retryMessage(message.key)}
                             >
-                              继续回答
-                            </Button>
+                              {chatText('chatPanel.retry')}
+                            </Button>}
                           </div>
                         )}
                         <ArtifactEditProvider rowId={message.rowId} content={message.content}
@@ -1138,7 +1138,7 @@ export default function CourseChat() {
                 （「已经排上的」与「正在打的」），分居两地会让用户以为队列
                 是另一个功能区。队列为空时整条不渲染。 */}
             <QueueBar
-              items={queued}
+              items={queued.filter(item => item.state !== 'uncertain')}
               onEdit={updateQueued}
               onRemove={removeQueued}
               onSendNow={(id) => void sendQueuedNow(id)}

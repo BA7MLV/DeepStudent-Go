@@ -46,7 +46,8 @@ export type ResourceOperation =
   | { kind: 'folderColor'; projectId: string; path: string; color: ResourceFolderColor }
   | { kind: 'move'; projectId: string; path: string; targetProjectId: string; target: string; revision: string }
   | { kind: 'remove'; projectId: string; path: string; revision: string }
-  | { kind: 'trash' | 'restore' | 'deleteTrash'; projectId: string }
+  | { kind: 'trash' | 'deleteTrash'; projectId: string }
+  | { kind: 'restore'; projectId: string; expectedDeletedAt?: string }
   | { kind: 'saveCourseText'; courseId: string; text: string; expected: string }
   | { kind: 'saveMarkdown'; courseId: string; text: string; expected: string; name?: string; folderId?: number; createOnly?: boolean }
   | { kind: 'organizeCourses'; folders: { name: string; courseIds: string[] }[] }

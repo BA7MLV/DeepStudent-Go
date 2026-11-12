@@ -2,7 +2,7 @@ import { useId, useState } from 'react';
 import { Button, Checkbox, Input, ListBox, SearchField, Select } from '@heroui/react';
 import { catalogOf, slotLabel, type ModelSlot, type SavedModel, type Settings } from '../../store/settings';
 import { editModelPatch, modelKey, savedModelsOf, suggestedModelSlots } from '../../store/modelLibrary';
-import { Field, Hint, LoadingButton, SectionCard, Sym, toast } from '../../ui';
+import { Field, Hint, LoadingButton, SectionCard, Sym } from '../../ui';
 import { Collapse } from '../motion';
 import { getModelMeta, MODEL_OVERRIDE_FIELDS } from '../../api/modelMeta';
 import type { DiscoveredModel } from '../../api/modelDiscoveryData';
@@ -87,7 +87,6 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
     setError('');
     try {
       settings.update(editModelPatch(settingsStore.getState(), null, draft));
-      toast.success('模型已添加到模型库，请保存模型设置');
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
 
@@ -111,7 +110,6 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
     const added = picked.length - failed.length;
     if (added > 0) {
       settings.update(patch);
-      toast.success(`已添加 ${added} 个模型，请保存模型设置`);
     }
     if (failed.length) setError(`${failed.length} 个模型未能添加（${failed.slice(0, 3).join('、')}${failed.length > 3 ? ' 等' : ''}），请逐个添加并检查用途。`);
     setSelectedIds(new Set(failed));
@@ -145,7 +143,7 @@ export default function ModelLibrary({ providerId, discovered = [], discoveredFr
             contextWindow: contextWindowText ? Number(contextWindowText) : undefined,
             maxOutputTokens: maxOutputTokensText ? Number(maxOutputTokensText) : undefined,
           }));
-          setEditor(null); toast.success(editor.original ? '模型库修改已暂存，请保存模型设置' : '模型已添加到模型库，请保存模型设置');
+          setEditor(null);
         } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
       }}>
         <h3 className="text-base font-semibold">{editor.original ? '编辑模型' : '新模型'}</h3>

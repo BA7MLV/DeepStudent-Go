@@ -7,7 +7,7 @@ import { SystemMaterials } from '../storage/system-materials.js';
 import { taskDto, listOwnerTasks } from '../cloud/tasks.js';
 import { inspectInteraction } from './interaction-recovery.js';
 import { preferencesProjection } from './preferences.js';
-import { RecordProjections } from './record-projections.js';
+import { RecordProjections, recordsEpoch } from './record-projections.js';
 import { studyOverview } from './study-overview.js';
 
 export interface RuntimeChange { revision: number; owner_id: string; domain: string; entity: string }
@@ -128,8 +128,15 @@ function activityReads({ store }: Ports): Pick<ReadHandlers, 'permissions' | 'in
   };
 }
 
-function recordReads({ store, recordsPage, sessionProjection }: Ports): Pick<ReadHandlers, 'preferences' | 'records' | 'recordKeys' | 'collectionPage' | 'sessionIndex' | 'courseCount' | 'courseReadiness' | 'courseMetadata' | 'coverCandidates' | 'courseColorFrame' | 'latestHandout' | 'skillIndex' | 'studySummary' | 'studyOverview' | 'fileIntents' | 'session'> {
+function recordReads({ store, recordsPage, sessionProjection }: Ports): Pick<ReadHandlers, 'preferences' | 'records' | 'recordHead' | 'recordKeys' | 'collectionPage' | 'sessionIndex' | 'courseCount' | 'courseReadiness' | 'courseMetadata' | 'coverCandidates' | 'courseColorFrame' | 'latestHandout' | 'skillIndex' | 'studySummary' | 'studyOverview' | 'fileIntents' | 'session'> {
   return {
+    recordHead: { read: owner => store.db.transaction(() => {
+      // One head per table, not per message. Derived heads survive tombstones
+      // and physical row deletion; summing them never loads record bodies.
+      const version = (store.db.prepare("SELECT COALESCE(SUM(version),0) AS version FROM client_collection_heads WHERE owner_id=? AND parent='*'")
+        .get(owner) as { version: number }).version;
+      return { epoch: recordsEpoch(store), version };
+    })(), matches: (_, change) => change.domain === 'cloud_records' },
     courseColorFrame: { read: (owner, request) => new RecordProjections(store).courseColorFrame(owner, request.videoId),
       matches: (request, change) => change.domain === 'record_collection' && change.entity === JSON.stringify(['frames', `parent:${JSON.stringify(request.videoId)}`]) },
     coverCandidates: { read: (owner, request) => new RecordProjections(store).coverCandidates(owner, request),

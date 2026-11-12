@@ -5,7 +5,10 @@ import { db } from '../store/db';
 import { cloud } from '../cloud/state';
 import { saveAnnotations, type LearningCommandRow } from '../client/learning';
 import { liveQuery } from 'dexie';
+import { loadCollection, observeCollection } from '../client/collections';
+import { accountLifetime } from '../client/account-lifecycle';
 import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { hitsInk, inkPath, inkOpacity, type InkNib, type InkPoint, type InkStroke, type InkTool } from '../materials/ink';
 import { useSelectionAsk } from '../store/selectionAsk';
 import { uuid } from '../utils/uuid';
@@ -92,7 +95,7 @@ export function MaterialInkProvider({ materialId, children, toolbarActions, defa
 
   const load = useCallback(async () => {
     try {
-      const saved = await databaseScope.materialInk.where('materialId').equals(materialId).sortBy('createdAt');
+      const saved = cloud.enabled ? await loadCollection<InkStroke>('materialInk', materialId) : await databaseScope.materialInk.where('materialId').equals(materialId).sortBy('createdAt');
       const pending = (await databaseScope.table<LearningCommandRow>('_learningCommands').toArray()).filter(row => row.entities.includes(`ink:${materialId}`));
       if (!mounted.current || databaseScope !== db) return;
       const projection = new Map(saved.map(row => [row.id, row]));
@@ -110,18 +113,24 @@ export function MaterialInkProvider({ materialId, children, toolbarActions, defa
       setError(null);
       setStatus(pending.some(row => row.state === 'conflict') ? t('inkConflict') : pending.length ? t('inkPending') : t('inkConfirmed'));
     } catch {
-      if (mounted.current) setError('批注读取失败，请重试后再书写。');
+      if (mounted.current) { setReady(false); setError(i18n.t('dataDelivery.inkLoadFailed')); }
     }
   }, [materialId, databaseScope, t]);
 
   useEffect(() => {
     mounted.current = true;
     const subscription = liveQuery(load).subscribe();
+    const lifetime = cloud.enabled ? accountLifetime(cloud.userId) : undefined;
+    const unown = lifetime?.own(() => { mounted.current = false; setReady(false); setRows([]); });
+    const remote = cloud.enabled ? observeCollection<InkStroke>('materialInk', materialId, {
+      next: () => { if (mounted.current) void load(); },
+      error: () => { if (mounted.current) { setReady(false); setError(i18n.t('dataDelivery.inkLoadFailed')); } },
+    }) : undefined;
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (queue.current.length) { event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', beforeUnload);
-    return () => { mounted.current = false; subscription.unsubscribe(); window.removeEventListener('beforeunload', beforeUnload); };
+    return () => { mounted.current = false; remote?.unsubscribe(); unown?.(); subscription.unsubscribe(); window.removeEventListener('beforeunload', beforeUnload); };
   }, [load]);
 
   // 每笔立即开始事务；队列保证快速画/撤销/重做的落盘顺序，离开阅读器也继续完成。

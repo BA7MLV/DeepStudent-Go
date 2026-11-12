@@ -1,5 +1,6 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, ListBox, Select } from '@heroui/react';
+import { useTranslation } from 'react-i18next';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { useCourseSubtitles } from './useCourseSubtitles';
 import { isJobActive, useJobStore, useTranscribeJob } from '../store/jobs';
@@ -82,6 +83,7 @@ const SubtitleCueRow = memo(function SubtitleCueRow({ cue, active, playerRef }: 
 });
 
 export default function SubtitlePanel({ videoId, playerRef, playbackSource, followPlayback, onSegmentsChange, onRunningChange, onLoadedChange }: Props) {
+  const { t } = useTranslation('interface');
   const available = usePluginAvailable('material-tools');
   const { segments, tracks, ready: loaded, retryable, error: loadError, retry } = useCourseSubtitles(videoId);
   const listRef = useRef<HTMLDivElement>(null);
@@ -186,7 +188,7 @@ export default function SubtitlePanel({ videoId, playerRef, playbackSource, foll
         ? Math.round(job.done * 100)
         : undefined; // 排队 / VAD：没有确定比例，走不确定态
 
-  const errorText = job?.phase === 'error' ? (job.error ?? job.message) : loadError;
+  const errorText = job?.actionError ?? (job?.phase === 'error' ? (job.error ?? job.message) : loadError);
 
   return (
     <Panel testId="panel-subs">
@@ -270,9 +272,10 @@ export default function SubtitlePanel({ videoId, playerRef, playbackSource, foll
       )}
 
       <PersistentError
-        title={loadError ? '字幕读取失败' : '转写失败'}
+        title={job?.actionError ? t('feedback.actionFailed') : loadError ? '字幕读取失败' : '转写失败'}
         text={errorText}
         onClose={() => {
+          if (job?.actionError) useJobStore.getState().upsert(videoId, { actionError: undefined });
           if (job?.phase === 'error') useJobStore.getState().upsert(videoId, { error: undefined, message: '' });
           if (loadError) retry();
         }}
@@ -283,7 +286,7 @@ export default function SubtitlePanel({ videoId, playerRef, playbackSource, foll
         <SkeletonReveal show={showSkeleton} skeleton={<CueSkeleton rows={9} />}>
           {loaded && segments.length === 0 && !running && (
             <PanelPlaceholder testId="subs-empty">
-              视频上传后自动准备字幕：优先使用 B 站自带字幕，否则由浏览器转写。请配置语音识别模型并保持页面打开；识别服务可能收费。
+              {t('feedback.subtitleServer')}
             </PanelPlaceholder>
           )}
           {cues.map((c, i) => (

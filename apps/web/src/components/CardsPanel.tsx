@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { reviewCard } from '../client/learning';
 import { Button, Tooltip } from '@heroui/react';
 import type { MediaPlayerInstance } from '@vidstack/react';
-import { db, type CardRow } from '../store/db';
+import { type CardRow } from '../store/db';
+import { useCourseCollection, CourseCollectionError } from './useCourseCollection';
 import { runCards, type CardsProgress } from '../pipelines/cards';
 import { usePluginAvailable } from '../plugins/catalog';
 import { assertPluginAvailable } from '../plugins/availability';
@@ -47,33 +48,18 @@ function apkgFileName(videoName: string): string {
 
 export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles }: Props) {
   const available = usePluginAvailable('flashcards');
-  const [rows, setRows] = useState<CardRow[]>([]);
+  const { rows, setRows, ready: loaded, error: readError, reload } = useCourseCollection<CardRow>('cards', videoId);
   /** 首次读回之前为 false —— 空态只在 `loaded && 真的为空` 时出现（不变量 I1） */
-  const [loaded, setLoaded] = useState(false);
   /** 已判定卡片 id 栈（审核顺序），撤销用 */
   const [history, setHistory] = useState<number[]>([]);
   const [progress, setProgress] = useState<CardsProgress | null>(null);
   const [exporting, setExporting] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    try {
-      const rs = await db.cards.where('videoId').equals(videoId).sortBy('time');
-      setRows(rs);
-      setHistory([]);
-    } catch (e) {
-      // 读失败按「确实为空」收尾，别把界面永远留在骨架/空白上（不变量 I5）
-      setErrorText(formatCaughtError(e));
-    } finally {
-      setLoaded(true);
-    }
-  }, [videoId]);
-
   useEffect(() => {
-    // 切视频先回到「未知」态，避免拿上一门课的卡片当本课的空/满判据
-    setLoaded(false);
-    void reload();
-  }, [reload]);
+    setHistory([]);
+  }, [videoId]);
+  useEffect(() => { if (readError) setErrorText(readError); }, [readError]);
 
   const showSkeleton = useSkeletonGate(!loaded);
 
@@ -171,7 +157,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
               loading={running}
               variant="primary"
               data-testid="cards-generate"
-               isDisabled={!available || hasSubtitles !== true}
+                isDisabled={!loaded || !available || hasSubtitles !== true}
               onPress={start}
             >
               <Sym name="style" />
@@ -187,7 +173,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
             <LoadingButton
               loading={exporting}
               data-testid="cards-export"
-              isDisabled={kept.length === 0 || running}
+               isDisabled={!loaded || kept.length === 0 || running}
               onPress={exportApkg}
             >
               <Sym name="download" />
@@ -206,6 +192,7 @@ export default function CardsPanel({ videoId, videoName, playerRef, hasSubtitles
       )}
 
       <PersistentError title="制卡失败" text={errorText} onClose={() => setErrorText(null)} />
+      <CourseCollectionError error={readError} retry={reload} />
 
       {/* 卡片面板的四块（占位 / 滑动卡 / 汇总 / 已保留列表）同处一栏，所以骨架把**整栏**包起来：
           只包占位的话，骨架在上、滑动卡在下，数据一到骨架收走会把下面的卡片整块顶上去 ——

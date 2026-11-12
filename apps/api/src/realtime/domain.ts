@@ -20,7 +20,7 @@ import { taskDto, listOwnerTasks } from '../cloud/tasks.js';
 import { CloudRecords, CloudConflict } from '../cloud/records.js';
 import type { RuntimeRecordsPage, RuntimeRecordsCommit, RuntimeRecordsReceipt } from '@wangke/contracts/client-runtime';
 import type { RuntimeSessionFrame, RuntimeSessionProjection } from '@wangke/contracts/client-runtime';
-import type { SessionJournalRequest, SessionJournalFrame, RuntimeSessionRow } from '@wangke/contracts/client-runtime';
+import type { SessionJournalRequest, SessionJournalFrame } from '@wangke/contracts/client-runtime';
 import type { RuntimeTaskSubmit, RuntimeTask } from '@wangke/contracts/client-runtime';
 import type { RuntimeTaskAdmission } from '@wangke/contracts/client-runtime';
 import type { PreferencesCommand, PreferencesProjection } from '@wangke/contracts/client-runtime';
@@ -34,6 +34,7 @@ import { cleanupBotJournal } from './journal-retention.js';
 import { TaskDelegationService } from '../cloud/delegation.js';
 import { CloudConfiguration } from '../cloud/config.js';
 import { RecordProjections, recordsEpoch } from './record-projections.js';
+import { sessionRow, sessionRowSql } from './session-row.js';
 import type { DelegationCommand } from '@wangke/contracts/client-runtime';
 
 import type {} from './errors.js';
@@ -62,6 +63,7 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   private readonly timer: ReturnType<typeof setInterval>;
   private cursor: number;
   private retainedAt = 0;
+  private headEpoch?: string;
   private readonly fileWatcher?: fs.FSWatcher;
   private fileWake?: ReturnType<typeof setTimeout>;
   private readonly domains: ReturnType<typeof assembleRuntimeDomains>;
@@ -112,6 +114,16 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   private pump() {
     try {
+      if ([...this.observers].some(observer => observer.request.kind === 'recordHead')) {
+        const epoch = recordsEpoch(this.store);
+        if (this.headEpoch !== undefined && this.headEpoch !== epoch) {
+          // A restore/reset may rewind revisions. Replace all active baselines;
+          // comparing numeric revisions from different epochs is invalid.
+          this.cursor = this.revision();
+          for (const observer of this.observers) observer.wake();
+        }
+        this.headEpoch = epoch;
+      }
       const now = Date.now();
       if (now - this.retainedAt >= 60000) {
         // Invalidation rows have no replay payload. A missing invalidation range
@@ -147,6 +159,7 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   async *watch(owner: string, request: RuntimeRead, signal: AbortSignal): AsyncIterable<RuntimeFrame> {
     if (this.observers.size >= 512) throw new RemoteError('client/domain', 'Subscription quota exceeded', { code: 'subscription_limit' });
+    if (request.kind === 'recordHead' && this.headEpoch === undefined) this.headEpoch = recordsEpoch(this.store);
     let pending = true, resume: (() => void) | undefined;
     const wake = () => { pending = true; resume?.(); resume = undefined; };
     const observer = { owner, request, wake };
@@ -208,7 +221,9 @@ export class ClientRuntimeDomain implements RuntimeDomain {
         if (!previous) yield next;
         else {
           const changes = diffRuntime(previous.value, next.value);
-          if (next.revision > previous.revision) yield { type: 'delta', baseRevision: previous.revision, revision: next.revision, changes };
+          const epochChanged = request.kind === 'recordHead' && (previous.value as { epoch?: string }).epoch !== (next.value as { epoch?: string }).epoch;
+          if (epochChanged) yield next;
+          else if (next.revision > previous.revision) yield { type: 'delta', baseRevision: previous.revision, revision: next.revision, changes };
           // A filesystem/provider change can become visible without a matching
           // revision bump. Dropping it here made the client stale forever; a
           // delta cannot carry it (revision must advance), so replace instead.
@@ -398,10 +413,18 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   async submitTask(owner: string, request: RuntimeTaskSubmit): Promise<RuntimeTask> {
     if (!this.submit) throw new Error('task_admission_unavailable');
-    try { return TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(this.submit(owner, request)); }
+    let submitted = false;
+    try {
+      const task = this.submit(owner, request);
+      submitted = true;
+      return TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(task);
+    }
     catch (error) {
       if (error instanceof Error && error.message === 'task_nonce_conflict') throw new RemoteError('client/conflict', 'Task operation id reused with different content', {});
-      throw this.failure(error);
+      // Only a synchronous admission failure with no durable task is a known
+      // rejection. Encoding a committed result can fail too; that stays uncertain.
+      const rejected = !submitted && !this.store.db.prepare('SELECT 1 FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, request.operationId);
+      throw this.failure(error, rejected);
     }
   }
   async taskAdmission(owner: string, operationId: string): Promise<RuntimeTaskAdmission> {
@@ -409,29 +432,35 @@ export class ClientRuntimeDomain implements RuntimeDomain {
     const row = this.store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, operationId);
     return TYPERT_REMOTE.methods['clientRuntime/taskAdmission'].result.create().parse(row ? { status: 'accepted', task: taskDto(row) } : { status: 'missing' });
   }
+  private sessionMetadata(owner: string, sessionId: number) {
+    const session = this.requireSession(owner, sessionId);
+    return { session, tasks: listOwnerTasks(this.store, owner, 'session', sessionId)
+      .map(task => TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(task)) };
+  }
+  private requireSession(owner: string, sessionId: number) {
+    const session = new CloudRecords(this.store).get(owner, 'chatSessions', sessionId);
+    if (!session) throw new Error('session_not_found');
+    return session;
+  }
   private sessionProjection(owner: string, request: Extract<RuntimeRead, { kind: 'session' }>): RuntimeSessionProjection {
     if (!Number.isSafeInteger(request.sessionId) || request.sessionId <= 0 || request.before && request.after) throw new Error('invalid_session');
-    const session = new CloudRecords(this.store).get(owner, 'chatSessions', request.sessionId);
-    if (!session) throw new Error('session_not_found');
+    const metadata = this.sessionMetadata(owner, request.sessionId);
     const marker = request.before ?? request.after;
     if (marker && (!Number.isSafeInteger(marker.id) || !Number.isFinite(marker.createdAt))) throw new Error('invalid_session_cursor');
     const comparison = request.before ? '<' : '>=';
-    const markerRow = marker ? new CloudRecords(this.store).get(owner, 'chats', marker.id) : undefined;
-    const markerRole = marker?.role ?? (markerRow?.sessionId === request.sessionId ? markerRow.role : undefined);
+    const markerRow = marker && !marker.role ? this.store.db.prepare(`SELECT json_extract(value,'$.role') AS role FROM cloud_records
+      WHERE owner_id=? AND table_name='chats' AND record_key=? AND json_extract(value,'$.sessionId')=?`)
+      .get(owner, JSON.stringify(marker.id), request.sessionId) as { role: string } | undefined : undefined;
+    const markerRole = marker?.role ?? markerRow?.role;
     const roleOrder = "CASE WHEN json_extract(value,'$.role')='user' THEN 0 ELSE 1 END";
-    const rows = this.store.db.prepare(`SELECT value FROM cloud_records WHERE owner_id=? AND table_name='chats'
+    const rows = this.store.db.prepare(`SELECT ${sessionRowSql} AS value FROM cloud_records WHERE owner_id=? AND table_name='chats'
       AND json_extract(value,'$.sessionId')=?
       ${marker ? `AND (json_extract(value,'$.createdAt'),${roleOrder},json_extract(value,'$.id')) ${comparison} (?,?,?)` : ''}
       ORDER BY json_extract(value,'$.createdAt') DESC,${roleOrder} DESC,json_extract(value,'$.id') DESC LIMIT ?`)
       .all(owner, request.sessionId, ...(marker ? [marker.createdAt, markerRole === 'user' ? 0 : 1, marker.id] : []), request.after ? 501 : 41) as { value: string }[];
     if (request.after && rows.length > 500) throw new Error('session_window_limit');
     const hasOlder = !request.after && rows.length > 40;
-    return { session, rows: rows.slice(0, request.after ? 500 : 40).reverse().map(row => {
-      const data = JSON.parse(row.value);
-      return { id: data.id, sessionId: data.sessionId, createdAt: data.createdAt, role: data.role, content: data.content, ...(data.taskId ? { taskId: data.taskId } : {}), data };
-    }), hasOlder,
-      tasks: listOwnerTasks(this.store, owner, 'session', request.sessionId)
-        .map(task => TYPERT_REMOTE.methods['clientRuntime/submitTask'].result.create().parse(task)) };
+    return { ...metadata, rows: rows.slice(0, request.after ? 500 : 40).reverse().map(row => sessionRow(JSON.parse(row.value))), hasOlder };
   }
   async *watchSession(owner: string, request: Extract<RuntimeRead, { kind: 'session' }>, signal: AbortSignal): AsyncIterable<RuntimeSessionFrame> {
     const codec = TYPERT_REMOTE.methods['clientRuntime/watchSession'].result.create();
@@ -447,9 +476,6 @@ export class ClientRuntimeDomain implements RuntimeDomain {
     const observer = { owner, request: { kind: 'session' as const, sessionId: request.sessionId }, wake };
     this.observers.add(observer);
     signal.addEventListener('abort', wake, { once: true });
-    const rowDto = (data: any): RuntimeSessionRow => ({ id: data.id, sessionId: data.sessionId, createdAt: data.createdAt,
-      role: data.role, content: data.content, ...(data.taskId ? { taskId: data.taskId } : {}), data });
-    const state = () => this.sessionProjection(owner, { kind: 'session', sessionId: request.sessionId });
     try {
       while (!signal.aborted) {
         if (!pending) await new Promise<void>(resolve => { resume = resolve; });
@@ -457,33 +483,36 @@ export class ClientRuntimeDomain implements RuntimeDomain {
         pending = false;
         // Everything before the first yield is synchronous SQLite I/O. Attach
         // before capture; writes during chunk delivery are replayed after it.
-        const { projection, latest, floor, batch, gap, rows } = this.store.db.transaction(() => {
-        const projection = state(); // Also rechecks ownership/deletion on every wake.
-        const head = this.store.db.prepare('SELECT cursor,floor FROM client_session_cursors WHERE owner_id=? AND session_id=?')
-          .get(owner, request.sessionId) as { cursor: number; floor: number } | undefined;
-        const latest = head?.cursor ?? 0, floor = head?.floor ?? 0;
-        const batch = cursor === undefined ? [] : this.store.db.prepare(`SELECT cursor,row_id,value FROM client_session_events
-          WHERE owner_id=? AND session_id=? AND cursor>? ORDER BY cursor LIMIT 64`).all(owner, request.sessionId, cursor) as { cursor: number; row_id: number; value: string | null }[];
-        const gap = cursor !== undefined && (cursor < floor || cursor > latest
-          || cursor < latest && (!batch.length || batch[0].cursor !== cursor + 1)
-          || batch.some((event, index) => event.cursor !== cursor! + index + 1));
+        const { session, tasks, hasOlder, latest, floor, batch, gap, rows } = this.store.db.transaction(() => {
+          // Only a new baseline needs the latest message window. Incremental wakes
+          // reauthorize and read metadata/events, not the same forty bodies again.
+          const initial = cursor === undefined ? this.sessionProjection(owner, { kind: 'session', sessionId: request.sessionId }) : undefined;
+          const metadata = initial ?? this.sessionMetadata(owner, request.sessionId);
+          const head = this.store.db.prepare('SELECT cursor,floor FROM client_session_cursors WHERE owner_id=? AND session_id=?')
+            .get(owner, request.sessionId) as { cursor: number; floor: number } | undefined;
+          const latest = head?.cursor ?? 0, floor = head?.floor ?? 0;
+          const batch = cursor === undefined ? [] : this.store.db.prepare(`SELECT cursor,row_id,${sessionRowSql} AS value FROM client_session_events
+            WHERE owner_id=? AND session_id=? AND cursor>? ORDER BY cursor LIMIT 64`).all(owner, request.sessionId, cursor) as { cursor: number; row_id: number; value: string | null }[];
+          const gap = cursor !== undefined && (cursor < floor || cursor > latest
+            || cursor < latest && (!batch.length || batch[0].cursor !== cursor + 1)
+            || batch.some((event, index) => event.cursor !== cursor! + index + 1));
           // First paint stays paged. A lost range explicitly repairs the entire
           // loaded timeline, never silently replaces it with forty latest rows.
-          const rows = gap ? (this.store.db.prepare(`SELECT value FROM cloud_records WHERE owner_id=? AND table_name='chats'
+          const rows = gap ? (this.store.db.prepare(`SELECT ${sessionRowSql} AS value FROM cloud_records WHERE owner_id=? AND table_name='chats'
             AND json_extract(value,'$.sessionId')=? ORDER BY json_extract(value,'$.createdAt'),
               CASE WHEN json_extract(value,'$.role')='user' THEN 0 ELSE 1 END,json_extract(value,'$.id')`)
-            .all(owner, request.sessionId) as { value: string }[]).map(row => rowDto(JSON.parse(row.value))) : projection.rows;
-          return { projection, latest, floor, batch, gap, rows };
+            .all(owner, request.sessionId) as { value: string }[]).map(row => sessionRow(JSON.parse(row.value))) : initial?.rows ?? [];
+          return { ...metadata, hasOlder: initial?.hasOlder ?? false, latest, floor, batch, gap, rows };
         })();
         if (cursor === undefined || gap) {
           if (gap) yield { type: 'resync-required', cursor: latest, reason: cursor! < floor ? 'cursor-expired' : 'journal-gap' };
-          yield codec.parse({ type: 'baseline', cursor: latest, session: projection.session, tasks: projection.tasks, hasOlder: gap ? false : projection.hasOlder });
+          yield codec.parse({ type: 'baseline', cursor: latest, session, tasks, hasOlder: gap ? false : hasOlder });
           for (let index = 0; index < rows.length && !signal.aborted; index += 64) {
-            state();
+            this.requireSession(owner, request.sessionId);
             yield codec.parse({ type: 'rows', cursor: latest, rows: rows.slice(index, index + 64) });
           }
           if (signal.aborted) break;
-          state();
+          this.requireSession(owner, request.sessionId);
           yield { type: 'ready', cursor: latest };
           cursor = latest;
           pending = true;
@@ -491,8 +520,8 @@ export class ClientRuntimeDomain implements RuntimeDomain {
         }
         const next = batch.at(-1)?.cursor ?? cursor;
         yield codec.parse({ type: 'events', baseCursor: cursor, cursor: next,
-          events: batch.map(event => ({ cursor: event.cursor, rowId: event.row_id, row: event.value ? rowDto(JSON.parse(event.value)) : null })),
-          session: projection.session, tasks: projection.tasks });
+          events: batch.map(event => ({ cursor: event.cursor, rowId: event.row_id, row: event.value ? sessionRow(JSON.parse(event.value)) : null })),
+          session, tasks });
         cursor = next;
         if (cursor < latest) pending = true;
       }
@@ -610,14 +639,15 @@ export class ClientRuntimeDomain implements RuntimeDomain {
       // Preserve the original transaction through skill package staging. Applying
       // each row separately can resync pending files against disk between the
       // definition and its references, tombstoning the not-yet-installed package.
-      return records.apply(owner, clientLearningMutations(records, owner, request.edits));
+      return { ...records.apply(owner, clientLearningMutations(records, owner, request.edits)), epoch: recordsEpoch(this.store) };
     });
   }
-  private failure(error: unknown) {
+  private failure(error: unknown, admissionRejected = false) {
     if (error instanceof RemoteError) return error;
     if (error instanceof CloudConflict) return new RemoteError('client/record-conflict', 'Record changes require reconciliation', { table: error.table, key: error.key, fields: error.fields });
     const code = error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : 'domain_failed';
-    return new RemoteError('client/domain', 'Domain request failed', { code });
+    if (code === 'domain_failed') console.error('client_domain_failed', error);
+    return new RemoteError('client/domain', 'Domain request failed', { code, ...(admissionRejected ? { admissionRejected: true } : {}) });
   }
   diagnostics() { return { subscriptions: this.observers.size + this.journals.size, revision: this.cursor, commands: this.inflight.size }; }
   close() { clearInterval(this.timer); clearTimeout(this.fileWake); this.fileWatcher?.close(); for (const observer of [...this.observers, ...this.journals]) observer.wake(); }

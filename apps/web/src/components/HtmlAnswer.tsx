@@ -52,7 +52,7 @@ function LegacyHtmlAnswer({ source, editActions, allowPopout, persistLegacy }: {
     {error ? <div role="alert"><p>预览失败：{error}</p>
       <Button size="sm" variant="tertiary" onPress={() => setAttempt(value => value + 1)}>重试预览</Button>
       <HtmlSource source={source} />
-    </div> : !payload ? <p role="status">正在准备预览…</p> : <WidgetBlock payload={payload} dark={dark} disabled allowPopout={allowPopout} editActions={editActions}
+    </div> : !payload ? <p role="status">正在准备预览…</p> : <WidgetBlock payload={payload} rowId={rowId} dark={dark} disabled allowPopout={allowPopout} editActions={editActions}
       htmlActions={{
         sourceOpen: showSource, sourceId, toggleSource: () => setShowSource((value) => !value),
         copySource: () => void copyWithFeedback(source, '已复制 HTML 源码'),

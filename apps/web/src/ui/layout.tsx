@@ -126,6 +126,7 @@ export interface RecentItem {
 
 interface RecentNavigation {
   label: string; items: RecentItem[]; loading?: boolean;
+  actionError?: string; dismissError?: () => void; dismissLabel?: string;
   pagination?: { previous?: () => void; next?: () => void; previousLabel: string; nextLabel: string;
     busy: boolean; error?: string; retry: () => void; retryLabel: string };
 }
@@ -217,9 +218,9 @@ function NavigationItem({ item, active, compact = false, onNavigate }: {
     'data-testid': item.testId,
     title: item.hint ?? item.label,
   };
-  const content = compact ? item.icon : <>
+  const content = <>
     <span className="page-shell__nav-icon" aria-hidden="true">{item.icon}</span>
-    <span className="min-w-0 truncate" {...overflowTitleProps}>{item.label}</span>
+    {!compact && <span className="min-w-0 truncate" {...overflowTitleProps}>{item.label}</span>}
   </>;
 
   if (item.to !== undefined) {
@@ -498,6 +499,10 @@ function Sidebar({
                     </ListBox.Item>
                   ))}
                 </ListBox>
+                {recent.actionError && <div className="px-3 py-2 text-xs text-danger" role="alert" data-testid="recent-action-error">
+                  {recent.actionError}
+                  <Button size="sm" variant="ghost" onPress={recent.dismissError}>{recent.dismissLabel}</Button>
+                </div>}
                 {recent.pagination && <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
                   {recent.pagination.previous && <Button size="sm" variant="ghost" isDisabled={recent.pagination.busy}
                     data-testid="chat-recent-previous" onPress={recent.pagination.previous}>{recent.pagination.previousLabel}</Button>}
@@ -572,8 +577,13 @@ export function NavigationShell({
       className={`sidebar-control relative shrink-0 rounded-full${railCollapsed ? ' page-shell__nav-logo' : ''}`}
       data-testid="nav-rail-toggle" aria-label={railCollapsed ? '展开侧边栏' : '收起侧边栏'}
       aria-expanded={!railCollapsed} aria-pressed={railCollapsed} onPress={toggleRail}>
-      {railCollapsed ? <BrandLogo /> : <Sym name="panel_left" />}
-      <DotBadge open={hasUnread} className="nav-unread" label="有已完成的会话未查看" testId="nav-unread-dot" />
+      {({ isHovered, isFocusVisible }) => <>
+        {railCollapsed ? <span className="t-icon-swap" data-state={isHovered || isFocusVisible ? 'b' : 'a'} aria-hidden="true">
+          <span className="t-icon" data-icon="a"><BrandLogo /></span>
+          <span className="t-icon" data-icon="b"><Sym name="panel_left" /></span>
+        </span> : <Sym name="panel_left" />}
+        <DotBadge open={hasUnread} className="nav-unread" label="有已完成的会话未查看" testId="nav-unread-dot" />
+      </>}
     </Button>
   );
 
@@ -1118,7 +1128,7 @@ export function Banner({
 }: BannerProps) {
   const status = variant === 'warning' ? 'warning' : variant === 'error' ? 'danger' : 'accent';
   return (
-    <Alert status={status} className="mb-4" data-testid={testId} role="note">
+    <Alert status={status} className="mb-4" data-testid={testId} role={variant === 'error' ? 'alert' : 'note'}>
       <Alert.Indicator>{icon}</Alert.Indicator>
       <Alert.Content>
         <Alert.Title className="flex items-center gap-1">

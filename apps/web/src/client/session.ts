@@ -3,6 +3,7 @@ import type { RuntimeTask } from '@wangke/contracts/client-runtime';
 import { cloud } from '../cloud/state';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
 import { accountLifecycle } from './account-lifecycle';
+import { sessionPayloadBytes } from './session-cache';
 
 /** Browser adapter: transport lifetime belongs to the account Runtime; this
  * translates the wire row envelope, not conversation ordering or deduplication. */
@@ -14,12 +15,16 @@ export function followServerSession(id: number, callbacks: {
   const lifetime = accountLifecycle.current();
   let stopped = false, release: (() => void) | undefined, off: (() => void) | undefined;
   let replay = () => {};
+  let evict = () => false;
+  let retainedBytes = () => 0;
   let readyResolve!: () => void, readyReject!: (error: unknown) => void;
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
   void ready.catch(() => {});
   void serverRuntime(owner).then(runtime => {
     if (stopped || owner !== cloud.userId || lifetime && !lifetime.current() || !isCurrentServerRuntime(runtime)) return;
     const model = runtime.session(id);
+    evict = () => runtime.evictSession(id);
+    retainedBytes = () => sessionPayloadBytes(model.getSnapshot().data);
     const decoded = new WeakMap<object, ChatRow>();
     let pending = false, busy = false;
     const current = () => !stopped && owner === cloud.userId && isCurrentServerRuntime(runtime) && !runtime.signal.aborted;
@@ -52,5 +57,6 @@ export function followServerSession(id: number, callbacks: {
     replay = refresh;
     off = model.subscribe(refresh); release = model.acquire(); refresh();
   }).catch(error => { readyReject(error); if (!stopped && owner === cloud.userId && (!lifetime || lifetime.current())) callbacks.failed(error instanceof Error ? error.message : String(error)); });
-  return Object.assign(() => { stopped = true; off?.(); release?.(); readyReject(new Error('session_released')); }, { refresh: () => replay(), ready });
+  return Object.assign(() => { stopped = true; off?.(); release?.(); readyReject(new Error('session_released')); },
+    { refresh: () => replay(), ready, evict: () => evict(), retainedBytes: () => retainedBytes() });
 }

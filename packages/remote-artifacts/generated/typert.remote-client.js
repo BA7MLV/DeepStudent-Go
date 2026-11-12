@@ -544,6 +544,7 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => 
 }))
 let _wangke_remote_host_clientRuntime_editLearning_result$schema$value
 const _wangke_remote_host_clientRuntime_editLearning_result$schema = () => (_wangke_remote_host_clientRuntime_editLearning_result$schema$value ??= z.object({
+  'epoch': z.union([z.undefined(), z.string()]).optional(),
   'accepted': z.array(z.string()),
   'versions': z.array(z.object({
   'table': z.string(),
@@ -611,6 +612,8 @@ const _wangke_remote_host_clientRuntime_read_parameter_0$schema = () => (_wangke
 }), z.object({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.object({
+  'kind': z.literal("recordHead"),
 }), z.object({
   'kind': z.literal("recordKeys"),
   'keys': z.array(z.object({
@@ -1156,8 +1159,12 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
   'path': z.string(),
   'revision': z.string(),
 }), z.object({
-  'kind': z.union([z.literal("trash"), z.literal("restore"), z.literal("deleteTrash")]),
+  'kind': z.union([z.literal("trash"), z.literal("deleteTrash")]),
   'projectId': z.string(),
+}), z.object({
+  'kind': z.literal("restore"),
+  'projectId': z.string(),
+  'expectedDeletedAt': z.union([z.undefined(), z.string()]).optional(),
 }), z.object({
   'kind': z.literal("saveCourseText"),
   'courseId': z.string(),
@@ -1374,6 +1381,8 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0$schema = () => (_wangk
 }), z.object({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.object({
+  'kind': z.literal("recordHead"),
 }), z.object({
   'kind': z.literal("recordKeys"),
   'keys': z.array(z.object({
@@ -2499,6 +2508,8 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
   'kind': z.literal("records"),
   'after': z.number(),
 }), z.strictObject({
+  'kind': z.literal("recordHead"),
+}), z.strictObject({
   'kind': z.literal("recordKeys"),
   'keys': z.array(z.strictObject({
   'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
@@ -2990,8 +3001,12 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0_strict$schem
   'path': z.string(),
   'revision': z.string(),
 }), z.strictObject({
-  'kind': z.union([z.literal("trash"), z.literal("restore"), z.literal("deleteTrash")]),
+  'kind': z.union([z.literal("trash"), z.literal("deleteTrash")]),
   'projectId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("restore"),
+  'projectId': z.string(),
+  'expectedDeletedAt': z.union([z.undefined(), z.string()]).optional(),
 }), z.strictObject({
   'kind': z.literal("saveCourseText"),
   'courseId': z.string(),
@@ -3101,6 +3116,8 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0_strict$schema = () => 
 }), z.strictObject({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.strictObject({
+  'kind': z.literal("recordHead"),
 }), z.strictObject({
   'kind': z.literal("recordKeys"),
   'keys': z.array(z.strictObject({
@@ -3300,7 +3317,7 @@ export const TYPERT_REMOTE = createTypertRemoteInfo({
         mode: 'strict',
         typeSymbol: '@wangke/contracts/client-runtime#RuntimeRecordsReceipt',
         create: _wangke_remote_host_clientRuntime_editLearning_result$schema,
-        jsonSchema: {"type":"object","properties":{"accepted":{"type":"array","items":{"type":"string"}},"versions":{"type":"array","items":{"type":"object","properties":{"table":{"type":"string"},"key":{"oneOf":[{"type":"string"},{"type":"number"}]},"revision":{"type":"number"}},"required":["table","key","revision"],"additionalProperties":true}}},"required":["accepted","versions"],"additionalProperties":true},
+        jsonSchema: {"type":"object","properties":{"epoch":{"type":"string"},"accepted":{"type":"array","items":{"type":"string"}},"versions":{"type":"array","items":{"type":"object","properties":{"table":{"type":"string"},"key":{"oneOf":[{"type":"string"},{"type":"number"}]},"revision":{"type":"number"}},"required":["table","key","revision"],"additionalProperties":true}}},"required":["accepted","versions"],"additionalProperties":true},
       },
       sourceLocation: {"file":"packages/remote-host/src/index.ts","line":50,"column":3},
     },

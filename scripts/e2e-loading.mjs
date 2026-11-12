@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import sharp from 'sharp';
 
 const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/lazy-loading-');
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
@@ -33,7 +34,7 @@ try {
   const files = [];
   for (let n = 0; n < 8; n++) {
     const upload = await setup.request.post(`${origin}/api/v1/files`, { headers: { 'content-type': 'application/octet-stream', 'x-file-name': `cover-${n}.png`, 'x-file-mime': 'image/png' },
-      data: Buffer.concat([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64'), Buffer.from(String(n))]) });
+      data: await sharp({ create: { width: 2, height: 2, channels: 4, background: { r: n * 30, g: 90, b: 180, alpha: 1 } } }).png().toBuffer() });
     assert.equal(upload.ok(), true); files.push((await upload.json()).id);
   }
   const image = await setup.request.get(`${origin}/api/v1/files/${files[0]}`);
@@ -107,7 +108,7 @@ try {
       const { cloud } = await import('/src/cloud/state.ts');
       storage.useCloudDatabase(owner); cloud.userId = owner; cloud.enabled = true;
       window.receiptCommand = { operationId: 'point-read-fault-fixture', request: { operationId: 'point-read-fault-fixture', edits: [] }, entities: [], state: 'confirmed', createdAt: 1,
-        receipt: { versions: [{ table: 'cards', key: 8888, revision: tombstoneVersion }, { table: 'chats', key: 1, revision: version }] } };
+        receipt: { epoch, accepted: [], versions: [{ table: 'cards', key: 8888, revision: tombstoneVersion }, { table: 'chats', key: 1, revision: version }] } };
       receiptCommand.sequence = await storage.db.table('_learningCommands').add(receiptCommand);
       await storage.db.table('_cloudMeta').bulkPut([{ id: 'cursor', value: 17 }, { id: 'records-epoch', value: epoch }, { id: 'attachment-original', value: new Blob(['private original']) }]);
       const { markCloudApply } = await import('/src/cloud/cache.ts');
@@ -129,9 +130,12 @@ try {
     await page.route('**/api/clientRuntime/read', route => route.fulfill({ status: 503, body: 'point read unavailable' }));
     assert.ok((await confirm()).error); await assertRetained();
     await page.unroute('**/api/clientRuntime/read');
-    await page.evaluate(() => storage.db.table('_cloudMeta').put({ id: 'records-epoch', value: 'different-generation' }));
+    await page.evaluate(() => { receiptCommand.receipt.epoch = 'different-generation'; });
     assert.deepEqual(await confirm(), { value: false }); await assertRetained();
-    await page.evaluate(epoch => storage.db.table('_cloudMeta').put({ id: 'records-epoch', value: epoch }), epoch);
+    await page.evaluate(async epoch => {
+      receiptCommand.receipt.epoch = epoch;
+      await storage.db.table('_learningCommands').where('operationId').equals(receiptCommand.operationId).modify({ state: 'confirmed', receipt: receiptCommand.receipt, error: undefined });
+    }, epoch);
     await page.evaluate(() => { window.originalPut = IDBObjectStore.prototype.put; IDBObjectStore.prototype.put = function (...args) {
       if (this.name === 'chats') throw new DOMException('injected quota failure', 'QuotaExceededError');
       return originalPut.apply(this, args);
@@ -160,9 +164,13 @@ try {
     await page.route('**/api/clientRuntime/read', route => route.fulfill({ status: 503, body: 'metadata unavailable' }));
     assert.ok((await hydrate()).error);
     await page.unroute('**/api/clientRuntime/read');
-    await page.evaluate(() => storage.db.table('_cloudMeta').put({ id: 'records-epoch', value: 'other-epoch' }));
+    await page.route('**/api/clientRuntime/read', async route => {
+      if (!route.request().postData()?.includes('"kind":"recordKeys"')) return route.continue();
+      const response = await route.fetch();
+      await route.fulfill({ response, body: (await response.text()).replaceAll(epoch, 'other-point-epoch') });
+    });
     assert.match((await hydrate()).error, /records_generation_changed/);
-    await page.evaluate(epoch => storage.db.table('_cloudMeta').put({ id: 'records-epoch', value: epoch }), epoch);
+    await page.unroute('**/api/clientRuntime/read');
     await page.evaluate(() => { IDBObjectStore.prototype.put = function (...args) {
       if (this.name === 'chats') throw new DOMException('injected quota failure', 'QuotaExceededError');
       return originalPut.apply(this, args);
@@ -184,11 +192,15 @@ try {
     const localMs = await page.evaluate(async owner => { const start = performance.now(); await sync.startCloud(owner, { background: true }); return performance.now() - start; }, owner);
     await waitSynced(page);
     const baselineMs = Date.now() - start;
-    assert.equal(await page.evaluate(() => storage.db.chats.count()), 1000);
+    assert.equal(await page.evaluate(() => storage.db.chats.count()), 0);
     assert.equal(requests.filter(path => path.startsWith('/api/v1/files/')).length, 0, 'baseline never downloads a Blob');
-    assert.equal(requests.filter(path => path === '/api/clientRuntime/recordsPage').length, 6, 'no duplicate first probe page');
+    assert.equal(requests.filter(path => path === '/api/clientRuntime/recordsPage').length, 0, 'cold start never reads account records');
+    assert.equal(await page.evaluate(() => storage.db.covers.count()), 0);
+    await page.evaluate(() => sync.readRecordKeys('covers', ['fixture-0']));
     assert.equal(await page.evaluate(async () => (await storage.db.covers.get('fixture-0')).blob.$file), files[0]);
-    evidence.timings.push({ delayMs, localMs, baselineMs, pageRequests: 6, baselineFileGETs: 0 });
+    await page.evaluate(() => sync.readRecordKeys('chats', [1]));
+    assert.equal(await page.evaluate(() => storage.db.chats.count()), 1, 'only the explicit message enters IDB');
+    evidence.timings.push({ delayMs, localMs, baselineMs, pageRequests: 0, baselineFileGETs: 0 });
 
     const downloads = await page.evaluate(async () => {
       const row = await storage.db.covers.get('fixture-0');
@@ -198,9 +210,13 @@ try {
     assert.ok(downloads.size > 0); assert.equal(downloads.type, 'image/png'); assert.equal(downloads.cached, 1);
     assert.equal(requests.filter(path => path.startsWith('/api/v1/files/')).length, 1, 'demand downloads are coalesced');
     requests.length = 0;
+    const fileStatuses = [];
+    page.on('response', response => { if (new URL(response.url()).pathname.startsWith('/api/v1/files/')) fileStatuses.push(response.status()); });
     await page.evaluate(async owner => { await sync.startCloud(owner); const row = await storage.db.covers.get('fixture-0'); await blobs.resolveCloudBlob(row.blob); }, owner);
-    assert.equal(requests.filter(path => path.startsWith('/api/v1/files/')).length, 0, 'restart reuses persistent file cache');
-    assert.equal(requests.filter(path => path === '/api/clientRuntime/recordsPage').length, 1, 'warm restart is incremental');
+    assert.equal(requests.filter(path => path.startsWith('/api/v1/files/')).length, 1, 'new lifetime revalidates cached bytes');
+    assert.deepEqual(fileStatuses, [304], 'warm disk bytes require authenticated conditional validation');
+    assert.equal(requests.filter(path => path === '/api/clientRuntime/recordsPage').length, 0, 'warm restart never reads an account body feed');
+    await page.evaluate(() => sync.readRecordKeys('covers', ['fixture-1']));
     await page.evaluate(async () => {
       const row = await storage.db.covers.get('fixture-1');
       const image = document.createElement('img'); image.id = 'lazy-cover'; image.loading = 'lazy';
@@ -227,15 +243,15 @@ try {
     assert.deepEqual(errors, []);
     await context.close();
   }
-  evidence.checks.push('zero baseline file GETs; demand coalescing; persistent disk cache; incremental warm restart; retained directory while revalidating');
+  evidence.checks.push('zero cold/warm account records; explicit cover/message reads only; demand coalescing; authenticated 304 for persistent bytes; retained directory while revalidating');
 
   // Fail startup before a follower exists. Timed retry must recover without
   // page reload, user action, or an incidental command flush.
   for (const onlineWake of [false, true]) {
     const { context, page, errors } = await pageFixture();
     let blocked = true, failed = 0;
-    await page.route('**/api/clientRuntime/recordsPage', async route => {
-      if (blocked) { failed++; await route.fulfill({ status: 503, body: 'temporary fixture outage' }); }
+    await page.route('**/api/clientRuntime/read', async route => {
+      if (blocked && route.request().postData()?.includes('"kind":"recordHead"')) { failed++; await route.fulfill({ status: 503, body: 'temporary head outage' }); }
       else await route.continue();
     });
     await page.evaluate(owner => sync.startCloud(owner, { background: true }), owner);
@@ -244,7 +260,7 @@ try {
     if (onlineWake) await page.evaluate(() => window.dispatchEvent(new Event('online')));
     await waitSynced(page);
     assert.ok(failed > 0);
-    assert.equal(await page.evaluate(() => storage.db.chats.count()), 1000);
+    assert.equal(await page.evaluate(() => storage.db.chats.count()), 0);
     assert.equal(await page.evaluate(() => sync.useCloudSync.getState().degradedSince), 0);
     assert.deepEqual(errors, []); await context.close();
   }
@@ -255,33 +271,41 @@ try {
   await page.route('**/api/v1/files/**', async route => { fileFailures++; await route.fulfill({ status: 503, body: 'file unavailable' }); });
   await page.evaluate(owner => sync.startCloud(owner), owner);
   assert.equal(fileFailures, 0);
+  await page.evaluate(() => sync.readRecordKeys('covers', ['fixture-0']));
   const failedFile = await page.evaluate(async () => {
     try { await blobs.resolveCloudBlob((await storage.db.covers.get('fixture-0')).blob); return 'unexpected'; }
     catch (error) { return error.message; }
   });
   assert.match(failedFile, /503/);
-  assert.equal(await page.evaluate(() => storage.db.chats.count()), 1000);
+  assert.equal(await page.evaluate(() => storage.db.chats.count()), 0);
   await page.unroute('**/api/v1/files/**');
   assert.ok(await page.evaluate(async () => (await blobs.resolveCloudBlob((await storage.db.covers.get('fixture-0')).blob)).size));
-  // A mid-rebuild failure keeps the last complete projection and private drafts.
+  // A failed epoch refresh must preserve the last point projection and all
+  // private intent. Success invalidates only disposable rows, never staging an
+  // account body snapshot or retiring an old-generation receipt.
+  await page.evaluate(() => sync.readRecordKeys('chats', [1]));
   await page.evaluate(async () => {
-    await storage.db.table('_cloudMeta').put({ id: 'records-epoch', value: 'force-rebuild' });
     await storage.db.table('_cloudMeta').put({ id: 'private-draft', value: new Blob(['retained draft']) });
+    await storage.db.table('_learningCommands').add({ operationId: 'epoch-private-intent', request: { operationId: 'epoch-private-intent', edits: [] }, entities: [], state: 'conflict', createdAt: 1, error: 'retained user intent' });
   });
-  let pages = 0;
-  await page.route('**/api/clientRuntime/recordsPage', async route => {
-    if (++pages === 3) await route.fulfill({ status: 503, body: 'mid-rebuild failure' }); else await route.continue();
+  let heads = 0;
+  await page.route('**/api/clientRuntime/read', async route => {
+    if (route.request().postData()?.includes('"kind":"recordHead"')) { heads++; await route.fulfill({ status: 503, body: 'epoch refresh failure' }); } else await route.continue();
   });
   await page.evaluate(() => sync.flushCloud().catch(() => {}));
-  assert.equal(await page.evaluate(() => storage.db.chats.count()), 1000);
-  assert.ok(await page.evaluate(() => storage.db.table('_projectionStage').count()) > 0);
-  await page.unroute('**/api/clientRuntime/recordsPage');
+  assert.ok(heads > 0);
+  assert.equal(await page.evaluate(() => storage.db.chats.count()), 1);
+  assert.equal(await page.evaluate(() => storage.db.table('_projectionStage').count()), 0);
+  assert.equal(await page.evaluate(() => storage.db.table('_learningCommands').count()), 1);
+  await page.unroute('**/api/clientRuntime/read');
+  store.db.prepare('UPDATE app_state SET value=? WHERE key=?').run('loading-new-epoch', 'records-epoch');
   await page.evaluate(() => sync.flushCloud());
-  assert.equal(await page.evaluate(() => storage.db.chats.count()), 1000);
+  assert.equal(await page.evaluate(() => storage.db.chats.count()), 0);
+  assert.equal(await page.evaluate(() => storage.db.table('_learningCommands').count()), 1);
   assert.equal(await page.evaluate(async () => (await storage.db.table('_cloudMeta').get('private-draft')).value.text()), 'retained draft');
   assert.equal(await page.evaluate(() => storage.db.table('_projectionStage').count()), 0);
   assert.deepEqual(errors, []); await context.close();
-  evidence.checks.push('file outage does not block records; retry works; atomic failed rebuild preserves previous projection and private drafts');
+  evidence.checks.push('file outage never blocks lightweight startup; retry works; epoch refresh failure preserves projection+intent+draft, successful real reset clears only projections and never stages account bodies');
   console.log(JSON.stringify(evidence, null, 2));
   console.log(`PASS loading regressions (${directory})`);
 } finally {

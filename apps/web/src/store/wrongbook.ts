@@ -8,6 +8,8 @@ import type { MaterialParseResult } from '../materials/reindex';
 import { saveMarkdownMaterial } from '../materials/markdownFile';
 import { getMaterialFile } from './fileStore';
 import { followDocument } from '../client/resources';
+import { cloud } from '../cloud/state';
+import { readRecordKeys } from '../cloud/sync';
 
 /** One Markdown Blob is the only source of truth; no parallel question table. */
 const FILE_ID = WRONGBOOK_MATERIAL_ID;
@@ -16,6 +18,10 @@ export async function readWrongbook(): Promise<string> {
   return file ? file.text() : EMPTY_WRONGBOOK;
 }
 export function observeWrongbook(next: (markdown: string) => void, error: (e: unknown) => void) {
+  if (cloud.enabled) {
+    const off = followDocument({ kind: 'courseDocument', courseId: FILE_ID }, document => next(document.text ?? EMPTY_WRONGBOOK), error);
+    return { unsubscribe: off };
+  }
   {
     let stopped = false, off: (() => void) | undefined;
     // Do not create an empty wrongbook just by visiting its panel. The initial
@@ -37,7 +43,8 @@ async function mutate(update: (markdown: string) => string, create = false): Pro
     const markdown = await readWrongbook();
     const base = /<!-- wrongbook:v[12] -->/.test(markdown) ? migrateWrongbook(markdown) : `${markdown.trimEnd()}\n\n<!-- wrongbook:v2 -->\n`;
     const result = update(base);
-    if (result !== markdown || create && !await db.videos.get(FILE_ID)) await saveMarkdownMaterial(FILE_ID, result, await getMaterialFile(FILE_ID) ? markdown : '', WRONGBOOK_FILE_NAME);
+    const course = create ? cloud.enabled ? (await readRecordKeys('videos', [FILE_ID]))[0] : await db.videos.get(FILE_ID) : undefined;
+    if (result !== markdown || create && !course) await saveMarkdownMaterial(FILE_ID, result, await getMaterialFile(FILE_ID) ? markdown : '', WRONGBOOK_FILE_NAME);
     return;
   }
 }

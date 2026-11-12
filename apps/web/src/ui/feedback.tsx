@@ -22,7 +22,7 @@
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Input, Label, Modal, TextField, Toast } from '@heroui/react';
+import { Button, Input, Label, Modal, TextField, Toast, type ToastProps } from '@heroui/react';
 import { CopyButton } from './copy-button';
 import { Sym } from './icons';
 import { MODAL_CONTAINER_CLASS } from './modalContainer';
@@ -355,11 +355,31 @@ export function FeedbackHost() {
 
   return (
     <>
-      <Toast.Provider placement="top" gap={8} maxVisibleToasts={3} />
+      <Toast.Provider placement="top" gap={8} maxVisibleToasts={1}>
+        {({ toast }) => <ActionToast toast={toast} />}
+      </Toast.Provider>
       {current && <FeedbackDialog key={queue.length} command={current} onOpenChange={handleOpenChange} />}
       <PopconfirmLayer />
     </>
   );
+}
+
+function ActionToast({ toast }: Pick<ToastProps, 'toast'>) {
+  const { title, description, variant, actionProps } = toast.content;
+  const urgent = variant === 'danger';
+  const ref = useRef<HTMLDivElement>(null);
+  // React Aria hardcodes alertdialog after merging root props. Change the
+  // ordinary toast to a nonmodal group before paint; Content is the live region.
+  useLayoutEffect(() => { ref.current?.setAttribute('role', urgent ? 'alertdialog' : 'group'); }, [urgent]);
+  return <Toast ref={ref} toast={toast} variant={variant}>
+    <Toast.Indicator variant={variant} />
+    <Toast.Content role={urgent ? 'alert' : 'status'} aria-live={urgent ? 'assertive' : 'polite'}>
+      <Toast.Title>{title}</Toast.Title>
+      {description && <Toast.Description>{description}</Toast.Description>}
+      {actionProps?.children && <Toast.ActionButton {...actionProps} />}
+    </Toast.Content>
+    <Toast.CloseButton />
+  </Toast>;
 }
 
 interface FeedbackDialogProps {

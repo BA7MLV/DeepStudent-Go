@@ -69,9 +69,11 @@ export interface ModelOverrides {
   inputCapabilities?: string[];
   outputCapabilities?: string[];
   toolCalling?: boolean;
+  /** Server image preparation policy for this exact model. Not a billing formula. */
+  imageInput?: { quality?: 'high' | 'original'; maxEdge?: number; maxPixels?: number; maxBytes?: number };
 }
 
-export const MODEL_OVERRIDE_FIELDS = ['modelType', 'metadataCatalogId', 'contextWindow', 'maxOutputTokens', 'reasoningEffort', 'inputCapabilities', 'outputCapabilities', 'toolCalling'] as const;
+export const MODEL_OVERRIDE_FIELDS = ['modelType', 'metadataCatalogId', 'contextWindow', 'maxOutputTokens', 'reasoningEffort', 'inputCapabilities', 'outputCapabilities', 'toolCalling', 'imageInput'] as const;
 
 export function hasModelOverrides(value?: ModelOverrides): boolean {
   return !!value && MODEL_OVERRIDE_FIELDS.some((field) => value[field] !== undefined);

@@ -155,6 +155,8 @@ const Bubble = memo(function Bubble({
   onAnswer,
   projectId,
   rich,
+  error,
+  resolving,
 }: {
   row: Row;
   approval?: ApprovalDto;
@@ -165,6 +167,8 @@ const Bubble = memo(function Bubble({
   projectId?: string;
   /** 项目里 Bot 的文字回复一律走富渲染；聊天里只有像 Markdown 的才走。 */
   rich?: boolean;
+  error?: string;
+  resolving?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const { message, first, last, stamp, status } = row;
@@ -201,8 +205,8 @@ const Bubble = memo(function Bubble({
         <p className="imsg-text">{message.content}</p>
         {waiting && approval && (
           <div className="imsg-actions">
-            <Button size="sm" variant="secondary" onPress={() => onResolve(approval.id, false)}>{t('botHome.reject')}</Button>
-            <Button size="sm" variant="primary" onPress={() => onResolve(approval.id, true)}>{t('botHome.approve')}</Button>
+            <Button size="sm" variant="secondary" isDisabled={resolving} onPress={() => onResolve(approval.id, false)}>{t('botHome.reject')}</Button>
+            <Button size="sm" variant="primary" isDisabled={resolving} onPress={() => onResolve(approval.id, true)}>{t('botHome.approve')}</Button>
           </div>
         )}
         {approval && approval.status !== 'pending' && (
@@ -251,6 +255,7 @@ const Bubble = memo(function Bubble({
         data-day={row.day}
       >
         <BotMessageBoundary key={message.content} content={message.content}>{body}</BotMessageBoundary>
+        {error && <p className="bh-inline-error" role="alert">{error}</p>}
       </div>
       {/* iMessage：只在自己最后一条下面写一次「已读 / 已送达」。 */}
       {row.lastMine && status && <DeliveryReceipt status={status} createdAt={timeOf(message)} />}
@@ -323,6 +328,11 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const listMoreFlight = useRef(false);
   const protocol = useRef(false);
   const [sendBusy, setSendBusy] = useState(false);
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
+  const setActionError = useCallback((key: string, value: string) => setActionErrors(old => ({ ...old, [key]: value })), []);
+  const approvalFlights = useRef(new Set<string>());
+  const [resolvingApprovals, setResolvingApprovals] = useState<Set<string>>(new Set());
+  const failedSends = useRef(new Map<string, { nonce: string; model: ReturnType<typeof taskModelChoice> }>());
   const [messageTarget, setMessageTarget] = useState<{ kind: 'run'; runId: string } | { kind: 'question'; questionId: string } | undefined>();
   const sendLock = useRef(false);
   const loadVersion = useRef(0);
@@ -526,16 +536,17 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const mergeThread = (updated: ThreadDto) => setThreads(old => old.map(thread => thread.id === updated.id ? { ...thread, ...updated } : thread));
 
   const send = async () => {
-    const modelSelection = taskModelChoice(activeId);
+    let modelSelection = taskModelChoice(activeId);
     if (!canChat || attachmentsPending || (!draft.trim() && !draftFiles.length) || sendLock.current || (activeId && !active)) return;
     sendLock.current = true; setSendBusy(true);
     const content = draft.trim();
-    const nonce = crypto.randomUUID();
+    let nonce: string = crypto.randomUUID();
     const sourceKey = draftKey;
     const files = draftFiles;
     let targetId: string | undefined;
     let pending: MessageDto | undefined;
     let clearedDraft = false;
+    setActionError(`composer:${sourceKey}`, '');
     try {
       const target = active ?? await create();
       if (!target) return;
@@ -548,6 +559,10 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       // Files upload on selection; never create/send a conversation for a partial batch.
       const attachments = files.map(item => item.uploaded!);
       const payload = attachments.length ? JSON.stringify({ ...attachments[0], attachments, caption: content }) : content;
+      const signature = JSON.stringify([session?.user?.id, target.id, payload, messageTarget]);
+      const previousAttempt = failedSends.current.get(signature);
+      if (previousAttempt) { nonce = previousAttempt.nonce; modelSelection = previousAttempt.model; }
+      failedSends.current.set(signature, { nonce, model: modelSelection });
       // Do not append across a trimmed, unloaded gap while the reader is in history.
       if (target.id === activeId && !await history.jumpLatest()) throw new Error('load_failed');
       history.setReading(true, scrollRef.current?.scrollTop ?? 0);
@@ -558,20 +573,21 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
         setDrafts(old => old[target.id]?.trim() === content ? { ...old, [target.id]: '' } : old);
       }
       settlePending(target.id, pending.id, await (attachments.length
-         ? serverClient.sendAttachment(target.id, payload, nonce, messageTarget, undefined, modelSelection)
-         : serverClient.sendMessage(target.id, payload, nonce, messageTarget, undefined, modelSelection)));
-       setMessageTarget(undefined);
+        ? serverClient.sendAttachment(target.id, payload, nonce, messageTarget, undefined, modelSelection)
+        : serverClient.sendMessage(target.id, payload, nonce, messageTarget, undefined, modelSelection)));
+      failedSends.current.delete(signature);
+      setMessageTarget(undefined);
       setAttachmentDrafts(old => ({ ...old, [target.id]: (old[target.id] ?? []).filter(item => !files.some(file => file.id === item.id)) }));
       setRunning(old => ({ ...old, [target.id]: true }));
       if (target.title === tp('newTitle')) {
         const updated = await serverClient.updateThread(target.id, { title: (content || files[0]?.file.name || '').slice(0, 60) }).catch(() => null);
         if (updated) mergeThread(updated);
       }
-       } catch (error) {
-       if (error instanceof Error && ['target_expired', 'question_already_answered', 'target_waiting_for_specific_answer'].includes(error.message)) setMessageTarget(undefined);
-       if (targetId && pending) settlePending(targetId, pending.id, null);
+    } catch (error) {
+      if (error instanceof Error && ['target_expired', 'question_already_answered', 'target_waiting_for_specific_answer'].includes(error.message)) setMessageTarget(undefined);
+      if (targetId && pending) settlePending(targetId, pending.id, null);
       if (clearedDraft) setDrafts(old => ({ ...old, [targetId ?? sourceKey]: old[targetId ?? sourceKey] || content }));
-      toast.error(projectError(error));
+      setActionError(`composer:${targetId ?? sourceKey}`, `${projectError(error)} ${i18n.t('interface:feedback.checkBeforeRetry')}`);
     } finally { sendLock.current = false; setSendBusy(false); }
   };
 
@@ -619,40 +635,45 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
 
   const addFiles = (files: File[]) => {
     if (!canChat) return;
-    if (files.some(file => !file.size || file.size > 20 * 1024 * 1024)) { toast.error('附件不能为空，单个附件不能超过 20 MB'); return; }
-    if (files.length + draftFiles.length > MAX_BOT_ATTACHMENTS) { toast.error(`最多添加 ${MAX_BOT_ATTACHMENTS} 个附件`); return; }
+    if (files.some(file => !file.size || file.size > 20 * 1024 * 1024)) { setActionError(`composer:${draftKey}`, '附件不能为空，单个附件不能超过 20 MB'); return; }
+    if (files.length + draftFiles.length > MAX_BOT_ATTACHMENTS) { setActionError(`composer:${draftKey}`, `最多添加 ${MAX_BOT_ATTACHMENTS} 个附件`); return; }
+    setActionError(`composer:${draftKey}`, '');
     const items = files.map(file => ({ id: crypto.randomUUID(), file }));
     setAttachmentDrafts(old => ({ ...old, [draftKey]: [...(old[draftKey] ?? []), ...items].slice(0, MAX_BOT_ATTACHMENTS) }));
     for (const item of items) void uploadDraftFile(item);
   };
 
   const react = useCallback(async (messageId: string) => {
+    setActionError(`message:${messageId}`, '');
     try {
       await serverClient.react(messageId, '👍');
-      toast.success('👍');
+      toast.success(t('botHome.reacted'));
     } catch {
-      toast.error(t('botHome.reactFailed'));
+      setActionError(`message:${messageId}`, t('botHome.reactFailed'));
     }
   }, [t]);
 
   const resolveApproval = useCallback(async (approvalId: string, approved: boolean) => {
-    if (!activeId) return;
+    if (!activeId || approvalFlights.current.has(approvalId)) return;
+    approvalFlights.current.add(approvalId); setResolvingApprovals(new Set(approvalFlights.current));
+    setActionError(`approval:${approvalId}`, '');
     try {
       const resolved = await serverClient.resolveApproval(approvalId, approved);
       patchActive(activeId, (thread) => ({ ...thread, approvals: thread.approvals?.map((approval) => approval.id === approvalId ? resolved : approval) }));
     } catch {
-      toast.error(t('botHome.approvalFailed'));
-    }
+      setActionError(`approval:${approvalId}`, t('botHome.approvalFailed'));
+    } finally { approvalFlights.current.delete(approvalId); setResolvingApprovals(new Set(approvalFlights.current)); }
   }, [activeId, patchActive, t]);
 
   const stop = async () => {
     if (!active) return;
+    setActionError(`thread:${active.id}`, '');
     try {
       const result = await serverClient.stopThread(active.id);
       setRunning(old => ({ ...old, [active.id]: false }));
       toast.info(result.stopped ? t('botHome.stopped') : t('botHome.notRunning'));
     } catch {
-      toast.error(t('botHome.stopFailed'));
+      setActionError(`thread:${active.id}`, t('botHome.stopFailed'));
     }
   };
 
@@ -660,7 +681,6 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
     if (question.status !== 'pending') return;
     setMessageTarget({ kind: 'question', questionId: question.id });
     setDrafts(old => ({ ...old, [draftKey]: old[draftKey] ?? '' }));
-    toast.info(t('botHome.answerPrompt'));
   }, [draftKey, t]);
 
   const continueRun = useCallback(() => {
@@ -689,7 +709,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       mergeThread(updated);
       patchActive(thread.id, detail => ({ ...detail, ...updated }));
       if (updated.archived && activeId === thread.id && !showArchived) { newDraft(); setPane('list'); }
-    } catch (error) { toast.error(projectError(error)); }
+    } catch (error) { setActionError(`thread:${thread.id}`, `${projectError(error)} ${i18n.t('interface:feedback.checkBeforeRetry')}`); }
   };
 
   const reload = () => {
@@ -790,7 +810,9 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
                 onResolve={resolveApproval}
                 onAnswer={answerQuestion}
                 projectId={projectId}
-                rich={Boolean(projectId)}
+                 rich={Boolean(projectId)}
+                 error={actionErrors[`message:${row.message.id}`] || (approvalByMessage.get(row.message.id) ? actionErrors[`approval:${approvalByMessage.get(row.message.id)!.id}`] : '')}
+                 resolving={approvalByMessage.get(row.message.id) ? resolvingApprovals.has(approvalByMessage.get(row.message.id)!.id) : false}
               />
             )}
           </VirtualMessages>
@@ -832,6 +854,11 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       onSettings={() => projectId ? setSettingsOpen(true) : openSettings('bot')}
       attachLabel={t('botHome.attach')}
         accessory={<>
+          {(actionErrors[`composer:${draftKey}`] || (activeId && actionErrors[`thread:${activeId}`])) && <div className="bh-inline-error" role="alert" data-testid="bot-action-error">
+            {actionErrors[`composer:${draftKey}`] || (activeId && actionErrors[`thread:${activeId}`])}
+            <Button size="sm" variant="tertiary" onPress={history.retry}>{tp('refresh')}</Button>
+            <Button size="sm" variant="tertiary" onPress={() => { setActionError(`composer:${draftKey}`, ''); if (activeId) setActionError(`thread:${activeId}`, ''); }}>{tp('cancel')}</Button>
+          </div>}
           <TaskModelPicker sessionId={activeId} />
          {messageTarget && <div className="imsg-composer__target" role="status">
            <span>{messageTarget.kind === 'question' ? t('botHome.answerTarget') : t('botHome.continueTarget')}</span>

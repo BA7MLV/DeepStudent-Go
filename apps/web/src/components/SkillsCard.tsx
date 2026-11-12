@@ -13,6 +13,7 @@ import { cloud } from '../cloud/state';
 import { accountLifetime, type AccountLifetime } from '../client/account-lifecycle';
 import type { SkillIndexItem } from '@wangke/contracts/client-runtime';
 import { useTranslation } from 'react-i18next';
+import PersistentError from './PersistentError';
 
 interface Draft {
   mcpRequired?: string[];
@@ -27,6 +28,7 @@ interface Draft {
 /** 设置页「写作技能」卡片：管理可注入讲义生成与问答的 skill（SKILL.md 单文件或含 references/ 的 zip 包） */
 export default function SkillsCard() {
   const { t } = useTranslation('settings');
+  const { t: feedback } = useTranslation('interface');
   const { rows: skills = [], ready, error, retry } = useSkillCatalog();
   const [showLegacy, setShowLegacy] = useState(false);
   const [page, setPage] = useState(0);
@@ -39,6 +41,9 @@ export default function SkillsCard() {
   const [draftError, setDraftError] = useState('');
   const [saving, setSaving] = useState(false);
   const [reading, setReading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importFlight = useRef(false);
   const generation = useRef(0);
   const draftLifetime = useRef<AccountLifetime | undefined>(undefined);
   useEffect(() => () => { ++generation.current; }, []);
@@ -68,7 +73,7 @@ export default function SkillsCard() {
       setDraftBaseline(JSON.stringify(next));
       setDraft(next);
     } catch {
-      if (fence === generation.current) toast.error(t('skillPicker.loadError'));
+      if (fence === generation.current) setActionError(t('skillPicker.loadError'));
     } finally { if (fence === generation.current) setReading(false); }
   };
 
@@ -101,23 +106,28 @@ export default function SkillsCard() {
     try {
       const skill = await readDefinition(metadata.id);
       await submitLearning([learningEdit({ kind: 'skillDefinition', expected: skill, value: { ...skill, enabled: enabled ? 1 : 0 } } as any)], [`skill:${skill.id}`]);
-    } catch { toast.error(t('skillPicker.saveError')); }
+    } catch { setActionError(t('skillPicker.saveError')); }
   };
 
   const importFiles = async (files: File[]) => {
+    if (importFlight.current) return;
+    importFlight.current = true; setImporting(true); setActionError(null);
     let ok = 0;
+    const failures: string[] = [];
     for (const f of files) {
       try {
-        const { name, refCount } = await importSkillFile(f);
-        toast.success(`已导入「${name}」${refCount > 0 ? `（含 ${refCount} 篇参考文档）` : ''}`);
+        await importSkillFile(f);
         ok++;
       } catch (e) {
-        toast.error(`导入 ${f.name} 失败：${e instanceof Error ? e.message : String(e)}`);
+        failures.push(`${f.name}：${e instanceof Error ? e.message : String(e)}`);
       }
     }
     if (ok > 0) {
       setShowLegacy(false);
+      toast.success(feedback('feedback.skillsImported', { count: ok }));
     }
+    if (failures.length) setActionError(failures.join('\n'));
+    importFlight.current = false; setImporting(false);
   };
 
   const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -167,7 +177,7 @@ export default function SkillsCard() {
 
   const removeSkill = async (metadata: SkillIndexItem) => {
     try { await saveSkillPackage(await readDefinition(metadata.id), null, []); }
-    catch { toast.error(t('skillPicker.saveError')); }
+    catch { setActionError(t('skillPicker.saveError')); }
   };
 
   const resetBuiltin = async (metadata: SkillIndexItem) => {
@@ -178,7 +188,7 @@ export default function SkillsCard() {
       const patch = { description: src.description, body: src.body, updatedAt: Date.now() };
       await submitLearning([learningEdit({ kind: 'skillDefinition', expected: skill, value: { ...skill, ...patch } } as any)], [`skill:${skill.id}`]);
       toast.success('已重置为内置版本');
-    } catch { toast.error(t('skillPicker.saveError')); }
+    } catch { setActionError(t('skillPicker.saveError')); }
   };
 
   const visibleSkills = skills.filter((skill) => isLegacyHandoutSkill(skill) === showLegacy);
@@ -191,7 +201,7 @@ export default function SkillsCard() {
       testId="card-skills"
       actions={
         <>
-          <Button variant="secondary" data-testid="btn-skill-import" onPress={() => fileRef.current?.click()}>
+          <Button variant="secondary" isDisabled={importing} data-testid="btn-skill-import" onPress={() => fileRef.current?.click()}>
             <Sym name="upload" />
             导入
           </Button>
@@ -221,6 +231,7 @@ export default function SkillsCard() {
         </>
       }
     >
+      <PersistentError title={feedback('feedback.skillsFailed')} text={actionError} onClose={() => setActionError(null)} />
       <div className="mb-3 text-muted">
         课程讲义统一加载写作、数学、编程、行测与申论规范，专题按需读取。支持 SKILL.md 单文件（.md）或含 references/
         参考文档的 zip 包；技能正文会注入提示词，请只导入可信来源。

@@ -35,6 +35,7 @@ export interface TranscribeJob {
   done: number;
   total: number;
   error?: string;
+  actionError?: string;
   /** 由启动时的续跑扫描发起（用于文案区分：是「继续转写」不是「重新转写」） */
   resume: boolean;
 }

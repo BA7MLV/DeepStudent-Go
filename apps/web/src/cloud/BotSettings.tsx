@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Spinner } from '@heroui/react';
+import { useTranslation } from 'react-i18next';
 import type { CloudConfig } from '@wangke/contracts/cloud';
 import { cloud, cloudRequest } from './state';
 import { applyCloudConfig } from './sync';
 import { serverClient } from '../api/serverClient';
-import { SectionCard, toast } from '../ui';
+import { SectionCard } from '../ui';
+import PersistentError from '../components/PersistentError';
 import { SettingSelect, SettingSwitch } from '../components/settings/controls';
 import BotManagement from './BotManagement';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
@@ -30,10 +32,16 @@ const DECISIONS = [
  * 不会把别的设备刚改的模型配置盖掉；失败时回滚到服务器的值并提示。
  */
 export default function BotSettings() {
+  const { t } = useTranslation('interface');
   const [config, setConfig] = useState<CloudConfig>();
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [permissions, setPermissions] = useState<Array<{ id: string; capability: string; arguments: string; status: string }>>([]);
   const [error, setError] = useState('');
+  const [permissionErrors, setPermissionErrors] = useState<Record<string, string>>({});
+  const [resolving, setResolving] = useState<Set<string>>(new Set());
+  const resolveFlights = useRef(new Set<string>());
+  const saveGeneration = useRef(0);
+  const saves = useRef(Promise.resolve());
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const loadActivity = useCallback(async () => {
@@ -55,50 +63,77 @@ export default function BotSettings() {
         if (!alive || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) return;
         const snapshot = model.getSnapshot();
         if (snapshot.status === 'ready') setPermissions((snapshot.data as unknown as { permissions: typeof permissions }).permissions.filter(permission => permission.status === 'pending'));
+        else if (snapshot.status === 'error') setError(t('feedback.permissionSyncFailed', { message: snapshot.error }));
       };
       off = model.subscribe(refresh); release = model.acquire(); refresh();
     }).catch(e => { if (alive) setError(e.message); });
-    return () => { alive = false; off?.(); release?.(); clearTimeout(saveTimer.current); };
-  }, [loadActivity]);
+    return () => { alive = false; ++saveGeneration.current; off?.(); release?.(); clearTimeout(saveTimer.current); };
+  }, [loadActivity, t]);
 
   const persist = (next: CloudConfig, delay = 0) => {
+    const generation = ++saveGeneration.current, owner = cloud.userId;
+    const current = () => generation === saveGeneration.current && owner === cloud.userId;
     setConfig(next);
+    setError('');
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      void (async () => {
+      saves.current = saves.current.then(async () => {
+        if (!current()) return;
         try {
           const latest = await cloudRequest<CloudConfig>('/config');
+          if (!current()) return;
           const saved = await cloudRequest<CloudConfig>('/config', { method: 'PUT', body: JSON.stringify({ ...latest, policy: next.policy, trustedAgentIds: next.trustedAgentIds }) });
-          setConfig(saved); applyCloudConfig(saved);
+          if (current()) { setConfig(saved); applyCloudConfig(saved); }
         } catch (e) {
-          toast.error(`没有保存：${(e as Error).message}`);
-          void cloudRequest<CloudConfig>('/config').then(setConfig).catch(() => {});
+          if (!current()) return;
+          setError(t('feedback.policyUncertain', { message: (e as Error).message }));
+          try { const saved = await cloudRequest<CloudConfig>('/config'); if (current()) setConfig(saved); } catch { /* Keep the failure visible. */ }
         }
-      })();
+      });
     }, delay);
   };
   const setPolicy = (patch: Partial<Policy>, delay = 0) => config && persist({ ...config, policy: { ...config.policy, ...patch } }, delay);
 
   const resolve = async (id: string, approved: boolean) => {
+    if (resolveFlights.current.has(id)) return;
+    resolveFlights.current.add(id); setResolving(new Set(resolveFlights.current));
+    setPermissionErrors(current => ({ ...current, [id]: '' }));
     try { await cloudRequest(`/permissions/${id}/resolve`, { method: 'POST', body: JSON.stringify({ approved }) }); await loadActivity(); }
-    catch (e) { toast.error((e as Error).message); }
+    catch (e) { setPermissionErrors(current => ({ ...current, [id]: t('feedback.approvalUncertain', { message: (e as Error).message }) })); }
+    finally { resolveFlights.current.delete(id); setResolving(new Set(resolveFlights.current)); }
+  };
+
+  const reloadConfig = async () => {
+    const generation = ++saveGeneration.current, owner = cloud.userId;
+    clearTimeout(saveTimer.current);
+    setError('');
+    try {
+      const value = await cloudRequest<CloudConfig>('/config');
+      if (generation !== saveGeneration.current || owner !== cloud.userId) return;
+      setConfig(value); applyCloudConfig(value);
+    } catch (e) {
+      if (generation === saveGeneration.current && owner === cloud.userId) setError((e as Error).message);
+    }
   };
 
   if (!config) {
-    return <div className="grid min-h-40 place-items-center text-muted">{error ? <p role="alert">{error}</p> : <Spinner size="sm" color="current" />}</div>;
+    return <div className="grid min-h-40 place-items-center text-muted">{error ? <div><p role="alert">{error}</p><Button size="sm" variant="tertiary" onPress={() => void reloadConfig()}>{t('feedback.reloadSettings')}</Button></div> : <Spinner size="sm" color="current" />}</div>;
   }
 
   return (
     <>
+      <PersistentError title={t('feedback.botSyncFailed')} text={error} onClose={() => setError('')} />
+      {error && <Button size="sm" variant="tertiary" onPress={() => void reloadConfig()}>{t('feedback.reloadSettings')}</Button>}
       {permissions.length > 0 && (
         <SectionCard title="等待批准" testId="bot-approvals">
           {permissions.map((p) => (
             <div key={p.id} className="flex flex-col gap-2 border-b border-border/70 py-3 last:border-b-0">
               <span className="text-sm font-medium">{p.capability}</span>
               <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-background-secondary p-2 text-xs">{p.arguments}</pre>
+              {permissionErrors[p.id] && <p className="text-sm text-danger" role="alert">{permissionErrors[p.id]}<Button size="sm" variant="tertiary" onPress={() => void loadActivity().catch(e => setError(e.message))}>{t('feedback.refreshStatus')}</Button></p>}
               <div className="grid grid-cols-2 gap-2">
-                <Button variant="secondary" className="min-h-11" onPress={() => void resolve(p.id, false)}>拒绝</Button>
-                <Button variant="primary" className="min-h-11" onPress={() => void resolve(p.id, true)}>批准</Button>
+                <Button variant="secondary" className="min-h-11" isDisabled={resolving.has(p.id)} onPress={() => void resolve(p.id, false)}>拒绝</Button>
+                <Button variant="primary" className="min-h-11" isDisabled={resolving.has(p.id)} onPress={() => void resolve(p.id, true)}>批准</Button>
               </div>
             </div>
           ))}

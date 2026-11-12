@@ -1,0 +1,27 @@
+/* A link, not an action button: compact geometry, neutral surface, native <a>. */
+.x-markdown a.md-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  max-inline-size: min(100%, 34ch);
+  box-sizing: border-box;
+  padding: 0.08em 0.45em;
+  border-radius: var(--radius-chip);
+  background: var(--background-secondary);
+  color: var(--foreground);
+  font-size: 0.9em;
+  line-height: 1.5;
+  vertical-align: -0.25em;
+  text-decoration: none;
+  overflow-wrap: normal;
+}
+.x-markdown a.md-link-chip:hover { background: var(--background-tertiary, var(--background-secondary)); text-decoration: none; }
+.x-markdown a.md-link-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.md-link-chip__label { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md-link-chip__domain { flex-shrink: 0; max-inline-size: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.8em; }
+.md-link-chip__arrow { flex-shrink: 0; color: var(--muted); }
+.md-link-chip__icon { position: relative; display: inline-flex; inline-size: 1em; block-size: 1em; flex-shrink: 0; color: var(--muted); }
+.md-link-chip__icon[data-loaded] > svg { visibility: hidden; }
+.x-markdown .md-link-chip__icon img { position: absolute; inset: 0; inline-size: 1em; block-size: 1em; margin: 0; border-radius: 2px; object-fit: contain; }
+.md-link-chip__icon:not([data-loaded]) img { visibility: hidden; }
+@media (max-width: 480px) { .md-link-chip__domain { max-inline-size: 9ch; } }

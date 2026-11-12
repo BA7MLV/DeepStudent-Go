@@ -544,6 +544,7 @@ const _wangke_remote_host_clientRuntime_editLearning_parameter_0$schema = () => 
 }))
 let _wangke_remote_host_clientRuntime_editLearning_result$schema$value
 const _wangke_remote_host_clientRuntime_editLearning_result$schema = () => (_wangke_remote_host_clientRuntime_editLearning_result$schema$value ??= z.object({
+  'epoch': z.union([z.undefined(), z.string()]).optional(),
   'accepted': z.array(z.string()),
   'versions': z.array(z.object({
   'table': z.string(),
@@ -611,6 +612,8 @@ const _wangke_remote_host_clientRuntime_read_parameter_0$schema = () => (_wangke
 }), z.object({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.object({
+  'kind': z.literal("recordHead"),
 }), z.object({
   'kind': z.literal("recordKeys"),
   'keys': z.array(z.object({
@@ -1156,8 +1159,12 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0$schema = () 
   'path': z.string(),
   'revision': z.string(),
 }), z.object({
-  'kind': z.union([z.literal("trash"), z.literal("restore"), z.literal("deleteTrash")]),
+  'kind': z.union([z.literal("trash"), z.literal("deleteTrash")]),
   'projectId': z.string(),
+}), z.object({
+  'kind': z.literal("restore"),
+  'projectId': z.string(),
+  'expectedDeletedAt': z.union([z.undefined(), z.string()]).optional(),
 }), z.object({
   'kind': z.literal("saveCourseText"),
   'courseId': z.string(),
@@ -1374,6 +1381,8 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0$schema = () => (_wangk
 }), z.object({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.object({
+  'kind': z.literal("recordHead"),
 }), z.object({
   'kind': z.literal("recordKeys"),
   'keys': z.array(z.object({
@@ -2499,6 +2508,8 @@ const _wangke_remote_host_clientRuntime_read_parameter_0_strict$schema = () => (
   'kind': z.literal("records"),
   'after': z.number(),
 }), z.strictObject({
+  'kind': z.literal("recordHead"),
+}), z.strictObject({
   'kind': z.literal("recordKeys"),
   'keys': z.array(z.strictObject({
   'table': z.union([z.literal("cards"), z.literal("comments"), z.literal("videos"), z.literal("files"), z.literal("segments"), z.literal("frames"), z.literal("handouts"), z.literal("chats"), z.literal("chatSessions"), z.literal("skills"), z.literal("skillRefs"), z.literal("danmakus"), z.literal("folders"), z.literal("subtitleTracks"), z.literal("materialBlocks"), z.literal("materialInk"), z.literal("covers"), z.literal("studyDays"), z.literal("courseFiles")]),
@@ -2990,8 +3001,12 @@ const _wangke_remote_host_clientRuntime_resourceCommand_parameter_0_strict$schem
   'path': z.string(),
   'revision': z.string(),
 }), z.strictObject({
-  'kind': z.union([z.literal("trash"), z.literal("restore"), z.literal("deleteTrash")]),
+  'kind': z.union([z.literal("trash"), z.literal("deleteTrash")]),
   'projectId': z.string(),
+}), z.strictObject({
+  'kind': z.literal("restore"),
+  'projectId': z.string(),
+  'expectedDeletedAt': z.union([z.undefined(), z.string()]).optional(),
 }), z.strictObject({
   'kind': z.literal("saveCourseText"),
   'courseId': z.string(),
@@ -3101,6 +3116,8 @@ const _wangke_remote_host_clientRuntime_watch_parameter_0_strict$schema = () => 
 }), z.strictObject({
   'kind': z.literal("records"),
   'after': z.number(),
+}), z.strictObject({
+  'kind': z.literal("recordHead"),
 }), z.strictObject({
   'kind': z.literal("recordKeys"),
   'keys': z.array(z.strictObject({
@@ -3300,7 +3317,7 @@ const $remote = createTypertRemoteInfo({
         mode: 'strict',
         typeSymbol: '@wangke/contracts/client-runtime#RuntimeRecordsReceipt',
         create: _wangke_remote_host_clientRuntime_editLearning_result$schema,
-        jsonSchema: {"type":"object","properties":{"accepted":{"type":"array","items":{"type":"string"}},"versions":{"type":"array","items":{"type":"object","properties":{"table":{"type":"string"},"key":{"oneOf":[{"type":"string"},{"type":"number"}]},"revision":{"type":"number"}},"required":["table","key","revision"],"additionalProperties":true}}},"required":["accepted","versions"],"additionalProperties":true},
+        jsonSchema: {"type":"object","properties":{"epoch":{"type":"string"},"accepted":{"type":"array","items":{"type":"string"}},"versions":{"type":"array","items":{"type":"object","properties":{"table":{"type":"string"},"key":{"oneOf":[{"type":"string"},{"type":"number"}]},"revision":{"type":"number"}},"required":["table","key","revision"],"additionalProperties":true}}},"required":["accepted","versions"],"additionalProperties":true},
       },
       sourceLocation: {"file":"packages/remote-host/src/index.ts","line":50,"column":3},
     },
@@ -4148,7 +4165,7 @@ export const TYPERT = {
           },
           {
             "name": "ResourceOperation",
-            "declaration": "export type ResourceOperation = { kind: 'importLibraryBlob'; sourceId: string; size: number; sha256: string; contentType: string; } | { kind: 'importLibrary'; library: import('./library-import.js').LibraryImport; } | { kind: 'createFolder'; name: string; } | { kind: 'createDirectory'; projectId: string; path: string; } | { kind: 'upload'; projectId: string; path: string; size: number; sha256: string; contentType: string; } | { kind: 'recordMediaDuration'; courseId: string; duration: number; } | { kind: 'recordPlayback'; courseId: string; position: number; finished?: boolean; } | { kind: 'recordReadingPosition'; courseId: string; unit: number; } | { kind: 'setReadingView'; courseId: string; view: 'raw' | 'blocks'; } | { kind: 'setCourseSkills'; courseId: string; pin: number[]; drop: number[]; } | { kind: 'setCoursePinned'; courseId: string; pinned: boolean; } | { kind: 'pauseTranscription'; courseId: string; } | { kind: 'setVideoSource'; courseId: string; source: { bvid: string; aid: number; cid: number; page: number; }; } | { kind: 'importSubtitles'; courseId: string; primary: boolean; segments: { idx: number; start: number; end: number; text: string; status: 0 | 1; cues?: { start: number; end: number; text: string; }[]; }[]; tracks: { lang: string; lanDoc: string; primary?: 0 | 1; cues: { start: number; end: number; text: string; }[]; }[]; } | { kind: 'renameFolder'; projectId: string; name: string; } | { kind: 'folderColor'; projectId: string; path: string; color: ResourceFolderColor; } | { kind: 'move'; projectId: string; path: string; targetProjectId: string; target: string; revision: string; } | { kind: 'remove'; projectId: string; path: string; revision: string; } | { kind: 'trash' | 'restore' | 'deleteTrash'; projectId: string; } | { kind: 'saveCourseText'; courseId: string; text: string; expected: string; } | { kind: 'saveMarkdown'; courseId: string; text: string; expected: string; name?: string; folderId?: number; createOnly?: boolean; } | { kind: 'organizeCourses'; folders: { name: string; courseIds: string[]; }[]; } | { kind: 'moveLibrarySelection'; placements: { key: string; parent: number | null; target: number | null; }[]; } | { kind: 'saveProjectText'; projectId: string; path: string; text: string; expectedRevision: string | null; };"
+            "declaration": "export type ResourceOperation = { kind: 'importLibraryBlob'; sourceId: string; size: number; sha256: string; contentType: string; } | { kind: 'importLibrary'; library: import('./library-import.js').LibraryImport; } | { kind: 'createFolder'; name: string; } | { kind: 'createDirectory'; projectId: string; path: string; } | { kind: 'upload'; projectId: string; path: string; size: number; sha256: string; contentType: string; } | { kind: 'recordMediaDuration'; courseId: string; duration: number; } | { kind: 'recordPlayback'; courseId: string; position: number; finished?: boolean; } | { kind: 'recordReadingPosition'; courseId: string; unit: number; } | { kind: 'setReadingView'; courseId: string; view: 'raw' | 'blocks'; } | { kind: 'setCourseSkills'; courseId: string; pin: number[]; drop: number[]; } | { kind: 'setCoursePinned'; courseId: string; pinned: boolean; } | { kind: 'pauseTranscription'; courseId: string; } | { kind: 'setVideoSource'; courseId: string; source: { bvid: string; aid: number; cid: number; page: number; }; } | { kind: 'importSubtitles'; courseId: string; primary: boolean; segments: { idx: number; start: number; end: number; text: string; status: 0 | 1; cues?: { start: number; end: number; text: string; }[]; }[]; tracks: { lang: string; lanDoc: string; primary?: 0 | 1; cues: { start: number; end: number; text: string; }[]; }[]; } | { kind: 'renameFolder'; projectId: string; name: string; } | { kind: 'folderColor'; projectId: string; path: string; color: ResourceFolderColor; } | { kind: 'move'; projectId: string; path: string; targetProjectId: string; target: string; revision: string; } | { kind: 'remove'; projectId: string; path: string; revision: string; } | { kind: 'trash' | 'deleteTrash'; projectId: string; } | { kind: 'restore'; projectId: string; expectedDeletedAt?: string; } | { kind: 'saveCourseText'; courseId: string; text: string; expected: string; } | { kind: 'saveMarkdown'; courseId: string; text: string; expected: string; name?: string; folderId?: number; createOnly?: boolean; } | { kind: 'organizeCourses'; folders: { name: string; courseIds: string[]; }[]; } | { kind: 'moveLibrarySelection'; placements: { key: string; parent: number | null; target: number | null; }[]; } | { kind: 'saveProjectText'; projectId: string; path: string; text: string; expectedRevision: string | null; };"
           },
           {
             "name": "ResponseSegment",
@@ -4184,7 +4201,7 @@ export const TYPERT = {
           },
           {
             "name": "RuntimeRead",
-            "declaration": "export type RuntimeRead = { kind: 'preferences'; } | { kind: 'permissions'; } | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean; cursor?: string; limit?: number; } | { kind: 'resourceTrash'; } | { kind: 'courseDocument'; courseId: string; } | { kind: 'systemDocument'; path: string; } | { kind: 'systemDirectory'; path: string; offset: number; query: string; } | { kind: 'executorRecovery'; taskId?: string; operationIds: string[]; } | { kind: 'interactionRecovery'; taskId: string; sequence: number; } | { kind: 'catalog'; } | { kind: 'pluginScope'; materialId?: string; projectFolderId?: number; } | { kind: 'tasks'; } | { kind: 'records'; after: number; } | { kind: 'recordKeys'; keys: { table: ProjectionTable; key: string | number; }[]; } | { kind: 'collectionPage'; table: ProjectionTable; parent?: string | number; cursor?: string; } | { kind: 'sessionIndex'; videoId: string; archived: boolean; recentOnly: boolean; cursor?: string; } | { kind: 'courseCount'; } | { kind: 'courseReadiness'; videoId: string; } | { kind: 'courseMetadata'; ids: string[]; covers: boolean; } | { kind: 'coverCandidates'; cursor?: string; } | { kind: 'courseColorFrame'; videoId: string; } | { kind: 'latestHandout'; videoId: string; } | { kind: 'skillIndex'; cursor?: string; } | { kind: 'studySummary'; } | { kind: 'studyOverview'; today: string; from: string; preview: { date: string; seconds: number; }[]; } | { kind: 'fileIntents'; } | { kind: 'session'; sessionId: number; before?: { createdAt: number; id: number; role?: string; }; after?: { createdAt: number; id: number; role?: string; }; } | { kind: 'plugin'; pluginId: string; instanceId: string; revision: number; method: string; args: { [key: string]: RuntimeJson; }; } | { kind: 'pluginQueries'; pluginId: string; instanceId: string; revision: number; queries: { key: string; method: string; args: { [key: string]: RuntimeJson; }; }[]; } | { kind: 'task'; taskId: string; };"
+            "declaration": "export type RuntimeRead = { kind: 'preferences'; } | { kind: 'permissions'; } | { kind: 'resources'; projectId?: string; folderId?: number; path: string; archived: boolean; cursor?: string; limit?: number; } | { kind: 'resourceTrash'; } | { kind: 'courseDocument'; courseId: string; } | { kind: 'systemDocument'; path: string; } | { kind: 'systemDirectory'; path: string; offset: number; query: string; } | { kind: 'executorRecovery'; taskId?: string; operationIds: string[]; } | { kind: 'interactionRecovery'; taskId: string; sequence: number; } | { kind: 'catalog'; } | { kind: 'pluginScope'; materialId?: string; projectFolderId?: number; } | { kind: 'tasks'; } | { kind: 'records'; after: number; } | { kind: 'recordHead'; } | { kind: 'recordKeys'; keys: { table: ProjectionTable; key: string | number; }[]; } | { kind: 'collectionPage'; table: ProjectionTable; parent?: string | number; cursor?: string; } | { kind: 'sessionIndex'; videoId: string; archived: boolean; recentOnly: boolean; cursor?: string; } | { kind: 'courseCount'; } | { kind: 'courseReadiness'; videoId: string; } | { kind: 'courseMetadata'; ids: string[]; covers: boolean; } | { kind: 'coverCandidates'; cursor?: string; } | { kind: 'courseColorFrame'; videoId: string; } | { kind: 'latestHandout'; videoId: string; } | { kind: 'skillIndex'; cursor?: string; } | { kind: 'studySummary'; } | { kind: 'studyOverview'; today: string; from: string; preview: { date: string; seconds: number; }[]; } | { kind: 'fileIntents'; } | { kind: 'session'; sessionId: number; before?: { createdAt: number; id: number; role?: string; }; after?: { createdAt: number; id: number; role?: string; }; } | { kind: 'plugin'; pluginId: string; instanceId: string; revision: number; method: string; args: { [key: string]: RuntimeJson; }; } | { kind: 'pluginQueries'; pluginId: string; instanceId: string; revision: number; queries: { key: string; method: string; args: { [key: string]: RuntimeJson; }; }[]; } | { kind: 'task'; taskId: string; };"
           },
           {
             "name": "RuntimeReceipt",
@@ -4200,7 +4217,7 @@ export const TYPERT = {
           },
           {
             "name": "RuntimeRecordsReceipt",
-            "declaration": "export interface RuntimeRecordsReceipt {\n    accepted: string[];\n    versions: { table: string; key: string | number; revision: number; }[];\n}"
+            "declaration": "export interface RuntimeRecordsReceipt {\n    epoch?: string;\n    accepted: string[];\n    versions: { table: string; key: string | number; revision: number; }[];\n}"
           },
           {
             "name": "RuntimeSessionFrame",

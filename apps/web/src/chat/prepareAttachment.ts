@@ -3,10 +3,14 @@ import { db } from '../store/db';
 import { resolveCloudBlob } from '../store/cloudBlob';
 import { MAX_ATTACHMENT_TEXT, type ChatAttachment } from './attachments';
 import { apiUrl } from '../api/base';
+import { isImageAttachment, type ImageAttachment } from './attachmentMedia';
+import { cloud } from '../cloud/state';
+import { accountLifetime, accountLifecycle } from '../client/account-lifecycle';
+import i18n from '../i18n';
 
 const LOCAL_MAX_BYTES = 512 * 1024 * 1024;
 
-async function extract(file: File): Promise<Pick<ChatAttachment, 'text' | 'dataUrl' | 'truncated'>> {
+async function extract(file: File): Promise<Pick<ImageAttachment, 'text' | 'dataUrl' | 'truncated' | 'width' | 'height'>> {
   if (/^image\/(png|jpeg|webp|gif)$/.test(file.type) || /\.(png|jpe?g|webp|gif)$/i.test(file.name)) {
     if (file.size > 10 * 1024 * 1024) throw new Error('图片不能超过 10 MB，请压缩后重试');
     const bitmap = await createImageBitmap(file);
@@ -20,7 +24,7 @@ async function extract(file: File): Promise<Pick<ChatAttachment, 'text' | 'dataU
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      return { dataUrl: canvas.toDataURL('image/jpeg', 0.85) };
+      return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), width: bitmap.width, height: bitmap.height };
     } finally { bitmap.close(); }
   }
   let text: string;
@@ -49,6 +53,7 @@ async function extract(file: File): Promise<Pick<ChatAttachment, 'text' | 'dataU
 }
 
 export async function prepareAttachment(id: string, file: File, onPhase: (phase: string) => void): Promise<ChatAttachment> {
+  const lifetime = cloud.enabled ? accountLifetime(cloud.userId) : undefined;
   if (!file.size) throw new Error('文件为空，请选择有内容的文件');
   if (file.size > LOCAL_MAX_BYTES) throw new Error('单个聊天附件不能超过 512 MiB');
   // A static-only deployment explicitly returns 404/HTML. Network/server failures never silently downgrade storage.
@@ -67,15 +72,36 @@ export async function prepareAttachment(id: string, file: File, onPhase: (phase:
     if (!(await serverClient.session()).authenticated) throw new Error('请先到 Bot 工作空间初始化或登录服务，再重试上传');
   }
   onPhase('解析中');
-  const parsed = await extract(file);
-  const attachment: ChatAttachment = { id, name: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, ...parsed };
+  const base = { id, name: file.name, mimeType: file.type || 'application/octet-stream', size: file.size };
+  const image = isImageAttachment(base);
+  if (image && file.size > 10 * 1024 * 1024) throw new Error('图片不能超过 10 MB，请压缩后重试');
+  // Server image decoding, EXIF orientation and preview generation are
+  // authoritative. Only static local mode needs a browser-generated data URL.
+  const parsed = image && !localOnly ? {} : await extract(file);
+  lifetime?.assertCurrent();
+  const attachment: ImageAttachment = { ...base, ...parsed };
   if (localOnly) {
     onPhase('保存中');
     await db.files.put({ id, blob: file });
   } else {
     onPhase('上传中');
-    try { attachment.serverId = (await serverClient.uploadFile(file)).id; }
+    try {
+      const uploaded = await serverClient.uploadFile(file);
+      attachment.serverId = uploaded.id;
+      lifetime?.assertCurrent();
+      if (image) {
+        if (!uploaded.previewServerId || !Number.isFinite(uploaded.width) || !Number.isFinite(uploaded.height) || uploaded.width! <= 0 || uploaded.height! <= 0) {
+          throw new Error(i18n.t('dataDelivery.previewInvalid'));
+        }
+        attachment.previewServerId = uploaded.previewServerId;
+        attachment.width = uploaded.width;
+        attachment.height = uploaded.height;
+      }
+    }
     catch (error) {
+      // No attachment has escaped this function yet. Never delete with a new
+      // account's credentials when an upload finishes after account invalidation.
+      if (attachment.serverId && (!lifetime || lifetime.current())) await serverClient.deleteFile(attachment.serverId).catch(() => {});
       if (error instanceof ServerApiError && error.status === 401) throw new Error('请先到 Bot 工作空间初始化或登录服务，再重试上传');
       if (error instanceof ServerApiError && error.status === 413) throw new Error('文件超过服务端上传上限');
       throw error;
@@ -85,29 +111,43 @@ export async function prepareAttachment(id: string, file: File, onPhase: (phase:
 }
 
 export async function removeAttachmentFile(file: ChatAttachment): Promise<void> {
+  // The server cascades its generated preview and rejects committed refs (409).
   if (file.serverId) await serverClient.deleteFile(file.serverId);
   else await db.files.delete(file.id);
 }
 
-export async function readAttachmentBlob(file: ChatAttachment): Promise<Blob> {
+export async function readAttachmentBlob(file: ChatAttachment, signal?: AbortSignal, preview = false): Promise<Blob> {
+  signal?.throwIfAborted();
+  if (preview && file.dataUrl) return (await fetch(file.dataUrl, { signal })).blob();
   let blob: Blob;
   if (file.serverId) {
-    const response = await fetch(apiUrl(`/api/v1/files/${encodeURIComponent(file.serverId)}`), { credentials: 'include' });
-    if (!response.ok) throw new Error(response.status === 401 ? '请先登录服务再下载附件' : '附件已删除或暂时无法下载');
-    blob = await response.blob();
+    const previewId = (file as ImageAttachment).previewServerId;
+    if (preview && !previewId) {
+      // Old embedded previews stay usable without prefetching the original.
+      if (file.dataUrl) return (await fetch(file.dataUrl, { signal })).blob();
+      throw new Error(i18n.t('dataDelivery.previewMissing'));
+    }
+    blob = await resolveCloudBlob({ $file: preview ? previewId! : file.serverId }, signal);
   } else {
     const saved = await db.files.get(file.id);
     if (!saved) throw new Error('本机附件文件已被清理');
-    blob = await resolveCloudBlob(saved.blob);
+    blob = await resolveCloudBlob(saved.blob, signal);
   }
+  signal?.throwIfAborted();
   return blob;
 }
 
-export async function downloadAttachment(file: ChatAttachment): Promise<void> {
-  const url = URL.createObjectURL(await readAttachmentBlob(file));
+export async function downloadAttachment(file: ChatAttachment, signal?: AbortSignal): Promise<void> {
+  const lifetime = accountLifecycle.current();
+  const combined = lifetime ? AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]) : signal;
+  const blob = await readAttachmentBlob(file, combined);
+  combined?.throwIfAborted();
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = file.name;
   link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  const release = () => { URL.revokeObjectURL(url); clearTimeout(timer); unregister?.(); };
+  const timer = setTimeout(release, 30_000);
+  const unregister = lifetime?.own(release);
 }

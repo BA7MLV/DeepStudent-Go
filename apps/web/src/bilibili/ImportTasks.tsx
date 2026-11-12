@@ -1,21 +1,24 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Button, Card, ProgressBar } from '@heroui/react';
 import { isActiveTask, useCloudActivity } from '../cloud/activityStore';
 import { cloudRequest } from '../cloud/state';
-import { toast } from '../ui';
 
 /** Reuses the account's shared task subscription; no per-page polling. */
 export default function BiliImportTasks() {
+  const { t } = useTranslation('interface');
   const tasks = useCloudActivity(state => state.tasks);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [stopping, setStopping] = useState<Set<string>>(new Set());
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const imports = tasks?.filter(task => task.kind === 'bilibiliImport' && !hidden.has(task.id)).slice(0, 8) ?? [];
   if (!imports.length) return null;
 
   async function stop(id: string) {
     setStopping(current => new Set(current).add(id));
+    setErrors(current => ({ ...current, [id]: '' }));
     try { await cloudRequest(`/tasks/${id}/cancel`, { method: 'POST' }); }
-    catch { toast.error('未能取消导入，请重试'); }
+    catch { setErrors(current => ({ ...current, [id]: t('feedback.importCancelUncertain') })); }
     finally { setStopping(current => { const next = new Set(current); next.delete(id); return next; }); }
   }
 
@@ -39,6 +42,7 @@ export default function BiliImportTasks() {
           </ProgressBar>
         </> : null}
         {task.error ? <p role="alert" className="break-words text-xs text-danger">{task.error}。已保存的视频会保留，请核对后仅重新选择未导入的集数。</p> : null}
+        {errors[task.id] && <p className="break-words text-xs text-danger" role="alert">{errors[task.id]}</p>}
         {Array.isArray(task.progress?.warnings) ? task.progress.warnings.map((warning, index) => <p key={index} className="text-xs text-warning">{String(warning)}</p>) : null}
       </div>;
     })}

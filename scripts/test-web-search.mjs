@@ -35,6 +35,66 @@ try {
   assert.equal(configuration.get(owner, true).providers[0].apiKey, 'secret-test-key');
   assert.throws(() => configuration.save(owner, stale), /web_config_conflict/);
 
+  // Yuanbao uses one encrypted service API KEY and the API KEY endpoint (not TC3 signing).
+  const yuanbaoConfig = { ...configuration.get(other), enabled: true, providerId: 'y', providers: [
+    { id: 'y', kind: 'yuanbao', name: '元宝搜索', enabled: true, apiKey: '  secret-yuanbao  ' },
+    { id: 'b', kind: 'brave', name: 'Brave', enabled: true, apiKey: 'fallback-key' },
+  ] };
+  assert.throws(() => configuration.save(other, { ...yuanbaoConfig, providers: [{ ...yuanbaoConfig.providers[0], apiKey: '' }] }), /web_key_required/);
+  const yuanbaoSaved = configuration.save(other, yuanbaoConfig);
+  assert.equal(yuanbaoSaved.providers[0].configured, true);
+  assert.ok(!JSON.stringify(yuanbaoSaved).includes('secret-yuanbao'));
+  assert.ok(!store.db.prepare('SELECT value FROM web_search_config WHERE owner_id=?').get(other).value.includes('secret-yuanbao'));
+  configuration.save(other, { ...yuanbaoSaved, fallback: true });
+  assert.equal(configuration.get(other, true).providers[0].apiKey, 'secret-yuanbao');
+  const yuanbao = new WebSearchService(configuration, async (url, init) => {
+    assert.equal(url, 'https://api.wsa.cloud.tencent.com/SearchPro');
+    assert.equal(init.method, 'POST'); assert.equal(init.redirect, 'error');
+    assert.equal(init.headers.authorization, 'Bearer secret-yuanbao');
+    assert.equal(init.headers['content-type'], 'application/json; charset=utf-8');
+    assert.deepEqual(JSON.parse(init.body), { Query: '三星堆的由来' });
+    return Response.json({ Response: { Pages: [
+      JSON.stringify({ url: 'https://example.org/lite#one', title: '<b>三星堆</b>', passage: '标准<strong>摘要</strong>', date: '2026-10-09 10:40:30' }),
+      JSON.stringify({ url: 'https://example.org/lite#two', title: '重复', passage: 'duplicate' }),
+      JSON.stringify({ url: 'javascript:alert(1)', title: 'Unsafe', passage: 'unsafe' }),
+      JSON.stringify({ url: 'https://example.org/standard', title: 'Standard', content: '<script>bad()</script>动态摘要', passage: '标准摘要', date: 'invalid' }),
+      JSON.stringify({ url: 'https://example.org/extra', title: 'Extra', content: '', passage: 'fallback passage' }),
+    ] } });
+  });
+  const yuanbaoResult = await yuanbao.call(other, 'websearch', { query: ' 三星堆的由来 ', limit: 2 }, new AbortController().signal, () => true);
+  assert.equal(yuanbaoResult.provider, '元宝搜索'); assert.equal(yuanbaoResult.sources.length, 2);
+  assert.equal(yuanbaoResult.sources[0].title, '三星堆'); assert.equal(yuanbaoResult.sources[0].snippet, '标准摘要');
+  assert.ok(yuanbaoResult.sources[0].published);
+  assert.equal(yuanbaoResult.sources[1].snippet, '动态摘要'); assert.equal(yuanbaoResult.sources[1].published, undefined);
+  assert.equal((await yuanbao.call(other, 'websearch', { query: '三星堆的由来' }, new AbortController().signal, () => true)).sources[2].snippet, 'fallback passage');
+  for (const [code, expected, status, fallback] of [
+    ['UnauthorizedOperation', 'web_auth_failed', 401, false],
+    ['AuthFailure.InvalidAuthorization', 'web_auth_failed', 401, false],
+    ['ResourceNotFound', 'web_service_not_enabled', 400, false],
+    ['ResourceUnavailable', 'web_service_unavailable', 400, false],
+    ['InvalidParameter', 'web_invalid_arguments', 400, false],
+    ['RequestLimitExceeded', 'web_rate_limited', 429, true],
+    ['InternalError', 'web_provider_failed', 502, true],
+  ]) {
+    let attempts = 0;
+    const failing = new WebSearchService(configuration, async url => {
+      attempts++;
+      return String(url).includes('api.wsa.') ? Response.json({ Response: { Error: { Code: code, Message: 'secret-yuanbao' } } })
+        : Response.json({ type: 'search', web: { results: [] } });
+    });
+    if (fallback) assert.equal((await failing.call(other, 'websearch', { query: 'test' }, new AbortController().signal, () => true)).provider, 'Brave');
+    else await assert.rejects(failing.call(other, 'websearch', { query: 'test' }, new AbortController().signal, () => true), error => error.code === expected && error.status === status && !error.message.includes('secret-yuanbao'));
+    assert.equal(attempts, fallback ? 2 : 1);
+  }
+  for (const body of [{}, { Response: {} }, { Response: { Pages: ['not json'] } }, { Response: { Pages: ['null'] } }, { Response: { Pages: [{}] } }]) {
+    const invalid = new WebSearchService(configuration, async () => Response.json(body));
+    await assert.rejects(invalid.call(other, 'websearch', { query: 'test' }, new AbortController().signal, () => true), /web_invalid_response/);
+  }
+  let emptyAttempts = 0;
+  const yuanbaoEmpty = new WebSearchService(configuration, async () => { emptyAttempts++; return Response.json({ Response: { Pages: [] } }); });
+  assert.deepEqual((await yuanbaoEmpty.call(other, 'websearch', { query: 'test' }, new AbortController().signal, () => true)).sources, []);
+  assert.equal(emptyAttempts, 1, 'Yuanbao empty results do not trigger fallback');
+
   const requests = [];
   const service = new WebSearchService(configuration, async (url, init) => {
     requests.push({ url, init });
@@ -97,13 +157,13 @@ try {
 
   // The real Bot loop advertises, executes, persists and delivers sources before its answer.
   cloud.save(owner, { ...cloud.get(owner), providers: [{ id: 'mock', name: 'Mock', baseUrl: 'https://model.example', apiKey: 'key', protocol: 'openai-chat', catalogId: '', serves: ['chat'] }], llmModel: { providerId: 'mock', model: 'mock' } });
-  const bot = new BotApplicationService(store, { enqueue() {} });
-  const thread = bot.create(owner, 'bot', 'Search'); bot.send(owner, thread.id, { clientNonce: crypto.randomUUID(), content: 'Search for current information' });
   runner = new BotRunner(store, { configuration: cloud, webSearch: new WebSearchService(configuration, async () => Response.json({ results: [{ title: 'Source', url: 'https://example.org/article', content: 'Useful evidence' }] })), fetch: async (_url, init) => {
     const body = JSON.parse(init.body), found = body.messages.some(m => m.role === 'tool');
     assert.ok(body.tools.some(t => t.function.name === 'websearch'));
     return Response.json({ choices: [{ message: found ? { content: 'Answer with source https://example.org/article' } : { tool_calls: [{ id: 'web', type: 'function', function: { name: 'websearch', arguments: '{"query":"current information"}' } }] } }] });
   } });
+  const bot = new BotApplicationService(store, runner);
+  const thread = bot.create(owner, 'bot', 'Search'); bot.send(owner, thread.id, { clientNonce: crypto.randomUUID(), content: 'Search for current information' });
   runner.start();
   for (let i = 0; i < 200 && store.db.prepare('SELECT status FROM runs WHERE thread_id=?').get(thread.id).status !== 'completed'; i++) await new Promise(resolve => setTimeout(resolve, 20));
   await runner.close();

@@ -14,6 +14,7 @@ import { agentHttpInit } from './http.js';
 import { retryAfter, abortable, limitedJson } from './model-client.js';
 import { checkGatewayRollout } from './model-rollout.js';
 import { normalizeThinkingLevel } from '@wangke/study-core/model/reasoning';
+import { ImagePreparationError, prepareModelImages } from './image-preparation.js';
 
 const transient: ModelErrorClass[] = ['network', 'timeout', 'rate_limited', 'server_error', 'context_exceeded'];
 // Shared across request-scoped Gateway instances; bounded, owner-isolated state.
@@ -126,8 +127,8 @@ export class ModelGateway {
     }
     const url = `${transport.url}${pagination.size ? `?${pagination}` : ''}`;
     const native = ['audio/transcriptions', 'systemone'].includes(input.endpoint) ? { model: input.modelRef.model, reserveTokens: audio?.total ?? this.ledger.model(input.owner, input.modelRef).contextTokens } : undefined;
-    const meteringProvider = { ...provider, baseUrl: transport.url.slice(0, -input.endpoint.length).replace(/\/$/, '') };
-    const fetcher = accountedFetch(this.ledger, { owner: input.owner, ...input.attribution, purpose: input.attribution?.purpose ?? input.purpose }, [meteringProvider], this.client.fetcher, native);
+    const meteringProvider = { ...provider, protocol: adapter.target.protocol, baseUrl: transport.url.slice(0, -input.endpoint.length).replace(/\/$/, '') };
+    const fetcher = accountedFetch(this.ledger, { owner: input.owner, ...input.attribution, purpose: input.attribution?.purpose ?? input.purpose }, [meteringProvider], this.client.fetcher, native, adapter.target);
     for (let attempt = 1; ; attempt++) {
       const started = this.clock();
       const record = (outcome: 'completed' | 'failed', errorClass?: ModelErrorClass) => attempts.push({ ...input.modelRef, candidateIndex: 0, attempt, durationMs: Math.max(0, this.clock() - started), outcome, ...(errorClass ? { errorClass } : {}) });
@@ -143,7 +144,7 @@ export class ModelGateway {
       } catch (error) {
         record('failed', modelErrorClass(error, attemptSignal));
         deadline?.close();
-        if (error instanceof BudgetBlocked) throw error;
+        if (error instanceof BudgetBlocked || error instanceof ImagePreparationError) throw error;
         if (signal.aborted || attempt >= policy.attempts || !replayable) throw new ModelFailure(input.signal.aborted ? 'model_cancelled' : attemptSignal.aborted ? 'model_timeout' : 'model_connection_failed');
         await (this.options.sleep ?? delay)(500 * 2 ** (attempt - 1), signal);
         continue;
@@ -219,13 +220,14 @@ export class ModelGateway {
             if (request.purpose === 'asr' && !request.audio || request.audio && request.purpose !== 'asr') throw new ModelFailure('model_invalid_request');
             const audio = request.audio ? adapter.encodeAudio(request.audio) : undefined;
             const wire = audio ?? adapter.encode({ ...request, continuationRef: request.continuationRef ?? candidates[0].adapter.target });
+            if (!audio) wire.body = await prepareModelImages(wire.body, target, signal);
             const bounded = audio ?? boundedRequest(wire.body as Record<string, unknown>, wire.path, request.outputTokens ?? model.outputTokens);
             if (limits.maxReservedTokens !== undefined && bounded.total > limits.maxReservedTokens) throw new BudgetBlocked('memory_job_token_budget');
             checkRequestCapacity(bounded.total, Math.min(model.contextTokens, this.ledger.limits(request.owner, request.run).contextTokens));
             const transport = adapter.transport(wire.path, request);
             if (audio) delete transport.headers['content-type'];
             const body = await this.client.request(transport.url, { method: 'POST', headers: transport.headers, body: audio?.body ?? JSON.stringify(bounded.body), redirect: 'error', signal }, { owner: request.owner, run: request.run, step: request.step, task: request.task, purpose: limits.attributionPurpose ?? request.purpose, provider: target.providerId, model: target.model }, bounded.total,
-              { ordinary: !request.run, purpose: request.purpose, attempts: 1, timeoutMs: policy.timeoutMs, chainMs: Math.max(1, Math.min(policy.chainMs, deadline - this.clock())) });
+              { ordinary: !request.run, purpose: request.purpose, imagesPrepared: true, attempts: 1, timeoutMs: policy.timeoutMs, chainMs: Math.max(1, Math.min(policy.chainMs, deadline - this.clock())) });
             // Decode before publishing a visible result. Never return provider body in errors.
             const response = audio ? adapter.decodeAudio(body) : adapter.decode(body, request.purpose, request.tools);
             attempts.push({ providerId: target.providerId, model: target.model, candidateIndex, attempt, durationMs: Math.max(0, this.clock() - started), outcome: 'completed' });
@@ -238,7 +240,7 @@ export class ModelGateway {
             attempts.push({ providerId: target.providerId, model: target.model, candidateIndex, attempt, durationMs: Math.max(0, this.clock() - started), outcome: 'failed', errorClass: lastClass });
             // Budget errors retain their stable pause codes and never switch provider.
             if (error instanceof BudgetBlocked && lastClass !== 'context_exceeded') throw error;
-            if (signal.aborted || !transient.includes(lastClass)) return fail(lastClass, failure instanceof ModelFailure ? failure.code : undefined);
+            if (signal.aborted || !transient.includes(lastClass)) return fail(lastClass, failure instanceof ModelFailure ? failure.code : failure instanceof ImagePreparationError ? failure.message : undefined);
             if (lastClass === 'context_exceeded') break;
             if (attempt < policy.attempts) {
               const wait = failure instanceof ModelFailure && failure.delay !== undefined ? failure.delay : Math.round(500 * 2 ** (attempt - 1) * (0.75 + Math.random() * 0.5));

@@ -9,6 +9,8 @@ import type { RecentItem } from '../ui/layout';
 import { useTranslation } from 'react-i18next';
 import { cloud } from '../cloud/state';
 import { useRecentSessionIndex } from './useRecentSessionIndex';
+import { readConversationSession } from '../store/conversationProducts';
+import { accountLifecycle } from '../client/account-lifecycle';
 
 /** 由共享布局持有查询和操作，切页不重挂；只有对话页显示当前会话高亮。 */
 export function useRecentChats(showActive = false) {
@@ -23,6 +25,11 @@ export function useRecentChats(showActive = false) {
   const [activity, setActivity] = useState<Map<number, number> | null>(null);
   const [retryTick, setRetryTick] = useState(0);
   const failures = useRef(0);
+  const [actionError, setActionError] = useState<string>();
+  const guard = (action: () => Promise<unknown>) => {
+    setActionError(undefined);
+    void action().catch(error => setActionError(error instanceof Error ? error.message : String(error)));
+  };
 
   useEffect(() => {
     if (!ready || cloud.enabled) return;
@@ -107,8 +114,20 @@ export function useRecentChats(showActive = false) {
     if (next) await useCourseChat.getState().renameSession(id, next);
   };
   const archive = async (id: number, title: string) => {
-    await useCourseChat.getState().setArchived(id, true);
-    toast.info(t('recent.archived', { title }));
+    const lifetime = accountLifecycle.current();
+    const original = await readConversationSession(id);
+    lifetime?.assertCurrent();
+    if (!original || !await useCourseChat.getState().setArchived(id, true, original)) return;
+    const expected = { ...original, archived: true };
+    let used = false;
+    const key = toast.info(t('recent.archived', { title }), { timeout: 8000, actionProps: { children: t('feedback.undo'), onPress: () => {
+      if (used) return;
+      used = true; toast.close(key);
+      void (async () => {
+        try { lifetime?.assertCurrent(); await useCourseChat.getState().setArchived(id, false, expected); }
+        catch (error) { setActionError(error instanceof Error ? error.message : t('feedback.archivedChanged')); }
+      })();
+    } } });
   };
   const fork = async (id: number) => {
     const newId = await useCourseChat.getState().forkSession(id);
@@ -122,32 +141,33 @@ export function useRecentChats(showActive = false) {
   const items: RecentItem[] = recentSessions.map((session) => {
     const id = session.id!;
     const busy = runningIds.includes(id);
-    const pin = () => void useCourseChat.getState().setPinned(id, !session.pinned);
+    const pin = () => guard(() => useCourseChat.getState().setPinned(id, !session.pinned));
     return {
       id: String(id), label: session.title,
       active: showActive && id === activeId,
       pendingReply: busy && !awaitingIds.includes(id),
       pinned: !!session.pinned,
-      onUnpin: () => void useCourseChat.getState().setPinned(id, false),
+      onUnpin: () => guard(() => useCourseChat.getState().setPinned(id, false)),
       onClick: () => {
-        void useCourseChat.getState().loadSession(id);
+        guard(() => useCourseChat.getState().loadSession(id));
         if (!showActive) navigate('/');
       },
       testId: `chat-recent-${id}`,
       menu: [
-        { key: 'rename', label: t('recent.rename'), icon: <Sym name="edit" />, onAction: () => void rename(id, session.title) },
+        { key: 'rename', label: t('recent.rename'), icon: <Sym name="edit" />, onAction: () => guard(() => rename(id, session.title)) },
         { key: 'pin', label: t(session.pinned ? 'recent.unpin' : 'recent.pin'), icon: <Sym name={session.pinned ? 'pin_off' : 'pin'} />, onAction: pin },
-        { key: 'fork', label: t('recent.fork'), icon: <Sym name="fork" />, isDisabled: busy, onAction: () => void fork(id) },
-        { key: 'archive', label: t('recent.archive'), icon: <Sym name="archive" />, isDisabled: busy, onAction: () => void archive(id, session.title) },
-        { key: 'delete', label: t('recent.delete'), icon: <Sym name="delete" />, danger: true, isDisabled: busy, onAction: () => void remove(id, session.title) },
+        { key: 'fork', label: t('recent.fork'), icon: <Sym name="fork" />, isDisabled: busy, onAction: () => guard(() => fork(id)) },
+        { key: 'archive', label: t('recent.archive'), icon: <Sym name="archive" />, isDisabled: busy, onAction: () => guard(() => archive(id, session.title)) },
+        { key: 'delete', label: t('recent.delete'), icon: <Sym name="delete" />, danger: true, isDisabled: busy, onAction: () => guard(() => remove(id, session.title)) },
       ],
-      onDelete: () => void remove(id, session.title),
+      onDelete: () => guard(() => remove(id, session.title)),
       deleteLabel: t('recent.deleteLabel', { title: session.title }),
       deleteTestId: `chat-recent-delete-${id}`,
       deleteDisabled: busy,
     };
   });
   return { label: t('recent.label'), items, loading: !ready || (cloud.enabled ? !serverIndex.page && serverIndex.loading : activity === null),
+    actionError, dismissError: () => setActionError(undefined), dismissLabel: t('feedback.dismiss'),
     ...(cloud.enabled ? { pagination: {
       previous: serverIndex.page?.previous ? serverIndex.previous : undefined,
       next: serverIndex.page?.next ? serverIndex.next : undefined,

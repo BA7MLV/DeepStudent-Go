@@ -8,6 +8,7 @@
 - 浏览器 confirmed cache 是只读投影。离线草稿、待提交命令、附件及历史资料保全不属于静态执行模式，继续保留。
 - 模型任务由服务器执行，页面只提交、观察与处理用户交互；关闭观察不取消任务。
 - 普通聊天的每会话展示投影由 React-free `ConversationSessionModel` 保存，session journal 提供实时消息，列表/单行/输入区分开订阅；全局任务仅负责后台发现。无关学习记录不重拉聊天，正常待确认命令静默。实施证据见[会话模型验收](chat-session-model-acceptance-2026-11-05.md)。
+- 发送失败保留服务端具体错误码，仅在聊天消息内显示错误与重试，不在右侧活动浮层显示任务恢复卡片。明确拒绝且重试时再次查证原任务不存在，才允许使用用户当前所选模型；结果未知的请求仍保留原操作内容，刷新只查询，不自动重复执行。消息和附件不丢失。
 - 可视化教学练习由「交互式讲解」skill 经 `show_widget` 生成，提交后原地揭晓参考答案解析并支持重练；通用 widget 状态负责保存与恢复。首次作品绑定可等待其真实确认投影，正文流继续更新。正式题卡的判分仍由宿主负责。见[交互式讲解](interactive-explainers.md)及[练习验收](quiz-repractice-2026-11-05.md)。
 - 卡片审核通过 `apps/api/src/learning/card-review.ts` 统一普通面板、插件和 Bot 的状态校验。调用方必须传原始 `expected` 状态；冲突不能改用最新状态盲重试。
 - 账户根身份由 `client/account-lifecycle.ts` 的 `AccountLifetime` 管理；runtime、数据库、偏好与插件句柄共同失效。局部异步 incarnation 仍用于拒绝已结束订阅的晚回调，A→B→A 不复用旧身份。

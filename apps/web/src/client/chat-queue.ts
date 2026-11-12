@@ -116,16 +116,44 @@ export function browserChatQueue() {
         if (taskId) await journal.atomic(record.item.operationId ?? record.item.id, latest => ({ record: latest ? { ...latest, state: 'accepted', taskId } : latest, value: undefined }));
       }
       check();
-      return (await table.where('id').startsWith(prefix).toArray())
+      const pending = (await table.where('id').startsWith(prefix).toArray())
         .filter(row => !row.removed && row.record.sessionId === sessionId && row.record.state !== 'accepted')
         .filter(row => sessionId !== 0 || row.record.item.draftOwner === draft)
         .sort((a,b) => (a.record.item.createdAt ?? 0) - (b.record.item.createdAt ?? 0) || a.id.localeCompare(b.id))
         .map(row => ({ ...row.record.item, state: row.record.state }));
+      return Promise.all(pending.map(async item => {
+        const receipt = await table.get(`task-command:${item.operationId ?? item.id}`);
+        check();
+        return { ...item, error: receipt?.failure?.reason };
+      }));
     },
     async submit(sessionId: number, item: Item, input: object, explicitRetry = false) {
       check();
       const operationId = item.operationId ?? item.id;
-      const execute = () => commands.execute(sessionId, { ...item, createdAt: item.createdAt ?? Date.now() }, { operationId, kind: 'chat', resource: `session:${sessionId}`, input: JSON.parse(JSON.stringify(input)) }, explicitRetry);
+      const execute = async () => {
+        if (explicitRetry) {
+          const receiptId = `task-command:${operationId}`;
+          const previous = await table.get(receiptId);
+          check();
+          if (previous?.failure?.rejected === true) {
+            // Only a known rejection AND a fresh missing admission permit using
+            // the user's current model. Unknown outcomes keep their frozen body.
+            const admission = await serverExecution.receipt(operationId);
+            check();
+            if (admission.status === 'missing') await cloudTransaction(database, [table], async () => {
+              check();
+              const latest = await table.get(receiptId), queued = await table.get(prefix + operationId);
+              if (!latest?.failure?.rejected || queued?.removed || queued?.record.state === 'accepted') return;
+              const command: RuntimeTaskSubmit = structuredClone(latest.command);
+              delete command.input.modelSelection;
+              if (item.modelSelection) command.input.modelSelection = JSON.parse(JSON.stringify(item.modelSelection));
+              await table.put({ ...latest, command, failure: undefined });
+              if (queued) await table.put({ ...queued, record: { ...queued.record, item: { ...queued.record.item, modelSelection: item.modelSelection } } });
+            });
+          }
+        }
+        return commands.execute(sessionId, { ...item, createdAt: item.createdAt ?? Date.now() }, { operationId, kind: 'chat', resource: `session:${sessionId}`, input: JSON.parse(JSON.stringify(input)) }, explicitRetry);
+      };
       if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request(prefix + operationId, { ifAvailable: true }, lock => {
         if (!lock) throw new Error('task_admission_uncertain');
         return execute();
@@ -163,8 +191,7 @@ export function browserChatQueue() {
   };
 }
 
-/** Integration point for the global task-recovery UI: undefined means this is
- * not an ordinary chat queue operation, so its existing recovery can handle it. */
+/** Private recovery port: undefined means this is not a chat queue operation. */
 export function retryQueuedChatOperation(operationId: string) {
   return browserChatQueue().retry(operationId);
 }

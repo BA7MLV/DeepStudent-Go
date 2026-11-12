@@ -3,6 +3,9 @@ import { useMediaPlayer } from '@vidstack/react';
 import { liveQuery } from 'dexie';
 import { db, type DanmakuRow } from '../store/db';
 import { useSettings } from '../store/settings';
+import { cloud } from '../cloud/state';
+import { observeCollection } from '../client/collections';
+import { accountLifetime } from '../client/account-lifecycle';
 
 /** 飘屏线速度（px/s）。用恒定线速度而不是恒定时长：思考题是句子，长度差好几倍，
  *  固定时长会让长句反而飞得更快、恰好最难读的那条最快 —— 反了。 */
@@ -42,17 +45,23 @@ export default function DanmakuLayer({ videoId }: { videoId: string }) {
 
   // 弹幕数据订阅：重新生成后按当前进度重新归位（不重复发射已播过的）
   useEffect(() => {
-    const sub = liveQuery(() => db.danmakus.where('videoId').equals(videoId).sortBy('time')).subscribe({
+    itemsRef.current = [];
+    resetTo(0);
+    const observer = {
       next: (rows) => {
-        itemsRef.current = rows;
+        itemsRef.current = rows.sort((a, b) => a.time - b.time);
         const t = lastTRef.current;
         let i = 0;
         while (i < rows.length && rows[i].time <= t) i++;
         ptrRef.current = i;
       },
-    });
-    return () => sub.unsubscribe();
-  }, [videoId]);
+      error: () => { itemsRef.current = []; resetTo(lastTRef.current); },
+    } satisfies { next(rows: DanmakuRow[]): void; error(error: unknown): void };
+    const sub = cloud.enabled ? observeCollection<DanmakuRow>('danmakus', videoId, observer)
+      : liveQuery(() => db.danmakus.where('videoId').equals(videoId).sortBy('time')).subscribe(observer);
+    const unown = cloud.enabled ? accountLifetime(cloud.userId).own(() => { itemsRef.current = []; resetTo(0); }) : undefined;
+    return () => { sub.unsubscribe(); unown?.(); };
+  }, [videoId, resetTo]);
 
   useEffect(() => {
     if (!player || !enabled) return;

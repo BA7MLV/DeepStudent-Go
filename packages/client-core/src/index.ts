@@ -9,6 +9,7 @@ import type { RuntimeTaskSubmit } from '@wangke/contracts/client-runtime';
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface RemoteErrorDetailsMap {
+    'client/domain': { code: string; admissionRejected?: boolean };
     'client/record-conflict': { table: string; key: string | number; fields: string[] };
   }
 }
@@ -276,6 +277,11 @@ export async function createClientRuntime(identity: { server: string; account: s
       return result.value;
     },
     session: (sessionId: number) => model(`session:${sessionId}`, () => new SessionModel(ctx, sessionId)),
+    evictSession: (sessionId: number): boolean => {
+      const key = `session:${sessionId}`, projection = models.get(key);
+      if (!projection || projection.diagnostics().refs !== 0) return false;
+      projection.dispose(); models.delete(key); return true;
+    },
     sessionPage: async (sessionId: number, before?: { createdAt: number; id: number; role?: string }) => {
       if (disposed) throw new Error('client_runtime_disposed');
       // Bind the request to the exact retained model BEFORE opening HTTP.
@@ -339,6 +345,11 @@ export async function createClientRuntime(identity: { server: string; account: s
       return { model: projection, dispose: () => { models.delete(key); projection.dispose(); } };
     },
     recordKeys: (request: Extract<RuntimeRead, { kind: 'recordKeys' }>) => model(JSON.stringify(request), () => new RuntimeModel(ctx, request)),
+    collection: (request: Omit<Extract<RuntimeRead, { kind: 'collectionPage' }>, 'cursor'>) => {
+      const key = `collection:${++projectionSequence}`;
+      const projection = model(key, () => new RuntimeModel(ctx, request));
+      return { model: projection, dispose: () => { models.delete(key); projection.dispose(); } };
+    },
     document: (request: Extract<RuntimeRead, { kind: 'courseDocument' | 'systemDocument' | 'systemDirectory' }>) => model(JSON.stringify(request), () => new RuntimeModel(ctx, request)),
     savePluginLayout: async (request: import('@wangke/contracts/system').SavePluginLayout) => {
       if (disposed) throw new Error('client_runtime_disposed');
@@ -354,6 +365,7 @@ export async function createClientRuntime(identity: { server: string; account: s
       return result.value;
     },
     preferences: () => model('preferences', () => new RuntimeModel(ctx, { kind: 'preferences' })),
+    recordHead: () => model('recordHead', () => new RuntimeModel(ctx, { kind: 'recordHead' })),
     permissions: () => model('permissions', () => new RuntimeModel(ctx, { kind: 'permissions' })),
     setPreferences: async (request: PreferencesCommand) => {
       if (disposed) throw new Error('client_runtime_disposed');
@@ -397,14 +409,14 @@ export async function createClientRuntime(identity: { server: string; account: s
     submitTask: async (request: RuntimeTaskSubmit) => {
       if (disposed) throw new Error('client_runtime_disposed');
       const result = await ctx.remote.clientRuntime.submitTask(request);
-      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
+      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code, detail: result.error.details });
       if (disposed) throw new Error('client_runtime_disposed');
       return result.value;
     },
     taskAdmission: async (operationId: string) => {
       if (disposed) throw new Error('client_runtime_disposed');
       const result = await ctx.remote.clientRuntime.taskAdmission(operationId);
-      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code });
+      if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code, detail: result.error.details });
       if (disposed) throw new Error('client_runtime_disposed');
       return result.value;
     },

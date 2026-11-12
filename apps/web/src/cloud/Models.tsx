@@ -6,7 +6,7 @@ import type { CloudConfig } from '@wangke/contracts/cloud';
 import ModelsModule from '../components/settings/ModelsModule';
 import { ModelSettingsContext } from '../components/settings/modelSettingsContext';
 import { useSettings, type Provider } from '../store/settings';
-import { LoadingButton, confirmDialog, toast } from '../ui';
+import { LoadingButton, confirmDialog } from '../ui';
 import { cloudRequest } from './state';
 import { applyCloudConfig } from './sync';
 import { cloudDiscoveryProviders, cloudEditorProviders, cloudModelConfig, cloudModelPreferences, cloudModelUpdate, cloudModelsDirty, cloudProviderDirty, createCloudModelDraft, modelSettingsError } from './modelSettings';
@@ -194,7 +194,6 @@ function CloudModelEditor({ initial, standalone, onDone }: { initial: CloudConfi
       }
       setSavedPreferences(JSON.stringify(cloudModelPreferences(draft)));
       setMessage('模型设置已保存到服务器'); setConflict(false);
-      if (!standalone) toast.success('模型设置已保存');
       if (complete) onDone?.();
     } catch (e) { showError(e); }
     finally { operation.current = false; setBusy(false); }

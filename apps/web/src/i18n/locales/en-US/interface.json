@@ -1,4 +1,13 @@
 {
+  "feedback": {
+    "subtitleServer": "The server processes subtitles, preferring Bilibili subtitles when available, otherwise using your speech recognition model. Once accepted, tasks continue after you close this page. Recognition may incur charges.",
+    "dismiss": "Dismiss",
+    "botSyncFailed": "Bot settings could not sync", "policyUncertain": "Save not confirmed: {{message}}. Reload server settings to check.", "permissionSyncFailed": "Permission sync failed: {{message}}", "approvalUncertain": "{{message}}. Refresh the status before trying again.", "reloadSettings": "Reload server settings", "refreshStatus": "Refresh status",
+    "readFailed": "Could not read material: {{message}}", "fileUnavailable": "Material file not found. Conversation history is still available.", "retry": "Retry", "documentSyncFailed": "Material could not sync", "documentUpdateFailed": "Material update failed: {{message}}", "positionFailed": "Could not save reading position: {{message}}. Reading further will save again.", "viewFailed": "Could not save reading view: {{message}}. Select the view again.",
+    "importCancelUncertain": "Cancellation not confirmed. Check the task status; cancel again only if it is still running.", "skillsFailed": "Skill action incomplete", "skillsImported": "Imported {{count}} skills",
+    "undo": "Undo", "actionFailed": "Action incomplete", "checkBeforeRetry": "Refresh and check the result before trying again. Review unconfirmed operations in sync recovery.",
+    "uploaded": "Uploaded {{count}} files", "moved": "Moved {{count}} files", "archivedChanged": "This conversation has changed. Check archived conversations before restoring it."
+  },
   "materialReader": { "fit": "Fit", "fitPage": "Fit page" },
   "imageCrop": {
     "orientation": "Image orientation", "rotateLeft": "Rotate left", "rotateRight": "Rotate right",

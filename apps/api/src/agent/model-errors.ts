@@ -1,6 +1,7 @@
 import type { ModelErrorClass } from '@wangke/contracts/cloud';
 import { BudgetBlocked } from './budget.js';
 import { ModelFailure } from './model-client.js';
+import { imagePreparationCodes } from './image-preparation.js';
 
 /** Never infer from provider text, URL, prompt, or arbitrary exception messages. */
 export function modelErrorClass(error: unknown, signal?: AbortSignal): ModelErrorClass {
@@ -21,7 +22,7 @@ export function modelErrorClass(error: unknown, signal?: AbortSignal): ModelErro
 }
 export class ModelGatewayFailure extends ModelFailure {
   constructor(readonly errorClass: ModelErrorClass, readonly traceId: string, readonly attempts: import('@wangke/contracts/cloud').ModelAttemptSummary[], legacyCode?: string) {
-    super(legacyCode && ['invalid_structured_response', 'model_incomplete_or_refused'].includes(legacyCode) ? legacyCode : ['network', 'timeout', 'server_error', 'rate_limited'].includes(errorClass) ? 'model_request_failed' : `model_${errorClass}`);
+    super(legacyCode && (['invalid_structured_response', 'model_incomplete_or_refused'].includes(legacyCode) || imagePreparationCodes.has(legacyCode)) ? legacyCode : ['network', 'timeout', 'server_error', 'rate_limited'].includes(errorClass) ? 'model_request_failed' : `model_${errorClass}`);
     this.name = 'ModelGatewayFailure';
   }
 }

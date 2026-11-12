@@ -17,10 +17,14 @@ test('task admission pushes local pending writes without a global records pull',
   assert.ok(admission.includes('await drainLearning();'), 'admission must drain the learning journal');
   assert.ok(!/\bflushCloud\(\)/.test(admission), 'admission must not run the global records cycle');
   const completion = source.slice(source.indexOf('if (completed.kind ==='));
-  assert.ok(completion.includes("await flushCloud();"), 'completion keeps a full-sync fallback for pre-protocol servers and overflow receipts');
-  assert.ok(completion.includes('completed.effects !== undefined') && completion.includes('reconcileTaskEffects(completed.effects)'),
+   assert.ok(completion.includes('await refreshTaskScope(terminal)'), 'completion keeps an explicit bounded fallback for missing/overflow receipts');
+   assert.ok(!completion.includes('await flushCloud();'), 'missing effects never authorize an account mirror');
+   assert.ok(completion.includes('terminal.effects !== undefined') && completion.includes('reconcileTaskEffects(terminal.effects, after.epoch)'),
     'completion must reconcile the terminal effects receipt exactly when the task carries one');
-  assert.ok(completion.includes('completed.effects.length && !'), 'an empty receipt must skip the global cycle entirely');
+   assert.ok(completion.includes('terminal.effects.length && !'), 'an empty proven receipt must skip projection downloads');
+   assert.ok(source.includes('admissionEpoch === after.epoch') && source.includes('before.epoch !== after.epoch'), 'effects require generation evidence and a terminal read epoch barrier');
+   assert.ok(source.includes("refreshRecordScope('chats', sessionId!)") && source.includes('for (const table of scopes['), 'fallback reads explicit session/course collections');
+   assert.ok(source.includes('task_scope_refresh_unavailable:'), 'unsupported fallback must fail visibly, not silently skip');
 });
 
 test('session revision in ChatPanel drains only that session entity', () => {

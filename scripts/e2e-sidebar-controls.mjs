@@ -30,8 +30,8 @@ try {
     assert.equal(await toggle.getAttribute('aria-expanded'), String(expanded));
     assert.equal(await toggle.locator('svg[viewBox="182 192 650 650"]').count(), expanded ? 0 : 1,
       'only the collapsed toggle uses the brand logo');
-    assert.equal(await toggle.locator('svg.tabler-icon-layout-sidebar').count(), expanded ? 1 : 0,
-      'expanded sidebar has a separate panel toggle');
+    assert.equal(await toggle.locator('svg.tabler-icon-layout-sidebar').count(), 1,
+      'panel toggle is always available; collapsed state swaps it with the brand on hover/focus');
     const { width, height } = await toggle.boundingBox();
     assert(width >= 44 && height >= 44, 'toggle retains a touch-sized target');
     const brand = page.getByTestId('app-brand');

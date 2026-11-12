@@ -60,6 +60,7 @@ document.body.dataset.ready = 'yes';`;
   await context.addInitScript(owner => { window.owner = owner; }, owner);
   const page = await context.newPage(), errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(origin + '/__ownership'); await page.locator('body[data-ready="yes"]').waitFor({ timeout: 30000 });
+  assert.equal(await page.evaluate(() => probe.db.chats.count()), 0, 'startup does not mirror source messages');
   const sync = async () => page.evaluate(async () => {
     await probe.flushCloud(); await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   });
@@ -109,11 +110,13 @@ document.body.dataset.ready = 'yes';`;
 
   // Once admitted, a source change or deletion must reject immediately, never
   // enter the initial-admission wait again or resurrect an old message.
-  await page.evaluate(async () => {
-    window.oldBinding = await probe.openWidgetSession(1, (await probe.db.chats.get(1)).widget);
-    window.deletedBinding = await probe.openWidgetSession(4, (await probe.db.chats.get(4)).widget);
-    window.liveBinding = await probe.openWidgetSession(2, (await probe.db.chats.get(2)).widget);
-  });
+  await page.evaluate(async ({ old, next }) => {
+    // UI payloads come from the session projection, not an account-wide IDB
+    // mirror. openWidgetSession must authenticate/hydrate each real source.
+    window.oldBinding = await probe.openWidgetSession(1, old);
+    window.deletedBinding = await probe.openWidgetSession(4, old);
+    window.liveBinding = await probe.openWidgetSession(2, next);
+  }, { old, next });
   put('chats', 1, row(1, next)); put('chats', 4, null); await sync();
   const stale = await page.evaluate(async () => {
     const failures = [];

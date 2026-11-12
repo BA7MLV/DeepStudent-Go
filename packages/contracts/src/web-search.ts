@@ -1,4 +1,4 @@
-export type SearchProviderKind = 'tavily' | 'brave' | 'searxng';
+export type SearchProviderKind = 'tavily' | 'brave' | 'searxng' | 'yuanbao';
 export interface SearchProvider {
   id: string;
   kind: SearchProviderKind;

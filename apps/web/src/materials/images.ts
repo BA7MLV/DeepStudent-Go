@@ -1,4 +1,8 @@
-import { db, type VideoRow } from '../store/db';
+import { db, type VideoRow, type FrameRow } from '../store/db';
+import { cloud } from '../cloud/state';
+import { readRecordKeys } from '../cloud/sync';
+import { loadCollection } from '../client/collections';
+import { accountLifecycle } from '../client/account-lifecycle';
 import { resolveCloudBlob } from '../store/cloudBlob';
 import { getMaterialFile } from '../store/fileStore';
 import { imageSourceKind, materialImageHref, materialSourceHref, parseMaterialImageHref, pdfRegionKey, validPdfRegion, videoFrameKey, type PdfRegion } from './imageRefs';
@@ -177,12 +181,19 @@ export async function readPdfQuestionCrops(course: VideoRow, range: { start: num
 }
 
 export async function loadMaterialImage(courseId: string, key: string): Promise<LoadedMaterialImage> {
-  const course = await db.videos.get(courseId);
+  const database = db, owner = cloud.userId, lifetime = accountLifecycle.current();
+  const image = await loadMaterialImageInScope(courseId, key);
+  if (database !== db || owner !== cloud.userId || lifetime && !lifetime.current()) throw new Error('client_account_changed');
+  return image;
+}
+
+async function loadMaterialImageInScope(courseId: string, key: string): Promise<LoadedMaterialImage> {
+  const course = cloud.enabled ? (await readRecordKeys<VideoRow>('videos', [courseId]))[0] : await db.videos.get(courseId);
   if (key.startsWith('frame-')) {
     if (!parseMaterialImageHref(materialImageHref(courseId, key))) throw new Error('无效的视频画面引用');
     if (!course || course.kind === 'material') throw new Error('来源视频已删除或不存在');
-    const frame = await db.frames.where('videoId').equals(courseId)
-      .filter((r) => r.kind === 'slide' && videoFrameKey(r.ts) === key).first();
+    const frames = cloud.enabled ? await loadCollection<FrameRow>('frames', courseId) : await db.frames.where('videoId').equals(courseId).toArray();
+    const frame = frames.find(r => r.kind === 'slide' && videoFrameKey(r.ts) === key);
     if (!frame) throw new Error('已保存的课程画面不存在，请重新读取画面目录或打开来源视频');
     return { blob: await resolveCloudBlob(frame.blob), image: { key, label: frame.caption || '课程画面', ts: frame.ts }, courseName: course.name };
   }
