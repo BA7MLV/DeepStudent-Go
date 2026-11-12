@@ -5,6 +5,8 @@ import { recordChatRender } from '../client/chat-diagnostics';
 import type { ComponentProps } from '@ant-design/x-markdown';
 import { Markdown as XMarkdown } from '../components/markdown/Markdown';
 import { MaterialImage } from '../components/MaterialImage';
+import { WebsiteLink } from '../components/markdown/WebsiteLink';
+import { WebsiteCitations } from '../components/markdown/WebsiteCitations';
 import { useNavigate } from 'react-router-dom';
 import {
   Button,
@@ -720,7 +722,7 @@ export default function CourseChat() {
   };
 
   const CourseLink = useCallback(
-    ({ href, children }: ComponentProps & { href?: string }) => {
+    ({ href, children, ...props }: ComponentProps & { href?: string }) => {
       const target = href ?? '';
       if (target.startsWith('#source-image/')) return <MaterialImage href={target} label={children} linkOnly />;
       if (target.startsWith('#/player/')) {
@@ -737,9 +739,9 @@ export default function CourseChat() {
         );
       }
       return (
-        <a href={target} target="_blank" rel="noreferrer">
+        <WebsiteLink {...props} href={target} target="_blank" rel="noreferrer">
           {children}
-        </a>
+        </WebsiteLink>
       );
     },
     [navigate],
@@ -940,6 +942,7 @@ export default function CourseChat() {
                         <ArtifactEditProvider rowId={message.rowId} content={message.content}
                           disabled={loading || !!message.streaming || !!message.error || !!message.interrupted || !!message.ask && !message.ask.picked}
                           onSaved={reflectArtifactEdit}>
+                        <WebsiteCitations content={message.error ? '' : message.content} streaming={!!message.streaming}>
                         <WidgetMessage message={message} content={message.error ? '' : message.content} dark={widgetDark} rowId={message.rowId}
                           disabled={loading || !!message.streaming || !!message.error || !!message.interrupted || !!message.ask && !message.ask.picked}
                           onPrompt={(text) => void send(text)}>
@@ -963,6 +966,7 @@ export default function CourseChat() {
                         {message.widgetPreview && (
                            <WidgetStreamFrame html={message.widgetPreview.html} dark={widgetDark} status={chatText('chatPanel.generatingWidget')} />
                         )}
+                        </WebsiteCitations>
                         </ArtifactEditProvider>
                         {!message.content && (message.ask || message.folderPlan) && <div aria-hidden="true" data-chat-answer-start="" />}
                         {/* 提问卡在 ResponseTimeline 里按提问 trace 落位：用户回应后的续跑正文与

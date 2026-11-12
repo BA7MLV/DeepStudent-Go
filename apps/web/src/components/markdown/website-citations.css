@@ -1,0 +1,13 @@
+.x-markdown .md-website-citation { font-size: .7em; line-height: 0; vertical-align: super; white-space: nowrap; }
+.x-markdown .md-website-citation > a { padding-inline: .12em; color: var(--muted); font-weight: 600; text-decoration: none; }
+.x-markdown .md-website-citation > a:hover { color: var(--foreground); text-decoration: none; }
+.x-markdown .md-website-citation > a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+.website-sources { display: flex; align-items: center; gap: .6rem; min-width: 0; margin-block-start: 1rem; color: var(--muted); font-size: .75rem; }
+.website-sources__label, .website-sources__count { flex-shrink: 0; }
+.website-sources__count { font-variant-numeric: tabular-nums; }
+.website-sources__icons { display: flex; flex-wrap: wrap; align-items: center; row-gap: .25rem; min-width: 0; padding-inline-start: .4rem; }
+.website-sources__icon { position: relative; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; inline-size: 2rem; block-size: 2rem; margin-inline-start: -.4rem; border: 2px solid var(--background); border-radius: 50%; background: var(--background-secondary); color: var(--muted); font-size: .9rem; text-decoration: none; }
+/* Raise only the active link; overlapping circles remain separate keyboard targets. */
+.website-sources__icon:hover, .website-sources__icon:focus-visible { z-index: 1; color: var(--foreground); background: var(--background-tertiary, var(--background-secondary)); }
+.website-sources__icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.website-sources .md-link-chip__icon img { position: absolute; inset: 0; inline-size: 1em; block-size: 1em; margin: 0; border-radius: 2px; object-fit: contain; }

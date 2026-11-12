@@ -9,6 +9,8 @@ import type { ComponentProps } from '@ant-design/x-markdown';
 import { MaterialImage, SourceImage } from './MaterialImage';
 import { parseMaterialImageHref } from '../materials/imageRefs';
 import { Markdown as XMarkdown } from './markdown/Markdown';
+import { WebsiteLink } from './markdown/WebsiteLink';
+import { WebsiteCitations } from './markdown/WebsiteCitations';
 import { systemMaterialPath } from '../materials/systemFiles';
 import type { MediaPlayerInstance } from '@vidstack/react';
 import { db, type ChatImage, type ChatSessionRow, type ChatToolCall, type QuizState, type FrameRow } from '../store/db';
@@ -645,7 +647,7 @@ export default function ChatPanel({
 
   /** 自定义链接渲染：#seek-N 跳播放器、#unit-N 跳材料对应页/段，其余外链新窗口打开 */
   const SeekLink = useCallback(
-    ({ href, children }: ComponentProps & { href?: string }) => {
+    ({ href, children, ...props }: ComponentProps & { href?: string }) => {
       const h = href ?? '';
       if (h.startsWith('#source-image/')) return <MaterialImage href={h} label={children} linkOnly onSource={readerRef && parseMaterialImageHref(h)?.courseId === videoId ? (unit) => { if (unit) readerRef.current?.scrollToUnit(unit); } : undefined} />;
       if (h.startsWith('#seek-')) {
@@ -678,9 +680,9 @@ export default function ChatPanel({
         );
       }
       return (
-        <a href={h} target="_blank" rel="noreferrer">
+        <WebsiteLink {...props} href={h} target="_blank" rel="noreferrer">
           {children}
-        </a>
+        </WebsiteLink>
       );
     },
     [seekTo, readerRef, videoId],
@@ -1423,6 +1425,7 @@ export default function ChatPanel({
                   <ArtifactEditProvider rowId={m.rowId} content={m.content} disabled={loading || !!m.streaming || !!m.error}
                     onSaved={(row) => setMsgs((prev) => prev.map((item) => item.rowId === row.id ? { ...item, content: row.content, responseSegments: row.responseSegments, widget: row.widget, widgets: row.widgets } : item))}>
                   <div className="chat-bubble chat-bubble--ai">
+                        <WebsiteCitations content={m.error ? '' : m.content} streaming={!!m.streaming}>
                         <WidgetMessage message={m} content={m.error ? displayChatFailure(m.content) : m.content} dark={widgetDark} rowId={m.rowId}
                           disabled={loading || !!m.streaming || !!m.error} onPrompt={(text) => void send(text)}>
                         {(markdown) => (
@@ -1463,6 +1466,7 @@ export default function ChatPanel({
                         {m.widgetPreview && (
                           <WidgetStreamFrame html={m.widgetPreview.html} dark={widgetDark} status={chatText('chatPanel.generatingWidget')} />
                         )}
+                        </WebsiteCitations>
                   </div>
                   </ArtifactEditProvider>
                   {!m.streaming && m.interrupted && m.key === latestInterruptedKey && (

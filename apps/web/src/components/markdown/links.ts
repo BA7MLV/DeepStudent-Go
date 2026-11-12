@@ -17,15 +17,9 @@ export function linkText(node: Node): string | null {
   return text;
 }
 
-export function standaloneLink(node: Node): boolean {
-  const parent = node.parent;
-  return parent?.type === 'tag' && ['p', 'li', 'td', 'th'].includes(parent.name)
-    && parent.children.every(child => child === node || child.type === 'text' && !child.data.trim());
-}
-
 const FILE_PATH = /\.(?:pdf|docx?|xlsx?|pptx?|zip|gz|tar|7z|rar|png|jpe?g|gif|webp|svg|ico|mp[34]|webm|wav|epub|md|txt|csv)$/i;
 
-export function websiteChip(href: unknown, text: string, standalone: boolean, ownOrigins: string[] = []) {
+export function websiteChip(href: string | undefined, text: string, ownOrigins: string[] = []) {
   const safe = safeWebUrl(href);
   if (!safe) return null;
   const url = new URL(safe);
@@ -38,6 +32,5 @@ export function websiteChip(href: unknown, text: string, standalone: boolean, ow
   if (!bare && (/^(?:https?:\/\/|www\.)/i.test(label) || label.startsWith(url.hostname))) {
     try { bare = new URL(/^https?:\/\//i.test(label) ? label : `${url.protocol}//${label}`).href === url.href; } catch { /* Descriptive text stays descriptive. */ }
   }
-  if (!bare && !standalone) return null;
   return { host, iconOrigin: linkIconOrigin(url.origin), domain: url.host.replace(/^www\./, ''), label: bare ? displayUrl : label || displayUrl, bare };
 }

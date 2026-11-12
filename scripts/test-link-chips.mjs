@@ -3,8 +3,9 @@ import dns from 'node:dns';
 import { syncBuiltinESMExports } from 'node:module';
 import Fastify from 'fastify';
 import { linkIconHost, linkIconOrigin } from '../packages/contracts/src/web-links.ts';
-import { websiteChip, linkText, standaloneLink } from '../apps/web/src/components/markdown/links.ts';
+import { websiteChip, linkText } from '../apps/web/src/components/markdown/links.ts';
 import { websiteBrand } from '../apps/web/src/components/markdown/websiteBrands.ts';
+import { websiteCitations } from '../apps/web/src/components/markdown/citationSources.ts';
 import { LinkIcons, registerLinkIconRoutes } from '../apps/api/src/web-links/icons.ts';
 
 assert.equal(linkIconHost('WWW.GitHub.COM.'), 'www.github.com');
@@ -20,26 +21,73 @@ for (const [host, brand] of [['github.com', 'github'], ['WWW.GITHUB.COM.', 'gith
   assert.equal(websiteBrand(host)?.id, brand);
 }
 for (const host of ['github.com.evil.org', 'fakegithub.com', 'example.org', 'weixin.qq.com.evil.org']) assert.equal(websiteBrand(host), null);
-const bare = websiteChip('https://www.github.com/org/repo?tab=readme#intro', 'https://www.github.com/org/repo?tab=readme#intro', false);
+const bare = websiteChip('https://www.github.com/org/repo?tab=readme#intro', 'https://www.github.com/org/repo?tab=readme#intro');
 assert.equal(bare.host, 'www.github.com');
 assert.equal(bare.label, 'github.com/org/repo?tab=readme#intro');
 assert.equal(bare.bare, true);
 assert.equal(bare.iconOrigin, 'https://www.github.com', 'only origin reaches the backend');
-assert.equal(websiteChip('https://example.org:8080/doc', 'Docs', true)?.iconOrigin, null, 'custom ports never trigger remote fetching');
-assert.equal(websiteChip('http://github.com/foo', 'github.com/foo', false)?.bare, true);
-assert.equal(websiteChip('https://github.com', '参考文档', false), null, 'descriptive prose is not a chip');
-assert.equal(websiteChip('https://github.com', '参考文档', true)?.label, '参考文档');
+assert.equal(websiteChip('https://example.org:8080/doc', 'Docs')?.iconOrigin, null, 'custom ports never trigger remote fetching');
+assert.equal(websiteChip('http://github.com/foo', 'github.com/foo')?.bare, true);
+assert.equal(websiteChip('https://github.com', '参考文档')?.label, '参考文档', 'all website labels use the same chip classification');
 for (const href of ['#source-image/course/image', '#heading', '/library', 'mailto:a@example.com', 'javascript:alert(1)', 'file:///doc.md', 'https://user:secret@example.com', 'http://127.0.0.1', 'https://example.org/file.pdf?download=1', 'https://example.org/image.png', 'https://example.org/file.md']) {
-  assert.equal(websiteChip(href, href, true), null, href);
+  assert.equal(websiteChip(href, href), null, href);
 }
-assert.equal(websiteChip('https://app.example.org/help', 'https://app.example.org/help', true, ['https://app.example.org']), null);
+assert.equal(websiteChip('https://app.example.org/help', 'https://app.example.org/help', ['https://app.example.org']), null);
 const node = { type: 'tag', name: 'a', children: [{ type: 'tag', name: 'strong', children: [{ type: 'text', data: 'GitHub' }] }] };
 node.parent = { type: 'tag', name: 'p', children: [node, { type: 'text', data: '\n ' }] };
 assert.equal(linkText(node), 'GitHub');
-assert.equal(standaloneLink(node), true);
 node.parent.children.push({ type: 'text', data: '正文' });
-assert.equal(standaloneLink(node), false);
+assert.equal(linkText(node), 'GitHub', 'surrounding prose does not change website presentation');
 assert.equal(linkText({ type: 'tag', name: 'a', children: [{ type: 'tag', name: 'img', children: [] }] }), null);
+
+const cited = websiteCitations(`正文 [**官方公告**](https://github.com/blog "官方来源")。
+
+重复：[另一处](https://GITHUB.com/blog)。
+
+> 参考 [文档][docs]。
+
+| 来源 | 备注 |
+| --- | --- |
+| [API](https://developer.mozilla.org/api) | 测试 |
+
+[docs]: https://example.org/docs "参考"
+
+https://www.news.cn/world/
+
+[![图片](https://example.org/a.png)](https://image.example.org)
+
+[文件](https://example.org/a.pdf) [站内](#/player/test) [本机](http://127.0.0.1)`);
+assert.deepEqual(cited.map(source => [source.number, source.href, source.label]), [
+  [1, 'https://github.com/blog', '官方公告'],
+  [2, 'https://example.org/docs', '文档'],
+  [3, 'https://developer.mozilla.org/api', 'API'],
+  [4, 'https://www.news.cn/world/', 'news.cn/world/'],
+]);
+assert.equal(cited[0].title, '官方来源');
+assert.equal(cited[0].iconOrigin, 'https://github.com');
+assert.deepEqual(websiteCitations('[本站](https://app.example.org/help)', false, ['https://app.example.org']), []);
+for (const source of [
+  '`[代码](https://example.org/code)`',
+  '```md\n[代码](https://example.org/code)\n```',
+  '    [缩进代码](https://example.org/code)',
+  '```html interactive\n<a href="https://example.org/work">作品</a>\n```',
+  '```wbw-widget\nhttps://example.org/widget\n```',
+  '```wbw-plugin\nhttps://example.org/plugin\n```',
+  '$\\text{[math](https://example.org/math)}$',
+  '![图片](https://example.org/image)',
+  '![alt [隐藏链接](https://hidden.example.org)](https://example.org/image)',
+]) assert.deepEqual(websiteCitations(source), [], source);
+for (const tail of ['[参考](https://stream.example.org/part', '[参考](https://stream.example.org/a(b)', '![图像](https://stream.example.org/image']) {
+  assert.deepEqual(websiteCitations(tail, true), [], 'unfinished destinations must not add sources or fetch icons');
+}
+assert.deepEqual(websiteCitations('[已有](https://example.org/done) 和 [参考](https://stream.example.org/part', true).map(source => source.href), ['https://example.org/done']);
+assert.equal(websiteCitations('[参考](https://stream.example.org/a(b))', true)[0].href, 'https://stream.example.org/a(b)');
+assert.equal(websiteCitations('[参考](https://stream.example.org/a "标题里有未配对的 ( 号")', true)[0].href, 'https://stream.example.org/a');
+assert.equal(websiteCitations('[参考](<https://stream.example.org/a(b>)', true)[0].href, 'https://stream.example.org/a(b');
+assert.equal(websiteCitations('[foo <strong>bar</strong>](https://example.org)')[0].label, 'foo bar');
+const growing = '[第一条](https://example.org/one)\n\n';
+assert.deepEqual(websiteCitations(growing + '[第二条](https://example.org/two)', true).map(source => source.number), [1, 2]);
+assert.deepEqual(websiteCitations(growing + '继续 [重复](https://example.org/one)', false).map(source => source.number), [1]);
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3b8AAAAASUVORK5CYII=', 'base64');
 let requests = 0;

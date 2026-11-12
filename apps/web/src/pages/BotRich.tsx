@@ -1,5 +1,6 @@
 import AssistantContent from '../components/AssistantContent';
 import { Markdown } from '../components/markdown/Markdown';
+import { WebsiteCitations } from '../components/markdown/WebsiteCitations';
 import { MarkdownCode, MarkdownPre } from '../components/mermaid/markdown';
 import { MarkdownTable } from '../components/MdTable';
 
@@ -13,9 +14,11 @@ const components = { code: MarkdownCode, pre: MarkdownPre, table: MarkdownTable 
 export default function BotRich({ content }: { content: string }) {
   return (
     <div className="imsg-rich">
+      <WebsiteCitations content={content}>
       <AssistantContent content={content}>
         {(markdown) => <Markdown content={markdown} components={components} />}
       </AssistantContent>
+      </WebsiteCitations>
     </div>
   );
 }

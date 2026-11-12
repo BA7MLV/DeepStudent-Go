@@ -372,6 +372,10 @@
     "limited": "Only part of the text is shown. Download the original for the full content.",
     "fallback": "The original is unavailable. Showing the saved text excerpt."
   },
+  "websiteSources": {
+    "label": "Sources",
+    "open": "Open source {{number}}: {{name}}"
+  },
   "courseChat": {
     "copy": "Copy",
     "forkMenu": "Branch a new session",

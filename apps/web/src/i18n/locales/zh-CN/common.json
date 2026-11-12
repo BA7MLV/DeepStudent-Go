@@ -372,6 +372,10 @@
     "limited": "仅预览部分正文，完整内容请下载原文件。",
     "fallback": "原文件暂时无法读取，当前显示已保存的正文摘要。"
   },
+  "websiteSources": {
+    "label": "引用来源",
+    "open": "打开引用 {{number}}：{{name}}"
+  },
   "courseChat": {
     "copy": "复制",
     "forkMenu": "分支出新会话",

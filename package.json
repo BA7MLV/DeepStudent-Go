@@ -99,6 +99,7 @@
     "test:web-search:e2e": "tsx scripts/e2e-web-search.mjs",
     "test:link-chips": "npm run build -w @wangke/contracts && tsx scripts/test-link-chips.mjs",
     "test:link-chips:e2e": "node scripts/e2e-link-chips.mjs",
+    "test:link-chips:chat:e2e": "tsx scripts/e2e-chat-link-chips.mjs",
     "test:mcp:e2e": "tsx scripts/e2e-mcp-files.mjs",
     "test:sandbox": "node scripts/test-sandbox.mjs",
     "test:sandbox:admission": "node --test scripts/test-sandbox-admission.mjs",
