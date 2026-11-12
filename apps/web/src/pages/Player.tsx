@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import i18n from '../i18n';
 import { resolveCloudBlob } from '../store/cloudBlob';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { withViewTransition } from '../utils/viewTransition';
 import { MediaPlayer, MediaProvider, Track, type MediaPlayerInstance, type MediaStorage } from '@vidstack/react';
 import { DefaultVideoLayout } from '@vidstack/react/player/layouts/default';
 import { playerLayoutIcons } from '../ui/player-icons';
@@ -619,6 +620,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
   return (
     <PageShell
       title={video.name}
+      titleTransitionName={`lib-title-${id}`}
       onBack={() => {
         const path = systemMaterialPath(id);
         if (path) {
@@ -626,7 +628,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
           useLibraryNavigation.getState().setFolderHistory((history) => history.entries[history.index] === folder ? history :
             { entries: [...history.entries.slice(0, history.index + 1), folder], index: history.index + 1 });
         }
-        navigate(path ? '/library' : libraryReturn);
+        withViewTransition(() => navigate(path ? '/library' : libraryReturn));
       }}
       fill
       rootRef={colorSchemeRef}
@@ -641,7 +643,7 @@ function PlayerResource({ id }: { id: string | undefined }) {
             经继承传递给内部的 .vds-captions */}
         <div
           className={videoPaneClass}
-          style={{ '--media-user-font-size': captionScale } as CSSProperties}
+          style={{ '--media-user-font-size': captionScale, viewTransitionName: `lib-cover-${id}` } as CSSProperties}
         >
           {isMaterial ? (
             <MaterialReader key={id} material={video} handleRef={readerRef} />

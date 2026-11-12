@@ -10,6 +10,7 @@ import { accountLifecycle } from '../client/account-lifecycle';
 import { Sym, toast } from '../ui';
 import { prefersReducedMotion } from '../utils/motion';
 import ImagePreview from './ImagePreview';
+import { markImagePreviewSource } from './imagePreviewSource';
 import ImageGallery from './ImageGallery';
 import AttachmentUploadStatus from './AttachmentUploadStatus';
 import ImageCropButton from './ImageCropButton';
@@ -47,7 +48,7 @@ function ChatImage({ file, images, draft = false }: { file: ChatAttachment; imag
   return <>
     <div ref={thumbnail} className="chat-image-slot" style={{ aspectRatio: dimensions.width && dimensions.height ? `${dimensions.width} / ${dimensions.height}` : '1' }}>
     <Button variant="ghost" className={draft ? 'chat-image chat-image--draft' : 'chat-image'} aria-label={stacked ? `查看 ${images.length} 张图片` : `预览图片 ${file.name}`}
-      onPress={() => { navigate(Math.max(0, images.findIndex((image) => image.id === file.id))); setOpen(true); }}>
+      onPress={event => { markImagePreviewSource(event.target); navigate(Math.max(0, images.findIndex((image) => image.id === file.id))); setOpen(true); }}>
       {preview.url && !thumbnailFailed ? <img src={preview.url} alt={file.name} width={dimensions.width} height={dimensions.height} decoding="async" onError={() => setThumbnailFailed(true)} /> : <span className="chat-image-placeholder" aria-label={preview.error ? '图片预览不可用' : '图片加载中'}><Sym name="image" /></span>}
     </Button>
     {(preview.error || thumbnailFailed) && <button type="button" className="chat-image-retry" aria-label={`重试图片预览 ${file.name}`} onClick={() => { setThumbnailFailed(false); preview.retry(); }}>重试</button>}

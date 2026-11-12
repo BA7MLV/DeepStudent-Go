@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { cloudBlobUrl } from '../store/cloudBlob';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { preloadChunk, withViewTransition } from '../utils/viewTransition';
 import {
   Button,
   Card,
@@ -620,23 +621,33 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
   const showSkeleton = useSkeletonGate(isFirstLoad);
 
   const clearFilters = () => {
-    setSearchText('');
-    setFilter('all');
+    withViewTransition(() => {
+      setSearchText('');
+      setFilter('all');
+    });
     searchInputRef.current?.focus();
   };
 
   const openFolder = (key: string | null) => {
-    setMobileManaging(false);
-    setFolderHistory((history) => ({ entries: [...history.entries.slice(0, history.index + 1), key], index: history.index + 1 }));
-    setSelection(new Set());
-    setSearchText('');
-    setFilter('all');
+    withViewTransition(() => {
+      setMobileManaging(false);
+      setFolderHistory((history) => ({ entries: [...history.entries.slice(0, history.index + 1), key], index: history.index + 1 }));
+      setSelection(new Set());
+      setSearchText('');
+      setFilter('all');
+    });
   };
   const travelFolder = (delta: number) => {
-    setFolderHistory((history) => ({ ...history, index: Math.max(0, Math.min(history.entries.length - 1, history.index + delta)) }));
-    setSelection(new Set());
-    setSearchText('');
-    setFilter('all');
+    withViewTransition(() => {
+      setFolderHistory((history) => ({ ...history, index: Math.max(0, Math.min(history.entries.length - 1, history.index + delta)) }));
+      setSelection(new Set());
+      setSearchText('');
+      setFilter('all');
+    });
+  };
+  const openPlayer = (id: string) => {
+    preloadChunk(() => import('./Player'));
+    withViewTransition(() => navigate(`/player/${id}`));
   };
   const openItem = (key: string) => {
     if (key.startsWith('project:')) navigate(`/projects/${key.slice(8)}/files`);
@@ -644,10 +655,10 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
     else if (key === 'system:folder') openFolder('system');
     else if (key === 'system:memory-folder') openFolder('system/memory');
     else if (key.startsWith('system:folder:')) openFolder(key.slice('system:folder:'.length).replace(/^\//, ''));
-    else if (key.startsWith('system:memory:')) navigate(`/player/${encodeURIComponent(key)}`);
-    else if (key.startsWith('system:file:')) navigate(`/player/${encodeURIComponent(key)}`);
+    else if (key.startsWith('system:memory:')) openPlayer(encodeURIComponent(key));
+    else if (key.startsWith('system:file:')) openPlayer(encodeURIComponent(key));
     else if (key.startsWith('folder:')) openFolder(key.slice(7));
-    else if (key.startsWith('file:')) navigate(`/player/${key.slice(5)}`);
+    else if (key.startsWith('file:')) openPlayer(key.slice(5));
   };
 
   const patchTask = (key: string, patch: Partial<ImportTask>) => {
@@ -1496,7 +1507,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
         data-dragging={finderDragging.includes(`folder:${g.key}`) || undefined}
         hidden={!folderTiles.some((folder) => folder.key === g.key)}
       >
-        <span className="finder-item__content" data-drop-target={dropFolder === g.key || undefined} data-dragging={finderDragging.includes(`folder:${g.key}`) || undefined} data-hidden={!folderTiles.some((folder) => folder.key === g.key) || undefined} {...folderDropProps(g.folder!.id!, true)} draggable onDragStart={(event) => startFinderDrag(event, `folder:${g.key}`)} onDragEnd={endFinderDrag}>
+        <span className="finder-item__content" data-drop-target={dropFolder === g.key || undefined} data-dragging={finderDragging.includes(`folder:${g.key}`) || undefined} data-hidden={!folderTiles.some((folder) => folder.key === g.key) || undefined} style={{ viewTransitionName: `lib-folder-${g.key}` }} {...folderDropProps(g.folder!.id!, true)} draggable onDragStart={(event) => startFinderDrag(event, `folder:${g.key}`)} onDragEnd={endFinderDrag}>
         <span className="finder-item__icon"><FolderIcon color={g.folder?.color} /></span>
         <span className="finder-item__name" title={g.name}>{g.name}</span>
         <span className="finder-item__meta">{g.videos.length + folders.filter((folder) => folder.parentId === g.folder!.id).length} 个项目</span>
@@ -1513,7 +1524,7 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
       video={v}
       isMobile={true}
       dragging={drag?.video.id === v.id}
-      onPlay={() => navigate(`/player/${v.id}`)}
+      onPlay={() => openPlayer(v.id)}
       onRename={() => openRename(v)}
       onMove={() => openMove(v)}
       onTogglePin={() => void togglePin(v)}
@@ -1701,18 +1712,18 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
             <Button isIconOnly variant="ghost" aria-label={tr('library.aria.forward')} isDisabled={folderHistory.index === folderHistory.entries.length - 1} onPress={() => travelFolder(1)}><Sym name="chevron_right" /></Button>
             </>}
           </div>
-          <h2 className="finder-title">{folderTitle}</h2>
+          <h2 className="finder-title" style={currentFolder ? { viewTransitionName: `lib-folder-${currentFolder.key}` } : undefined}>{folderTitle}</h2>
           {isMobile && <Button className="finder-manage" variant="ghost" isDisabled={inSystemFolder} onPress={() => { setMobileManaging(!mobileManaging); setSelection(new Set()); setActionMenuOpen(false); }}>{mobileManaging ? tr('library.chrome.mobileDone') : tr('library.chrome.mobileManageBtn')}</Button>}
           <div className="finder-tools">
-            <ToggleButtonGroup className="finder-view-switch" selectionMode="single" disallowEmptySelection selectedKeys={[view]} onSelectionChange={(keys) => { const key = [...keys][0]; if (key === 'icons' || key === 'list') setView(key); }} aria-label={tr('library.aria.view')}>
+            <ToggleButtonGroup className="finder-view-switch" selectionMode="single" disallowEmptySelection selectedKeys={[view]} onSelectionChange={(keys) => { const key = [...keys][0]; if (key === 'icons' || key === 'list') withViewTransition(() => setView(key)); }} aria-label={tr('library.aria.view')}>
               <ToggleButton id="icons" aria-label={tr('library.aria.iconsView')}><Sym name="grid_view" /></ToggleButton>
               <ToggleButton id="list" aria-label={tr('library.aria.listView')}><Sym name="list" /></ToggleButton>
             </ToggleButtonGroup>
             <Dropdown>
               <Dropdown.Trigger className="finder-tool" aria-label={tr('library.aria.sortFilter')}><Sym name="sort" /></Dropdown.Trigger>
               <Dropdown.Popover><Dropdown.Menu aria-label={tr('library.aria.sortFilter')} onAction={(key) => {
-                if (key === 'name' || key === 'recent') setSort(key);
-                else { setFilter(key as LibraryFilter); setSelection(new Set()); }
+                if (key === 'name' || key === 'recent') withViewTransition(() => setSort(key));
+                else { withViewTransition(() => setFilter(key as LibraryFilter)); setSelection(new Set()); }
               }}>
                 <Dropdown.Item id="name" textValue={tr('library.sort.name')}>{tr('library.sort.name')} {sort === 'name' && <Sym name="check" className="size-4" />}</Dropdown.Item>
                 <Dropdown.Item id="recent" textValue={tr('library.sort.recent')}>{tr('library.sort.recent')} {sort === 'recent' && <Sym name="check" className="size-4" />}</Dropdown.Item>
@@ -2600,6 +2611,8 @@ function VideoRow({
       <button
         type="button"
         className={`${THUMB_CLS} mb-2 overflow-hidden transition-shadow hover:shadow-md`}
+        style={{ viewTransitionName: `lib-cover-${v.id}` }}
+        onPointerDown={() => preloadChunk(() => import('./Player'))}
         data-testid="video-thumb"
         aria-label={`${isMaterial ? tr('library.chrome.read') : tr('library.chrome.study')} ${v.name}${ratio == null ? '' : v.finished === 1 ? tr('library.chrome.ariaFinishedSuffix') : tr('library.chrome.ariaWatchedSuffix', { percent: Math.round(ratio * 100) })}`}
         onClick={onPlay}
@@ -2652,7 +2665,7 @@ function VideoRow({
         )}
       </button>
       <div className={MAIN_CLS}>
-        <h3 className={NAME_CLS} id={`library-title-${v.id}`} title={v.name}>
+        <h3 className={NAME_CLS} id={`library-title-${v.id}`} style={{ viewTransitionName: `lib-title-${v.id}` }} title={v.name}>
           {v.name}
         </h3>
         <div className={META_CLS} title={meta}>

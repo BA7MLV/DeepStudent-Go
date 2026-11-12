@@ -5,6 +5,7 @@ import { fmtUnitRef, type UnitKind } from '../materials/units';
 import { fmtTime } from '../utils/vtt';
 import ImageGallery from './ImageGallery';
 import ImagePreview from './ImagePreview';
+import { markImagePreviewSource } from './imagePreviewSource';
 
 export default function ChatScreenshots({ images, materialKind, onSource }: {
   images: ChatImage[]; materialKind?: UnitKind; onSource: (image: ChatImage) => void;
@@ -26,7 +27,7 @@ export default function ChatScreenshots({ images, materialKind, onSource }: {
   </div>;
   return <div className="chat-shots" data-testid="chat-message-screenshots">
     <ImageGallery count={images.length}>
-      <Button variant="ghost" className="chat-image" aria-label={`查看 ${images.length} 张图片`} onPress={() => { setIndex(0); setOpen(true); }}>
+      <Button variant="ghost" className="chat-image" aria-label={`查看 ${images.length} 张图片`} onPress={event => { markImagePreviewSource(event.target); setIndex(0); setOpen(true); }}>
         <img src={images[0].thumb} alt={images[0].label || `截图 ${labelOf(images[0])}`} loading="lazy" decoding="async" />
       </Button>
     </ImageGallery>

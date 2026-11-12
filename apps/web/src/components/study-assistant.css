@@ -200,3 +200,35 @@
 .player-layout--assistant .video-pane:not(.video-pane--reading) { overflow-y: auto; justify-content: flex-start; }
 .player-layout--assistant .comments-block { margin-bottom: 88px; }
 .player-layout--assistant:not(.player-layout--theater) .video-pane [data-media-player] { width: min(100%, calc(72dvh * 16 / 9)); flex: none; }
+
+/* ── 面板 Tabs：指示条滑动 + 新面板从被选一侧进场 ────────────────────────────
+   HeroUI 自带 .tabs__indicator 的 translate/width/height 过渡，但它的两条
+   data-reduce-motion 分支把 transition-property 一并写成了 none（两条规则合起来
+   覆盖所有情况），这里按产品 token 重新接上。 */
+.panel-tabs .tabs__indicator {
+  transition-property: translate, width, height;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-smooth-out);
+}
+
+/* 面板本体：从 hidden 变可见时从被选 tab 的一侧滑入。 */
+.panel-tabs [role='tabpanel'] {
+  transition:
+    opacity var(--duration-fast) var(--ease-smooth-out),
+    translate var(--duration-fast) var(--ease-smooth-out),
+    display 0s;
+}
+@starting-style {
+  .panel-tabs[data-tab-dir='right'] [role='tabpanel'] { opacity: 0; translate: 12px 0; }
+  .panel-tabs[data-tab-dir='left'] [role='tabpanel'] { opacity: 0; translate: -12px 0; }
+}
+
+/* View Transition 拍帧窗口内挂掉 t-dropdown 自身的缩放过渡（见 StudyAssistant.tsx）。 */
+.study-assistant__content.vt-instant {
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-tabs .tabs__indicator { transition-property: none; }
+  .panel-tabs [role='tabpanel'] { transition: none; }
+}
