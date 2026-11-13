@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Button, Checkbox, Dropdown, Input, Label, Modal } from '@heroui/react';
+import { Button, Checkbox, Dropdown, Input, Label, Modal, Switch } from '@heroui/react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../store/db';
 import { useCourseChat } from '../store/courseChat';
@@ -39,6 +39,10 @@ export default function ChatAddMenu({ disabled, onSelectProject, onSkillInsert }
   const loading = useCourseChat((state) => state.loading);
   const sessionId = useCourseChat(state => state.activeId);
   const contextCourses = useCourseChat((state) => state.contextCourses);
+  const courseReferenceEnabled = useCourseChat((state) => state.courseReferenceEnabled);
+  const webSearchEnabled = useCourseChat((state) => state.webSearchEnabled);
+  const setCourseReferenceEnabled = useCourseChat((state) => state.setCourseReferenceEnabled);
+  const setWebSearchEnabled = useCourseChat((state) => state.setWebSearchEnabled);
   const project = useCourseChat((state) => state.project);
   const projectLabel = project ? `${tp('selectProject')} · ${projectDisplayName(project.name)}` : tp('selectProject');
   const contextLabel = contextCourses.length ? text('chatAdd.referenceCount', { count: contextCourses.length }) : text('chatAdd.references');
@@ -91,6 +95,14 @@ export default function ChatAddMenu({ disabled, onSelectProject, onSkillInsert }
           </Dropdown.Menu>
           <div className="chat-add-menu__model px-2 py-1">
             <TaskModelPicker sessionId={sessionId} onClose={() => setAddOpen(false)} />
+          </div>
+          <div className="chat-add-menu__switches px-2 py-1">
+            <Switch isSelected={courseReferenceEnabled} onChange={(enabled) => setCourseReferenceEnabled(Boolean(enabled))} data-testid="chat-course-reference-switch">
+              <Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{text('chatAdd.courseReference')}</span></Switch.Content>
+            </Switch>
+            <Switch isSelected={webSearchEnabled} onChange={(enabled) => setWebSearchEnabled(Boolean(enabled))} data-testid="chat-web-search-switch">
+              <Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{text('chatAdd.webSearch')}</span></Switch.Content>
+            </Switch>
           </div>
         </Dropdown.Popover>
       </Dropdown>

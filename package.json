@@ -28,6 +28,7 @@
     "test:context-compression:server": "tsx scripts/test-server-context-compression.mjs && tsx scripts/test-server-context-compression-consumption.mjs",
     "test:chat:server-ui": "tsx scripts/e2e-server-chat-ui.mjs",
     "test:session:title": "tsx --test scripts/test-session-title.mjs",
+    "test:chat:toggles": "tsx --test scripts/test-chat-capability-toggles.mjs",
     "test:chat:timeline": "npm run build:api && tsx scripts/test-server-chat-timeline.mjs && tsx scripts/test-response-order.mjs",
     "test:chat:timeline:e2e": "npm run build:api && tsx scripts/e2e-chat-timeline.mjs",
     "test:chat:loading": "tsx scripts/test-session-presentation.mjs && tsx scripts/e2e-session-loading.mjs",

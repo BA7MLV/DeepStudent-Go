@@ -77,6 +77,7 @@ interface SessionView {
   pendingAsk: PendingAsk | null; pendingPlan: PendingPlan | null; planApplying: boolean;
   skillIds: number[] | undefined; turnSkillIds: number[]; mcpServerIds: string[] | undefined;
   contextCourses: CourseContextItem[]; project: ChatProject | null;
+  courseReferenceEnabled: boolean; webSearchEnabled: boolean;
 }
 export interface CourseChatStore extends SessionView {
   ready: boolean; sessions: ChatSessionRow[]; activeId: number | null;
@@ -93,6 +94,7 @@ export interface CourseChatStore extends SessionView {
   setSkillIds(ids: number[] | undefined): void; setTurnSkillIds(ids: number[]): void;
   setMcpServerIds(ids: string[] | undefined): Promise<void>; clearCourseContext(): void;
   setCourseContext(ids: string[]): Promise<void>; setProject(project: ChatProject | null): Promise<void>;
+  setCourseReferenceEnabled(enabled: boolean): void; setWebSearchEnabled(enabled: boolean): void;
   answerAsk(answer: AskUserAnswer | string): Promise<void>; stop(): void;
   setSendMode(mode: SendMode): void; enqueue(text: string, attachments?: ChatAttachment[], skills?: number[]): void;
   removeQueued(id: string): void; updateQueued(id: string, text: string): void; clearQueue(): void;
@@ -106,7 +108,7 @@ const EMPTY_VIEW: SessionView = {
   tasks: [],
   messages: [], hasOlder: false, loadingOlder: false, historyError: null, loaded: false, loading: false,
   queued: [], pendingAsk: null, pendingPlan: null, planApplying: false, skillIds: undefined,
-  turnSkillIds: [], mcpServerIds: undefined, contextCourses: [], project: null,
+  turnSkillIds: [], mcpServerIds: undefined, contextCourses: [], project: null, courseReferenceEnabled: true, webSearchEnabled: true,
 };
 const DRAFT_STATE = { ...EMPTY_VIEW, activeId: null, loaded: true };
 const pendingCloudSubmissions = new Map<string, number>();
@@ -372,7 +374,8 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
         writeView(id, {
           skillIds: session?.skillIds, mcpServerIds: session?.mcpServerIds,
           project: session?.projectFolderId == null ? null : { folderId: session.projectFolderId, name: projectFolder?.name ?? '项目', color: projectFolder?.color },
-          contextCourses: contextIds.filter(cid => byId.has(cid)).map(cid => ({ id: cid, name: byId.get(cid)! })) });
+          contextCourses: contextIds.filter(cid => byId.has(cid)).map(cid => ({ id: cid, name: byId.get(cid)! })),
+          courseReferenceEnabled: session?.courseReferenceEnabled !== false, webSearchEnabled: session?.webSearchEnabled !== false });
         await serverSessions.get(id)?.ready;
       } catch (error) {
         if (current() && get().activeId === id) writeView(id, { historyError: `消息同步失败：${error instanceof Error ? error.message : String(error)}` });
@@ -462,6 +465,14 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
     if (key) await patchSession(key, row => { if (project) row.projectFolderId = project.folderId; else delete row.projectFolderId; if (changed) delete row.contextCourseIds; });
     if (current()) writeView(key, { project, ...(changed ? { contextCourses: [] } : {}) });
   },
+  setCourseReferenceEnabled: enabled => {
+    const key = activeKey(), current = captureScope(); writeView(key, { courseReferenceEnabled: enabled });
+    if (key) void patchSession(key, row => { if (enabled) delete row.courseReferenceEnabled; else row.courseReferenceEnabled = false; }).catch(error => { if (current()) writeView(key, { historyError: String(error) }); });
+  },
+  setWebSearchEnabled: enabled => {
+    const key = activeKey(), current = captureScope(); writeView(key, { webSearchEnabled: enabled });
+    if (key) void patchSession(key, row => { if (enabled) delete row.webSearchEnabled; else row.webSearchEnabled = false; }).catch(error => { if (current()) writeView(key, { historyError: String(error) }); });
+  },
   send: async (rawText, mode, target, resume, suppliedAttachments, suppliedSkills, queuedCommand) => {
     const currentScope = captureScope(), state = get();
     const key = resume ? resume.sessionId : target ?? state.activeId ?? 0;
@@ -494,7 +505,7 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
     try {
       if (id == null) {
         writeView(0, { loading: true });
-        const row = await newSessionRow(view.skillIds, view.contextCourses.map(course => course.id), view.mcpServerIds, view.project?.folderId);
+        const row = await newSessionRow(view.skillIds, view.contextCourses.map(course => course.id), view.mcpServerIds, view.project?.folderId, view.courseReferenceEnabled, view.webSearchEnabled);
         id = row.id!;
         if (!currentScope() || !adapter.current()) return;
         if (activeKey() === key) set(s => ({ sessions: [...s.sessions.slice(-50), row], activeId: id, loaded: true }));
@@ -630,11 +641,12 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
   cancelPlan: async () => { await commandServerChat(get().activeId, 'cancelPlan'); },
 }));
 
-async function newSessionRow(skillIds?: number[], contextCourseIds: string[] = [], mcpServerIds?: string[], projectFolderId?: number): Promise<ChatSessionRow> {
+async function newSessionRow(skillIds?: number[], contextCourseIds: string[] = [], mcpServerIds?: string[], projectFolderId?: number, courseReferenceEnabled = true, webSearchEnabled = true): Promise<ChatSessionRow> {
   const current = captureScope(), adapter = browserChatQueue();
   const value: ChatSessionRow = { id: learningId(), videoId: LIBRARY_ASSISTANT_ID, title: '新会话', createdAt: Date.now(),
     ...(skillIds !== undefined ? { skillIds } : {}), ...(mcpServerIds !== undefined ? { mcpServerIds } : {}),
-    ...(contextCourseIds.length ? { contextCourseIds } : {}), ...(projectFolderId != null ? { projectFolderId } : {}) };
+    ...(contextCourseIds.length ? { contextCourseIds } : {}), ...(projectFolderId != null ? { projectFolderId } : {}),
+    ...(courseReferenceEnabled ? {} : { courseReferenceEnabled: false }), ...(webSearchEnabled ? {} : { webSearchEnabled: false }) };
   await sessionQueue().flush(); if (!current() || !adapter.current()) throw new Error('client_account_changed');
   await submitLearning([learningEdit({ kind: 'conversationSession', expected: null, value } as any)], [`session:${value.id}`], undefined, false);
   if (!current() || !adapter.current()) throw new Error('client_account_changed');

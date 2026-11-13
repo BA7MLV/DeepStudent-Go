@@ -211,6 +211,12 @@ export interface ChatSessionRow {
    * 普通单课程问答会话不使用该字段。
    */
   contextCourseIds?: string[];
+  /**
+   * 会话级能力开关（非索引字段）。
+   * `undefined` = 默认开启；`false` = 本会话关闭对应能力，老会话迁移后保持默认。
+   */
+  courseReferenceEnabled?: boolean;
+  webSearchEnabled?: boolean;
   /** Resource folder associated with library chat; stable across folder renames. */
   projectFolderId?: number;
   /**

@@ -32,7 +32,7 @@
     "touchHelp": "长按输入栏说话，松开完成，上滑取消；识别后可编辑再发送",
     "desktopHelp": "回车发送，Shift + 回车换行；点击麦克风开始语音输入"
   },
-  "chatAdd": { "title": "添加内容或调整模型", "references": "课程引用", "referenceCount": "课程引用 · {{count}} 门", "readFailed": "课程列表读取失败，请关闭后重试", "saveFailed": "课程选择保存失败，请重试", "handoutAdded": "已添加讲义提示词，可修改后发送", "handoutFailed": "讲义提示词加载失败，请重试", "handout": "生成讲义", "limited": "已限定", "search": "搜索课程", "selected": "已选择 {{count}} 门，最多 {{max}} 门", "auto": "自动选择", "reset": "恢复自动选择", "wait": "回复完成后可修改课程引用。", "loading": "正在读取课程…", "empty": "课程库还是空的", "import": "导入课程", "importNew": "导入新课程", "noMatches": "没有匹配的课程", "cancel": "取消", "save": "保存" },
+  "chatAdd": { "title": "添加内容或调整模型", "references": "课程引用", "referenceCount": "课程引用 · {{count}} 门", "courseReference": "课程引用", "webSearch": "联网搜索", "readFailed": "课程列表读取失败，请关闭后重试", "saveFailed": "课程选择保存失败，请重试", "handoutAdded": "已添加讲义提示词，可修改后发送", "handoutFailed": "讲义提示词加载失败，请重试", "handout": "生成讲义", "limited": "已限定", "search": "搜索课程", "selected": "已选择 {{count}} 门，最多 {{max}} 门", "auto": "自动选择", "reset": "恢复自动选择", "wait": "回复完成后可修改课程引用。", "loading": "正在读取课程…", "empty": "课程库还是空的", "import": "导入课程", "importNew": "导入新课程", "noMatches": "没有匹配的课程", "cancel": "取消", "save": "保存" },
   "context": {
     "detail": "上下文用量 ≈{{used}} / {{total}}（{{percent}}%）", "view": "查看上下文详情", "title": "上下文详情",
     "used": "已用（估算）", "window": "上下文窗口", "remaining": "剩余容量", "system": "系统提示词", "history": "历史消息", "current": "当前输入 / 附件",

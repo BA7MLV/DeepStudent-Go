@@ -10,7 +10,7 @@ export const LIBRARY_IMPORT_FIELDS = {
   blocks: 'id materialId idx unit unitLabel text kind', frames: 'id videoId ts blob kind caption',
   covers: 'videoId blob w h ts source createdAt', handouts: 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos',
   cards: 'id videoId q a time status createdAt', comments: 'id videoId time author role text parentId createdAt', danmakus: 'id videoId time text',
-  sessions: 'id videoId title createdAt contextCourseIds projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions',
+  sessions: 'id videoId title createdAt contextCourseIds courseReferenceEnabled webSearchEnabled projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions',
   messages: 'id taskId videoId sessionId role content createdAt modelTrace modelRequests explicitSkillIds images attachments reasoning reasoningMs tools responseSegments quiz ask folderPlan resume interrupted interruptReason widget widgets legacyHtmlWorks widgetState widgetStates',
   skills: 'id name description body enabled builtin updatedAt mcpRequired', references: 'id skillId path body',
   annotations: 'id materialId surface tool color width height points createdAt renderer nib opacity smoothing input anchor rects', studyDays: 'date seconds updatedAt',

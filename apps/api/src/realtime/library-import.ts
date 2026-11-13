@@ -19,7 +19,7 @@ const definitions = {
   cards: ['cards', 'id', 'id videoId q a time status createdAt'],
   comments: ['comments', 'id', 'id videoId time author role text parentId createdAt'],
   danmakus: ['danmakus', 'id', 'id videoId time text'],
-  sessions: ['chatSessions', 'id', 'id videoId title createdAt contextCourseIds projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions'],
+  sessions: ['chatSessions', 'id', 'id videoId title createdAt contextCourseIds courseReferenceEnabled webSearchEnabled projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions'],
   messages: ['chats', 'id', 'id taskId videoId sessionId role content createdAt modelTrace modelRequests explicitSkillIds images attachments reasoning reasoningMs tools responseSegments quiz ask folderPlan resume interrupted interruptReason widget widgets legacyHtmlWorks widgetState widgetStates'],
   skills: ['skills', 'id', 'id name description body enabled builtin updatedAt mcpRequired'],
   references: ['skillRefs', 'id', 'id skillId path body'],
