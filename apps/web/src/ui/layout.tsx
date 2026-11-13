@@ -94,6 +94,8 @@ export interface RecentItem {
   pendingReply?: boolean;
   pinned?: boolean;
   onUnpin?: () => void;
+  /** 置顶这一项。长按拖到侧栏底部的投放区时调用（未置顶行投放区显示「置顶」）。 */
+  onPin?: () => void;
   /**
    * 行尾菜单的动作。传了就渲染那颗「更多」按钮，并接上右键。
    *
@@ -126,6 +128,12 @@ export interface RecentItem {
 
 interface RecentNavigation {
   label: string; items: RecentItem[]; loading?: boolean;
+  /** 置顶小节的标题（如「置顶」）。没传时置顶行仍归入原列表，不单开小节。 */
+  pinnedLabel?: string;
+  /** 拖拽投放区在拖动未置顶行时显示的文案（如「置顶」）。 */
+  dropPinLabel?: string;
+  /** 拖拽投放区在拖动已置顶行时显示的文案（如「取消置顶」）。 */
+  dropUnpinLabel?: string;
   actionError?: string; dismissError?: () => void; dismissLabel?: string;
   pagination?: { previous?: () => void; next?: () => void; previousLabel: string; nextLabel: string;
     busy: boolean; error?: string; retry: () => void; retryLabel: string };
@@ -280,6 +288,226 @@ function Sidebar({
    * 于是自己收一个 id：右键时 `setMenuId(item.id)`，菜单照样锚在那颗「更多」上。
    */
   const [menuId, setMenuId] = useState<string | null>(null);
+  /**
+   * 长按拖拽切换置顶：按住一行约 350ms 进入拖拽，侧栏底部浮出一块投放区。
+   * 拖的是已置顶行时投放区显示「取消置顶」，否则显示「置顶」；松手落在投放区内即切换。
+   *
+   * 拖拽期间 RAC 的 press 仍会在 pointerup 补发一次选中（等于「拖完还跳去那个会话」），
+   * 用 `suppressSelectUntilRef` 的时间窗吞掉这一下。
+   */
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropHover, setDropHover] = useState(false);
+  const dragIdRef = useRef<string | null>(null);
+  const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const pressRef = useRef<{ x: number; y: number; timer: number } | null>(null);
+  const suppressSelectUntilRef = useRef(0);
+  const setDrag = (id: string | null) => {
+    dragIdRef.current = id;
+    setDragId(id);
+  };
+
+  const beginRecentPress = (item: RecentItem, event: React.PointerEvent) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    pressRef.current = { x: event.clientX, y: event.clientY, timer: window.setTimeout(() => {
+      pressRef.current = null;
+      setDrag(item.id);
+    }, 350) };
+    const inZone = (point: { clientX: number; clientY: number }) => {
+      const rect = dropZoneRef.current?.getBoundingClientRect();
+      return !!rect && point.clientX >= rect.left && point.clientX <= rect.right
+        && point.clientY >= rect.top && point.clientY <= rect.bottom;
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      if (pressRef.current) {
+        window.clearTimeout(pressRef.current.timer);
+        pressRef.current = null;
+      }
+      setDrag(null);
+      setDropHover(false);
+    };
+    const onMove = (move: PointerEvent) => {
+      if (pressRef.current) {
+        // 350ms 内就挪出 8px，用户是在滚动列表而不是要拖拽。
+        if (Math.hypot(move.clientX - pressRef.current.x, move.clientY - pressRef.current.y) > 8) cleanup();
+        return;
+      }
+      setDropHover(inZone(move));
+    };
+    const onUp = (up: PointerEvent) => {
+      const draggedId = dragIdRef.current;
+      cleanup();
+      if (draggedId == null) return;
+      suppressSelectUntilRef.current = Date.now() + 500;
+      if (!inZone(up)) return;
+      const dragged = items.find((candidate) => candidate.id === draggedId);
+      if (dragged?.pinned) dragged.onUnpin?.();
+      else dragged?.onPin?.();
+    };
+    const onCancel = () => cleanup();
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+  };
+
+  const items = recent?.items ?? [];
+  const pinnedItems = items.filter((item) => item.pinned);
+  const unpinnedItems = items.filter((item) => !item.pinned);
+  const draggedItem = dragId == null ? undefined : items.find((item) => item.id === dragId);
+  const listSelection = {
+    selectionMode: 'single' as const,
+    disallowEmptySelection: true,
+    selectedKeys: items.filter((item) => item.active).map((item) => item.id),
+    onSelectionChange: (keys: Iterable<unknown>) => {
+      if (Date.now() < suppressSelectUntilRef.current) return;
+      const next = [...keys][0];
+      if (next == null) return;
+      items.find((item) => item.id === String(next))?.onClick();
+      onNavigate?.();
+    },
+    className: 'gap-px pr-1',
+  };
+
+  /** 渲染 Recent 的一行;置顶 / 未置顶两个 ListBox 共用同一份行结构。 */
+  const renderRecentItem = (item: RecentItem) => (
+    <ListBox.Item
+      key={item.id}
+      id={item.id}
+      textValue={item.label}
+      data-testid={item.testId}
+      data-dragging={dragId === item.id || undefined}
+      onPointerDown={(event) => beginRecentPress(item, event)}
+      onFocus={(event) => {
+        setFocusedRecentId(item.id);
+        measureRecentTitle(event.currentTarget);
+      }}
+      onMouseEnter={(event) => measureRecentTitle(event.currentTarget)}
+      /* 右键整行开菜单。preventDefault 挡掉浏览器自带的上下文菜单 ——
+         不挡的话用户的右键永远看到浏览器的菜单，我们的入口等于没有。 */
+      onContextMenu={
+        item.menu
+          ? (event) => {
+              event.preventDefault();
+              if (dragIdRef.current == null) setMenuId(item.id);
+            }
+          : undefined
+      }
+      className="sidebar-control recent-item group min-h-9 gap-3 rounded-full px-3 text-[0.8125rem] font-normal text-muted"
+    >
+      {item.pendingReply ? (
+        <span className="grid size-6 shrink-0 place-items-center text-sm"
+          role="status" aria-label="正在等待回复…">
+          <MatrixDots />
+        </span>
+      ) : item.pinned && item.onUnpin ? (
+        <span className="shrink-0" title="取消置顶"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}>
+          <Button isIconOnly size="sm" variant="ghost"
+            className="sidebar-control size-6 min-w-0 rounded-md text-muted"
+            aria-label={`取消置顶 ${item.label}`}
+            data-testid={`${item.testId ?? item.id}-unpin`}
+            onPress={item.onUnpin}>
+            <Sym name="pin" />
+          </Button>
+        </span>
+      ) : <span className="grid size-6 shrink-0 place-items-center text-sm" aria-hidden="true">
+        <Sym name="chat_bubble" />
+      </span>}
+      {/* 长标题在 hover / 聚焦时横向滚动；完整内容仍保留在 DOM 中。 */}
+      <span className="recent-title min-w-0">
+        <span>{item.label}</span>
+      </span>
+      {unreadIds.includes(Number(item.id)) && (
+        <span className="size-2 shrink-0 rounded-full bg-accent"
+          role="img" aria-label="会话已完成，未查看"
+          data-testid={`${item.testId ?? item.id}-unread`} />
+      )}
+      {item.menu && (
+        /**
+         * 挡冒泡的壳：见 `RecentItem.onDelete` 的注释。
+         * 停的是 pointerdown / mousedown / click 三种 —— React Aria 的
+         * `useSelectableItem` 按下与点击判定各走一个事件，少停一个就会漏。
+         *
+         * 刻意**不**停 focus：ListBox 是复合控件，行上的 `data-focused`
+         * 是上面那几个快捷键（Delete / ContextMenu）认「停在哪一行」的判据，
+         * 按钮把焦点抢走这条判据就会跟着错。
+         */
+        <span
+          className="ml-auto shrink-0"
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Dropdown.Root
+            isOpen={menuId === item.id}
+            onOpenChange={(open) => setMenuId(open ? item.id : null)}
+          >
+            <Dropdown.Trigger
+              /* `Dropdown.Trigger` 包的是 RAC 的 Button，不是 HeroUI 的
+                 Button —— `isIconOnly` / `variant` / `size` 那些属性不存在，
+                 尺寸与配色只能自己给类名。 */
+              /* 显形规则：宽屏**只认鼠标悬停这一行**。
+                 刻意不给「键盘焦点行」「当前选中行」两个例外 ——
+                 那颗按钮 Tab 走不到（ListBox 是复合控件，整组只占一个
+                 tab 停靠点），让它跟着焦点显形等于摆一颗看得见点不到的
+                 按钮；键盘用户真正的入口是 ContextMenu / Shift+F10
+                 开菜单、Delete 直接删（见上面 `focusedRecentId` 的注释）。
+
+                 窄屏常驻（`max-[900px]`）：触屏没有 hover，藏起来这个
+                 入口就不存在了。见 docs/plans/2026-10-15-recent-会话操作菜单-design.md §3.1。
+
+                 菜单开着的那一行例外常驻：菜单锚在这颗按钮上，
+                 锚点跟着鼠标移开而隐身，会变成「菜单浮在空气里」。 */
+              className={[
+                'sidebar-control grid size-6 place-items-center rounded-md text-muted transition-opacity',
+                menuId === item.id
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100 max-[900px]:opacity-100',
+              ].join(' ')}
+              aria-label={`${item.label} 的更多操作`}
+              data-testid={`${item.testId ?? item.id}-menu-trigger`}
+            >
+              <Sym name="more_vert" />
+            </Dropdown.Trigger>
+            <Dropdown.Popover>
+              <Dropdown.Menu
+                onAction={(key) => {
+                  item.menu?.find((action) => action.key === String(key))?.onAction();
+                }}
+              >
+                {item.menu.map((action) => (
+                  <Dropdown.Item
+                    key={action.key}
+                    id={action.key}
+                    textValue={action.label}
+                    isDisabled={action.isDisabled}
+                    className={
+                      action.danger
+                        ? 'text-danger data-[hovered=true]:bg-danger/10'
+                        : undefined
+                    }
+                    data-testid={`${item.testId ?? item.id}-menu-${action.key}`}
+                  >
+                    {/* 菜单项图标：menu-item 的行高只够一个 1em 的字形，
+                        撑大字号会把整行顶高。 */}
+                    <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
+                      {action.icon}
+                    </span>
+                    {action.label}
+                  </Dropdown.Item>
+                ))}
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown.Root>
+        </span>
+      )}
+</ListBox.Item>
+  );
+
   return (
     <>
       <div id={navigationId} className="flex shrink-0 flex-col gap-1">
@@ -292,7 +520,9 @@ function Sidebar({
         <>
           <Separator className="my-3" />
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="shrink-0 px-3 pb-2 text-[0.8125rem] text-muted">{recent.label}</div>
+            <div className="shrink-0 px-3 pb-2 text-[0.8125rem] text-muted" data-testid="recent-section-label">
+              {pinnedItems.length > 0 ? (recent.pinnedLabel ?? recent.label) : recent.label}
+            </div>
             {!recent.loading && recent.items.length === 0 && (
               <div className="px-3 text-xs leading-6 text-muted">开始对话后，会话会显示在这里</div>
             )}
@@ -353,155 +583,18 @@ function Sidebar({
                   target.onDelete();
                 }}
               >
-                <ListBox
-                  aria-label={recent.label}
-                  selectionMode="single"
-                  disallowEmptySelection
-                  selectedKeys={recent.items.filter((item) => item.active).map((item) => item.id)}
-                  onSelectionChange={(keys) => {
-                    const next = [...keys][0];
-                    if (next == null) return;
-                    recent.items.find((item) => item.id === String(next))?.onClick();
-                    onNavigate?.();
-                  }}
-                  className="gap-px pr-1"
-                >
-                  {recent.items.map((item) => (
-                    <ListBox.Item
-                      key={item.id}
-                      id={item.id}
-                      textValue={item.label}
-                      data-testid={item.testId}
-                      onFocus={(event) => {
-                        setFocusedRecentId(item.id);
-                        measureRecentTitle(event.currentTarget);
-                      }}
-                      onMouseEnter={(event) => measureRecentTitle(event.currentTarget)}
-                      /* 右键整行开菜单。preventDefault 挡掉浏览器自带的上下文菜单 ——
-                         不挡的话用户的右键永远看到浏览器的菜单，我们的入口等于没有。 */
-                      onContextMenu={
-                        item.menu
-                          ? (event) => {
-                              event.preventDefault();
-                              setMenuId(item.id);
-                            }
-                          : undefined
-                      }
-                      className="sidebar-control recent-item group min-h-9 gap-3 rounded-full px-3 text-[0.8125rem] font-normal text-muted"
-                    >
-                      {item.pendingReply ? (
-                        <span className="grid size-6 shrink-0 place-items-center text-sm"
-                          role="status" aria-label="正在等待回复…">
-                          <MatrixDots />
-                        </span>
-                      ) : item.pinned && item.onUnpin ? (
-                        <span className="shrink-0" title="取消置顶"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          onClick={(event) => event.stopPropagation()}>
-                          <Button isIconOnly size="sm" variant="ghost"
-                            className="sidebar-control size-6 min-w-0 rounded-md text-muted"
-                            aria-label={`取消置顶 ${item.label}`}
-                            data-testid={`${item.testId ?? item.id}-unpin`}
-                            onPress={item.onUnpin}>
-                            <Sym name="pin" />
-                          </Button>
-                        </span>
-                      ) : <span className="grid size-6 shrink-0 place-items-center text-sm" aria-hidden="true">
-                        <Sym name="chat_bubble" />
-                      </span>}
-                      {/* 长标题在 hover / 聚焦时横向滚动；完整内容仍保留在 DOM 中。 */}
-                      <span className="recent-title min-w-0">
-                        <span>{item.label}</span>
-                      </span>
-                      {unreadIds.includes(Number(item.id)) && (
-                        <span className="size-2 shrink-0 rounded-full bg-accent"
-                          role="img" aria-label="会话已完成，未查看"
-                          data-testid={`${item.testId ?? item.id}-unread`} />
-                      )}
-                      {item.menu && (
-                        /**
-                         * 挡冒泡的壳：见 `RecentItem.onDelete` 的注释。
-                         * 停的是 pointerdown / mousedown / click 三种 —— React Aria 的
-                         * `useSelectableItem` 按下与点击判定各走一个事件，少停一个就会漏。
-                         *
-                         * 刻意**不**停 focus：ListBox 是复合控件，行上的 `data-focused`
-                         * 是上面那几个快捷键（Delete / ContextMenu）认「停在哪一行」的判据，
-                         * 按钮把焦点抢走这条判据就会跟着错。
-                         */
-                        <span
-                          className="ml-auto shrink-0"
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onMouseDown={(event) => event.stopPropagation()}
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <Dropdown.Root
-                            isOpen={menuId === item.id}
-                            onOpenChange={(open) => setMenuId(open ? item.id : null)}
-                          >
-                            <Dropdown.Trigger
-                              /* `Dropdown.Trigger` 包的是 RAC 的 Button，不是 HeroUI 的
-                                 Button —— `isIconOnly` / `variant` / `size` 那些属性不存在，
-                                 尺寸与配色只能自己给类名。 */
-                              /* 显形规则：宽屏**只认鼠标悬停这一行**。
-                                 刻意不给「键盘焦点行」「当前选中行」两个例外 ——
-                                 那颗按钮 Tab 走不到（ListBox 是复合控件，整组只占一个
-                                 tab 停靠点），让它跟着焦点显形等于摆一颗看得见点不到的
-                                 按钮；键盘用户真正的入口是 ContextMenu / Shift+F10
-                                 开菜单、Delete 直接删（见上面 `focusedRecentId` 的注释）。
-
-                                 窄屏常驻（`max-[900px]`）：触屏没有 hover，藏起来这个
-                                 入口就不存在了。见 docs/plans/2026-10-15-recent-会话操作菜单-design.md §3.1。
-
-                                 菜单开着的那一行例外常驻：菜单锚在这颗按钮上，
-                                 锚点跟着鼠标移开而隐身，会变成「菜单浮在空气里」。 */
-                              className={[
-                                'sidebar-control grid size-6 place-items-center rounded-md text-muted transition-opacity',
-                                menuId === item.id
-                                  ? 'opacity-100'
-                                  : 'opacity-0 group-hover:opacity-100 max-[900px]:opacity-100',
-                              ].join(' ')}
-                              aria-label={`${item.label} 的更多操作`}
-                              data-testid={`${item.testId ?? item.id}-menu-trigger`}
-                            >
-                              <Sym name="more_vert" />
-                            </Dropdown.Trigger>
-                            <Dropdown.Popover>
-                              <Dropdown.Menu
-                                onAction={(key) => {
-                                  item.menu?.find((action) => action.key === String(key))?.onAction();
-                                }}
-                              >
-                                {item.menu.map((action) => (
-                                  <Dropdown.Item
-                                    key={action.key}
-                                    id={action.key}
-                                    textValue={action.label}
-                                    isDisabled={action.isDisabled}
-                                    className={
-                                      action.danger
-                                        ? 'text-danger data-[hovered=true]:bg-danger/10'
-                                        : undefined
-                                    }
-                                    data-testid={`${item.testId ?? item.id}-menu-${action.key}`}
-                                  >
-                                    {/* 菜单项图标：menu-item 的行高只够一个 1em 的字形，
-                                        撑大字号会把整行顶高。 */}
-                                    <span className="grid size-4 shrink-0 place-items-center" aria-hidden="true">
-                                      {action.icon}
-                                    </span>
-                                    {action.label}
-                                  </Dropdown.Item>
-                                ))}
-                              </Dropdown.Menu>
-                            </Dropdown.Popover>
-                          </Dropdown.Root>
-                        </span>
-                      )}
-                    </ListBox.Item>
-                  ))}
+                {pinnedItems.length > 0 && (
+                  <>
+                    <ListBox {...listSelection} aria-label={recent.pinnedLabel ?? recent.label}>
+                      {pinnedItems.map((item) => renderRecentItem(item))}
+                    </ListBox>
+                    <div className="shrink-0 px-3 pb-2 pt-1 text-[0.8125rem] text-muted">{recent.label}</div>
+                  </>
+                )}
+                <ListBox {...listSelection} aria-label={recent.label}>
+                  {unpinnedItems.map((item) => renderRecentItem(item))}
                 </ListBox>
-                {recent.actionError && <div className="px-3 py-2 text-xs text-danger" role="alert" data-testid="recent-action-error">
+{recent.actionError && <div className="px-3 py-2 text-xs text-danger" role="alert" data-testid="recent-action-error">
                   {recent.actionError}
                   <Button size="sm" variant="ghost" onPress={recent.dismissError}>{recent.dismissLabel}</Button>
                 </div>}
@@ -516,6 +609,20 @@ function Sidebar({
                 </div>}
               </div>
             </ScrollShadow>
+            {draggedItem && (
+              <div
+                ref={dropZoneRef}
+                data-testid="recent-drop-zone"
+                data-hover={dropHover || undefined}
+                className={[
+                  'mt-2 flex shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[0.8125rem] transition-colors',
+                  dropHover ? 'border-solid bg-surface text-foreground' : 'border-dashed text-muted',
+                ].join(' ')}
+              >
+                <Sym name={draggedItem.pinned ? 'pin_off' : 'pin'} />
+                {draggedItem.pinned ? (recent.dropUnpinLabel ?? recent.label) : (recent.dropPinLabel ?? recent.label)}
+              </div>
+            )}
           </div>
         </>
       )}
