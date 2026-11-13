@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Modal } from '@heroui/react';
 import { MODAL_CONTAINER_CLASS, Sym } from '../ui';
 import { prefersReducedMotion } from '../utils/viewTransition';
@@ -49,6 +49,8 @@ function PreviewPane({ title, content, status, footer, onOpenChange, onDownload,
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [intrinsic, setIntrinsic] = useState({ width: 0, height: 0 });
   const scroll = useRef<HTMLDivElement>(null);
+  // 滚轮缩放锚点：光标下的内容坐标，缩放后把同一坐标滚回光标处。
+  const wheelAnchor = useRef<{ ax: number; ay: number; cx: number; cy: number } | null>(null);
   const svgRoot = useRef<HTMLDivElement>(null);
   const eventsRoot = useRef<HTMLDivElement>(null);
   const svg = content?.kind === 'svg' ? content.svg : undefined;
@@ -107,6 +109,39 @@ function PreviewPane({ title, content, status, footer, onOpenChange, onDownload,
     if (scroll.current) { scroll.current.scrollLeft = 0; scroll.current.scrollTop = 0; }
   };
   const hasGallery = !!navigation && navigation.total > 1;
+
+  // React 的 onWheel 是被动监听，preventDefault 无效，必须用原生监听挡住页面滚动。
+  useEffect(() => {
+    const el = scroll.current;
+    if (!el || !content) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.deltaY) return;
+      event.preventDefault();
+      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom * Math.exp(-event.deltaY * 0.002)));
+      if (next === zoom) return;
+      const rect = el.getBoundingClientRect();
+      const ax = event.clientX - rect.left;
+      const ay = event.clientY - rect.top;
+      const padX = Math.max(0, (el.clientWidth - width) / 2);
+      const padY = Math.max(0, (el.clientHeight - height) / 2);
+      wheelAnchor.current = { ax, ay, cx: (el.scrollLeft + ax - padX) / scale, cy: (el.scrollTop + ay - padY) / scale };
+      setZoom(next);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [content, zoom, scale, width, height]);
+
+  // 锚点在渲染出新尺寸后生效：把滚轮前光标下的内容点滚回光标处。
+  useLayoutEffect(() => {
+    const el = scroll.current;
+    const anchor = wheelAnchor.current;
+    if (!el || !anchor) return;
+    wheelAnchor.current = null;
+    const padX = Math.max(0, (el.clientWidth - width) / 2);
+    const padY = Math.max(0, (el.clientHeight - height) / 2);
+    el.scrollLeft = anchor.cx * scale + padX - anchor.ax;
+    el.scrollTop = anchor.cy * scale + padY - anchor.ay;
+  }, [zoom, scale, width, height]);
 
   return <div ref={eventsRoot} className="image-preview-events"
     onKeyDown={(event) => {

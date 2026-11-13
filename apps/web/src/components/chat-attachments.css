@@ -38,11 +38,12 @@
 .chat-document-preview__footer { display: flex; flex-flow: row wrap; align-items: center; gap: 8px; }
 .chat-document-preview__footer > small { margin-inline-end: auto; color: var(--muted); }
 .chat-image-draft { position: relative; flex: none; width: 88px; height: 88px; padding: 4px; }
-.chat-image-draft__remove { position: absolute; z-index: 1; top: 0; right: 0; border-radius: var(--radius-full); opacity: 0; pointer-events: none; }
-.chat-image-draft:hover .chat-image-draft__remove, .chat-image-draft:focus-within .chat-image-draft__remove { opacity: 1; pointer-events: auto; }
-.chat-image-draft__crop { position: absolute; z-index: 1; bottom: 0; left: 0; border-radius: var(--radius-full); }
-.chat-image-draft__crop-loading { position: absolute; inset: 4px; display: grid; place-items: center; background: var(--background); opacity: .8; }
-@media (hover: none) { .chat-image-draft .chat-image-draft__remove { opacity: 1; pointer-events: auto; } }
+/* 裁剪与移除同属上传阶段的临时操作：成组悬停出现在右上角，不占用缩略图四角。 */
+.chat-image-draft__actions { position: absolute; z-index: 1; top: 0; right: 0; display: flex; opacity: 0; pointer-events: none; }
+.chat-image-draft:hover .chat-image-draft__actions, .chat-image-draft:focus-within .chat-image-draft__actions { opacity: 1; pointer-events: auto; }
+.chat-image-draft__actions > button { border-radius: var(--radius-full); }
+.chat-image-draft__crop-loading { display: grid; place-items: center; width: 28px; height: 28px; }
+@media (hover: none) { .chat-image-draft .chat-image-draft__actions { opacity: 1; pointer-events: auto; } }
 .chat-image-draft > .chat-image-pending__overlay { inset: 4px; border-radius: var(--radius-panel); }
 .chat-image-gallery { position: relative; width: 100%; }
 .chat-image.chat-image { display: flex; width: 100%; height: auto; min-width: 0; padding: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--background); }
