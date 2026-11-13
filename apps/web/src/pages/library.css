@@ -12,6 +12,12 @@
   display: none;
 }
 
+/* 资料区没有内容从顶栏下滚过（finder 自带实色工具栏），
+   渐进模糊在这里只剩四层 backdrop-filter 的合成开销，按约定不启用。 */
+.page-library .page-app-bar__blur {
+  display: none;
+}
+
 .page-library [data-testid='top-app-bar']:has([data-testid='nav-rail-toggle'], [data-testid='nav-rail-open']) {
   display: flex;
   width: 64px;
