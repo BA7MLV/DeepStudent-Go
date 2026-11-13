@@ -92,6 +92,7 @@ export function useRecentChats(showActive = false) {
     return sessions
     .filter((session) => (showActive && session.id === activeId) || (activity?.get(session.id!) ?? 0) > 0)
     .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned)
+      || (a.pinnedOrder ?? Number.MAX_SAFE_INTEGER) - (b.pinnedOrder ?? Number.MAX_SAFE_INTEGER)
       || (activity?.get(b.id!) || b.createdAt) - (activity?.get(a.id!) || a.createdAt)
       || b.createdAt - a.createdAt || b.id! - a.id!);
   }, [sessions, activity, showActive, activeId, serverIndex.page]);
@@ -148,7 +149,6 @@ export function useRecentChats(showActive = false) {
       pendingReply: busy && !awaitingIds.includes(id),
       pinned: !!session.pinned,
       onUnpin: () => guard(() => useCourseChat.getState().setPinned(id, false)),
-      onPin: () => guard(() => useCourseChat.getState().setPinned(id, true)),
       onClick: () => {
         guard(() => useCourseChat.getState().loadSession(id));
         if (!showActive) navigate('/');
@@ -169,6 +169,7 @@ export function useRecentChats(showActive = false) {
   });
   return { label: t('recent.label'), items, loading: !ready || (cloud.enabled ? !serverIndex.page && serverIndex.loading : activity === null),
     pinnedLabel: t('recent.pinnedSection'), dropPinLabel: t('recent.pin'), dropUnpinLabel: t('recent.unpin'),
+    reorderPinned: (orderedIds: string[]) => guard(() => useCourseChat.getState().reorderPinned(orderedIds.map((id) => Number(id)))),
     actionError, dismissError: () => setActionError(undefined), dismissLabel: t('feedback.dismiss'),
     ...(cloud.enabled ? { pagination: {
       previous: serverIndex.page?.previous ? serverIndex.previous : undefined,
