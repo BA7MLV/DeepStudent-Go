@@ -4,7 +4,7 @@ import type { InkStroke } from '../materials/ink';
 import { cloud } from '../cloud/state';
 import { cloudTransaction } from '../cloud/transactions';
 import { serverRuntime, isCurrentServerRuntime } from './bootstrap';
-import { DurableCommands, type DurableCommand } from '@wangke/client-core';
+import type { DurableCommand } from '@wangke/client-core';
 import { commandDigest } from './command-digest';
 import { accountLifetime } from './account-lifecycle';
 import Dexie from 'dexie';
@@ -93,6 +93,7 @@ export async function drainLearning(entities?: readonly string[]) {
   const entry = { promise: undefined as unknown as Promise<void>, again: false };
   const promise = (async () => {
     const runtime = await serverRuntime(owner);
+    const { DurableCommands } = await import('@wangke/client-core');
     const guard = () => { if (database !== db || owner !== cloud.userId || !isCurrentServerRuntime(runtime)) throw new Error('client_account_changed'); };
     const table = database.table<LearningCommandRow>('_learningCommands');
     const update = async (operationId: string, patch: Partial<LearningCommandRow>) => { guard(); await table.where('operationId').equals(operationId).modify(patch); };

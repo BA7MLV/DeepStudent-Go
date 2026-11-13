@@ -1,4 +1,4 @@
-import { createClientRuntime, type ClientRuntime } from '@wangke/client-core';
+import type { ClientRuntime } from '@wangke/client-core';
 import { API_BASE_URL } from '../api/base';
 import { cloud } from '../cloud/state';
 import { accountLifecycle, accountLifetime, invalidateAccountLifetime, type AccountLifetime } from './account-lifecycle';
@@ -17,7 +17,9 @@ export function serverRuntime(account: string): Promise<ClientRuntime> {
   const lifetime = accountLifetime(account);
   if (active?.lifetime === lifetime) return active.ready;
   const base = new URL(`${API_BASE_URL || location.origin}/`, location.href).href;
-  const ready = createClientRuntime({ server: base, account, scope: 'account' }, {
+  // client-core 会带出 remote-artifacts 生成码、zod 与 @deepseek-ai/*(合计约 130KB gzip),
+  // 只有登录后的云同步才需要,动态 import 别让它占入口首屏。
+  const ready = import('@wangke/client-core').then(({ createClientRuntime }) => createClientRuntime({ server: base, account, scope: 'account' }, {
     interactions: 'answer', location,
     transport: {
       streamBaseUrl: base,
@@ -34,7 +36,7 @@ export function serverRuntime(account: string): Promise<ClientRuntime> {
     lifetime.assertCurrent();
     if (active?.lifetime === lifetime) active.runtime = runtime;
     return runtime;
-  });
+  }));
   active = { lifetime, ready };
   lifetime.own(() => { if (active?.lifetime === lifetime) active = undefined; });
   void ready.catch(() => { if (lifetime.current()) invalidateAccountLifetime(); });

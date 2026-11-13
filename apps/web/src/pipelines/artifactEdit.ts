@@ -1,7 +1,6 @@
 import { runCloudTask } from '../cloud/tasks';
 import type { ArtifactKind } from '../utils/artifactEdit';
 import { validateDiagram } from '../components/mermaid/diagramSchema';
-import { renderDiagram } from '../components/mermaid/diagramRender';
 import { sanitizeSvg } from '../components/mermaid/svgRender';
 import { renderMermaid } from '../components/mermaid/mermaidRender';
 import { validateWidgetArgs } from '../harness/widget';
@@ -22,6 +21,8 @@ export async function validateArtifact(kind: ArtifactKind, source: string, execu
     try { diagram = JSON.parse(source); } catch {
       throw new Error('修改后的图形 JSON 不完整或格式不正确，原内容未修改；请重新生成修改');
     }
+    // dagre 布局库只在这一步需要,动态 import 避免它随对话首屏分包下载。
+    const { renderDiagram } = await import('../components/mermaid/diagramRender');
     sanitizeSvg(renderDiagram(validateDiagram(diagram)).svg);
   } else if (kind === 'svg') {
     sanitizeSvg(source);

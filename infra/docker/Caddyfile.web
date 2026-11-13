@@ -4,6 +4,9 @@
 
 :8080 {
 	root * /srv
+	# 放在站点层:压缩对 /assets/* 同样生效。之前 encode 只在 SPA handle 里,
+	# 静态分包(几百 KB gzip)从不被压缩,弱网首屏直接多付一倍字节。
+	encode zstd gzip
 
 	# API traffic belongs to the stable edge, never the replaceable Web container.
 	handle /api/* {
@@ -29,7 +32,6 @@
 		@biliScript path /wangke-bili-bridge.user.js
 		header @biliScript Content-Type "text/javascript; charset=utf-8"
 		header @biliScript Cache-Control "no-cache"
-		encode zstd gzip
 		try_files {path} /index.html
 		file_server
 	}

@@ -1,8 +1,9 @@
 import React from 'react';
 import type { ComponentProps } from '@ant-design/x-markdown';
 import MermaidBlock from './MermaidBlock';
-import JsonDiagramBlock from './JsonDiagramBlock';
 import SvgBlock from './SvgBlock';
+// dagre 只服务 ```diagram 图表块,静态进 markdown 分包会把布局库拖进对话首屏,这里留在懒边界之后。
+const JsonDiagramBlock = React.lazy(() => import('./JsonDiagramBlock'));
 import { diagramKindOf, fenceTitleOf } from './fence';
 import ArtifactEditor from '../ArtifactEditor';
 import HtmlAnswer from '../HtmlAnswer';
@@ -53,7 +54,7 @@ export function MarkdownCode({ block, lang, streamStatus, className, children }:
     const closed = streamStatus !== 'loading' && (kind !== 'svg' || !streaming || /<\/svg>\s*$/i.test(code));
     const title = fenceTitleOf(lang);
     const diagram = kind === 'mermaid' ? <MermaidBlock code={code} closed={closed} title={title} />
-      : kind === 'diagram' ? <JsonDiagramBlock code={code} closed={closed} title={title} />
+      : kind === 'diagram' ? <React.Suspense fallback={null}><JsonDiagramBlock code={code} closed={closed} title={title} /></React.Suspense>
       : <SvgBlock code={code} closed={closed} title={title} />;
     return <ArtifactEditor kind={kind} source={code.replace(/\s+$/, '')} closed={closed}>{diagram}</ArtifactEditor>;
   }

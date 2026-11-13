@@ -47,14 +47,16 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext();
-const cdp = await context.newCDPSession(context.pages()[0] ?? (await context.newPage()));
-await cdp.send('Network.enable');
-await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 1.6 * 1024 * 1024 / 8, uploadThroughput: 750 * 1024 / 8 });
-await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
 
 const runs = [];
 for (let run = 0; run < 3; run++) {
   const page = await context.newPage();
+  // 限速必须挂在真正测量的页面上：CDP emulation 是 per-session 的,
+  // 挂在别的 page 上对新开的页面不生效,之前因此整轮都没有限速。
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 150, downloadThroughput: 1.6 * 1024 * 1024 / 8, uploadThroughput: 750 * 1024 / 8 });
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
   const started = performance.now();
   const jsRequests = [];
   page.on('response', async (response) => {
@@ -69,18 +71,41 @@ for (let run = 0; run < 3; run++) {
   });
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
   const metrics = await page.evaluate(() => new Promise((resolve) => {
-    const paint = performance.getEntriesByType('paint');
-    const hydrated = () => resolve({
-      fcp: (paint.find((entry) => entry.name === 'first-contentful-paint')?.startTime) ?? null,
-      lcp: performance.getEntriesByType('largest-contentful-paint').at(-1)?.startTime ?? null,
-      hydratedAt: performance.now(),
-    });
+    const result = { fcp: null, lcp: null, hydratedAt: null };
+    let lcp = null;
+    let hydratedAt = null;
+    let done = false;
+    // LCP 只在后续条目到来时刷新;水合后再静置 2.5s 取最后一条,避免读早了拿到半程值。
+    const LCP_SETTLE_MS = 2500;
+    const settle = () => {
+      if (done) return;
+      done = true;
+      setTimeout(() => { result.lcp = lcp; resolve(result); }, LCP_SETTLE_MS);
+    };
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.name === 'first-contentful-paint') result.fcp = entry.startTime;
+        else lcp = entry.startTime;
+      }
+    }).observe({ type: 'paint', buffered: true });
+    new PerformanceObserver((list) => {
+      const entry = list.getEntries().at(-1);
+      if (entry) lcp = entry.startTime;
+    }).observe({ type: 'largest-contentful-paint', buffered: true });
+    // `#root` 出厂就带着 <style> 和 #boot-splash 两个子节点,不能拿 childList 数量当水合信号;
+    // React 首次 render 会整体替换掉内联骨架,以 #boot-splash 消失为准。
     const root = document.getElementById('root');
-    if (root && root.children.length > 1) return hydrated();
+    const hydrated = () => {
+      if (hydratedAt != null) return;
+      hydratedAt = performance.now();
+      result.hydratedAt = hydratedAt;
+      settle();
+    };
+    if (!document.getElementById('boot-splash')) { hydrated(); return; }
     const observer = new MutationObserver(() => {
-      if (root && root.children.length > 1) { observer.disconnect(); hydrated(); }
+      if (!document.getElementById('boot-splash')) { observer.disconnect(); hydrated(); }
     });
-    observer.observe(root ?? document.body, { childList: true });
+    observer.observe(root ?? document.body, { childList: true, subtree: true });
     setTimeout(() => { observer.disconnect(); hydrated(); }, 30_000);
   }));
   const startup = jsRequests.filter((entry) => !entry.url.includes('/sw') && !entry.url.includes('workbox') && !entry.url.includes('registerSW'));
