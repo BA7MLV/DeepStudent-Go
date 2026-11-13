@@ -678,6 +678,16 @@
   transform: translateX(0);
 }
 
+/* ── Recent 行的长按拖拽：拖拽中不选中文本，被拖的那一行半透明。 ── */
+.recent-item {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.recent-item[data-dragging='true'] {
+  opacity: 0.5;
+}
+
 .recent-title[data-overflow='true'] > span {
   will-change: transform;
 }

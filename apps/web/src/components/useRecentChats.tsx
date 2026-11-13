@@ -148,6 +148,7 @@ export function useRecentChats(showActive = false) {
       pendingReply: busy && !awaitingIds.includes(id),
       pinned: !!session.pinned,
       onUnpin: () => guard(() => useCourseChat.getState().setPinned(id, false)),
+      onPin: () => guard(() => useCourseChat.getState().setPinned(id, true)),
       onClick: () => {
         guard(() => useCourseChat.getState().loadSession(id));
         if (!showActive) navigate('/');
@@ -167,6 +168,7 @@ export function useRecentChats(showActive = false) {
     };
   });
   return { label: t('recent.label'), items, loading: !ready || (cloud.enabled ? !serverIndex.page && serverIndex.loading : activity === null),
+    pinnedLabel: t('recent.pinnedSection'), dropPinLabel: t('recent.pin'), dropUnpinLabel: t('recent.unpin'),
     actionError, dismissError: () => setActionError(undefined), dismissLabel: t('feedback.dismiss'),
     ...(cloud.enabled ? { pagination: {
       previous: serverIndex.page?.previous ? serverIndex.previous : undefined,

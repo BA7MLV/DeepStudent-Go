@@ -203,6 +203,7 @@
     "test:loading:pwa": "tsx --test scripts/test-pwa-precache.mjs && tsx scripts/e2e-pwa-demand.mjs",
     "test:pwa-update:e2e": "node scripts/e2e-pwa-update.mjs",
     "test:sidebar-icons:e2e": "tsx scripts/e2e-sidebar-icons.mjs",
+    "test:recent:pin:e2e": "tsx scripts/e2e-recent-pin-drag.mjs",
     "test:loading:session-index:e2e": "tsx scripts/e2e-session-index.mjs",
     "test:plugins:context:e2e": "tsx scripts/e2e-plugin-action-context.mjs",
     "test:plugins:scope:demand": "tsx scripts/test-plugin-scope-demand.mjs",
