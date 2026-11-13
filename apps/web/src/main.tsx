@@ -49,6 +49,15 @@ applyFontScale(useSettings.getState().fontScale);
 const stopLocaleSync = startLocaleSync();
 import.meta.hot?.dispose(stopLocaleSync);
 
+const stopSettingsSync = (() => {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === 'wangke-settings') void useSettings.persist.rehydrate();
+  };
+  window.addEventListener('storage', onStorage);
+  return () => window.removeEventListener('storage', onStorage);
+})();
+import.meta.hot?.dispose(stopSettingsSync);
+
 /**
  * 关闭浏览器自己的滚动恢复。
  *
