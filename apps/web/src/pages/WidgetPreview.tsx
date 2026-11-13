@@ -126,9 +126,13 @@ export default function WidgetPreview() {
         </Button>
         <div className="widget-preview-page__titles">
           <h1 className="widget-preview-page__title">{title || (htmlSurface ? 'HTML 预览' : '交互图形')}</h1>
-          <p className="widget-preview-page__subtitle">
-            {htmlSurface ? '独立页面 · 安全预览 HTML 内容' : '独立预览 · 仍可使用图形内的交互控件'}{feedback ? ' · 题卡反馈只读，作答请回原页面' : ''}
-          </p>
+          {/* 交互图形顶栏只留标题，不再用副标题解释用法；HTML 页与只读反馈仍需要一句状态说明。 */}
+          {htmlSurface || feedback ? (
+            <p className="widget-preview-page__subtitle">
+              {[htmlSurface ? '独立页面 · 安全预览 HTML 内容' : '', feedback ? '题卡反馈只读，作答请回原页面' : '']
+                .filter(Boolean).join(' · ')}
+            </p>
+          ) : null}
         </div>
       </header>
       <div className="widget-preview-page__body">
