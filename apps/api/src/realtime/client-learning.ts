@@ -6,7 +6,7 @@ import { clearStudyTimeMutations } from '../learning/clear-study-time.js';
 
 const schemas = {
   conversationMessage: ['chats', 'id taskId videoId sessionId role content createdAt modelTrace modelRequests explicitSkillIds images attachments reasoning reasoningMs tools responseSegments quiz ask folderPlan resume interrupted interruptReason widget widgets legacyHtmlWorks widgetState widgetStates'],
-  conversationSession: ['chatSessions', 'id videoId title createdAt contextCourseIds projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions defaultModel'],
+  conversationSession: ['chatSessions', 'id videoId title createdAt contextCourseIds courseReferenceEnabled webSearchEnabled projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions defaultModel'],
   skillDefinition: ['skills', 'id name description body enabled builtin updatedAt mcpRequired'],
   skillReference: ['skillRefs', 'id skillId path body'],
   materialAnnotation: ['materialInk', 'id materialId surface tool color width height points createdAt renderer nib opacity smoothing input anchor rects'],

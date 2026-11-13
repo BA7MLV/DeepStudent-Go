@@ -326,6 +326,7 @@ async function runServerAgent(
   onSnapshot?: (result: ServerAgentResult) => { rowId: number; userRowId: number; widgets?: WidgetPayload[] },
   initialTraces: ServerToolTrace[] = [],
   toolLabel: (name: string) => string = name => name,
+  webToolsEnabled = true,
 ): Promise<ServerAgentResult> {
   const savedCheckpoint = context.store.db.prepare('SELECT payload FROM task_agent_checkpoints WHERE task_id=?').get(context.task.id) as { payload: string } | undefined;
   const resumed = savedCheckpoint ? JSON.parse(savedCheckpoint.payload) : undefined;
@@ -337,7 +338,7 @@ async function runServerAgent(
     const project = context.store.db.prepare('SELECT p.network_policy,p.archived FROM cloud_tasks c JOIN runs r ON r.id=c.parent_run_id JOIN threads t ON t.id=r.thread_id JOIN projects p ON p.id=t.project_id AND p.owner_id=c.owner_id WHERE c.id=? AND c.owner_id=?').get(context.task.id, context.owner) as { network_policy: string; archived: number } | undefined;
     return !project || !project.archived && project.network_policy === 'allow';
   };
-  const webTools = context.webSearch?.definitions(context.owner, webPermitted()) ?? [];
+  const webTools = webToolsEnabled ? context.webSearch?.definitions(context.owner, webPermitted()) ?? [] : [];
   const webNames = new Set(webTools.map(tool => tool.function.name));
   const builtin = executeTool;
   executeTool = async (name, args) => webNames.has(name) && context.webSearch
@@ -738,14 +739,16 @@ function courseProgress(row: Record<string, any>) {
   return '尚未开始';
 }
 
-function libraryExecutor(context: TaskContext, session: Record<string, any> | null) {
+function libraryExecutor(context: TaskContext, session: Record<string, any> | null, courseReference = true) {
   const contextIds = new Set<string>((Array.isArray(session?.contextCourseIds) ? session.contextCourseIds : []).filter((id): id is string => typeof id === 'string' && id.length > 0));
+  const referenceDenied = '本会话已关闭课程引用，课程内容不可用；请基于通用知识回答。';
   return async (name: string, args: Record<string, unknown>) => {
     const courses = rowsFor(context, 'videos');
     const projectScope = folderCourseScope(rowsFor(context, 'folders'), courses as Array<{ id: string; folderId?: number }>, session?.projectFolderId);
     const inSessionScope = (id: string) => !contextIds.size || contextIds.has(id);
     const inProjectScope = (id: string) => !projectScope || projectScope.has(id);
     if (name === 'edit') {
+      if (!courseReference && typeof args.path === 'string' && args.path.startsWith('/courses/')) return referenceDenied;
       return editNodeDocument(context, args);
     }
     if (name === 'read') {
@@ -753,6 +756,7 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
       if (system !== null) return system;
       const match = typeof args.path === 'string' && /^\/courses\/([^/]+)\/(material|transcript)$/.exec(args.path);
       if (match) {
+        if (!courseReference) return referenceDenied;
         const id = decodeURIComponent(match[1]);
         if (!inProjectScope(id)) throw new Error('course_outside_project_scope');
         if (!inSessionScope(id)) throw new Error('course_outside_session_scope');
@@ -763,6 +767,7 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
       }
     }
     if (name === 'list_courses') {
+      if (!courseReference) return referenceDenied;
       const status = String(args.status ?? 'all');
       const kind = String(args.kind ?? 'all');
       const limit = Math.min(50, Math.max(1, Number(args.limit) || 20));
@@ -775,6 +780,7 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
       return filtered.length ? filtered.slice(0, limit).map(row => `- 《${String(row.name)}》 · ${row.kind === 'material' ? `阅读材料 ${String(row.materialFormat ?? '').toUpperCase()}` : '视频课程'} · ${courseProgress(row)} · courseId=${row.id}`).join('\n') : '没有符合筛选条件的课程。';
     }
     if (name === 'search_course_library') {
+      if (!courseReference) return referenceDenied;
       const query = String(args.query ?? '').trim();
       if (!query) return '请提供检索关键词。';
       const requested = typeof args.courseId === 'string' && args.courseId ? args.courseId : '';
@@ -801,6 +807,7 @@ function libraryExecutor(context: TaskContext, session: Record<string, any> | nu
       }).join('\n') : '资料库中没有检索到相关内容。';
     }
     if (name === 'get_course_details') {
+      if (!courseReference) return referenceDenied;
       const id = String(args.courseId ?? '');
       if (!inProjectScope(id) || !inSessionScope(id)) return '当前会话课程范围内没有该 courseId。';
       const course = courses.find(row => String(row.id) === id);
@@ -941,7 +948,12 @@ async function chat(context: TaskContext) {
   if (!text) throw new Error('问题不能为空');
   const history = chatHistory(context, sessionId).filter(row => row.taskId !== context.task.id);
   const courses = rowsFor(context, 'videos');
-  const system = `你是 DeepStudent Go 学习资料库助手。服务器负责模型请求、检索、任务和数据保存；你可以通过工具读取用户自己的课程数据。\n\n规则：涉及用户课程、学习进度或课程内容时必须先调用工具，不能编造；通用问题直接回答。引用课程内容时保留工具返回的课程名、courseId 和时间/页码。用简洁自然的中文回答。\n\n${SERVER_WIDGET_RULE}`;
+  const courseReference = session.courseReferenceEnabled !== false;
+  const webSearchEnabled = session.webSearchEnabled !== false;
+  const courseRule = courseReference
+    ? '规则：涉及用户课程、学习进度或课程内容时必须先调用工具，不能编造；引用课程内容时保留工具返回的课程名、courseId 和时间/页码。'
+    : '规则：本会话已关闭课程引用，不要调用课程工具或读取课程内容；涉及课程内容时说明本会话未开启课程引用，基于通用知识回答。';
+  const system = `你是 DeepStudent Go 学习资料库助手。服务器负责模型请求、检索、任务和数据保存；你可以通过工具读取用户自己的课程数据。\n\n${courseRule}通用问题直接回答。用简洁自然的中文回答。\n\n${SERVER_WIDGET_RULE}`;
   const project = session.projectFolderId == null ? undefined : context.records.get(context.owner, 'folders', session.projectFolderId);
   const current = attachmentMessage({ role: 'user', content: `${project ? runtimeContext({ project: { folderId: project.id, name: project.name } }) : ''}${text}`, attachments });
   const systemWithSkills = system + shell.prompt + skills.prompt;
@@ -969,7 +981,7 @@ async function chat(context: TaskContext) {
     result.widgets = assistantRow.widgets ?? [];
     return { rowId: assistantId, userRowId: userId, ...widgetFields(result) };
   };
-  const result = await runServerAgent(context, target, messages, [...libraryTools(courses.length > 0), ...shell.tools, ...mcp.tools], mcp.wrap(skills.wrap(shell.wrap(libraryExecutor(context, session)))), persist, [...skills.traces, ...mcp.traces], mcp.label);
+  const result = await runServerAgent(context, target, messages, [...libraryTools(courseReference && courses.length > 0), ...shell.tools, ...mcp.tools], mcp.wrap(skills.wrap(shell.wrap(libraryExecutor(context, session, courseReference)))), persist, [...skills.traces, ...mcp.traces], mcp.label, webSearchEnabled);
   persist(result, false);
   if (title) await refineSessionTitle(context, sessionId, title, target, text, result.content, modelFetch(context));
   return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...(result.ask ? { ask: result.ask } : {}), ...responseFields(result) };

@@ -15,7 +15,7 @@ const definitions = {
   courseComment: ['comments', 'comments', 'id videoId time author role text parentId createdAt'],
   courseDanmaku: ['danmakus', 'danmaku', 'id videoId time text'],
   conversationMessage: ['chats', 'chat qa', 'id taskId videoId sessionId role content createdAt modelTrace modelRequests explicitSkillIds images attachments reasoning reasoningMs tools responseSegments quiz ask folderPlan resume interrupted interruptReason widget widgets legacyHtmlWorks widgetState widgetStates'],
-  conversationSession: ['chatSessions', 'chat qa', 'id videoId title createdAt contextCourseIds projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions'],
+  conversationSession: ['chatSessions', 'chat qa', 'id videoId title createdAt contextCourseIds courseReferenceEnabled webSearchEnabled projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions'],
 } as const;
 const states: Record<string, string[]> = { transcribe: ['status', 'transcriptionPaused'], material: ['unitCount', 'scanned', 'empty'], cover: ['coverState', 'dominantColor'], handout: ['coverState', 'dominantColor'] };
 
