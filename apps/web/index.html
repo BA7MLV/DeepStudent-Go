@@ -11,6 +11,17 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="DeepStudent Go" />
     <meta name="description" content="导入课程视频与文档，转写字幕、整理讲义，结合原文提问和复习。" />
+    <script>
+      try {
+        var saved = JSON.parse(localStorage.getItem('wangke-settings') || 'null');
+        var theme = saved && saved.state && saved.state.theme;
+        var dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = 'dark';
+        }
+      } catch (error) {}
+    </script>
     <link rel="icon" href="/icon.svg?v=deepstudent-75" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=deepstudent" />
     <title>DeepStudent Go</title>
@@ -33,7 +44,7 @@
           width: clamp(36px, 5vw, 48px);
           height: auto;
         }
-        #boot-splash .boot-base { fill: #2b2b2e; }
+        #boot-splash .boot-base { fill: #7c7c7c; }
         #boot-splash .boot-shine {
           transform: translateX(-75%);
           transform-box: fill-box;
@@ -45,10 +56,8 @@
           0% { transform: translateX(-75%); }
           100% { transform: translateX(0); }
         }
-        @media (prefers-color-scheme: dark) {
-          #boot-splash { background: #101012; }
-          #boot-splash .boot-base { fill: #f2f2f2; }
-        }
+        html.dark #boot-splash { background: #101012; }
+        html.dark #boot-splash .boot-base { fill: #9a9a9a; }
         @media (prefers-reduced-motion: reduce) {
           #boot-splash .boot-shine { animation: none; opacity: 0; }
         }

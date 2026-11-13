@@ -80,7 +80,9 @@ export function useMobileGlobals(): void {
     // ── 1. 页面位置与尺寸 = 视觉视口 ──
     const syncHeight = () => {
       // 捏合缩放只改变放大区域，不应把整页重排成更小的布局。
-      if (vp.scale !== 1) return;
+      // 例外：键盘开着时必须同步 —— 用户捏合放大阅读后点输入框，
+      // 若因 scale ≠ 1 跳过，--vvh 停留在全高，输入栏会被键盘盖住。
+      if (vp.scale !== 1 && document.documentElement.dataset.keyboard !== 'open') return;
       // 不能把 offsetTop 加进高度：那只对齐了底边，顶部仍可被 Safari 推出屏幕。
       // 收键盘后 offsetTop 偶尔残留，夹到 layout viewport 内，避免整页悬空。
       const height = Math.min(vp.height, window.innerHeight);

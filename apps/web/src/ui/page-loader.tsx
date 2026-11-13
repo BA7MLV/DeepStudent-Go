@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, useLayoutEffect, useRef } from 'react';
 import './page-loader.css';
 
 const OUTER_PATH = 'M182 324.8C182 278.316 182 255.073 191.046 237.319C199.004 221.701 211.701 209.004 227.319 201.046C245.073 192 268.316 192 314.8 192H692.2C738.684 192 761.927 192 779.681 201.046C795.299 209.004 807.996 221.701 815.954 237.319C825 255.073 825 278.316 825 324.8V394C825 550.815 825 629.222 794.482 689.117C767.637 741.803 724.803 784.637 672.117 811.482C612.222 842 533.815 842 377 842H314.8C268.316 842 245.073 842 227.319 832.954C211.701 824.996 199.004 812.299 191.046 796.681C182 778.927 182 755.684 182 709.2V324.8Z';
@@ -7,11 +7,23 @@ const MARK_PATH = 'M288.417 459.122C288.417 457.652 288.417 456.917 288.43 456.2
 const EYE_PATH = 'M735.686 358.247C735.686 394.974 705.673 424.747 668.65 424.747C631.627 424.747 601.614 394.974 601.614 358.247C601.614 321.52 631.627 291.747 668.65 291.747C705.673 291.747 735.686 321.52 735.686 358.247Z';
 const PUPIL_PATH = 'M726.807 358.359C726.807 372.386 715.344 383.757 701.203 383.757C687.063 383.757 675.6 372.386 675.6 358.359C675.6 344.332 687.063 332.961 701.203 332.961C715.344 332.961 726.807 344.332 726.807 358.359Z';
 
+/** 与 transitions.css 的 --shimmer-dur 保持一致；相位对齐全文档时钟，见下方 useLayoutEffect。 */
+const SHIMMER_PERIOD_MS = 2000;
+
 /** SVG adaptation of transitions.dev shimmer: a fixed logo mask over two monochrome layers. */
 export function PageLoader({ label = '正在加载页面…', contained = false }: { label?: string; contained?: boolean }) {
   const id = useId();
   const gradientId = `page-loader-gradient-${id}`;
   const maskId = `page-loader-mask-${id}`;
+  const shineRef = useRef<SVGRectElement>(null);
+
+  // CSS 动画的相位绑定在元素上，重挂载会归零。负 animation-delay 把相位锚到
+  // performance.now() 这个全文档时钟上：启动骨架屏在文档时间 ≈ 0 开始扫光，
+  // PageLoader 无论何时挂载都从同一相位继续，交接不再“跳回起点”。
+  useLayoutEffect(() => {
+    const shine = shineRef.current;
+    if (shine) shine.style.animationDelay = `${-(performance.now() % SHIMMER_PERIOD_MS)}ms`;
+  }, []);
 
   return (
     <div className="page-loader" data-contained={contained || undefined} role="status" aria-label={label} aria-busy="true">
@@ -33,6 +45,7 @@ export function PageLoader({ label = '正在加载页面…', contained = false 
         <g mask={`url(#${maskId})`}>
           <rect x="182" y="192" width="650" height="650" fill="var(--shimmer-base)" />
           <rect
+            ref={shineRef}
             className="page-loader__shine"
             x="182"
             y="192"
