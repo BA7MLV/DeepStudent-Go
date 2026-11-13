@@ -688,6 +688,11 @@
   opacity: 0.5;
 }
 
+/* 置顶小节内拖动时的插入指示线：落在哪两行之间，就在那行上缘亮一条主线。 */
+.recent-item[data-drop-before='true'] {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
 .recent-title[data-overflow='true'] > span {
   will-change: transform;
 }

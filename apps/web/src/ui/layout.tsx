@@ -94,8 +94,6 @@ export interface RecentItem {
   pendingReply?: boolean;
   pinned?: boolean;
   onUnpin?: () => void;
-  /** 置顶这一项。长按拖到侧栏底部的投放区时调用（未置顶行投放区显示「置顶」）。 */
-  onPin?: () => void;
   /**
    * 行尾菜单的动作。传了就渲染那颗「更多」按钮，并接上右键。
    *
@@ -134,6 +132,8 @@ interface RecentNavigation {
   dropPinLabel?: string;
   /** 拖拽投放区在拖动已置顶行时显示的文案（如「取消置顶」）。 */
   dropUnpinLabel?: string;
+  /** 按小节内的显示顺序重排置顶会话（拖拽排序 / 拖入置顶区时调用），id 序号即新次序。 */
+  reorderPinned?: (orderedIds: string[]) => void;
   actionError?: string; dismissError?: () => void; dismissLabel?: string;
   pagination?: { previous?: () => void; next?: () => void; previousLabel: string; nextLabel: string;
     busy: boolean; error?: string; retry: () => void; retryLabel: string };
@@ -251,6 +251,9 @@ function NavigationItem({ item, active, compact = false, onNavigate }: {
   </Button>;
 }
 
+/** 长按拖拽时松手那一刻的落点：置顶小节底部的投放区，或置顶列表里的插入位置。 */
+type DropTarget = { kind: 'zone' } | { kind: 'list'; index: number } | null;
+
 /** 侧栏内部：主导航 / Recent / 底部入口。宽屏就地渲染，窄屏进 Drawer。 */
 function Sidebar({
   rail,
@@ -289,21 +292,29 @@ function Sidebar({
    */
   const [menuId, setMenuId] = useState<string | null>(null);
   /**
-   * 长按拖拽切换置顶：按住一行约 350ms 进入拖拽，侧栏底部浮出一块投放区。
-   * 拖的是已置顶行时投放区显示「取消置顶」，否则显示「置顶」；松手落在投放区内即切换。
+   * 长按拖拽管理置顶：按住一行约 350ms 进入拖拽。
+   * - 拖已置顶行：在置顶小节内拖到某两行之间 = 重排；拖到小节最下方的「取消置顶」投放区 = 取消置顶。
+   * - 拖未置顶行：拖到置顶小节内的某个位置 = 置顶并插到那里；拖到「取消置顶」投放区（此时显示「置顶」）= 追加到置顶末尾。
    *
    * 拖拽期间 RAC 的 press 仍会在 pointerup 补发一次选中（等于「拖完还跳去那个会话」），
    * 用 `suppressSelectUntilRef` 的时间窗吞掉这一下。
    */
   const [dragId, setDragId] = useState<string | null>(null);
-  const [dropHover, setDropHover] = useState(false);
+  /** 松手那一刻的落点：投放区，或置顶列表里的插入位置。 */
+  const [dropTarget, setDropTarget] = useState<DropTarget>(null);
   const dragIdRef = useRef<string | null>(null);
+  const dropTargetRef = useRef<DropTarget>(null);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  const pinnedAreaRef = useRef<HTMLDivElement | null>(null);
   const pressRef = useRef<{ x: number; y: number; timer: number } | null>(null);
   const suppressSelectUntilRef = useRef(0);
   const setDrag = (id: string | null) => {
     dragIdRef.current = id;
     setDragId(id);
+  };
+  const setTarget = (target: DropTarget) => {
+    dropTargetRef.current = target;
+    setDropTarget(target);
   };
 
   const beginRecentPress = (item: RecentItem, event: React.PointerEvent) => {
@@ -312,10 +323,22 @@ function Sidebar({
       pressRef.current = null;
       setDrag(item.id);
     }, 350) };
-    const inZone = (point: { clientX: number; clientY: number }) => {
-      const rect = dropZoneRef.current?.getBoundingClientRect();
-      return !!rect && point.clientX >= rect.left && point.clientX <= rect.right
-        && point.clientY >= rect.top && point.clientY <= rect.bottom;
+    const inRect = (rect: DOMRect, point: { clientX: number; clientY: number }) =>
+      point.clientX >= rect.left && point.clientX <= rect.right
+      && point.clientY >= rect.top && point.clientY <= rect.bottom;
+    const dropTargetAt = (point: { clientX: number; clientY: number }): DropTarget => {
+      const zoneRect = dropZoneRef.current?.getBoundingClientRect();
+      if (zoneRect && inRect(zoneRect, point)) return { kind: 'zone' };
+      const area = pinnedAreaRef.current;
+      const areaRect = area?.getBoundingClientRect();
+      if (!area || !areaRect || !inRect(areaRect, point)) return null;
+      // 插入位 =（除被拖行外）中点在指针之上的行数；被拖行本身不算，插到「自己身上」等于原地不动。
+      const rows = [...area.querySelectorAll<HTMLElement>('[role="option"]')].filter((el) => el.id !== item.id);
+      const index = rows.filter((el) => {
+        const rect = el.getBoundingClientRect();
+        return point.clientY > rect.top + rect.height / 2;
+      }).length;
+      return { kind: 'list', index };
     };
     const cleanup = () => {
       window.removeEventListener('pointermove', onMove);
@@ -326,7 +349,7 @@ function Sidebar({
         pressRef.current = null;
       }
       setDrag(null);
-      setDropHover(false);
+      setTarget(null);
     };
     const onMove = (move: PointerEvent) => {
       if (pressRef.current) {
@@ -334,17 +357,24 @@ function Sidebar({
         if (Math.hypot(move.clientX - pressRef.current.x, move.clientY - pressRef.current.y) > 8) cleanup();
         return;
       }
-      setDropHover(inZone(move));
+      setTarget(dropTargetAt(move));
     };
     const onUp = (up: PointerEvent) => {
       const draggedId = dragIdRef.current;
+      const target = dropTargetRef.current;
       cleanup();
-      if (draggedId == null) return;
+      if (draggedId == null || target == null) return;
       suppressSelectUntilRef.current = Date.now() + 500;
-      if (!inZone(up)) return;
-      const dragged = items.find((candidate) => candidate.id === draggedId);
-      if (dragged?.pinned) dragged.onUnpin?.();
-      else dragged?.onPin?.();
+      const pinnedIds = pinnedItems.map((pinned) => pinned.id);
+      if (target.kind === 'zone') {
+        if (item.pinned) item.onUnpin?.();
+        else recent?.reorderPinned?.([...pinnedIds, draggedId]);
+        return;
+      }
+      // 重排与「拖入置顶」都归结为同一件事：给出置顶小节的完整新顺序。
+      const withoutDragged = pinnedIds.filter((id) => id !== draggedId);
+      withoutDragged.splice(target.index, 0, draggedId);
+      recent?.reorderPinned?.(withoutDragged);
     };
     const onCancel = () => cleanup();
     window.addEventListener('pointermove', onMove);
@@ -378,6 +408,8 @@ function Sidebar({
       textValue={item.label}
       data-testid={item.testId}
       data-dragging={dragId === item.id || undefined}
+      data-drop-before={item.pinned && dropTarget?.kind === 'list'
+        && pinnedItems.filter((pinned) => pinned.id !== dragId).findIndex((pinned) => pinned.id === item.id) === dropTarget.index || undefined}
       onPointerDown={(event) => beginRecentPress(item, event)}
       onFocus={(event) => {
         setFocusedRecentId(item.id);
@@ -520,9 +552,6 @@ function Sidebar({
         <>
           <Separator className="my-3" />
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="shrink-0 px-3 pb-2 text-[0.8125rem] text-muted" data-testid="recent-section-label">
-              {pinnedItems.length > 0 ? (recent.pinnedLabel ?? recent.label) : recent.label}
-            </div>
             {!recent.loading && recent.items.length === 0 && (
               <div className="px-3 text-xs leading-6 text-muted">开始对话后，会话会显示在这里</div>
             )}
@@ -583,13 +612,35 @@ function Sidebar({
                   target.onDelete();
                 }}
               >
-                {pinnedItems.length > 0 && (
-                  <>
-                    <ListBox {...listSelection} aria-label={recent.pinnedLabel ?? recent.label}>
-                      {pinnedItems.map((item) => renderRecentItem(item))}
-                    </ListBox>
+                {(pinnedItems.length > 0 || draggedItem) && (
+                  <div ref={pinnedAreaRef} data-testid="recent-pinned-area">
+                    <div className="shrink-0 px-3 pb-2 text-[0.8125rem] text-muted" data-testid="recent-pinned-section">
+                      {recent.pinnedLabel ?? recent.label}
+                    </div>
+                    {pinnedItems.length > 0 && (
+                      <ListBox {...listSelection} aria-label={recent.pinnedLabel ?? recent.label}>
+                        {pinnedItems.map((item) => renderRecentItem(item))}
+                      </ListBox>
+                    )}
+                    {draggedItem && (
+                      <div
+                        ref={dropZoneRef}
+                        data-testid="recent-drop-zone"
+                        data-hover={dropTarget?.kind === 'zone' || undefined}
+                        className={[
+                          'mx-2 mb-1 flex shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[0.8125rem] transition-colors',
+                          dropTarget?.kind === 'zone' ? 'border-solid bg-surface text-foreground' : 'border-dashed text-muted',
+                        ].join(' ')}
+                      >
+                        <Sym name={draggedItem.pinned ? 'pin_off' : 'pin'} />
+                        {draggedItem.pinned ? (recent.dropUnpinLabel ?? recent.label) : (recent.dropPinLabel ?? recent.label)}
+                      </div>
+                    )}
                     <div className="shrink-0 px-3 pb-2 pt-1 text-[0.8125rem] text-muted">{recent.label}</div>
-                  </>
+                  </div>
+                )}
+                {pinnedItems.length === 0 && !draggedItem && (
+                  <div className="shrink-0 px-3 pb-2 text-[0.8125rem] text-muted">{recent.label}</div>
                 )}
                 <ListBox {...listSelection} aria-label={recent.label}>
                   {unpinnedItems.map((item) => renderRecentItem(item))}
@@ -609,20 +660,6 @@ function Sidebar({
                 </div>}
               </div>
             </ScrollShadow>
-            {draggedItem && (
-              <div
-                ref={dropZoneRef}
-                data-testid="recent-drop-zone"
-                data-hover={dropHover || undefined}
-                className={[
-                  'mt-2 flex shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[0.8125rem] transition-colors',
-                  dropHover ? 'border-solid bg-surface text-foreground' : 'border-dashed text-muted',
-                ].join(' ')}
-              >
-                <Sym name={draggedItem.pinned ? 'pin_off' : 'pin'} />
-                {draggedItem.pinned ? (recent.dropUnpinLabel ?? recent.label) : (recent.dropPinLabel ?? recent.label)}
-              </div>
-            )}
           </div>
         </>
       )}

@@ -86,6 +86,7 @@ export interface CourseChatStore extends SessionView {
   loadSession(id: number): Promise<void>; createSession(): Promise<void>;
   deleteSessionById(id: number): Promise<boolean>; deleteSession(): Promise<boolean>;
   renameSession(id: number, title: string): Promise<void>; setPinned(id: number, pinned: boolean): Promise<void>;
+  reorderPinned(orderedIds: number[]): Promise<void>;
   setArchived(id: number, archived: boolean, expected?: ChatSessionRow): Promise<boolean>; refreshArchived(): Promise<void>;
   setDraft(text: string): void;
   send(text: string, mode?: SendMode, target?: number, resume?: ResumeRequest, attachments?: ChatAttachment[], skills?: number[], queuedCommand?: QueuedMessage & { explicitRetry?: boolean }): Promise<void>;
@@ -409,7 +410,15 @@ export const useCourseChat = createSessionStore<SessionView, CourseChatStore, Co
   },
   deleteSession: async () => { const id = get().activeId; return id == null ? false : get().deleteSessionById(id); },
   renameSession: async (id, title) => { if (title.trim()) await patchSession(id, row => { row.title = title.trim(); }); },
-  setPinned: async (id, pinned) => { await patchSession(id, row => { if (pinned) row.pinned = true; else delete row.pinned; }); },
+  setPinned: async (id, pinned) => { await patchSession(id, row => {
+    if (pinned) { row.pinned = true; row.pinnedOrder = -Date.now(); } else { delete row.pinned; delete row.pinnedOrder; }
+  }); },
+  reorderPinned: async (orderedIds) => {
+    // 逐条 patch 而不是并行：patchSession 每次都要读回该行并刷 store，串行避免读到中间态。
+    for (const [index, id] of orderedIds.entries()) {
+      await patchSession(id, row => { row.pinned = true; row.pinnedOrder = index; });
+    }
+  },
   setArchived: async (id, archived, expected) => {
     if (get().runningIds.includes(id)) return false;
     const current = captureScope(), wasActive = get().activeId === id;
