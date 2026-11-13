@@ -214,8 +214,11 @@ body,
 }
 
 /* ── iOS Safari 防聚焦缩放：<16px 的输入框聚焦时会自动放大页面 ─────────────
-   只覆盖文档树里的 input/textarea；HeroUI 的输入框同样是文档树元素，一并生效 */
-@media (max-width: 640px), (orientation: landscape) and (max-height: 520px) and (max-width: 1100px) {
+   只覆盖文档树里的 input/textarea；HeroUI 的输入框同样是文档树元素，一并生效。
+   按 pointer: coarse 判定而非宽度：iPad 等宽视口触屏同样会触发自动缩放，
+   一旦页面被捏合（vp.scale ≠ 1），useMobileGlobals 的 --vvh 停更，
+   键盘弹出后输入栏会被压在键盘底下。 */
+@media (pointer: coarse), (max-width: 640px), (orientation: landscape) and (max-height: 520px) and (max-width: 1100px) {
   input,
   textarea {
     font-size: 16px !important;
