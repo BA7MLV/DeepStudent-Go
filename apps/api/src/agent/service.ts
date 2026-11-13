@@ -96,7 +96,13 @@ export class BotApplicationService {
         }
          const runId = crypto.randomUUID();
          this.store.db.prepare('INSERT INTO runs(id,thread_id,mode,status,created_at,trigger_message_id) VALUES(?,?,?,?,?,?)').run(runId, threadId, 'bot', 'queued', dto.createdAt, dto.id);
-         this.runner.freezeModel(runId, owner, input.modelSelection, thread.default_model ? JSON.parse(thread.default_model) : undefined);
+         try {
+           this.runner.freezeModel(runId, owner, input.modelSelection, thread.default_model ? JSON.parse(thread.default_model) : undefined);
+         } catch (error) {
+           // 还没配模型时不要在发消息这一步把整条消息打回 500:消息已经接受了,
+           // 让 runner 在真正执行冻结时抛 model_not_configured,失败记进 runs.error_code。
+           if (!(error instanceof Error) || error.message !== 'model_not_configured') throw error;
+         }
         return { ...dto, deduplicated: false, receipt: { messageId: dto.id, runId, disposition: 'created' } };
       }
       return { ...dto, deduplicated: false };
