@@ -319,9 +319,13 @@ function Sidebar({
 
   const beginRecentPress = (item: RecentItem, event: React.PointerEvent) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    /** 拖拽激活后接管手势：非被动 touchmove + preventDefault，阻止列表跟着手指继续滚动。 */
+    let onTouchMove: ((touch: TouchEvent) => void) | null = null;
     pressRef.current = { x: event.clientX, y: event.clientY, timer: window.setTimeout(() => {
       pressRef.current = null;
       setDrag(item.id);
+      onTouchMove = (touch) => { if (dragIdRef.current != null) touch.preventDefault(); };
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
     }, 350) };
     const inRect = (rect: DOMRect, point: { clientX: number; clientY: number }) =>
       point.clientX >= rect.left && point.clientX <= rect.right
@@ -344,6 +348,10 @@ function Sidebar({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
+      if (onTouchMove) {
+        window.removeEventListener('touchmove', onTouchMove);
+        onTouchMove = null;
+      }
       if (pressRef.current) {
         window.clearTimeout(pressRef.current.timer);
         pressRef.current = null;
