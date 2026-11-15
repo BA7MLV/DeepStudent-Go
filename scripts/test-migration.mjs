@@ -48,7 +48,7 @@ const entry = path.join(os.tmpdir(), `test-migration-entry-${Date.now()}.ts`);
 const bundle = path.join(os.tmpdir(), `test-migration-bundle-${Date.now()}.mjs`);
 fs.writeFileSync(
   entry,
-  `export * from '${root}/src/store/db';\nexport * from '${root}/src/store/migration';\n`,
+  `export * from '${root}/apps/web/src/store/db';\nexport * from '${root}/apps/web/src/store/migration';\n`,
 );
 execSync(`node_modules/.bin/esbuild ${entry} --bundle --platform=node --format=esm --outfile=${bundle}`, {
   cwd: root,
