@@ -461,6 +461,14 @@ const MIGRATIONS: Array<[number, string]> = [
     value TEXT NOT NULL
   );`],
   [36, `ALTER TABLE cloud_tasks ADD COLUMN effects TEXT;`],
+  // The idempotency journal only ever grows during operation. Give each receipt
+  // a clock so the retention sweep below can bound it; existing rows start a
+  // fresh retention window at upgrade time instead of being mass-deleted.
+  [37, `
+    ALTER TABLE cloud_operations ADD COLUMN created_at TEXT NOT NULL DEFAULT '';
+    UPDATE cloud_operations SET created_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE created_at = '';
+    CREATE INDEX cloud_operations_retention ON cloud_operations(created_at);
+  `],
 ];
 
 // These two migrations were already numbered 14 and 15 on the main branch.
@@ -591,6 +599,7 @@ export class DatabaseStore {
             { version: 32, tables: ['resource_trash'], extra: [], sql: MIGRATIONS.find(([v]) => v === 32)![1] },
             { version: 35, tables: ['bilibili_credentials'], extra: [], sql: MIGRATIONS.find(([v]) => v === 35)![1] },
             { version: 36, tables: [], extra: [['cloud_tasks', 'effects']], sql: MIGRATIONS.find(([v]) => v === 36)![1] },
+            { version: 37, tables: [], extra: [['cloud_operations', 'created_at']], sql: MIGRATIONS.find(([v]) => v === 37)![1] },
         ];
         const present = groups.map(group => {
           const markers = [...group.tables.map(table => columns(this.db, table).length > 0), ...group.extra.map(([table, column]) => columns(this.db, table).some(c => c.name === column))];
@@ -643,6 +652,10 @@ export class DatabaseStore {
           apply(32, groups[17], 17);
           apply(35, groups[18], 18);
           apply(36, groups[19], 19);
+          apply(37, groups[20], 20);
+          // Idempotency receipts older than the retention window cannot protect
+          // any live client journal anyway; drop them so the table stays bounded.
+          this.db.prepare('DELETE FROM cloud_operations WHERE created_at < ?').run(new Date(Date.now() - 180 * 86400000).toISOString());
          // Retire folder archive without interpreting retained folders as deleted.
          // Trashed workspaces must remain locked until explicitly restored.
          if (!this.db.prepare('SELECT 1 FROM schema_migrations WHERE version=33').get()) {

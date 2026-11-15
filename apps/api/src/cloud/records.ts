@@ -163,7 +163,7 @@ export class CloudRecords {
         this.store.db.prepare(`INSERT INTO cloud_records(owner_id,table_name,record_key,value) VALUES(?,?,?,?)
           ON CONFLICT(owner_id,table_name,record_key) DO UPDATE SET value=excluded.value,revision=excluded.revision`)
           .run(owner, op.table, JSON.stringify(op.key), value === null ? null : JSON.stringify(value));
-        this.store.db.prepare('INSERT INTO cloud_operations(owner_id,id) VALUES(?,?)').run(owner, op.id);
+        this.store.db.prepare('INSERT INTO cloud_operations(owner_id,id,created_at) VALUES(?,?,?)').run(owner, op.id, new Date().toISOString());
       }
       if (instructions && !this.indexingInstructions) this.store.systemFiles.write(owner, AGENTS_PATH, this.get(owner, 'preferences', 'agentInstructions')?.value ?? '', instructionBefore);
       if (skillBefore) this.store.skillRecords.writeChanges(owner, skillBefore);
