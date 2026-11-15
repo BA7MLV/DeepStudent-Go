@@ -34,8 +34,8 @@ export type ResourceOperation =
   | { kind: 'createDirectory'; projectId: string; path: string }
   | { kind: 'upload'; projectId: string; path: string; size: number; sha256: string; contentType: string }
   | { kind: 'recordMediaDuration'; courseId: string; duration: number }
-  | { kind: 'recordPlayback'; courseId: string; position: number; finished?: boolean }
-  | { kind: 'recordReadingPosition'; courseId: string; unit: number }
+  | { kind: 'recordPlayback'; courseId: string; position: number; finished?: boolean; positionAt?: number }
+  | { kind: 'recordReadingPosition'; courseId: string; unit: number; positionAt?: number }
   | { kind: 'setReadingView'; courseId: string; view: 'raw' | 'blocks' }
   | { kind: 'setCourseSkills'; courseId: string; pin: number[]; drop: number[] }
   | { kind: 'setCoursePinned'; courseId: string; pinned: boolean }

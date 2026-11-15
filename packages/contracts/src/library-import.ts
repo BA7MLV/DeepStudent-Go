@@ -4,11 +4,11 @@ import type { RuntimeJson } from './client-runtime.js';
 /** Reject unknown legacy fields before the projecting wire codec can drop them.
  * The full source archive remains exportable for explicit manual conversion. */
 export const LIBRARY_IMPORT_FIELDS = {
-  courses: 'id name size mimeType duration createdAt status transcriptionPaused biliSource lastPosition finished fileDeleted pinned skillOverride folderId kind materialFormat unitCount lastUnit scanned empty htmlView dominantColor coverState',
+  courses: 'id name size mimeType duration createdAt status transcriptionPaused biliSource lastPosition finished fileDeleted pinned skillOverride folderId kind materialFormat unitCount lastUnit scanned empty htmlView dominantColor coverState positionAt',
   folders: 'id name createdAt parentId color', files: 'id blob',
   segments: 'id videoId idx start end text status cues', tracks: 'id videoId lang lanDoc primary cues',
   blocks: 'id materialId idx unit unitLabel text kind', frames: 'id videoId ts blob kind caption',
-  covers: 'videoId blob w h ts source createdAt', handouts: 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos',
+  covers: 'videoId blob w h ts source createdAt', handouts: 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos positionAt',
   cards: 'id videoId q a time status createdAt', comments: 'id videoId time author role text parentId createdAt', danmakus: 'id videoId time text',
   sessions: 'id videoId title createdAt contextCourseIds courseReferenceEnabled webSearchEnabled projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions',
   messages: 'id taskId videoId sessionId role content createdAt modelTrace modelRequests explicitSkillIds images attachments reasoning reasoningMs tools responseSegments quiz ask folderPlan resume interrupted interruptReason widget widgets legacyHtmlWorks widgetState widgetStates',

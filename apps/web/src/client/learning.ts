@@ -183,7 +183,7 @@ export async function saveHandoutReading(handoutId: number, position: { anchor: 
   const database = db;
   const row = cloud.enabled ? (await (await import('../cloud/sync')).readRecordKeys<HandoutRow>('handouts', [handoutId]))[0] : await database.handouts.get(handoutId);
   if (database !== db) throw new Error('client_account_changed');
-  if (row) await submitLearning([learningEdit({ kind: 'handoutReading', courseId: row.videoId, handoutId, position })], [`handout:${handoutId}`]);
+  if (row) await submitLearning([learningEdit({ kind: 'handoutReading', courseId: row.videoId, handoutId, position, positionAt: Date.now() })], [`handout:${handoutId}`]);
 }
 export async function addStudyTime(entries: [string, number][], operationId: string = crypto.randomUUID()) {
   const database = db, lifetime = accountLifetime(cloud.userId);

@@ -59,10 +59,13 @@ export function executeResourceCommand(resources: ResourceFiles, owner: string, 
         changes = { duration: operation.duration };
       } else if (operation.kind === 'recordPlayback') {
         if (!Number.isFinite(operation.position) || operation.position < 0 || operation.position > 31536000) throw new RemoteError('gateway/bad-request', 'Invalid playback position', {});
-        changes = { lastPosition: operation.position, ...(operation.finished === undefined ? {} : { finished: operation.finished ? 1 : 0 }) };
+        if (operation.positionAt !== undefined && (!Number.isSafeInteger(operation.positionAt) || operation.positionAt <= 0 || operation.positionAt > 4102444800000)) throw new RemoteError('gateway/bad-request', 'Invalid playback clock', {});
+        changes = { lastPosition: operation.position, ...(operation.finished === undefined ? {} : { finished: operation.finished ? 1 : 0 }),
+          ...(operation.positionAt === undefined ? {} : { positionAt: operation.positionAt }) };
       } else if (operation.kind === 'recordReadingPosition') {
         if (!Number.isSafeInteger(operation.unit) || operation.unit < 0 || operation.unit > 10000000) throw new RemoteError('gateway/bad-request', 'Invalid reading position', {});
-        changes = { lastUnit: operation.unit };
+        if (operation.positionAt !== undefined && (!Number.isSafeInteger(operation.positionAt) || operation.positionAt <= 0 || operation.positionAt > 4102444800000)) throw new RemoteError('gateway/bad-request', 'Invalid reading clock', {});
+        changes = { lastUnit: operation.unit, ...(operation.positionAt === undefined ? {} : { positionAt: operation.positionAt }) };
       } else if (operation.kind === 'setReadingView') {
         if (operation.view !== 'raw' && operation.view !== 'blocks') throw new RemoteError('gateway/bad-request', 'Invalid reading view', {});
         changes = { htmlView: operation.view };

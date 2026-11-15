@@ -16,6 +16,14 @@ function canonicalWire(value: unknown): unknown {
     .map(([key, item]) => [key, canonicalWire(item)]));
 }
 const equal = (a: unknown, b: unknown) => isDeepStrictEqual(a, b) || isDeepStrictEqual(canonicalWire(a), canonicalWire(b));
+/** Playback/reading state is one fact written by one clock: the client wall
+ * clock captured alongside the position (`positionAt`). A device reconnecting
+ * after offline use must not drag progress backwards, so a strictly older
+ * write keeps the newer stored value instead of last-arrival-wins. `finished`
+ * follows the same clock: it is part of the same playback state and the player
+ * legitimately resets it to 0 when a new viewing round starts. */
+const POSITION_FIELDS = ['lastPosition', 'lastUnit', 'readPos', 'finished'];
+const safeClock = (value: unknown): number | null => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
 export class CloudConflict extends Error {
   constructor(readonly table: string, readonly key: string | number, readonly fields: string[]) {
     super('sync_conflict');
@@ -123,12 +131,27 @@ export class CloudRecords {
               value.seconds = Number(current.seconds ?? 0) + delta;
             } else {
               // Positions/timestamps are naturally last-write-wins; content conflicts stay visible.
-               const position = (op.table === 'preferences' && op.key !== 'agentInstructions') || ['lastPosition', 'lastUnit', 'readPos', 'updatedAt', 'finished'].includes(field);
-              if (!position && !equal(current[field], op.before[field]) && !equal(current[field], op.after[field])) {
-                throw new CloudConflict(op.table, op.key, [field]);
+               const preferences = op.table === 'preferences' && op.key !== 'agentInstructions';
+              if (field === 'positionAt') {
+                const incomingAt = safeClock(op.after.positionAt), storedAt = safeClock(current.positionAt);
+                if (incomingAt !== null && (storedAt === null || incomingAt >= storedAt)) value.positionAt = incomingAt;
+              } else if (POSITION_FIELDS.includes(field) && !preferences) {
+                const incomingAt = safeClock(op.after.positionAt), storedAt = safeClock(current.positionAt);
+                const stale = incomingAt !== null && storedAt !== null && incomingAt < storedAt;
+                if (!stale) {
+                  if (Object.hasOwn(op.after, field)) value[field] = op.after[field];
+                  else delete value[field];
+                }
+              } else {
+                const position = preferences || field === 'updatedAt' || POSITION_FIELDS.includes(field);
+                if (!position && !equal(current[field], op.before[field]) && !equal(current[field], op.after[field])) {
+                  throw new CloudConflict(op.table, op.key, [field]);
+                }
+                if (field === 'updatedAt' && typeof op.after.updatedAt === 'number' && typeof current.updatedAt === 'number') {
+                  value.updatedAt = Math.max(current.updatedAt, op.after.updatedAt);
+                } else if (Object.hasOwn(op.after, field)) value[field] = op.after[field];
+                else delete value[field];
               }
-              if (Object.hasOwn(op.after, field)) value[field] = op.after[field];
-              else delete value[field];
             }
           }
         }
