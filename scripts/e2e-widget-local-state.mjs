@@ -1,12 +1,13 @@
 // Real browser IndexedDB + projection-only middleware + production WidgetBlock.
 // Sources are fixture projections; no server is needed or contacted by this test.
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/widget-local-state-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-widget-local-state-'));
 const html = `<section><output></output><button id="next">下一步</button><button id="special">特殊型</button><span id="error"></span></section>
 <script>(()=>{
 const api=window.__wbw; let mode='std',step=0;window.restores=0;

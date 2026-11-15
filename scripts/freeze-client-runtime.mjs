@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -7,7 +8,7 @@ import assert from 'node:assert/strict';
 // Read-only acceptance orchestration. Each test owns a disposable database;
 // all logs and failed attempts are retained. No commit, deploy or real model.
 const root = process.cwd();
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/client-final-freeze-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-client-final-freeze-'));
 const previous = process.argv[2] === '--resume' ? path.resolve(process.argv[3]) : undefined;
 const prior = previous ? JSON.parse(fs.readFileSync(path.join(previous, 'results.json'), 'utf8')) : undefined;
 const superseded = prior?.results.filter(result => result.code !== 0) ?? [];
@@ -87,7 +88,7 @@ if (previous) {
   await Promise.all(Array.from({ length: 3 }, async () => { while (index < tests.length) { const test = tests[index++]; await run(...test); } }));
 }
 assert.ok(tests.every(test => results.some(result => result.name === test[0])), 'missing acceptance result');
-if (results.every(result => result.code === 0)) await run('performance', ['node', 'scripts/benchmark-client-head.mjs', '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/client-baseline-head-4rgby508/source', '.']);
+if (results.every(result => result.code === 0)) await run('performance', ['node', 'scripts/benchmark-client-head.mjs', path.join(os.tmpdir(), 'opencode', 'client-baseline-head-4rgby508', 'source'), '.']);
 const after = { output: identity(outputs), source: identity(sources) };
 fs.writeFileSync(path.join(directory, 'identities-after.json'), JSON.stringify(after, null, 2));
 assert.deepEqual(after, before, 'source/output changed during final acceptance');

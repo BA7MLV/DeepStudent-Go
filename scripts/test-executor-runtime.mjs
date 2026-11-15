@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createExecutorRuntime, DurableCommands } from '@wangke/client-core';
 import { workerTokens, workerTokenHash } from '../apps/api/src/cloud/workerAuth.ts';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/executor-runtime-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-executor-runtime-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'bootstrap-secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

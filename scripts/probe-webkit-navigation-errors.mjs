@@ -1,10 +1,11 @@
 /** Read-only browser transport diagnostic. No app credentials or business data. */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { webkit, chromium } from 'playwright';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/navigation-errors-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-navigation-errors-'));
 const evidence = { browser: process.env.BROWSER ?? 'webkit', abortOnHide: !!process.env.ABORT_ON_HIDE, rounds: 20, errors: [], failures: [], caught: 0, unhandled: [] };
 const server = http.createServer((req, res) => {
   if (req.url === '/') {

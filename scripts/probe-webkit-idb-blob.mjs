@@ -5,7 +5,7 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import { chromium, webkit } from 'playwright';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/idb-blob-probe-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-idb-blob-probe-'));
 const require = createRequire(import.meta.url);
 const isolatedTemp = path.join(directory, 'tmp');
 fs.mkdirSync(isolatedTemp, { mode: 0o700 });

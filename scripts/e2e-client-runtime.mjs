@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
 
-const temporary = '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode';
+const temporary = path.join(os.tmpdir(), 'opencode');
+fs.mkdirSync(temporary, { recursive: true });
 const directory = fs.mkdtempSync(path.join(temporary, 'runtime-browser-'));
 // Board samples are test fixtures; the product seeds no components.
 process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");

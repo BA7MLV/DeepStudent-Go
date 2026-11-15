@@ -1,5 +1,6 @@
 /** Real HTTP/API and browser lifecycle; only the model responses are mocked. */
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -11,7 +12,7 @@ import { createServer } from 'vite';
 import { scannedPdf } from './fixtures/scanned-pdf.mjs';
 import { verifyExecutorRecovery } from './fixtures/executor-recovery.mjs';
 
-const directory=fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/server-task-e2e-');
+const directory=fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-server-task-e2e-'));
 Object.assign(process.env,{NODE_ENV:'test',DATA_DIR:directory,FILES_DIR:path.join(directory,'files'),BOOTSTRAP_SECRET_FILE:path.join(directory,'bootstrap-secret')});
 delete process.env.CLOUD_WORKER_DISABLED;
 const {buildServer}=await import('../apps/api/src/server.ts');

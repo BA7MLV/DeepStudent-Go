@@ -1,11 +1,12 @@
 /** Adapter-only budget/lifetime tests; no production UI/scale claim. */
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
-const directory = await fs.mkdtemp('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/skill-catalog-budget-');
+const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-skill-catalog-budget-'));
 const output = path.join(directory, 'demand.mjs');
 await build({ entryPoints: ['apps/web/src/skills/demand.ts'], bundle: true, platform: 'node', format: 'esm', outfile: output,
   plugins: [{ name: 'catalog-ports', setup(builder) {

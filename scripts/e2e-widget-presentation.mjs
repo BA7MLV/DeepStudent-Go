@@ -1,11 +1,12 @@
 // Independent works auto-render; ordinary titled HTML remains click-to-preview.
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createServer } from 'vite';
 import { chromium, webkit } from 'playwright';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/widget-presentation-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-widget-presentation-'));
 const fixture = `
 import React from 'react';
 import { createRoot } from 'react-dom/client';

@@ -1,13 +1,14 @@
 /** Real API/SQLite and browser stores; only the server model HTTP is scripted.
  * Source-module regression, not production rendering/performance acceptance. */
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/artifact-demand-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-artifact-demand-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 delete process.env.CLOUD_WORKER_DISABLED;
 const { buildServer } = await import('../apps/api/src/server.ts');
