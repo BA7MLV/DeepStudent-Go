@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@heroui/react';
+import { useTranslation } from 'react-i18next';
 import { cloud } from './state';
 import { db } from '../store/db';
 import { confirmDialog, toast } from '../ui';
@@ -15,6 +16,7 @@ import { cloudTransaction } from './transactions';
  * 导出 JSON 仍是兜底,不做任何自动取舍。
  */
 export default function ConflictRecovery() {
+  const { t } = useTranslation('settings');
   const [rows, setRows] = useState<LearningCommandRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -32,13 +34,13 @@ export default function ConflictRecovery() {
     setBusy(operationId);
     try {
       if (action === 'discard' && !await confirmDialog({
-        headline: '保留云端,丢弃这笔本机修改?',
-        description: '原稿会转入恢复证据,不会静默消失;之后仍可导出。',
-        confirmText: '丢弃本机修改', danger: true,
+        headline: t('conflictRecovery.discardTitle'),
+        description: t('conflictRecovery.discardDescription'),
+        confirmText: t('conflictRecovery.discardConfirm'), danger: true,
       })) return;
       await resolveLearningCommand(operationId, action);
       await load();
-      toast.success(action === 'retry' ? '已按本机原稿重新提交' : '已保留云端,本机原稿转入恢复证据');
+      toast.success(action === 'retry' ? t('conflictRecovery.retried') : t('conflictRecovery.discarded'));
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
@@ -49,9 +51,9 @@ export default function ConflictRecovery() {
   const discardAll = async () => {
     if (!rows.length) return;
     if (!await confirmDialog({
-      headline: `保留云端,丢弃这 ${rows.length} 笔本机修改?`,
-      description: '每笔原稿都会转入恢复证据,不会静默消失。',
-      confirmText: '全部丢弃本机修改', danger: true,
+      headline: t('conflictRecovery.discardAllTitle', { count: rows.length }),
+      description: t('conflictRecovery.discardAllDescription'),
+      confirmText: t('conflictRecovery.discardAllConfirm'), danger: true,
     })) return;
     setBusy('all');
     try {
@@ -64,7 +66,7 @@ export default function ConflictRecovery() {
       });
       if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed');
       await load();
-      toast.success('已保留云端,本机原稿转入恢复证据');
+      toast.success(t('conflictRecovery.discarded'));
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
@@ -77,7 +79,7 @@ export default function ConflictRecovery() {
     try {
       for (const row of rows) await resolveLearningCommand(row.operationId, 'retry');
       await load();
-      toast.success('已按本机原稿重新提交');
+      toast.success(t('conflictRecovery.retried'));
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
@@ -96,7 +98,7 @@ export default function ConflictRecovery() {
     } finally { setBusy(null); }
   };
 
-  if (!rows.length) return <p className="text-sm text-muted">当前没有需要处理的冲突。</p>;
+  if (!rows.length) return <p className="text-sm text-muted">{t('conflictRecovery.empty')}</p>;
 
   return (
     <div className="flex flex-col gap-3" data-testid="cloud-conflict-recovery">
@@ -106,17 +108,17 @@ export default function ConflictRecovery() {
             <span className="text-sm font-medium">{row.entities.join('、') || row.operationId}</span>
             <span className="text-xs text-muted">{new Date(row.createdAt).toLocaleString()}</span>
           </div>
-          <p className="text-xs text-muted" role="status">{row.error ?? '同步冲突'}</p>
+          <p className="text-xs text-muted" role="status">{row.error ?? 'sync conflict'}</p>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void resolve(row.operationId, 'discard')}>保留云端(丢弃本机修改)</Button>
-            <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void resolve(row.operationId, 'retry')}>保留本机(重新提交)</Button>
+            <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void resolve(row.operationId, 'discard')}>{t('conflictRecovery.keepCloud')}</Button>
+            <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void resolve(row.operationId, 'retry')}>{t('conflictRecovery.keepLocal')}</Button>
           </div>
         </div>
       ))}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void retryAll()}>全部保留本机</Button>
-        <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void discardAll()}>全部保留云端</Button>
-        <Button size="sm" variant="ghost" isDisabled={busy !== null} onPress={() => void exportDrafts()}>导出冲突原稿</Button>
+        <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void retryAll()}>{t('conflictRecovery.keepAllLocal')}</Button>
+        <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void discardAll()}>{t('conflictRecovery.keepAllCloud')}</Button>
+        <Button size="sm" variant="ghost" isDisabled={busy !== null} onPress={() => void exportDrafts()}>{t('conflictRecovery.exportDrafts')}</Button>
       </div>
     </div>
   );

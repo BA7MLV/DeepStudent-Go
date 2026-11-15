@@ -3,12 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { Dropdown, ListBox, ScrollShadow, SearchField, Separator, Switch, Tooltip } from '@heroui/react';
 import { Sym } from '../ui';
 import { slotLabel,
-  catalogOf as settingsCatalogOf, useSettings, sameRef, modelOverridesOf, targetOrNull, type ModelRef, type ModelSlot } from '../store/settings';
+  catalogOf as settingsCatalogOf, useSettings, sameRef, modelOverridesOf, targetOrNull, type ModelRef, type ModelSlot, type SettingsStore } from '../store/settings';
 import { guessContextWindow } from '../api/modelCaps';
 import { effectiveThinkingLevel, reasoningChoices, reasoningProfile } from '@wangke/study-core/model/reasoning';
 import { useModelMetaRevision } from '../utils/useModelMeta';
 import ReasoningEffortSlider from './ReasoningEffortSlider';
 import './subtitle-danmaku.css';
+import { useShallow } from 'zustand/react/shallow';
 import { modelKey, modelLabel, modelsForSlot } from '../store/modelLibrary';
 import { ModelCapabilities } from './ModelCapabilities';
 import { overflowTitleProps } from '../ui/overflowTitle';
@@ -89,7 +90,13 @@ export default function ModelPicker({
   onChange,
 }: Props) {
   const { t: pickerText } = useTranslation('settings');
-  const settings = useSettings();
+  // 只订阅模型选择真正读的字段(helpers 需要 providers/favorites/savedModels 与四个
+  // 槽位),避免任何无关设置变化都重渲染聊天工具栏里的这颗药丸。
+  const settings = useSettings(useShallow((s: SettingsStore) => ({
+    providers: s.providers, favorites: s.favorites, savedModels: s.savedModels,
+    llmModel: s.llmModel, visionModel: s.visionModel, asrModel: s.asrModel, decisionModel: s.decisionModel,
+    thinkingEnabled: s.thinkingEnabled, thinkingEffort: s.thinkingEffort, update: s.update,
+  }))) as SettingsStore;
   const value = controlledValue ?? settings[field];
   const favs = settings.favorites[slot];
   // 收藏夹不含当前值时并入当前值（去重、过滤空串），保证选中态始终可见、有效
@@ -252,7 +259,13 @@ function ChipDropdown({
   catalogOf: (id: string) => string;
 }) {
   const { t: pickerText } = useTranslation('settings');
-  const settings = useSettings();
+  // 只订阅模型选择真正读的字段(helpers 需要 providers/favorites/savedModels 与四个
+  // 槽位),避免任何无关设置变化都重渲染聊天工具栏里的这颗药丸。
+  const settings = useSettings(useShallow((s: SettingsStore) => ({
+    providers: s.providers, favorites: s.favorites, savedModels: s.savedModels,
+    llmModel: s.llmModel, visionModel: s.visionModel, asrModel: s.asrModel, decisionModel: s.decisionModel,
+    thinkingEnabled: s.thinkingEnabled, thinkingEffort: s.thinkingEffort, update: s.update,
+  }))) as SettingsStore;
 
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
