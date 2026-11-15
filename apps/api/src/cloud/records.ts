@@ -52,13 +52,13 @@ export class CloudRecords {
     if (disk === undefined) this.store.systemFiles.write(owner, AGENTS_PATH, '', null);
     return text;
   }
-  ownedFile(owner: string, id: string) { return !!this.store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(id, owner); }
+  ownedFile(owner: string, id: string) { return !!this.store.statement('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(id, owner); }
 
   studyDays(owner: string): Record<string, unknown>[] {
-    const budget = this.store.db.prepare("SELECT count(*) count,coalesce(sum(length(CAST(value AS BLOB))),0) bytes FROM cloud_records WHERE owner_id=? AND table_name='studyDays' AND value IS NOT NULL")
+    const budget = this.store.statement("SELECT count(*) count,coalesce(sum(length(CAST(value AS BLOB))),0) bytes FROM cloud_records WHERE owner_id=? AND table_name='studyDays' AND value IS NOT NULL")
       .get(owner) as { count: number; bytes: number };
     if (budget.count > 20000 || budget.bytes > 8 * 1024 * 1024) throw new Error('study_clear_budget_exceeded');
-    const rows = this.store.db.prepare("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='studyDays' AND value IS NOT NULL ORDER BY record_key LIMIT 20001")
+    const rows = this.store.statement("SELECT value FROM cloud_records WHERE owner_id=? AND table_name='studyDays' AND value IS NOT NULL ORDER BY record_key LIMIT 20001")
       .all(owner) as { value: string }[];
     if (rows.length > 20000) throw new Error('study_clear_budget_exceeded');
     return rows.map(row => JSON.parse(row.value));
@@ -66,7 +66,7 @@ export class CloudRecords {
 
   get(owner: string, table: string, key: string | number): Record<string, any> | null {
     if ((table === 'skills' || table === 'skillRefs') && !this.store.db.inTransaction) this.store.skillRecords.sync(owner);
-    const row = this.store.db.prepare('SELECT value FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?')
+    const row = this.store.statement('SELECT value FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?')
       .get(owner, table, JSON.stringify(key)) as { value: string | null } | undefined;
     return row?.value ? JSON.parse(row.value) : null;
   }
@@ -74,7 +74,7 @@ export class CloudRecords {
   list(owner: string, after: number, limit = 200): CloudRecord[] {
     this.agentInstructions(owner);
     this.store.skillRecords.sync(owner);
-    const rows = this.store.db.prepare('SELECT revision,table_name,record_key,value FROM cloud_records WHERE owner_id=? AND revision>? ORDER BY revision LIMIT ?')
+    const rows = this.store.statement('SELECT revision,table_name,record_key,value FROM cloud_records WHERE owner_id=? AND revision>? ORDER BY revision LIMIT ?')
       .all(owner, after, limit) as Array<{ revision: number; table_name: string; record_key: string; value: string | null }>;
     return rows.map(r => ({ revision: r.revision, table: r.table_name, key: JSON.parse(r.record_key), value: r.value ? JSON.parse(r.value) : null }));
   }
@@ -96,10 +96,10 @@ export class CloudRecords {
             (typeof op.key === 'string' && (!op.key || op.key.length > 256)) ||
             (op.after !== null && (!op.after || Array.isArray(op.after) || typeof op.after !== 'object')) ||
             (op.before !== null && (!op.before || Array.isArray(op.before) || typeof op.before !== 'object'))) throw new Error('invalid_mutation');
-        if (this.store.db.prepare('SELECT 1 FROM cloud_operations WHERE owner_id=? AND id=?').get(owner, op.id)) continue;
+        if (this.store.statement('SELECT 1 FROM cloud_operations WHERE owner_id=? AND id=?').get(owner, op.id)) continue;
         if (op.after && op.after[CLOUD_TABLES[op.table]] !== op.key) throw new Error('invalid_record_key');
         if (op.table === 'preferences' && op.key === 'agentInstructions' && op.after && (typeof op.after.value !== 'string' || op.after.value.length > 100000)) throw new Error('invalid_agent_instructions');
-        const existing = this.store.db.prepare('SELECT value,revision FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?')
+        const existing = this.store.statement('SELECT value,revision FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?')
           .get(owner, op.table, JSON.stringify(op.key)) as { value: string | null; revision: number } | undefined;
         const recordId = `${op.table}:${JSON.stringify(op.key)}`;
         const current: Record<string, unknown> | null = existing?.value ? JSON.parse(existing.value) : null;
@@ -160,10 +160,10 @@ export class CloudRecords {
         // The attempted INSERT allocates a new AUTOINCREMENT revision even on
         // conflict. Publish it with the value in one UPDATE, avoiding a transient
         // deletion in derived indexes during content-only streaming edits.
-        this.store.db.prepare(`INSERT INTO cloud_records(owner_id,table_name,record_key,value) VALUES(?,?,?,?)
+        this.store.statement(`INSERT INTO cloud_records(owner_id,table_name,record_key,value) VALUES(?,?,?,?)
           ON CONFLICT(owner_id,table_name,record_key) DO UPDATE SET value=excluded.value,revision=excluded.revision`)
           .run(owner, op.table, JSON.stringify(op.key), value === null ? null : JSON.stringify(value));
-        this.store.db.prepare('INSERT INTO cloud_operations(owner_id,id,created_at) VALUES(?,?,?)').run(owner, op.id, new Date().toISOString());
+        this.store.statement('INSERT INTO cloud_operations(owner_id,id,created_at) VALUES(?,?,?)').run(owner, op.id, new Date().toISOString());
       }
       if (instructions && !this.indexingInstructions) this.store.systemFiles.write(owner, AGENTS_PATH, this.get(owner, 'preferences', 'agentInstructions')?.value ?? '', instructionBefore);
       if (skillBefore) this.store.skillRecords.writeChanges(owner, skillBefore);
@@ -173,7 +173,7 @@ export class CloudRecords {
         new BotMemory(this.store).rememberUserName(owner, name);
       }
       return { accepted: mutations.map(op => op.id), versions: mutations.map(op => ({ table: op.table, key: op.key,
-        revision: (this.store.db.prepare('SELECT revision FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?').get(owner, op.table, JSON.stringify(op.key)) as { revision: number }).revision })) };
+        revision: (this.store.statement('SELECT revision FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?').get(owner, op.table, JSON.stringify(op.key)) as { revision: number }).revision })) };
     });
     return result;
   }
