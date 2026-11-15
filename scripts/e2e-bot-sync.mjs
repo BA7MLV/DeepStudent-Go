@@ -1,12 +1,13 @@
 // Isolated real API + Web. No production data, model or IM traffic.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const temporary = '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode';
+const temporary = os.tmpdir();
 const root = fs.mkdtempSync(path.join(temporary, 'bot-sync-web-'));
 const output = path.join(root, 'evidence'); fs.mkdirSync(output);
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: root, FILES_DIR: path.join(root, 'files'), BOOTSTRAP_SECRET_FILE: path.join(root, 'config/bootstrap-secret') });

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const root = path.join(os.tmpdir(), 'opencode');
+const root = os.tmpdir();
 fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'board-plugins-'));
 // The product ships no board components; this suite exercises the v1 protocol

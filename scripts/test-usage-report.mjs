@@ -13,7 +13,7 @@ import { UsageLedger } from '../apps/api/src/agent/budget.ts';
 import { BotApplicationService } from '../apps/api/src/agent/service.ts';
 import { BotRunner } from '../apps/api/src/agent/runner.ts';
 
-const temporary = path.join(os.tmpdir(), 'opencode');
+const temporary = os.tmpdir();
 fs.mkdirSync(temporary, { recursive: true });
 const root = fs.mkdtempSync(path.join(temporary, 'usage-report-'));
 const dbPath = path.join(root, 'db.sqlite');

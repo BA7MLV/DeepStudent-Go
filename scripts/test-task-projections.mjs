@@ -6,7 +6,7 @@ import path from 'node:path';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { listOwnerTasks } from '../apps/api/src/cloud/tasks.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/task-projections-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-projections-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
 const owner = crypto.randomUUID();
 const now = new Date().toISOString();

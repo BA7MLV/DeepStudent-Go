@@ -35,7 +35,7 @@ Database.prototype.prepare = function (sql) {
   return statement;
 };
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/loading-production-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'loading-production-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

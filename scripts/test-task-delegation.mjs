@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
@@ -21,7 +22,7 @@ import { modelUsageReport } from '../apps/api/src/agent/model-observations.ts';
 import { WorkspaceHandoff } from '../apps/api/src/agent/workspace-handoff.ts';
 import { ProjectRepository } from '../apps/api/src/projects/repository.ts';
 
-const temp = '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode';
+const temp = os.tmpdir();
 const ref = model => ({ providerId: 'fixture', model });
 const selection = model => ({ modelRef: ref(model) });
 function fixture() {

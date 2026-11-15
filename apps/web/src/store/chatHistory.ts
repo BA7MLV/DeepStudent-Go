@@ -46,7 +46,7 @@ export const serverChatHistory: ChatHistoryAdapter = {
   async page(sessionId, before) {
     const owner = cloud.userId, database = db, lifetime = accountLifecycle.current();
     const accountCurrent = () => owner === cloud.userId && database === db && (!lifetime || lifetime.current());
-    const pendingCreation = () => database.table<LearningCommandRow>('_learningCommands').filter(command => command.state !== 'confirmed' && command.request.edits.some(edit =>
+    const pendingCreation = () => database.table<LearningCommandRow>('_learningCommands').where('state').anyOf(['queued', 'uncertain', 'conflict']).filter(command => command.request.edits.some(edit =>
       edit.kind === 'conversationSession' && edit.expected == null && edit.value?.id === sessionId)).first();
     const pendingSession = await pendingCreation();
     if (!accountCurrent()) throw new Error('client_account_changed');

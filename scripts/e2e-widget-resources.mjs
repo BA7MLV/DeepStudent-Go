@@ -1,4 +1,5 @@
 // Real CSP, local material loading and repair UX. Isolated browser storage; no model calls.
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -87,7 +88,7 @@ try {
     assert.ok(await host.evaluate(el => el.scrollWidth <= el.clientWidth + 1), `${width}px: recovery UI fits`);
   }
   await host.getByRole('button', { name: '收起', exact: true }).click();
-  await page.screenshot({ path: `${process.env.TMPDIR || '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T'}/opencode/widget-resource-recovery.png` });
+  await page.screenshot({ path: `${process.env.TMPDIR || os.tmpdir()}/opencode/widget-resource-recovery.png` });
 
   await page.evaluate(html => window.__renderResource(html), '<h2>缺失的本机图片</h2><img data-wbw-image="#source-image/deleted/frame-1" alt="已删除原图">' + controls);
   await frame().getByRole('img', { name: /已删除原图.*不存在/ }).waitFor();

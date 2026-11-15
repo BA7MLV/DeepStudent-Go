@@ -10,7 +10,7 @@ import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { settleWithin } from '../apps/api/src/lifecycle.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/release-drain-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'release-drain-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
 const owner = crypto.randomUUID(), at = new Date().toISOString();
 store.db.prepare('INSERT INTO users VALUES(?,?,?)').run(owner, owner, at);

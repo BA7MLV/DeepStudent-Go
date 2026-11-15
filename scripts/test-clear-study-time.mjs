@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import { PluginService } from '../apps/api/src/plugins/service.ts';
 import { ClientRuntimeDomain } from '../apps/api/src/realtime/domain.ts';
 import { RecordProjections } from '../apps/api/src/realtime/record-projections.ts';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/clear-study-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'clear-study-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system'));
 const plugins = new PluginService(store);
 const domain = new ClientRuntimeDomain(store, plugins);

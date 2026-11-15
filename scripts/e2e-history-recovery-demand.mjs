@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import { createServer } from 'vite';
 import { verifyExecutorRecovery } from './fixtures/executor-recovery.mjs';
 
 // Dedicated source-only fixture: no API, no full build, no real user profile.
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/history-demand-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'history-demand-'));
 let web, browser;
 try {
   const fixture = `

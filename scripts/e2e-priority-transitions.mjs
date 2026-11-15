@@ -7,7 +7,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const cache = mkdtempSync(path.join(os.tmpdir(), 'opencode/priority-transitions-'));
+const cache = mkdtempSync(path.join(os.tmpdir(), 'priority-transitions-'));
 const screenshots = process.env.SCREENSHOT_DIR ?? path.resolve('test-results/priority-transitions');
 mkdirSync(screenshots, { recursive: true });
 const fixture = `

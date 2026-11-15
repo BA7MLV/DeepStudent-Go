@@ -18,7 +18,7 @@ if (process.env.PLUGIN_CPU_DIAGNOSTIC === '1') {
   console.error(`Plugin diagnostic inspector: ${inspector.url()}`);
 }
 
-const root = path.join(os.tmpdir(), 'opencode'); fs.mkdirSync(root, { recursive: true });
+const root = os.tmpdir(); fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'plugin-platform-ui-'));
 // Board samples are test fixtures; the product seeds no components.
 process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");

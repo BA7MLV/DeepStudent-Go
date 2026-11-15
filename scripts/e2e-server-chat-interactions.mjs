@@ -1,11 +1,12 @@
 /** Real authenticated app + API/SQLite. Only the external model transport is scripted. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/chat-interactions-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-interactions-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 delete process.env.CLOUD_WORKER_DISABLED;
 const html = `<section><h3>学习路线</h3>

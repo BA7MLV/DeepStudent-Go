@@ -16,7 +16,7 @@ import { PluginService } from '../apps/api/src/plugins/service.ts';
 import { PluginFiles } from '../apps/api/src/plugins/files.ts';
 import { SystemMaterials } from '../apps/api/src/storage/system-materials.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/create-mode-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'create-mode-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system-files'));
 const web = await createServer({ root: path.resolve('apps/web'), server: { middlewareMode: true, hmr: false }, appType: 'custom' });
 const previousWindow = globalThis.window;

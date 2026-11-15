@@ -1,11 +1,12 @@
 /** Real typed resource command + isolated SQLite. Not browser/production startup evidence. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fixtureDomain } from './fixture-domain.mjs';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/subtitle-import-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'subtitle-import-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

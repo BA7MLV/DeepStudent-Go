@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium, webkit } from 'playwright';
@@ -5,7 +7,7 @@ import { chromium, webkit } from 'playwright';
 // Tests the page-side contract, NOT the native Safari / Android browser chrome.
 // Use real devices for toolbar tinting, Home Screen launch and safe-area env values.
 const base = process.env.BASE_URL || 'http://localhost:5173';
-const output = process.env.SHOTS_DIR || '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/browser-chrome';
+const output = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'opencode', 'browser-chrome');
 await mkdir(output, { recursive: true });
 
 for (const [name, engine] of [['chromium', chromium], ['webkit', webkit]]) {

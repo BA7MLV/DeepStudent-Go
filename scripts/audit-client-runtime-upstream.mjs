@@ -18,7 +18,7 @@ const option = name => { const i = args.indexOf(name); return i < 0 ? undefined 
 const project = process.cwd();
 const lockBytes = fs.readFileSync('package-lock.json');
 const lock = JSON.parse(lockBytes);
-const tempRoot = path.join(os.tmpdir(), 'opencode');
+const tempRoot = os.tmpdir();
 fs.mkdirSync(tempRoot, { recursive: true });
 const scratch = fs.realpathSync(fs.mkdtempSync(path.join(tempRoot, 'dsh-provenance-')));
 const cache = option('--cache-dir');

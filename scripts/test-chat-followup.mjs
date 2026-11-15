@@ -3,6 +3,7 @@
  * Equivalent business assertions now exercise the production store + real queue
  * policy/IndexedDB, with a free server-command carrier (not a local model). The
  * real typed HTTP/admission/two-tab matrix remains e2e-session-queue.mjs. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -14,7 +15,7 @@ Object.assign(globalThis, { indexedDB, IDBKeyRange, window: new EventTarget() })
 const values = new Map();
 globalThis.localStorage = globalThis.sessionStorage = { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, String(v)), removeItem: k => values.delete(k) };
 window.localStorage = localStorage;
-const dir = mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/server-chat-followup-');
+const dir = mkdtempSync(join(os.tmpdir(), 'server-chat-followup-'));
 const root = resolve('apps/web/src');
 writeFileSync(join(dir, 'entry.ts'), `export { useCourseChat, reflectCloudTasks, flushChatQueue } from '${root}/store/courseChat'; export { db } from '${root}/store/db';`);
 const submitted = [], commands = [], cancelled = [];

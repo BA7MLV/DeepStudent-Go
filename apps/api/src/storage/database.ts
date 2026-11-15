@@ -680,6 +680,18 @@ export class DatabaseStore {
     })();
   }
 
+  private readonly statements = new Map<string, Database.Statement<unknown[], unknown>>();
+
+  /** better-sqlite3 每次调用 prepare 都会重新解析 SQL;热路径复用已编译语句。 */
+  stmt(sql: string): Database.Statement<unknown[], unknown> {
+    let statement = this.statements.get(sql);
+    if (!statement) {
+      statement = this.db.prepare(sql) as Database.Statement<unknown[], unknown>;
+      this.statements.set(sql, statement);
+    }
+    return statement;
+  }
+
   transaction<T>(fn: () => T): T {
     const result = this.db.transaction(fn)();
     this.systemFiles.flush();

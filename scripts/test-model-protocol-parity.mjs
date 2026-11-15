@@ -120,7 +120,7 @@ test('shared protocol restrictions, capability overrides and incomplete-tool saf
 });
 
 test('real BotRunner shares preferences and persists reasoning/native state through a tool round', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode', 'bot-codec-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'bot-codec-'));
   const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
   const owner = crypto.randomUUID(), at = new Date().toISOString();
   store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run(owner, owner, at);

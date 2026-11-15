@@ -1,4 +1,5 @@
 /** Isolated SQLite scalar aggregation; not browser/production performance. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { studyOverview } from '../apps/api/src/realtime/study-overview.ts';
 import { computeStats, mergeSeconds, toSecondsMap } from '../apps/web/src/utils/studyLog.ts';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/study-overview-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'study-overview-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system'));
 const owner = 'study-owner', other = 'study-other';
 const evidence = { checks: [], plans: [], timezones: ['UTC', 'America/New_York', 'Asia/Shanghai'] };

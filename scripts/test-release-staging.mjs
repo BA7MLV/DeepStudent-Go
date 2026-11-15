@@ -10,7 +10,7 @@ import { fenceRemoteWorkers } from '../apps/api/src/storage/release.ts';
 import { workerTokens, workerTokenHash } from '../apps/api/src/cloud/workerAuth.ts';
 import { createExecutorRuntime } from '@wangke/client-core';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/release-staging-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'release-staging-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/secret'), CLOUD_WORKER_DISABLED: '1', API_RELEASE_ID: crypto.randomUUID(), API_RELEASE_TOKEN: crypto.randomBytes(32).toString('hex') });
 const dbPath = path.join(directory, 'db/wangke.sqlite');
 const seed = new DatabaseStore(dbPath);

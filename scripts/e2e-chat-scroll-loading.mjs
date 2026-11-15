@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
 // npx tsx scripts/e2e-chat-scroll-loading.mjs — isolated API/SQLite, no model calls.
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/scroll-loading-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'scroll-loading-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

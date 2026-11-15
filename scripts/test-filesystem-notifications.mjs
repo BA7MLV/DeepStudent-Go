@@ -2,6 +2,7 @@
  * fixture data: proves external file creation reaches a live projection, and
  * that a change visible without a revision bump is sent as a replacement
  * snapshot instead of being dropped. Not a browser/production-startup test. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,7 +15,7 @@ import { apply as installGateway } from '@deepseek-ai/dsh-api-gateway/client';
 import { TYPERT_REMOTE } from '@wangke/remote-artifacts';
 import { applyRuntimePatch } from '@wangke/contracts/runtime-projection';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/fs-notify-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-notify-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

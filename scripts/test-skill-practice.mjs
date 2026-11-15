@@ -23,7 +23,7 @@ for (const boundary of ['AI 参考', '重新练习', 'setWidgetState', 'ask_user
 }
 // Fresh accounts can actually read the bundled skill reference through the
 // existing system-material API; no new migration or persistent domain required.
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/skill-practice-unit-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-practice-unit-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system-files'));
 try {
   const owner = 'skill-practice-owner';

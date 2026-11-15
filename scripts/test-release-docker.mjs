@@ -6,7 +6,7 @@ import test from 'node:test';
 import { DockerReleaseAdapter } from './lib/release-docker.mjs';
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/release-docker-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-docker-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.mkdirSync(path.join(root, 'data')); fs.writeFileSync(path.join(root, '.env'), 'SECRET=not-in-arguments');
   fs.writeFileSync(path.join(root, 'deployment-images.json'), '{}');

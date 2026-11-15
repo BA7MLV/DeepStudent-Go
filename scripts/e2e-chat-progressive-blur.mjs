@@ -1,9 +1,11 @@
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 const base = process.env.BASE_URL || 'http://localhost:5173';
-const out = process.env.SHOTS_DIR || '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/chat-progressive-blur';
+const out = process.env.SHOTS_DIR || path.join(os.tmpdir(), 'opencode', 'chat-progressive-blur');
 await mkdir(out, { recursive: true });
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {

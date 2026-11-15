@@ -668,6 +668,8 @@ export class WangkeDB extends Dexie {
     this.version(18).stores({ _learningCommands: '++sequence, &operationId', _historyRecovery: 'id', _historyTransactions: 'id', _projectionStage: 'id' });
     this.version(19).stores({ _widgetStates: '[rowId+widgetId], rowId' });
     this.version(20).stores({ _fileCache: 'id', _fileCacheMeta: 'id, usedAt' });
+    // v21：同步诊断只做计数与取最早一条，避免每次全表读 _learningCommands。
+    this.version(21).stores({ _learningCommands: '++sequence, &operationId, state, createdAt' });
     this.on('blocked', () => { setDatabaseNotice({ database: name, state: 'blocked' }); });
     this.on('ready', () => {
       if (databaseNotice()?.database === name && databaseNotice()?.state === 'blocked') setDatabaseNotice(null);

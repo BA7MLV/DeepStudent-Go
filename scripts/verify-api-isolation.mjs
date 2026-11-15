@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repository = fileURLToPath(new URL('..', import.meta.url));
-const temporaryRoot = path.join(os.tmpdir(), 'opencode');
+const temporaryRoot = os.tmpdir();
 fs.mkdirSync(temporaryRoot, { recursive: true });
 const output = fs.mkdtempSync(path.join(temporaryRoot, 'wangke-api-isolation-'));
 execFileSync('npm', ['exec', '--', 'turbo', 'prune', '@wangke/api', '--docker', `--out-dir=${output}`], {

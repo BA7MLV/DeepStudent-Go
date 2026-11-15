@@ -9,7 +9,7 @@ import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { CloudTaskRunner, taskDto } from '../apps/api/src/cloud/tasks.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode', 'server-reasoning-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'server-reasoning-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
 const records = new CloudRecords(store);
 const configuration = new CloudConfiguration(store, path.join(directory, 'config'));

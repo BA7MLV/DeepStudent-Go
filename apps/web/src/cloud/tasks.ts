@@ -25,7 +25,7 @@ export async function submitCloudTask(kind: CloudTaskKind, resource: string, inp
     await flushPreferences();
     if (account !== cloud.userId) throw new Error('client_account_changed');
     const database = db;
-    const pending = () => database.table<LearningCommandRow>('_learningCommands').filter(row => row.state !== 'confirmed' && row.entities.includes(`session:${input.sessionId}`)).toArray();
+    const pending = () => database.table<LearningCommandRow>('_learningCommands').where('state').anyOf(['queued', 'uncertain', 'conflict']).filter(row => row.entities.includes(`session:${input.sessionId}`)).toArray();
     if ((await pending()).length) {
       if (account !== cloud.userId || database !== db) throw new Error('client_account_changed');
       await drainLearning([`session:${input.sessionId}`]);

@@ -13,7 +13,7 @@ import { migrateChatAttachmentReferences, migrateTerminalTaskAttachmentReference
 import { normalizeChatAttachments, resolveAttachmentMessages } from '../apps/api/runtime/chat-attachments.ts';
 import { attachmentMessage } from '../packages/study-core/src/chat/attachments.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/attachment-references-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'attachment-references-'));
 const filesDir = path.join(directory, 'files'); fs.mkdirSync(filesDir);
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
 const records = new CloudRecords(store);

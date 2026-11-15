@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import Database from 'better-sqlite3';
 import { SystemFiles } from '../apps/api/src/storage/system-files.ts';
 import { migrateFileIntents } from '../apps/api/src/storage/file-intents.ts';
 
-const root = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/file-intents-');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'file-intents-'));
 let db = new Database(path.join(root, 'db.sqlite'));
 db.exec(`CREATE TABLE users(id TEXT PRIMARY KEY); INSERT INTO users VALUES('owner');
   CREATE TABLE system_file_entries(owner_id TEXT,path TEXT,memory_id TEXT,pending INTEGER DEFAULT 0,content TEXT,expected TEXT,PRIMARY KEY(owner_id,path));`);

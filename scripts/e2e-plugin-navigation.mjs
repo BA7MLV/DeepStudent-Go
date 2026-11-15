@@ -7,8 +7,8 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { addPlugin, assertCreationHint, changePlugin, editLayout, pluginTool, openChatPlugins } from './plugin-tools.mjs';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/plugin-navigation-'));
-const output = path.join(os.tmpdir(), 'opencode/create-mode-screenshots'); fs.mkdirSync(output, { recursive: true });
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-navigation-'));
+const output = path.join(os.tmpdir(), 'create-mode-screenshots'); fs.mkdirSync(output, { recursive: true });
 // Board samples are test fixtures; the product seeds no components.
 process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });

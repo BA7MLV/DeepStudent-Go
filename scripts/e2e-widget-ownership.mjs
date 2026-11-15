@@ -7,8 +7,8 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/widget-ownership-'));
-const shots = path.join(os.tmpdir(), 'opencode/skill-practice-evidence'); fs.mkdirSync(shots, { recursive: true });
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-ownership-'));
+const shots = path.join(os.tmpdir(), 'skill-practice-evidence'); fs.mkdirSync(shots, { recursive: true });
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'),
   BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
 const { buildServer } = await import('../apps/api/src/server.ts');

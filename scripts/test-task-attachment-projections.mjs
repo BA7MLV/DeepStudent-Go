@@ -8,7 +8,7 @@ import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { CloudTaskRunner, taskDto, listOwnerTasks } from '../apps/api/src/cloud/tasks.ts';
 import { submitOwnerTask } from '../apps/api/src/cloud/task-commands.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/task-attachment-projections-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'task-attachment-projections-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
 const records = new CloudRecords(store);
 const owner = crypto.randomUUID(), now = new Date().toISOString();

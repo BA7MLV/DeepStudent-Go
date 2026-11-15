@@ -7,7 +7,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/composer-collapse-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'composer-collapse-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 delete process.env.CLOUD_WORKER_DISABLED;
 const { buildServer } = await import('../apps/api/src/server.ts');

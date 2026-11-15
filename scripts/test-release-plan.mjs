@@ -41,7 +41,7 @@ assert.deepEqual(release.images.web, builtWeb);
 assert.throws(() => assembleManifest(webPlan, manifest, {}, manifest.database), /missing_or_wrong_build:web/);
 assert.throws(() => assembleManifest(webPlan, manifest, { web: builtWeb }, { identity: 'changed' }), /web_release_cannot_change_database/);
 assert.throws(() => assembleManifest({ ...webPlan, baselineCommit: 'f'.repeat(40) }, manifest, { web: builtWeb }, manifest.database), /baseline_mismatch/);
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/release-plan-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'release-plan-'));
 const repository = path.join(directory, 'repo'); fs.mkdirSync(repository);
 const git = args => execFileSync('git', args, { cwd: repository, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_AUTHOR_NAME: 'Fixture', GIT_AUTHOR_EMAIL: 'fixture@example.invalid', GIT_COMMITTER_NAME: 'Fixture', GIT_COMMITTER_EMAIL: 'fixture@example.invalid' } }).trim();
 try {
