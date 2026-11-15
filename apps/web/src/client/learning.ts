@@ -166,6 +166,34 @@ export async function submitLearning(edits: ClientLearningEdit[], entities: stri
   if (waitProjection && command) throw new Error('learning_receipt_projection_unavailable');
 }
 
+/** Conflict resolution works on the durable journal only; the network drain is
+ * the caller's separate step so the journal transition stays testable offline.
+ * `retry` re-submits the original local intent verbatim — meaningful once the
+ * cloud side changed back or the failure was transient. `discard` keeps the
+ * cloud value and drops the local intent; the row is preserved in recovery
+ * evidence so a discard is never silent data loss. */
+export async function resolveLearningCommand(operationId: string, action: 'retry' | 'discard') {
+  const database = db, owner = cloud.userId;
+  const guard = () => { if (database !== db || owner !== cloud.userId) throw new Error('client_account_changed'); };
+  guard();
+  await cloudTransaction(database, [database.table('_learningCommands'), database.table('_cloudMeta')], async () => {
+    guard();
+    const row = await database.table<LearningCommandRow>('_learningCommands').where('operationId').equals(operationId).first();
+    if (!row) throw new Error('learning_command_missing');
+    if (action === 'retry') {
+      if (row.state !== 'conflict') throw new Error('learning_command_not_in_conflict');
+      await database.table('_learningCommands').where('operationId').equals(operationId)
+        .modify({ state: 'queued', error: undefined, wireRequest: undefined });
+    } else {
+      await database.table('_learningCommands').where('operationId').equals(operationId).delete();
+      await database.table('_cloudMeta').put({ id: `learning-discarded:${operationId}`, value: { request: row.request, entities: row.entities, discardedAt: Date.now() } });
+    }
+    guard();
+  });
+  guard();
+  if (action === 'retry') await drainLearning();
+}
+
 export async function editMessage(expected: ChatRow | null, value: ChatRow | null) {
   await submitLearning([learningEdit({ kind: 'conversationMessage', expected, value } as any)], [`message:${(value ?? expected)!.id}`, `session:${(value ?? expected)!.sessionId}`]);
 }

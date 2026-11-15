@@ -62,11 +62,15 @@ export const cloudSyncDiagnostics = () => {
 };
 async function publishCommandDiagnostics(database = db) {
   const lifetime = accountLifetime(cloud.userId);
-  const rows = await cloudRetry(database, () => database.table<LearningCommandRow>('_learningCommands').toArray());
+  // Indexed counts only: diagnostics must never materialize the whole journal.
+  const commands = database.table<LearningCommandRow>('_learningCommands');
+  const [total, confirmed, queued, uncertain, conflicts, oldest] = await cloudRetry(database, () => Promise.all([
+    commands.count(), commands.where('state').equals('confirmed').count(), commands.where('state').equals('queued').count(),
+    commands.where('state').equals('uncertain').count(), commands.where('state').equals('conflict').count(), commands.orderBy('createdAt').first(),
+  ]));
+  const pending = total - confirmed;
   if (database !== db || !lifetime.current()) return;
-  useCloudSync.setState({ pending: rows.length, queued: rows.filter(row => row.state === 'queued').length,
-    uncertain: rows.filter(row => row.state === 'uncertain').length, conflicts: rows.filter(row => row.state === 'conflict').length,
-    oldestPendingAt: rows.length ? Math.min(...rows.map(row => row.createdAt)) : 0 });
+  useCloudSync.setState({ pending, queued, uncertain, conflicts, oldestPendingAt: oldest?.createdAt ?? 0 });
 }
 let configSignature = '';
 let configCheckedAt = 0;
