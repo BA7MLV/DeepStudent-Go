@@ -5,23 +5,80 @@
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
-    "./runtime-projection": { "types": "./src/runtime-projection.ts", "default": "./dist/runtime-projection.js" },
-    "./client-runtime": { "types": "./src/client-runtime.ts", "default": "./dist/client-runtime.js" },
-    ".": { "types": "./src/index.ts", "default": "./dist/index.js" },
-    "./cloud": { "types": "./src/cloud.ts", "default": "./dist/cloud.js" },
-    "./web-search": { "types": "./src/web-search.ts", "default": "./dist/web-search.js" },
-    "./web-links": { "types": "./src/web-links.ts", "default": "./dist/web-links.js" },
-    "./gateway": { "types": "./src/gateway.ts", "default": "./dist/gateway.js" },
-    "./mcp": { "types": "./src/mcp.ts", "default": "./dist/mcp.js" },
-    "./projects": { "types": "./src/projects.ts", "default": "./dist/projects.js" },
-    "./resources": { "types": "./src/resources.ts", "default": "./dist/resources.js" },
-    "./system": { "types": "./src/system.ts", "default": "./dist/system.js" },
-    "./board": { "types": "./src/board.ts", "default": "./dist/board.js" },
-    "./plugins": { "types": "./src/plugins.ts", "default": "./dist/plugins.js" },
-    "./learning-plugins": { "types": "./src/learning-plugins.ts", "default": "./dist/learning-plugins.js" },
-    "./task-status": { "types": "./src/task-status.ts", "default": "./dist/task-status.js" },
-    "./model-settings": { "types": "./src/model-settings.ts", "default": "./dist/model-settings.js" }
+    "./runtime-projection": {
+      "types": "./src/runtime-projection.ts",
+      "default": "./dist/runtime-projection.js"
+    },
+    "./client-runtime": {
+      "types": "./src/client-runtime.ts",
+      "default": "./dist/client-runtime.js"
+    },
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./cloud": {
+      "types": "./src/cloud.ts",
+      "default": "./dist/cloud.js"
+    },
+    "./web-search": {
+      "types": "./src/web-search.ts",
+      "default": "./dist/web-search.js"
+    },
+    "./web-links": {
+      "types": "./src/web-links.ts",
+      "default": "./dist/web-links.js"
+    },
+    "./gateway": {
+      "types": "./src/gateway.ts",
+      "default": "./dist/gateway.js"
+    },
+    "./mcp": {
+      "types": "./src/mcp.ts",
+      "default": "./dist/mcp.js"
+    },
+    "./projects": {
+      "types": "./src/projects.ts",
+      "default": "./dist/projects.js"
+    },
+    "./resources": {
+      "types": "./src/resources.ts",
+      "default": "./dist/resources.js"
+    },
+    "./system": {
+      "types": "./src/system.ts",
+      "default": "./dist/system.js"
+    },
+    "./server-dto": {
+      "types": "./src/server-dto.ts",
+      "default": "./dist/server-dto.js"
+    },
+    "./board": {
+      "types": "./src/board.ts",
+      "default": "./dist/board.js"
+    },
+    "./plugins": {
+      "types": "./src/plugins.ts",
+      "default": "./dist/plugins.js"
+    },
+    "./learning-plugins": {
+      "types": "./src/learning-plugins.ts",
+      "default": "./dist/learning-plugins.js"
+    },
+    "./task-status": {
+      "types": "./src/task-status.ts",
+      "default": "./dist/task-status.js"
+    },
+    "./model-settings": {
+      "types": "./src/model-settings.ts",
+      "default": "./dist/model-settings.js"
+    }
   },
-  "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit -p tsconfig.json" },
-  "devDependencies": { "typescript": "^7.0.2" }
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
 }

@@ -114,6 +114,7 @@
     "test:cloud:transactions": "tsx --test scripts/test-cloud-transactions.mjs",
     "test:position-merge": "tsx --test scripts/test-position-merge.mjs",
     "test:conflict-resolution": "tsx --test scripts/test-conflict-resolution.mjs",
+    "test:server-dto": "tsx --test scripts/test-server-dto.mjs",
     "test:storage": "tsx --test scripts/test-storage-usage.mjs",
     "test:storage:e2e": "tsx scripts/e2e-server-storage.mjs",
     "test:usage": "tsx scripts/test-usage-report.mjs && tsx scripts/test-prompt-cache.mjs",
