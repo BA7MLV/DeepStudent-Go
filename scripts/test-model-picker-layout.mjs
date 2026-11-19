@@ -69,8 +69,8 @@ try {
     await page.getByTestId('model-search-llmModel').waitFor();
     await page.getByTestId('model-search-llmModel').locator('input').press('Escape');
     await page.getByTestId('model-search-llmModel').waitFor({ state: 'hidden' });
-    await page.locator('.model-slot__auto [data-slot="checkbox-content"]').click();
-    assert.equal(await page.getByRole('checkbox', { name: '自动：优先主模型，否则使用读图模型', exact: true }).isChecked(), false);
+    await page.locator('.model-slot__auto [data-slot="switch-content"]').click();
+    assert.equal(await page.getByRole('switch', { name: '自动：优先主模型，否则使用读图模型', exact: true }).getAttribute('aria-checked'), 'false');
     await page.getByTestId('model-button-visionModel').waitFor();
     await assertLayout(4);
     assert.deepEqual(errors, []);

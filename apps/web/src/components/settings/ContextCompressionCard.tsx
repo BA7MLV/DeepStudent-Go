@@ -1,4 +1,4 @@
-import { Checkbox } from '@heroui/react';
+import { Switch } from '@heroui/react';
 import { useSettings } from '../../store/settings';
 import { cloud } from '../../cloud/state';
 import { SectionCard } from '../../ui';
@@ -15,13 +15,13 @@ export default function ContextCompressionCard() {
         {ready ? `服务器决策模型：${model.model}。压缩由服务器执行，保留原始消息；浏览器不会连接模型供应商。`
           : '请先保存服务器决策模型配置。上下文压缩不会回退到浏览器执行。'}
       </p>
-      <Checkbox aria-label="自动请求服务端上下文压缩" isDisabled={!ready} isSelected={settings.jev.contextCompression}
+      <Switch aria-label="接近上下文上限时自动请求服务端压缩" isDisabled={!ready} isSelected={settings.jev.contextCompression}
         onChange={contextCompression => settings.update({ jev: { ...settings.jev, contextCompression } })} data-testid="server-context-compression">
-        <Checkbox.Content>
-          <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-          接近上下文上限时自动请求服务端压缩
-        </Checkbox.Content>
-      </Checkbox>
+        <Switch.Content>
+          <span>接近上下文上限时自动请求服务端压缩</span>
+          <Switch.Control><Switch.Thumb /></Switch.Control>
+        </Switch.Content>
+      </Switch>
     </SectionCard>
   );
 }

@@ -105,6 +105,8 @@ export default function ModelPicker({
   const nameOf = (id: string) => settings.providers.find((p) => p.id === id)?.name ?? pickerText('modelPicker.providerDeleted');
   const catalogOf = (id: string) => settingsCatalogOf(settings, id);
 
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const pick = (ref: ModelRef) => {
     if (onChange) { onChange(ref); return; }
     // 切文本模型时按能力表回填上下文窗口默认值（仍可手改），与设置页行为一致
@@ -148,7 +150,7 @@ export default function ModelPicker({
 
   if (variant === 'icon') {
     return (
-      <Dropdown>
+      <Dropdown isOpen={menuOpen} onOpenChange={setMenuOpen}>
         <Tooltip>
           <Tooltip.Trigger>
             {/* ⚠️ Dropdown.Trigger 自己就渲染一个 <button>。在它里面再放 HeroUI 的
@@ -168,23 +170,30 @@ export default function ModelPicker({
           </Tooltip.Content>
         </Tooltip>
         <Dropdown.Popover placement="bottom end">
-          <Dropdown.Menu
-            onAction={(key) => {
-              const ref = candidates.find((c) => keyOf(c) === key);
-              if (ref) pick(ref);
+          {/* 列表里装的是「值」不是「动作」，语义与键盘走 ListBox 单选（同 ChipDropdown），不再是 Menu。 */}
+          <ListBox
+            aria-label={slotLabel(slot)}
+            selectionMode="single"
+            disallowEmptySelection
+            selectedKeys={[currentKey]}
+            onSelectionChange={(keys) => {
+              const next = [...keys][0];
+              if (next == null) return;
+              const ref = candidates.find((c) => keyOf(c) === String(next));
+              if (ref) { pick(ref); setMenuOpen(false); }
             }}
           >
             {candidates.map((ref) => (
-              <Dropdown.Item
+              <ListBox.Item
                 key={keyOf(ref)}
                 id={keyOf(ref)}
                 textValue={ref.model || pickerText('modelPicker.autoReuse')}
                 data-testid={`model-picker-item-${keyOf(ref)}`}
               >
                 {rowContent(ref)}
-              </Dropdown.Item>
+              </ListBox.Item>
             ))}
-          </Dropdown.Menu>
+          </ListBox>
         </Dropdown.Popover>
       </Dropdown>
     );

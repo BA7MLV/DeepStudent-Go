@@ -14,9 +14,8 @@ import {
   ListBox,
   Modal,
   ProgressBar,
-  Radio,
-  RadioGroup,
   SearchField,
+  Select,
   Tag,
   TagGroup,
   TextArea,
@@ -1719,19 +1718,38 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
               <ToggleButton id="icons" aria-label={tr('library.aria.iconsView')}><Sym name="grid_view" /></ToggleButton>
               <ToggleButton id="list" aria-label={tr('library.aria.listView')}><Sym name="list" /></ToggleButton>
             </ToggleButtonGroup>
-            <Dropdown>
-              <Dropdown.Trigger className="finder-tool" aria-label={tr('library.aria.sortFilter')}><Sym name="sort" /></Dropdown.Trigger>
-              <Dropdown.Popover><Dropdown.Menu aria-label={tr('library.aria.sortFilter')} onAction={(key) => {
-                if (key === 'name' || key === 'recent') withViewTransition(() => setSort(key));
-                else { withViewTransition(() => setFilter(key as LibraryFilter)); setSelection(new Set()); }
-              }}>
-                <Dropdown.Item id="name" textValue={tr('library.sort.name')}>{tr('library.sort.name')} {sort === 'name' && <Sym name="check" className="size-4" />}</Dropdown.Item>
-                <Dropdown.Item id="recent" textValue={tr('library.sort.recent')}>{tr('library.sort.recent')} {sort === 'recent' && <Sym name="check" className="size-4" />}</Dropdown.Item>
-                <Dropdown.Section>
-                  {LIBRARY_FILTERS.map((item) => <Dropdown.Item key={item.value} id={item.value} textValue={tr(item.label)}>{tr(item.label)} {filter === item.value && <Sym name="check" className="size-4" />}</Dropdown.Item>)}
-                </Dropdown.Section>
-              </Dropdown.Menu></Dropdown.Popover>
-            </Dropdown>
+            {/* 排序与筛选是两个值,不再是点完即走的动作菜单：触发器常驻显示当前值,选项前有对勾。 */}
+            <Select
+              className="w-36 max-w-[40vw]"
+              aria-label={tr('library.aria.sort')}
+              data-testid="library-sort"
+              selectedKey={sort}
+              onSelectionChange={(key) => { if (key === 'name' || key === 'recent') withViewTransition(() => setSort(key)); }}
+            >
+              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  <ListBox.Item id="name" textValue={tr('library.sort.name')}>{tr('library.sort.name')}<ListBox.ItemIndicator /></ListBox.Item>
+                  <ListBox.Item id="recent" textValue={tr('library.sort.recent')}>{tr('library.sort.recent')}<ListBox.ItemIndicator /></ListBox.Item>
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            <Select
+              className="w-32 max-w-[40vw]"
+              aria-label={tr('library.aria.filter')}
+              data-testid="library-filter"
+              selectedKey={filter}
+              onSelectionChange={(key) => { withViewTransition(() => setFilter(key as LibraryFilter)); setSelection(new Set()); }}
+            >
+              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {LIBRARY_FILTERS.map((item) => (
+                    <ListBox.Item key={item.value} id={item.value} textValue={tr(item.label)}>{tr(item.label)}<ListBox.ItemIndicator /></ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
             <span className="finder-tool-divider" />
             <Button isIconOnly variant="ghost" data-testid="btn-new-folder" aria-label={tr('library.aria.newFolder')} isDisabled={inSystemFolder} onPress={() => openFolderModal('create')}><Sym name="create_new_folder" /></Button>
             <Button isIconOnly={!isMobile} className="finder-import" variant="ghost" aria-label={tr('library.aria.import')} isDisabled={inSystemFolder} onPress={() => setImportOpen(true)}><Sym name="upload" />{isMobile && tr('library.aria.importShort')}</Button>
@@ -2077,33 +2095,24 @@ function LegacyLibrary({ importing }: { importing?: { folderId?: number; onClose
                 <Modal.Heading>{moving ? tr('library.chrome.moveTitle', { name: moving.name }) : ''}</Modal.Heading>
               </Modal.Header>
               <Modal.Body>
-                {/* mdui-radio-group/-radio → RadioGroup/Radio；选中值走 value + onChange。
-                    Radio 需要显式组合 Content/Control/Indicator 才有可点的圆点。 */}
-                <RadioGroup
-                  value={moveTarget}
-                  onChange={(key) => setMoveTarget(String(key))}
-                  data-testid="move-radio-group"
+                {/* 文件夹是用户自己建的、数量会增长 —— 用 Select 而不是铺开的单选组,长名单不会把弹窗顶破。 */}
+                <Select
+                  className="w-56 max-w-full"
+                  selectedKey={moveTarget}
+                  onSelectionChange={(key) => { if (key != null) setMoveTarget(String(key)); }}
+                  data-testid="move-target-select"
                   aria-label={tr('library.aria.moveTarget')}
                 >
-                  <Radio value="-1">
-                    <Radio.Content>
-                      <Radio.Control>
-                        <Radio.Indicator />
-                      </Radio.Control>
-                      {tr('library.t.uncategorized')}
-                    </Radio.Content>
-                  </Radio>
-                  {folders.map((f) => (
-                    <Radio key={f.id} value={String(f.id)}>
-                      <Radio.Content>
-                        <Radio.Control>
-                          <Radio.Indicator />
-                        </Radio.Control>
-                        {f.name}
-                      </Radio.Content>
-                    </Radio>
-                  ))}
-                </RadioGroup>
+                  <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      <ListBox.Item id="-1" textValue={tr('library.t.uncategorized')}>{tr('library.t.uncategorized')}<ListBox.ItemIndicator /></ListBox.Item>
+                      {folders.map((f) => (
+                        <ListBox.Item key={f.id} id={String(f.id)} textValue={f.name}>{f.name}<ListBox.ItemIndicator /></ListBox.Item>
+                      ))}
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
                 <div className="row row--nowrap" style={{ marginTop: 16 }}>
                   <TextField data-testid="move-new-name" fullWidth>
                     <Input

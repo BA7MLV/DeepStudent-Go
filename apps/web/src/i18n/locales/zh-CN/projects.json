@@ -225,6 +225,8 @@
       "backNav": "后退",
       "forward": "前进",
       "view": "显示方式",
+      "sort": "排序",
+      "filter": "筛选",
       "iconsView": "图标视图",
       "listView": "列表视图",
       "sortFilter": "排序与筛选",

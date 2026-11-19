@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Spinner } from '@heroui/react';
+import { Button, Spinner, ToggleButton, ToggleButtonGroup } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
 import type { CloudConfig } from '@wangke/contracts/cloud';
 import { cloud, cloudRequest } from './state';
@@ -7,7 +7,7 @@ import { applyCloudConfig } from './sync';
 import { serverClient } from '../api/serverClient';
 import { SectionCard } from '../ui';
 import PersistentError from '../components/PersistentError';
-import { SettingSelect, SettingSwitch } from '../components/settings/controls';
+import { SettingRow, SettingSwitch } from '../components/settings/controls';
 import BotManagement from './BotManagement';
 import { serverRuntime, isCurrentServerRuntime } from '../client/bootstrap';
 
@@ -142,9 +142,24 @@ export default function BotSettings() {
 
       <SectionCard title="权限" testId="bot-policy">
         <p className="text-xs text-muted-foreground">允许后，Bot 会直接完成日常操作；“每次询问”会逐次确认。工作区单独设置的限制仍然生效。</p>
+        {/* 三个短标签的分段选择（同「外观 → 主题」）：一次点按即选，且三条策略同屏可比，藏在下拉里要逐个展开才能看清。 */}
         {CAPABILITIES.map(({ key, label }) => (
-          <SettingSelect key={key} label={label} value={config.policy[key]} options={DECISIONS}
-            onChange={(value) => setPolicy({ [key]: value } as Partial<Policy>)} />
+          <SettingRow key={key} label={label}>
+            <ToggleButtonGroup
+              aria-label={label}
+              selectionMode="single"
+              disallowEmptySelection
+              selectedKeys={[config.policy[key]]}
+              onSelectionChange={(keys) => {
+                const next = [...keys][0];
+                if (next) setPolicy({ [key]: next } as Partial<Policy>);
+              }}
+            >
+              {DECISIONS.map(({ id, label: decision }) => (
+                <ToggleButton key={id} id={id}>{decision}</ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          </SettingRow>
         ))}
         <SettingSwitch label="命令可联网" isSelected={config.policy.network === 'allow'} onChange={(on) => setPolicy({ network: on ? 'allow' : 'deny' })} />
         <p className="text-xs text-muted-foreground">联网开关只决定命令能否访问网络，不会因联网额外询问。工作区也需允许联网。删除或破坏性命令、对外发布等影响、外部 MCP 工具，以及修改权限或服务连接、提高步数上限，仍需单独确认；确认消息会说明原因。</p>

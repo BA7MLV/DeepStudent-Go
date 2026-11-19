@@ -17,7 +17,7 @@
   max-width: 100%;
 }
 
-.model-slot__auto [data-slot='checkbox-content'] {
+.model-slot__auto [data-slot='switch-content'] {
   width: 100%;
   min-height: 44px;
   min-width: 0;

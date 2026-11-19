@@ -76,7 +76,7 @@ try {
   assert.equal(await page.locator('[data-model-picker="asrModel"]').getByTestId('model-option-catalog-vision').count(), 0, 'text/vision models are not ASR candidates');
   await page.locator('[data-model-picker="asrModel"]').getByTestId('model-option-opaque-audio').click();
   assert.equal((await state()).asrModel.model, 'opaque-audio');
-  await page.getByRole('checkbox', { name: '自动：优先主模型，否则使用读图模型', exact: true }).focus();
+  await page.getByRole('switch', { name: '自动：优先主模型，否则使用读图模型', exact: true }).focus();
   await page.keyboard.press('Space');
   await page.getByTestId('model-button-visionModel').click();
   assert.equal(await page.locator('[data-model-picker="visionModel"]').getByTestId('model-option-opaque-audio').count(), 0);

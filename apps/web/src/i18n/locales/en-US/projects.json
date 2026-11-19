@@ -226,6 +226,8 @@
       "backNav": "Back",
       "forward": "Forward",
       "view": "View",
+      "sort": "Sort",
+      "filter": "Filter",
       "iconsView": "Icon view",
       "listView": "List view",
       "sortFilter": "Sort and filter",

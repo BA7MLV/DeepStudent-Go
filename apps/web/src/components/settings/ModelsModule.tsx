@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Button,
-  Checkbox,
   Chip,
   Input,
   ListBox,
@@ -10,6 +9,7 @@ import {
   SearchField,
   Select,
   Slider,
+  Switch,
   ToggleButton,
   ToggleButtonGroup,
 } from '@heroui/react';
@@ -575,7 +575,7 @@ function SlotModelSelect({
         </Popover>
       )}
       </>}
-      {slot === 'vision' ? <Checkbox
+      {slot === 'vision' ? <Switch
         className="model-slot__auto"
         aria-label={t('models.autoVision')}
         isSelected={!ref.model}
@@ -584,7 +584,7 @@ function SlotModelSelect({
           if (!on && !first) { toast.warning(t('models.addVisionFirst')); return; }
           update({ visionModel: on ? { providerId: '', model: '' } : { providerId: first.providerId, model: first.model } });
         }}
-      ><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>自动：优先主模型，否则使用读图模型</Checkbox.Content></Checkbox>
+      ><Switch.Content><span>{t('models.autoVision')}</span><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
         : ref.model && <Button variant="tertiary" className="model-slot__clear self-start" onPress={() => update({ [name]: { providerId: '', model: '' } })}>{slot === 'decision' ? t('models.noDecision') : t('models.clearSelection')}</Button>}
       {issue && <p id={`model-error-${name}`} role="alert" className="text-xs text-danger">{modelIssueMessage(issue)}</p>}
     </div>
