@@ -44,3 +44,24 @@
 ::view-transition-group(study-assistant-head) {
   animation-duration: var(--vt-panel-dur);
 }
+
+/* 侧栏导航的工作区转场：旧页向侧栏方向让位（--distance-base 的 8px），新页从对侧跟进；
+   让位/跟进的错峰沿袭上面的 30%/45% 节奏，侧栏与顶栏像素原地不动。 */
+::view-transition-old(page-workspace) {
+  animation-name: vt-workspace-out;
+}
+::view-transition-new(page-workspace) {
+  animation-name: vt-workspace-in;
+}
+@keyframes vt-workspace-out {
+  to {
+    opacity: 0;
+    translate: calc(-1 * var(--distance-base)) 0;
+  }
+}
+@keyframes vt-workspace-in {
+  from {
+    opacity: 0;
+    translate: var(--distance-base) 0;
+  }
+}
