@@ -896,6 +896,7 @@
 
 .app-nav-content[data-exiting] {
   transition-duration: var(--duration-medium);
+  transition-timing-function: var(--ease-in);
 }
 
 .app-nav-drawer[data-placement='left'] {
@@ -910,7 +911,7 @@
   --drawer-enter-duration: var(--duration-slow);
   --drawer-exit-duration: var(--duration-medium);
   --drawer-enter-ease: var(--ease-smooth-out);
-  --drawer-exit-ease: var(--ease-smooth-out);
+  --drawer-exit-ease: var(--ease-in);
   transition: translate var(--drawer-enter-duration) var(--drawer-enter-ease);
 }
 
@@ -1066,7 +1067,7 @@
   --drawer-enter-duration: var(--duration-slow);
   --drawer-exit-duration: var(--duration-medium);
   --drawer-enter-ease: var(--ease-smooth-out);
-  --drawer-exit-ease: var(--ease-smooth-out);
+  --drawer-exit-ease: var(--ease-in);
 }
 
 @media (max-width: 640px) {

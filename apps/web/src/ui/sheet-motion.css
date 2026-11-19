@@ -6,7 +6,7 @@
   --drawer-enter-duration: var(--duration-slow);
   --drawer-exit-duration: var(--duration-medium);
   --drawer-enter-ease: var(--ease-smooth-out);
-  --drawer-exit-ease: var(--ease-smooth-out);
+  --drawer-exit-ease: var(--ease-in);
 }
 
 @starting-style {

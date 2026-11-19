@@ -10,8 +10,8 @@
      feels calm instead of snapping open. */
   --reasoning-expand-duration: 380ms;
   --reasoning-collapse-duration: 280ms;
-  --reasoning-expand-ease: cubic-bezier(0.33, 1, 0.68, 1);
-  --reasoning-collapse-ease: cubic-bezier(0.32, 0, 0.67, 0);
+  --reasoning-expand-ease: var(--ease-out);
+  --reasoning-collapse-ease: var(--ease-in);
 }
 
 .reasoning-chain__heading,

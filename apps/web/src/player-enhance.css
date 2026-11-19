@@ -36,7 +36,7 @@
   --media-menu-font-size: 14px;
   --media-tooltip-bg: rgb(25 27 32 / 0.98);
   --media-controls-in-transition: opacity var(--duration-quick, 150ms) var(--ease-out, ease-out);
-  --media-controls-out-transition: opacity var(--duration-quick, 150ms) var(--ease-out, ease-out);
+  --media-controls-out-transition: opacity var(--duration-quick, 150ms) var(--ease-in);
 }
 
 /* 不再用 :hover 强行显示，让「静止收起」与 Vidstack 内部状态保持一致。 */
@@ -601,6 +601,6 @@
   .dm-item { animation-name: dm-pop-fade; animation-duration: 7s; }
   .seek-pulse {
     transform: translateY(-50%);
-    animation: seek-pulse-fade var(--duration-medium, 350ms) var(--ease-out, ease-out) forwards;
+    animation: seek-pulse-fade var(--duration-medium, 350ms) var(--ease-in) forwards;
   }
 }

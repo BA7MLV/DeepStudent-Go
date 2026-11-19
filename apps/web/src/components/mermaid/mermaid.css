@@ -58,7 +58,7 @@
   height: 8px;
   border-radius: 50%;
   background: var(--accent);
-  animation: xmd-mermaid-pulse 1s ease-in-out infinite;
+  animation: xmd-mermaid-pulse 1s var(--ease-in-out) infinite;
 }
 
 @keyframes xmd-mermaid-pulse {
