@@ -1,7 +1,6 @@
 /** Isolated projection contract, fault and scale evidence. No real model or IM. */
 import os from 'node:os';
 import assert from 'node:assert/strict';
-import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
