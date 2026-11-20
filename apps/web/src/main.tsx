@@ -33,7 +33,7 @@ import DatabaseNotice from './cloud/DatabaseNotice';
 // 不走 `./ui` barrel:barrel 会把 layout.tsx(react-router-dom)与 feedback.tsx(HeroUI)
 // 一并拉进入口首屏,这里只需要两件轻量实现。
 import { PageLoader } from './ui/page-loader';
-import { toast } from './ui/toast';
+import UpdateBanner, { UPDATE_READY_EVENT } from './ui/UpdateBanner';
 
 // Consume once, outside React rendering (including StrictMode), before API calls.
 const bootstrapSecret = consumeBootstrapLink(location, history);
@@ -105,7 +105,7 @@ function Root() {
   React.useEffect(() => {
     applyFontScale(fontScale);
   }, [fontScale]);
-  return <AppLocaleProvider><DatabaseNotice />{bootView}</AppLocaleProvider>;
+  return <AppLocaleProvider><DatabaseNotice /><UpdateBanner />{bootView}</AppLocaleProvider>;
 }
 
 function render() {
@@ -116,20 +116,14 @@ function render() {
   ));
 }
 
-// PWA autoUpdate：新 SW 在后台接管后，老页面仍在跑旧版本。这里给一条轻提示，
-// 提供手动刷新入口，不自动打断当前操作；首次安装激活不提示。
+// PWA autoUpdate：新 SW 在后台接管后，老页面仍在跑旧版本。这里通知 UpdateBanner
+// 给出持久可关闭的刷新入口，不自动打断当前操作；首次安装激活不提示。
 if ('serviceWorker' in navigator) {
   let hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadController) { hadController = true; return; }
     hadController = true;
-    toast.info(i18n.t('newVersionReady'), {
-      timeout: 0,
-      actionProps: {
-        children: i18n.t('refreshNow'),
-        onPress: () => window.location.reload(),
-      },
-    });
+    window.dispatchEvent(new Event(UPDATE_READY_EVENT));
   });
 }
 
