@@ -10,6 +10,7 @@ import { DeliveryError } from '../apps/api/src/gateway/plugin.ts';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { BotApplicationService } from '../apps/api/src/agent/service.ts';
+import { freezeTaskModel } from '../apps/api/src/agent/task-model.ts';
 import { GatewayCore } from '../apps/api/src/gateway/core.ts';
 import { registerGatewayRoutes } from '../apps/api/src/gateway/routes.ts';
 import Fastify from 'fastify';
@@ -256,7 +257,18 @@ function fixture(t, factory) {
   const at = new Date().toISOString();
   store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run('owner', 'owner', at);
   store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,role,system_prompt,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('agent', 'owner', 'agent', 'study', 'Study', at, at);
-  const bot = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  // 让真实用户消息能被受理并建 run:离线地址 + 假密钥,永不发起网络请求。
+  secrets.save('owner', { ...secrets.get('owner', true), providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://offline.invalid', apiKey: 'test', protocol: 'openai-chat', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture-chat' } });
+  // send 的准入与建 run 都要调 runner.freezeModel(P1 契约);判定仍走生产 freezeTaskModel。
+  // 准入那次快照的 id 是占位(生产里不落任何 run),所以只对真实存在的 run 写 model_snapshot。
+  const bot = new BotApplicationService(store, {
+    freezeModel(id, owner) {
+      if (!store.db.prepare('SELECT 1 FROM runs WHERE id=?').get(id)) return;
+      const snapshot = freezeTaskModel(store, owner, secrets.get(owner, true), 'bot');
+      store.db.prepare('UPDATE runs SET model_snapshot=? WHERE id=? AND model_snapshot IS NULL').run(JSON.stringify(snapshot), id);
+    },
+    enqueue() {}, cancel() {},
+  });
   const gateway = new GatewayCore(store, secrets, bot, { ilink: factory }, path.join(directory, 'files'));
   t.after(async () => { await gateway.close(); store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   return { store, secrets, bot, gateway };

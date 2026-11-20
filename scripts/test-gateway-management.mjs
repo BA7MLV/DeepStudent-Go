@@ -7,6 +7,7 @@ import Fastify from 'fastify';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { BotApplicationService } from '../apps/api/src/agent/service.ts';
+import { freezeTaskModel } from '../apps/api/src/agent/task-model.ts';
 import { GatewayCore } from '../apps/api/src/gateway/core.ts';
 import { registerGatewayRoutes } from '../apps/api/src/gateway/routes.ts';
 import { IlinkPlugin } from '../apps/api/src/gateway/adapters/ilink.ts';
@@ -17,17 +18,35 @@ const at = () => new Date().toISOString();
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 const message = (id, text = 'hello', patch = {}) => ({ messageId: id, tenant: 'tenant', peer: 'same-peer', chat: 'same-chat', topic: '', direct: true, human: true, text, context: 'private-context', ...patch });
 const input = (botId, extra = {}) => ({ channel: 'ilink', agentId: 'owner-agent', enabled: true, config: { botId, botToken: `secret-${botId}` }, ...extra });
+// 默认模型的最小可用配置:离线地址 + 假密钥,只为让模型准入与冻结成功,永不发起网络请求。
+const fixtureModel = () => ({
+  providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://offline.invalid', apiKey: 'test', protocol: 'openai-chat', serves: ['chat'] }],
+  llmModel: { providerId: 'fixture', model: 'fixture-chat' },
+});
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'gateway-management-'));
   const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
   const secrets = new CloudConfiguration(store, path.join(directory, 'config'));
+  // 夹具默认保持「未配置模型」:readiness 用例要靠这个前置态断言 binding_required → model_required,
+  // 欢迎语用例也刻意在无模型时配对成功且不建 run。需要真实聊天的用例自行调用 configureModel。
   for (const owner of ['owner', 'other']) {
     store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run(owner, owner, at());
     store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,role,system_prompt,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(`${owner}-agent`, owner, owner, 'study', 'Study', at(), at());
     secrets.save(owner, { ...secrets.get(owner, true), providers: [], llmModel: { providerId: '', model: '' } });
   }
+  const configureModel = owner => secrets.save(owner, { ...secrets.get(owner, true), ...fixtureModel() });
   const contexts = new Map(), hooks = new Map(), sent = [];
-  const bot = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  // send 的准入与建 run 都要调 runner.freezeModel(P1 契约),加上它消息才会被受理;
+  // 判定本身仍走生产 freezeTaskModel,按当前配置算,未配置时抛 model_not_configured → 拒收。
+  // 准入那次快照的 id 是占位(生产里不落任何 run),所以只对真实存在的 run 写 model_snapshot。
+  const bot = new BotApplicationService(store, {
+    freezeModel(id, owner) {
+      if (!store.db.prepare('SELECT 1 FROM runs WHERE id=?').get(id)) return;
+      const snapshot = freezeTaskModel(store, owner, secrets.get(owner, true), 'bot');
+      store.db.prepare('UPDATE runs SET model_snapshot=? WHERE id=? AND model_snapshot IS NULL').run(JSON.stringify(snapshot), id);
+    },
+    enqueue() {}, cancel() {},
+  });
   const factory = channel => account => ({
     manifest: channel === 'ilink' ? new IlinkPlugin(async () => {}).manifest : new FeishuPlugin(async () => {}).manifest,
     validate() {},
@@ -43,11 +62,13 @@ function fixture(t) {
     gateway.receive(id, [message('pair', gateway.pair('owner', id).command)]); await gateway.tick();
     return store.db.prepare('SELECT * FROM gateway_bindings WHERE account_id=?').get(id);
   };
-  return { store, secrets, bot, gateway, contexts, hooks, sent, bind };
+  return { store, secrets, bot, gateway, contexts, hooks, sent, bind, configureModel };
 }
 
 test('fresh WeChat inbound context unblocks rejected deliveries in order, even before inbox processing', async t => {
-  const { gateway, store, secrets, bind, hooks, sent } = fixture(t);
+  const { gateway, store, secrets, bind, hooks, sent, configureModel } = fixture(t);
+  // 意图是「上下文恢复后按序投递」;用户消息需被受理才会进 thread,故在起点配好模型。
+  configureModel('owner');
   const { id } = await gateway.save('owner', input('context-recovery'));
   const binding = await bind(id);
   for (let n = 0; n < 3; n++) await gateway.tick();
@@ -164,7 +185,9 @@ test('readiness distinguishes transport, owner binding, model, Bot and actionabl
 });
 
 test('two bots on one server isolate cursors, dedupe, owner binding and conversations', async t => {
-  const { gateway, store, contexts, bind, sent } = fixture(t);
+  const { gateway, store, contexts, bind, sent, configureModel } = fixture(t);
+  // 意图是双 bot 隔离;两个真实问题都要各建一个 run,前提是 owner 已配模型。
+  configureModel('owner');
   const first = (await gateway.save('owner', input('one'))).id;
   const second = (await gateway.save('owner', input('two'))).id;
   const b1 = await bind(first), b2 = await bind(second);
@@ -206,7 +229,9 @@ test('duplicate platform identities are rejected across owners, simultaneous sav
 });
 
 test('remove fences active send, attachment and late login; cascades queues while preserving web history', async t => {
-  const { gateway, store, bot, bind, hooks, contexts } = fixture(t);
+  const { gateway, store, bot, bind, hooks, contexts, configureModel } = fixture(t);
+  // 用例断言移除账号时未完成的 run 级联为 cancelled;run 要被建出来就必须先有模型。
+  configureModel('owner');
   const { id } = await gateway.save('owner', input('remove'));
   const binding = await bind(id), context = contexts.get(id);
   bot.send('owner', binding.thread_id, { clientNonce: 'active', content: 'preserved question' });
@@ -274,7 +299,7 @@ test('DELETE endpoint enforces authentication, origin and ownership', async t =>
 });
 
 test('WeChat welcomes only after manual pairing, without chat history, model context or runs', async t => {
-  const { gateway, hooks, store, sent } = fixture(t);
+  const { gateway, hooks, store, sent, configureModel } = fixture(t);
   store.db.prepare('UPDATE users SET name=? WHERE id=?').run('小明', 'owner');
   const { id } = await gateway.save('owner', input('', { config: {} }));
   const pair = gateway.pair('owner', id);
@@ -307,6 +332,9 @@ test('WeChat welcomes only after manual pairing, without chat history, model con
   assert.equal(sent.length, 2); assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_bindings').get().n, 1);
   assert.equal(store.db.prepare('SELECT COUNT(*) n FROM runs').get().n, 0);
   assert.equal(store.db.prepare('SELECT COUNT(*) n FROM gateway_outbox').get().n, 2, 're-login, replay and restart do not duplicate welcomes');
+  // 欢迎语与配对刻意不依赖模型(上面 readiness 仍是 model_required、runs 为 0 即为证);
+  // 只有第一个真实问题要建 run,按意图在其发生点补上可用模型。
+  configureModel('owner');
   gateway.receive(id, [message('first-question', '第一道题')]); await gateway.tick();
   assert.equal(store.db.prepare('SELECT COUNT(*) n FROM runs').get().n, 1, 'the first real question runs normally');
   assert.deepEqual(store.db.prepare('SELECT role,content FROM messages').all(), [{ role: 'user', content: '第一道题' }], 'pairing and onboarding never enter chat history/model context');
@@ -359,7 +387,9 @@ test('pairing and both welcome deliveries commit atomically, so failed onboardin
 });
 
 test('bare WeChat codes stay account-scoped and revoked queued codes cannot restore a binding', async t => {
-  const { gateway, store, sent } = fixture(t);
+  const { gateway, store, sent, configureModel } = fixture(t);
+  // 用例要断言绑定后普通四字消息'1234'进入聊天记录;消息被受理的前提是已配模型。
+  configureModel('owner');
   const first = (await gateway.save('owner', input('bare-first'))).id;
   const second = (await gateway.save('owner', input('bare-second'))).id;
   const pair = gateway.pair('owner', first);
@@ -384,7 +414,9 @@ test('bare WeChat codes stay account-scoped and revoked queued codes cannot rest
 });
 
 test('a current bare code is not merged into an earlier WeChat photo or text batch', async t => {
-  const { gateway, store, bind, sent } = fixture(t);
+  const { gateway, store, bind, sent, configureModel } = fixture(t);
+  // 用例要断言批次里的文本'先处理这个问题'先入聊天记录;真实消息要被受理就需先配模型。
+  configureModel('owner');
   const id = (await gateway.save('owner', input('bare-boundary'))).id;
   await bind(id); // Legacy /pair commands continue to work.
   const pair = gateway.pair('owner', id);
