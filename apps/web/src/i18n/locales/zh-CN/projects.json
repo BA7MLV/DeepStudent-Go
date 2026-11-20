@@ -365,6 +365,7 @@
       "idleEsc": "拖到文件夹以移动，或按 Esc 取消"
     },
     "chrome": {
+      "pageLoading": "正在加载资料库…",
       "page": "资料",
       "pwaTitle": "建议用 Safari 将本页「添加到主屏幕」后使用",
       "pwaHelp": "为什么要添加到主屏幕",

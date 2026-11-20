@@ -69,7 +69,14 @@ export default function App() {
   useEffect(() => startStudyTracking(), []);
 
   // 指向导航时预取目标，不在看板空闲期间下载所有播放器/阅读器。
-  useEffect(() => preloadOnIntent({ '/library': pages.library, '/player': pages.player, '/study': pages.study, '/board': pages.tasks }), []);
+  // 资料库预取的是它要落的那一面：绝大多数人打开的是资源目录，本地课程表（IndexedDB 全表 + 拖拽）
+  // 那份分包只在本地模式/旧书签/导入覆盖层时才需要，不在这里预取，免得弱网白下几十 KB。
+  useEffect(() => preloadOnIntent({
+    '/library': () => import('./pages/ResourceLibrary'),
+    '/player': pages.player,
+    '/study': pages.study,
+    '/board': pages.tasks,
+  }), []);
 
   // 启动时把上次没转完的视频接着转（刷新/关页会中断任务，但已完成段落了库，续跑不重复计费）
   useEffect(() => {

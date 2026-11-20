@@ -366,6 +366,7 @@
       "idleEsc": "Drag to a folder to move, or press Esc to cancel"
     },
     "chrome": {
+      "pageLoading": "Loading library…",
       "page": "Resources",
       "pwaTitle": "Add this page to your home screen in Safari for the best experience",
       "pwaHelp": "Why add to the home screen",
