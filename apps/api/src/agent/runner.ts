@@ -305,7 +305,9 @@ export class BotRunner {
         const round = await prepareAndRequest({ turn: toolTurn, thread, owner, context, selected, ledger, gateway, governor, checkActive, appendActive, startedAt: started, frozenModel, thinkingLevel, imageProgress });
         context = round.context;
         const { result, registry } = round;
-        const { calls, text } = result?.response ?? { calls: [], text: '' };
+        // 回退到待读图的 study_file 调用:图片批次没有模型请求的本轮,
+        // 这批调用就是本轮的工具批次(与拆分前逐字一致)。
+        const { calls, text } = result?.response ?? { calls: round.imageCalls, text: '' };
         if (result) {
           if (!result.continuationReusable) context = context.map(({ response_items: _native, providerState: _state, ...message }) => message);
           selected = { ...selected, providerId: result.providerId, model: result.model, protocol: result.protocol };

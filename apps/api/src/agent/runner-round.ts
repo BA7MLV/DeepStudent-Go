@@ -15,7 +15,7 @@ import { workspaceContextOf } from './runner-context.js';
 import { sql } from '../storage/sql.js';
 import type { ModelGateway } from './model-gateway.js';
 import type { ProjectThread } from '../projects/repository.js';
-import type { ModelMessage as Message } from './model.js';
+import type { ModelMessage as Message, ModelCall } from './model.js';
 import type { RuntimeModelTarget } from './model-adapter.js';
 import type { FrozenTaskModel, ModelThinkingLevel } from '@wangke/contracts/cloud';
 import type { ToolTurn } from './runner-tools.js';
@@ -48,6 +48,10 @@ export interface RoundOutput {
   registry: ToolRegistry;
   /** 本轮绑定了微信渠道(决定 WeChat 回复格式校验)。 */
   wechat: boolean;
+  /** 还没读完的 study_file 读图调用。result 为 undefined 时,调用方必须把这批
+   * 调用当作本轮的工具批次(见拆分前 runner 的 `?? { calls: images.calls }`),
+   * 否则待读图片永远不会被消费,run 会在没有读图的情况下空转完成。 */
+  imageCalls: ModelCall[];
 }
 
 export async function prepareAndRequest(input: RoundInput): Promise<RoundOutput> {
@@ -133,9 +137,12 @@ export async function prepareAndRequest(input: RoundInput): Promise<RoundOutput>
   // and cancellation while preventing a model from answering after only
   // the first image. Successful reads are reused after a restart.
   const result = images.calls.length ? undefined : await gateway.request({ owner, run: run.id, purpose: 'bot', frozenModel: input.frozenModel, messages: modelView, tools: registry.definitions(), outputTokens, cacheKey: run.thread_id, conversationId: run.thread_id, continuationRef: input.selected, signal: turn.signal, thinkingLevel: input.thinkingLevel });
-  if (images.hasImages && !(result?.response.calls.length ?? 0)) {
+  // 与拆分前一致的「回退后」语义:result 缺席(待读图)时本轮的工具批次
+  // 就是这批 study_file 调用;图片就绪提示只在既无模型调用、也无待读图时发。
+  const roundCalls = result?.response.calls ?? images.calls;
+  if (images.hasImages && !roundCalls.length) {
     if (input.imageProgress.timer) { clearTimeout(input.imageProgress.timer); input.imageProgress.timer = undefined; }
     if (input.imageProgress.sent) appendActive('progress', '图片已读完，正在整理答复。', `im:status:${run.id}:image-ready`);
   }
-  return { context, result, registry, wechat };
+  return { context, result, registry, wechat, imageCalls: images.calls };
 }
