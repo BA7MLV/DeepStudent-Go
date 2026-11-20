@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
-const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'opencode-skill-catalog-budget-'));
+const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-catalog-budget-'));
 const output = path.join(directory, 'demand.mjs');
 await build({ entryPoints: ['apps/web/src/skills/demand.ts'], bundle: true, platform: 'node', format: 'esm', outfile: output,
   plugins: [{ name: 'catalog-ports', setup(builder) {

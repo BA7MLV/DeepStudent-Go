@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/model-list-source-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'model-list-source-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, BOOTSTRAP_SECRET_FILE: path.join(directory, 'bootstrap-secret'), FILES_DIR: path.join(directory, 'files') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 let mode = 'success';
@@ -136,7 +136,7 @@ try {
   console.log('PASS: onboarding, cloud and local settings use automatic /models discovery only; metadata supplements parameters, API declarations win, empty/error lists never fall back to catalogs, saved/manual models remain intact and credentials stay isolated');
 } catch (error) {
   if (page) {
-    await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/model-list-source-failure.png') });
+    await page.screenshot({ path: path.join(os.tmpdir(), 'model-list-source-failure.png') });
     console.error(await page.locator('body').innerText());
   }
   throw error;

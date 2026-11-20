@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -40,7 +41,7 @@ if (process.argv[2] === '--host') {
   process.send({ origin });
   process.on('message', async message => { if (message === 'close') { await app.close(); process.exit(0); } });
 } else {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-node-chat-edit-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'node-chat-edit-'));
   const checks = [], requests = [];
   let child, origin, cookie, cookieB, sessionId = 10000;
   const start = async () => {

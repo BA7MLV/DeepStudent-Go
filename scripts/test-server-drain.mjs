@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createExecutorRuntime } from '@wangke/client-core';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/server-drain-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'server-drain-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

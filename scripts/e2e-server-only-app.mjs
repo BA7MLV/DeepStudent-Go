@@ -1,4 +1,5 @@
 /** Full authenticated entry and lazy routes, rather than isolated components. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-server-only-app-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'server-only-app-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

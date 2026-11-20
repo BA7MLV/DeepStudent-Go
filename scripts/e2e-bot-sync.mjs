@@ -2,13 +2,13 @@
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const temporary = path.join(os.tmpdir(), 'opencode');
-fs.mkdirSync(temporary, { recursive: true });
+const temporary = os.tmpdir();
 const root = fs.mkdtempSync(path.join(temporary, 'bot-sync-web-'));
 const output = path.join(root, 'evidence'); fs.mkdirSync(output);
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: root, FILES_DIR: path.join(root, 'files'), BOOTSTRAP_SECRET_FILE: path.join(root, 'config/bootstrap-secret') });

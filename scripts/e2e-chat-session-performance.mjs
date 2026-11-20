@@ -1,5 +1,6 @@
 /** Production app, real SQLite/DSH/IDB/React; only model HTTP is scripted.
  * Opt-in DEV counters count component calls, not DOM mutation guesses. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import crypto from 'node:crypto';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-chat-session-performance-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-session-performance-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 delete process.env.CLOUD_WORKER_DISABLED;
 const { buildServer } = await import('../apps/api/src/server.ts');

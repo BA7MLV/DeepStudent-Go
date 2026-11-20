@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -9,7 +10,7 @@ import { ResourceFiles } from '../apps/api/src/projects/resources.ts';
 import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { editCourseMarkdown, awaitTaskAnswer } from '../apps/api/runtime/task-interactions.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-native-task-interactions-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'native-task-interactions-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
 const owner = crypto.randomUUID(), now = new Date().toISOString();
 store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run(owner, 'Fixture', now);

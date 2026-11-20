@@ -10,7 +10,7 @@ import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { CloudTaskRunner, taskDto, listOwnerTasks } from '../apps/api/src/cloud/tasks.ts';
 import { responseTimeline } from '../packages/study-core/src/utils/responseOrder.ts';
 
-const temporaryRoot = path.join(os.tmpdir(), 'opencode');
+const temporaryRoot = os.tmpdir();
 fs.mkdirSync(temporaryRoot, { recursive: true });
 const directory = fs.mkdtempSync(path.join(temporaryRoot, 'chat-timeline-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));

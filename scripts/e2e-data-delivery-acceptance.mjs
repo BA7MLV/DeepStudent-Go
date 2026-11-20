@@ -1,6 +1,7 @@
 /** Independent integration gate. Run: npx tsx scripts/e2e-data-delivery-acceptance.mjs
  * Local isolated API + real product Chromium. Never reads production credentials.
  * Failures are accumulated, not skipped; evidence reports exactly what ran. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -10,7 +11,7 @@ import sharp from 'sharp';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-data-delivery-acceptance-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'data-delivery-acceptance-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

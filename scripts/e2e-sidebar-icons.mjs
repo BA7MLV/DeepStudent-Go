@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
 // Isolated authenticated app: never use the user's account or conversations.
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-sidebar-icons-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sidebar-icons-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

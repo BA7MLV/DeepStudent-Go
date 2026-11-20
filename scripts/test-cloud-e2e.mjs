@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ import { chromium } from 'playwright';
 import { fixtureBrowserDomain } from './fixture-domain.mjs';
 
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-cloud-e2e-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cloud-e2e-'));
 const evidence = { command: 'node --import tsx scripts/test-cloud-e2e.mjs', mode: 'source Vite dev + isolated source API/SQLite + compiled Node task runtime/workers + mock model; run build:api first', nodeVersion: process.version, startedAt: new Date().toISOString(), steps: [], errors: [] };
 console.log(`Cloud E2E evidence: ${directory}`);
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/bootstrap-secret'), FILES_DIR: path.join(directory, 'files') });

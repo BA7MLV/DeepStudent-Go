@@ -6,7 +6,7 @@ import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { sessionSkills } from '../apps/api/runtime/skills.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/skill-reference-routing-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-reference-routing-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system-files'));
 try {
   const owner = 'reference-routing';

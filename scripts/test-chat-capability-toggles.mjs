@@ -9,7 +9,7 @@ import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { CloudTaskRunner, taskDto } from '../apps/api/src/cloud/tasks.ts';
 
-const temporaryRoot = path.join(os.tmpdir(), 'opencode');
+const temporaryRoot = os.tmpdir();
 fs.mkdirSync(temporaryRoot, { recursive: true });
 const directory = fs.mkdtempSync(path.join(temporaryRoot, 'chat-toggles-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));

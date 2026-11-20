@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
 function fixture(t) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/wangke-web-update-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wangke-web-update-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   fs.writeFileSync(path.join(directory, '.env'), 'WANGKE_WEB_IMAGE=fixture/web@sha256:abc\n');
   const log = path.join(directory, 'calls.jsonl');

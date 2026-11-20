@@ -702,7 +702,8 @@ export class DatabaseStore {
 
   private statements = new Map<string, Database.Statement>();
   /** better-sqlite3 does not cache compiled statements; hot loops must reuse
-   * one prepared object per SQL text instead of recompiling per row. */
+   * one prepared object per SQL text instead of recompiling per row.
+   * PR33 侧同类实现叫 stmt():全树统一走 statement() 入口,共享同一份缓存。 */
   statement(sql: string): Database.Statement {
     let cached = this.statements.get(sql);
     if (!cached) { cached = this.db.prepare(sql); this.statements.set(sql, cached); }

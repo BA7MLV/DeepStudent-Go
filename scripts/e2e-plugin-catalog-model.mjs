@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -5,7 +6,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-catalog-model-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'catalog-model-'));
 // Board samples are test fixtures; the product seeds no components.
 process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,

@@ -1,11 +1,12 @@
 /** Real production service worker; static caching only, not app/offline UI acceptance. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, webkit } from 'playwright';
 import { preview } from 'vite';
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-pwa-demand-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pwa-demand-'));
 const chunks = JSON.parse(fs.readFileSync('apps/web/dist/.vite/manifest.json', 'utf8'));
 const entry = Object.values(chunks).find(chunk => chunk.isEntry).file;
 const visited = chunks['src/pages/CourseChat.tsx']?.file ?? Object.values(chunks).find(chunk => /^assets\/CourseChat-.*\.js$/.test(chunk.file))?.file;

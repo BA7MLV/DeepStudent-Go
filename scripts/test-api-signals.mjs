@@ -7,7 +7,7 @@ import { spawn } from 'node:child_process';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 for (const signal of ['SIGTERM', 'SIGINT']) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/api-signal-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'api-signal-'));
   const child = spawn(process.execPath, ['--import', 'tsx', path.join(root, 'apps/api/src/server.ts')], {
     cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, NODE_ENV: 'production', DATA_DIR: directory, DB_PATH: path.join(directory, 'db.sqlite'), FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), HOST: '127.0.0.1', PORT: '0', API_DRAIN_MS: '100', CLOUD_WORKER_DISABLED: '1' },

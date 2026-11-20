@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { prepareCI, buildMatrix, collectManifest } from './release-ci.mjs';
 import { manifestIdentity } from './release-plan.mjs';
 
-const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/release-ci-'));
+const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'release-ci-'));
 const repository = path.join(temporary, 'repo'), output = path.join(temporary, 'output');
 fs.mkdirSync(repository);
 const git = args => execFileSync('git', args, { cwd: repository, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' } }).trim();

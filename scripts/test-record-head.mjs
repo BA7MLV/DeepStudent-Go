@@ -3,12 +3,13 @@ import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import os from 'node:os';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { ClientRuntimeDomain } from '../apps/api/src/realtime/domain.ts';
 import { applyRuntimePatch } from '../packages/contracts/src/runtime-projection.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-record-head-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'record-head-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system'));
 const owner = 'head-owner', other = 'head-other';
 for (const id of [owner, other]) store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run(id, id, new Date().toISOString());

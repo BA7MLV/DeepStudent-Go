@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { isActiveTask } from '../apps/web/src/cloud/activityStore.ts';
 
-const temporaryRoot = path.join(os.tmpdir(), 'opencode');
+const temporaryRoot = os.tmpdir();
 fs.mkdirSync(temporaryRoot, { recursive: true });
 const directory = fs.mkdtempSync(path.join(temporaryRoot, 'background-tasks-api-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/bootstrap-secret') });

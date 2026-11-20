@@ -6,7 +6,7 @@ import path from 'node:path';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
 
-const temporaryRoot = path.join(os.tmpdir(), 'opencode');
+const temporaryRoot = os.tmpdir();
 fs.mkdirSync(temporaryRoot, { recursive: true });
 const directory = fs.mkdtempSync(path.join(temporaryRoot, 'chat-timeline-ui-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });

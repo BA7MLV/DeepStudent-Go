@@ -43,7 +43,7 @@ const unavailableHost = dependencyPackage('host-consumer', '1.0.0'); unavailable
 assert.deepEqual(resolvePluginDependencies([unavailableHost])[0].dependencies.required, ['host.learning-data']);
 assert.throws(() => parsePluginLayout({ apiVersion: 2, instances: [], placements: [{ id: 'bad', pluginId: 'counter', instanceId: 'missing', viewId: 'list', surface: 'board.main', scope: { kind: 'account' }, order: 0 }] }));
 
-const root = path.join(os.tmpdir(), 'opencode'); fs.mkdirSync(root, { recursive: true });
+const root = os.tmpdir(); fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'plugin-platform-'));
 // Board samples are test fixtures; the product seeds no components.
 process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");

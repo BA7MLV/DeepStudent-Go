@@ -84,11 +84,11 @@ try {
   }
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.locator('.ob__scene').evaluate(element => { element.scrollTop = 0; });
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/onboarding-models-desktop.png') });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'onboarding-models-desktop.png') });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'onboarding editor stays within the mobile viewport');
   assert.ok(await page.getByTestId('card-api').evaluate(element => element.getBoundingClientRect().right <= innerWidth), 'onboarding cards are not clipped by the outer grid');
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/onboarding-models-mobile.png') });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'onboarding-models-mobile.png') });
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.getByTestId('provider-preset-search').evaluate(element => element.scrollIntoView({ block: 'center' }));
   await page.getByTestId('provider-preset-search').fill('Fixture Provider');
@@ -164,7 +164,7 @@ try {
     const popover = document.querySelector('[data-model-picker="llmModel"]');
     return popover && getComputedStyle(popover).opacity === '1' && !popover.hasAttribute('data-entering');
   });
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/onboarding-model-picker.png') });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'onboarding-model-picker.png') });
   await page.getByTestId('model-option-catalog-model').click();
   await assertDesktopSetupLayout();
   // Completion must save pending model choices, and failures must keep the editor open.
@@ -200,7 +200,7 @@ try {
     await page.getByTestId('settings-module-models').evaluate(element => { element.scrollTop = 0; });
   };
   await assertSaveDock();
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-save-desktop.png') });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'cloud-models-save-desktop.png') });
   await page.getByTestId(`provider-name-${id}`).fill(saved.providers[0].name);
   await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
   await page.getByTestId(`provider-name-${id}`).fill('Renamed connection');
@@ -219,11 +219,11 @@ try {
   await page.getByTestId('provider-back').click();
   await page.getByTestId('provider-add-card').waitFor();
   assert.equal(await page.getByRole('heading', { name: '云端账号与权限', exact: true }).count(), 0);
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-desktop.png') });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'cloud-models-desktop.png') });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByTestId('provider-add-card').waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'mobile editor stays within the viewport');
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-mobile.png') });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'cloud-models-mobile.png') });
   // Saving rotated credentials succeeds even when the provider has no model-list endpoint.
   await page.getByTestId(`provider-summary-${id}`).click();
   await page.getByRole('button', { name: '更换 Key', exact: true }).click();
@@ -231,7 +231,7 @@ try {
   await page.getByTestId(`api-key-${id}`).fill('rotated-secret');
   await assertSaveDock();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'key accounts and floating actions fit mobile screens');
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-save-mobile.png') });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'cloud-models-save-mobile.png') });
   assert.equal(await page.getByTestId('btn-check-models').innerText(), '保存连接并获取模型');
   upstreamStatus = 404;
   await page.getByTestId('btn-check-models').click();
@@ -291,7 +291,7 @@ try {
   await page.getByTestId('cloud-models-save').waitFor({ state: 'detached' });
   assert.ok(!(await page.evaluate(() => JSON.stringify(localStorage))).includes('account-secret-for-server-only'));
   await page.getByTestId('field-api-key-' + id).evaluate(element => element.scrollIntoView({ block: 'center' }));
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-unified-keys-mobile.png') });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'cloud-models-unified-keys-mobile.png') });
   await accounts.getByRole('button', { name: '删除', exact: true }).click();
   await accounts.getByText('Secondary account', { exact: false }).waitFor({ state: 'detached' });
   await page.getByTestId(`provider-default-key-${id}`).getByText('当前使用', { exact: true }).waitFor();
@@ -343,13 +343,13 @@ try {
   await botRoute.scrollIntoViewIfNeeded();
   assert.equal(await botRoute.evaluate(element => element.scrollWidth > element.clientWidth), false, 'main/backup controls fit the mobile card');
   assert.ok(await botRoute.getByRole('button').evaluateAll(buttons => buttons.every(button => getComputedStyle(button).transform === 'none' && button.getBoundingClientRect().height >= 44)), 'mobile actions avoid clipped GPU layers and retain 44px touch targets');
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/model-routes-mobile.png'), animations: 'disabled' });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'model-routes-mobile.png'), animations: 'disabled' });
   await page.setViewportSize({ width: 1280, height: 1000 });
   await page.reload();
   await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).waitFor();
   await botRoute.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/model-routes-desktop.png'), animations: 'disabled' });
-  await botRoute.screenshot({ path: path.join(os.tmpdir(), 'opencode/model-routes-card.png'), animations: 'disabled' });
+  await page.screenshot({ path: path.join(os.tmpdir(), 'model-routes-desktop.png'), animations: 'disabled' });
+  await botRoute.screenshot({ path: path.join(os.tmpdir(), 'model-routes-card.png'), animations: 'disabled' });
   await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).waitFor();
   assert.equal(await botRoute.getByLabel('Bot 助手 · 主模型', { exact: true }).inputValue(), refKey('openai/gpt-4o'));
   await botRoute.getByRole('button', { name: 'Bot 助手 · 移除备用模型 1', exact: true }).click();
@@ -428,7 +428,7 @@ try {
 } catch (error) {
   const page = browser?.contexts()[0]?.pages()[0];
   if (page) {
-    await page.screenshot({ path: path.join(os.tmpdir(), 'opencode/cloud-models-failure.png') });
+    await page.screenshot({ path: path.join(os.tmpdir(), 'cloud-models-failure.png') });
     console.error(await page.locator('body').innerText());
   }
   throw error;

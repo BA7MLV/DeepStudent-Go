@@ -1,4 +1,5 @@
 /** Isolated SQL/filesystem scope projection, not production browser acceptance. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import { PluginFiles } from '../apps/api/src/plugins/files.ts';
 import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { assembleRuntimeDomains } from '../apps/api/src/realtime/runtime-domains.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-plugin-scope-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-scope-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system'));
 const evidence = { checks: [] };
 try {

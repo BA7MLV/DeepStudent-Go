@@ -1,3 +1,4 @@
+import os from 'node:os';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import assert from 'node:assert/strict';
 // Read-only acceptance orchestration. Each test owns a disposable database;
 // all logs and failed attempts are retained. No commit, deploy or real model.
 const root = process.cwd();
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-client-final-freeze-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'client-final-freeze-'));
 const previous = process.argv[2] === '--resume' ? path.resolve(process.argv[3]) : undefined;
 const prior = previous ? JSON.parse(fs.readFileSync(path.join(previous, 'results.json'), 'utf8')) : undefined;
 const superseded = prior?.results.filter(result => result.code !== 0) ?? [];

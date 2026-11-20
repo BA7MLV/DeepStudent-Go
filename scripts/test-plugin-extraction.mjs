@@ -12,7 +12,7 @@ import { PluginService } from '../apps/api/src/plugins/service.ts';
 import { reconcilePracticeExtractions } from '../apps/api/src/plugins/practice-extraction.ts';
 import { reconcileLearningResults } from '../apps/api/src/plugins/learning-results.ts';
 
-const root = path.join(os.tmpdir(), 'opencode'); fs.mkdirSync(root, { recursive: true });
+const root = os.tmpdir(); fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'plugin-extraction-')), filesDir = path.join(directory, 'files'); fs.mkdirSync(filesDir);
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system'));
 const owner = crypto.randomUUID(), other = crypto.randomUUID();

@@ -14,7 +14,7 @@ import { manifestIdentity } from './release-plan.mjs';
 const Database = createRequire(new URL('../apps/api/package.json', import.meta.url))('better-sqlite3');
 const image = (service, letter, commit) => ({ image: `registry.invalid/${service}@sha256:${letter.repeat(64)}`, sourceCommit: commit.repeat(40) });
 function fixture(t, options = {}) {
-  const installation = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/release-recovery-'));
+  const installation = fs.mkdtempSync(path.join(os.tmpdir(), 'release-recovery-'));
   t.after(() => fs.rmSync(installation, { recursive: true, force: true }));
   fs.mkdirSync(path.join(installation, 'data/files/empty'), { recursive: true });
   fs.mkdirSync(path.join(installation, 'data/config'), { recursive: true });

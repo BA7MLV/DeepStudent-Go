@@ -3,6 +3,7 @@
  * local controls and continuation). This source fixture retains complex DOM
  * recovery and exercises production widget-state/edit commands against real API.
  * No external BASE_URL or existing user profile is used. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -12,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { chromium, webkit } from 'playwright';
 import { createServer } from 'vite';
 
-const directory=fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-widget-protocol-'));
+const directory=fs.mkdtempSync(path.join(os.tmpdir(), 'widget-protocol-'));
 Object.assign(process.env,{NODE_ENV:'test',DATA_DIR:directory,FILES_DIR:path.join(directory,'files'),BOOTSTRAP_SECRET_FILE:path.join(directory,'secret'),CLOUD_WORKER_DISABLED:'1'});
 const {buildServer}=await import('../apps/api/src/server.ts');
 const {DatabaseStore}=await import('../apps/api/src/storage/database.ts');

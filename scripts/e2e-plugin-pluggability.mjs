@@ -7,7 +7,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const root = path.join(os.tmpdir(), 'opencode'); fs.mkdirSync(root, { recursive: true });
+const root = os.tmpdir(); fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'plugin-unplug-ui-'));
 const output = path.join(root, 'plugin-pluggability-screenshots'); fs.mkdirSync(output, { recursive: true });
 // Board samples are test fixtures; the product seeds no components.

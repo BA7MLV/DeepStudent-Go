@@ -1,4 +1,5 @@
 /** Real SubtitlePanel/API without startCloud. Domain evidence, not production startup/scale. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import { chromium, webkit } from 'playwright';
 import { expect } from 'playwright/test';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-subtitle-demand-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'subtitle-demand-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

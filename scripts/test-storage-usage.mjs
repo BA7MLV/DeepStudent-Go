@@ -5,7 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { collectStorageUsage, storageUsageReader } from '../apps/api/src/storage/usage.ts';
 
-const temporary = path.join(os.tmpdir(), 'opencode');
+const temporary = os.tmpdir();
 fs.mkdirSync(temporary, { recursive: true });
 const fixture = () => {
   const root = fs.mkdtempSync(path.join(temporary, 'wangke-storage-'));

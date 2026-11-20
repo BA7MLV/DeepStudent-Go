@@ -8,7 +8,7 @@ import { SystemMaterials } from '../apps/api/src/storage/system-materials.ts';
 import { BotSkills } from '../apps/api/src/agent/skills.ts';
 import { sessionSkills } from '../apps/api/runtime/skills.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/visual-merge-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'visual-merge-'));
 const filename = path.join(directory, 'db.sqlite'), files = path.join(directory, 'files');
 let store = new DatabaseStore(filename, files);
 const at = new Date().toISOString();

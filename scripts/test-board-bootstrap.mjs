@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -7,7 +8,7 @@ import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { BoardFiles } from '../apps/api/src/board/files.ts';
 
 const fixtures = path.resolve('scripts/fixtures/board-plugins');
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-board-bootstrap-'));
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'board-bootstrap-'));
 const store = new DatabaseStore(path.join(root, 'db.sqlite'), path.join(root, 'files'));
 const accountRoot = owner => path.join(root, 'files', crypto.createHash('sha256').update(owner).digest('hex'), 'system');
 try {

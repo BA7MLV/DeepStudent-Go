@@ -1,6 +1,7 @@
 /** Real API + coverQueue module without startCloud: bounded backfill must page
  * candidate keys instead of reading the account's course mirror. Not production
  * startup or cover-generation quality evidence. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -9,7 +10,7 @@ import crypto from 'node:crypto';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-cover-backfill-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cover-backfill-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

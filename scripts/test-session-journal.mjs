@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import WebSocket from 'ws';
 import { createClientRuntime } from '@wangke/client-core';
 import { SessionJournalModel } from '../packages/client-core/src/session.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-session-journal-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'session-journal-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

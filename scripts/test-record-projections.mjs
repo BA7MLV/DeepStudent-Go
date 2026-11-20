@@ -1,4 +1,5 @@
 /** Isolated projection contract, fault and scale evidence. No real model or IM. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -8,7 +9,7 @@ import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { RecordProjections, recordParentSql, PROJECTION_PAGE_BYTES } from '../apps/api/src/realtime/record-projections.ts';
 import { assembleRuntimeDomains } from '../apps/api/src/realtime/runtime-domains.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-record-projections-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'record-projections-'));
 const dbPath = path.join(directory, 'db.sqlite');
 let store = new DatabaseStore(dbPath, path.join(directory, 'system'));
 const evidence = { environment: { node: process.version, platform: process.platform, arch: process.arch, network: 'none; synchronous SQLite API microbenchmark, not browser' }, checks: [], scale: [] };

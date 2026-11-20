@@ -27,7 +27,9 @@ const LibraryImportFiles = lazy(() => import('./LibraryImportFiles'));
  *   - 重置：先确认、再验密码，服务器清空成功后才清本机缓存，失败时本机数据原样保留。
  */
 export default function DataSettings() {
-  const sync = useCloudSync();
+  const syncError = useCloudSync(s => s.error);
+  const degradedSince = useCloudSync(s => s.degradedSince);
+  const pending = useCloudSync(s => s.pending);
   const [busy, setBusy] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const resourceIssues = useResourceCommands(state => state.issues);
@@ -47,9 +49,9 @@ export default function DataSettings() {
     finally { setBusy(null); }
   };
 
-  const conflict = sync.error.includes('冲突');
+  const conflict = syncError.includes('冲突');
   // Settings is where the user asked to look, so degradation is shown as-is here.
-  const syncLabel = conflict ? '有冲突' : sync.error ? '同步失败' : sync.degradedSince ? '连接中断，正在自动重试' : sync.pending ? `${sync.pending} 项待同步` : '已同步';
+  const syncLabel = conflict ? '有冲突' : syncError ? '同步失败' : degradedSince ? '连接中断，正在自动重试' : pending ? `${pending} 项待同步` : '已同步';
 
   const importLegacy = () => run('import', async () => {
     if (!await confirmDialog({ headline: '导入此浏览器的旧数据？', description: '仅支持空的云端库，旧数据保留在本机。', confirmText: '导入' })) return;
@@ -112,7 +114,7 @@ export default function DataSettings() {
       </SectionCard>
       <SectionCard title="同步" testId="cloud-sync-card">
         <SettingRow label="状态">
-          <span className={`text-sm ${sync.error ? 'text-danger' : 'text-muted'}`} role="status">{syncLabel}</span>
+          <span className={`text-sm ${syncError ? 'text-danger' : 'text-muted'}`} role="status">{syncLabel}</span>
           <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('sync', flushCloud, '已同步')}>立即同步</Button>
         </SettingRow>
         {conflict && (

@@ -11,7 +11,7 @@ import { CloudTaskRunner } from '../apps/api/src/cloud/tasks.ts';
 import { PluginService } from '../apps/api/src/plugins/service.ts';
 import { receiveFile } from '../apps/api/src/cloud/files.ts';
 
-const root = path.join(os.tmpdir(), 'opencode'); fs.mkdirSync(root, { recursive: true });
+const root = os.tmpdir(); fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'plugin-material-actions-')), filesDir = path.join(directory, 'files'); fs.mkdirSync(filesDir);
 const dbPath = path.join(directory, 'db.sqlite'), store = new DatabaseStore(dbPath, path.join(directory, 'system'));
 const owner = crypto.randomUUID(), other = crypto.randomUUID();

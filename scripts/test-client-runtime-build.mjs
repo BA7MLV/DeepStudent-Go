@@ -1,11 +1,11 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 
 // Deliberately run with plain node, not tsx: production cannot execute Host decorators from TS.
-const root = path.join(os.tmpdir(), 'opencode');
-fs.mkdirSync(root, { recursive: true });
+const root = os.tmpdir();
 const directory = fs.mkdtempSync(path.join(root, 'runtime-build-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'bootstrap-secret') });

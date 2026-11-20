@@ -1,5 +1,6 @@
 /** Real API + HandoutPanel source modules, no startCloud/global baseline. This
  * proves the domain adapter only, not production startup/scale/offline behavior. */
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -13,7 +14,7 @@ import { build } from 'esbuild';
 import { pathToFileURL } from 'node:url';
 import { unzipSync, strFromU8 } from 'fflate';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-handout-demand-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'handout-demand-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

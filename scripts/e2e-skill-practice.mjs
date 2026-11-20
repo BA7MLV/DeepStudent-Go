@@ -8,8 +8,8 @@ import net from 'node:net';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/skill-practice-'));
-const shots = process.env.SHOTS_DIR ?? path.join(os.tmpdir(), 'opencode/skill-practice-evidence');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-practice-'));
+const shots = process.env.SHOTS_DIR ?? path.join(os.tmpdir(), 'skill-practice-evidence');
 fs.mkdirSync(shots, { recursive: true });
 const reference = fs.readFileSync(new URL('../packages/study-core/assets/builtin/interactive-explainer/references/practice.md', import.meta.url), 'utf8');
 const html = reference.match(/```html\n([\s\S]*?)\n```/)[1];

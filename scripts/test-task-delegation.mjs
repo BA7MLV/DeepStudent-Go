@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import { test } from 'node:test';
@@ -22,8 +23,7 @@ import { modelUsageReport } from '../apps/api/src/agent/model-observations.ts';
 import { WorkspaceHandoff } from '../apps/api/src/agent/workspace-handoff.ts';
 import { ProjectRepository } from '../apps/api/src/projects/repository.ts';
 
-const temp = path.join(os.tmpdir(), 'opencode');
-fs.mkdirSync(temp, { recursive: true });
+const temp = os.tmpdir();
 const ref = model => ({ providerId: 'fixture', model });
 const selection = model => ({ modelRef: ref(model) });
 function fixture() {

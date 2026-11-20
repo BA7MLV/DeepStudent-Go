@@ -7,7 +7,7 @@ import { Readable } from 'node:stream';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/plugin-extraction-ui-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-extraction-ui-'));
 // Board samples are test fixtures; the product seeds no components.
 process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/bootstrap-secret') });

@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { fixturePreference } from './fixture-domain.mjs';
 
-const temporary = path.join(os.tmpdir(), 'opencode');
+const temporary = os.tmpdir();
 fs.mkdirSync(temporary, { recursive: true });
 const directory = fs.mkdtempSync(path.join(temporary, 'wangke-usage-ui-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'config/secret'), CLOUD_WORKER_DISABLED: '1' });

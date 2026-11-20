@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -7,7 +8,7 @@ import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { RecordProjections } from '../apps/api/src/realtime/record-projections.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-session-index-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'session-index-'));
 let store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'system'));
 const owner = 'index-owner', other = 'index-other', videoId = '__library_assistant__';
 const request = { kind: 'sessionIndex', videoId, archived: false, recentOnly: false };

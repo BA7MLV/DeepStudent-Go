@@ -7,7 +7,7 @@ import { build } from 'vite';
 import { dshEsm } from '../apps/web/dsh-esm.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/runtime-license-test-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-license-test-'));
 const destinations = ['web', 'api'].map(name => path.join(directory, name));
 execFileSync(process.execPath, [path.join(root, 'scripts/build-client-runtime-licenses.mjs'), ...destinations], { cwd: root, stdio: 'inherit' });
 const expected = fs.readFileSync(path.join(root, 'licenses/client-runtime/THIRD_PARTY_NOTICES.txt'));

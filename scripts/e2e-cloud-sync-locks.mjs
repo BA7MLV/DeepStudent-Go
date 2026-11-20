@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -6,7 +7,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { waitForProbe } from './fixtures/wait-for-probe.mjs';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-sync-locks-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-locks-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'bootstrap-secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

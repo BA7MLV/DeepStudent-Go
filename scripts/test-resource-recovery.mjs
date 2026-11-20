@@ -1,3 +1,4 @@
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -10,7 +11,7 @@ import { ResourceFiles } from '../apps/api/src/projects/resources.ts';
 import { executeResourceCommand, recoverResourceCommands } from '../apps/api/src/realtime/resources.ts';
 import { journaledResourceCommand, recoverResourceWorkflow, resourceScope } from '../apps/api/src/realtime/resource-workflows.ts';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-resource-recovery-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'resource-recovery-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'), path.join(directory, 'files/system-files'));
 const projects = new ProjectRepository(store, path.join(directory, 'files/projects'));
 const resources = new ResourceFiles(projects, path.join(directory, 'files'));

@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import sharp from 'sharp';
 
-const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode/attachment-files-'));
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'attachment-files-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

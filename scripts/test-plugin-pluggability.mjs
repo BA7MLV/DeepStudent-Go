@@ -16,7 +16,7 @@ import { receiveFile } from '../apps/api/src/cloud/files.ts';
 import { readLearningMarkdown } from '../apps/api/src/plugins/learning-files.ts';
 import { parseWrongbook } from '../packages/study-core/src/study/wrongbook.ts';
 
-const root = path.join(os.tmpdir(), 'opencode'); fs.mkdirSync(root, { recursive: true });
+const root = os.tmpdir(); fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'plugin-unplug-'));
 // Board samples are test fixtures; the product seeds no components.
 process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");
