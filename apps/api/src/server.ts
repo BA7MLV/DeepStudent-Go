@@ -1,15 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { Readable } from 'node:stream';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import helmet from '@fastify/helmet';
-import argon2 from 'argon2';
-import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
-// 这些 JSON 类型只作为「客户端提交的凭据」的形状入口;内容由 simplewebauthn 自己校验。
-import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
-import type { BootstrapInitializeRequest, ConversationMode, MessageRole } from '@wangke/contracts';
-import { parseBotAttachments, botMessageAdmissionError, botMessageAdmissionStatus } from '@wangke/contracts';
 import { DatabaseStore } from './storage/database.js';
 import { BootstrapRepository } from './storage/bootstrapRepository.js';
 import { BotRunner } from './agent/runner.js';
@@ -23,9 +16,6 @@ import { IlinkPlugin } from './gateway/adapters/ilink.js';
 import { registerGatewayRoutes } from './gateway/routes.js';
 import { CloudRecords } from './cloud/records.js';
 import { CloudConfiguration } from './cloud/config.js';
-import { receiveFile, byteRange, fileOperationId } from './cloud/files.js';
-import { ensureImageReference, attachmentFileInUse } from './cloud/attachment-images.js';
-import { migrateChatAttachmentReferences, migrateTerminalTaskAttachmentReferences } from './cloud/attachment-migration.js';
 import { registerCloudRoutes } from './cloud/routes.js';
 import { registerBilibiliRoutes } from './bilibili/routes.js';
 import { SystemMaterials } from './storage/system-materials.js';
@@ -50,36 +40,18 @@ import { recoverResourceCommands } from './realtime/resources.js';
 import { registerResourceRoutes } from './projects/resource-routes.js';
 import type { SandboxCleanup, SandboxExecutor } from './agent/sandbox.js';
 import { settleWithin } from './lifecycle.js';
-import { inspectDatabase } from './storage/release.js';
 import { storageUsageReader } from './storage/usage.js';
 import { BotMessageHistory } from './agent/message-history.js';
 import { registerClientRuntime } from './realtime/host.js';
 import { submitOwnerTask } from './cloud/task-commands.js';
-import { sql, sqlFixed, sqlKeyword, sqlVariant } from './storage/sql.js';
-import {
-  agentProfileRowSchema, agentProfileSummaryRowSchema, approvalProjectionRowSchema, runRowSchema, type RunRow, authUserRowSchema, expectRow, expectRows, fileRecordRowSchema,
-  messageRecordRowSchema, threadRowSchema,
-  type AgentProfileRow, type ApprovalProjectionRow, type AuthUserRow, type FileRecordRow, type MessageRecordRow, type ThreadRow,
-} from './storage/row-schema.js';
-
-/** 行形状:server.ts 的 SQL 结果一律在信任边界收窄,不再 `as any`。
- * `api_tokens` 的会话行只带 `{ id, name, token_id }`(没有密码列),因此用宽松 schema。 */
-const authTokenRowSchema = { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, token_id: { type: 'string' }, session_id: { type: ['string', 'null'] } }, required: ['id', 'name'] } as const;
-const credentialRowSchema = {
-  type: 'object', properties: { id: { type: 'string' }, public_key: {}, counter: { type: 'integer' }, user_id: { type: ['string', 'null'] } },
-  required: ['id', 'public_key', 'counter'],
-} as const;
-const challengeRowSchema = { type: 'object', properties: { id: { type: 'string' }, challenge: { type: 'string' } }, required: ['id', 'challenge'] } as const;
-const userRowSchema = { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } }, required: ['id', 'name'] } as const;
-const previewRowSchema = {
-  type: 'object', additionalProperties: true,
-  properties: { id: { type: 'string' }, updatedAt: { type: 'string' }, archived: { type: ['integer', 'boolean', 'null'] }, preview: { type: ['string', 'null'] } },
-  required: ['id', 'updatedAt'],
-} as const;
-const threadSummarySchema = { type: 'object', additionalProperties: true, properties: { id: { type: 'string' }, archived: { type: ['integer', 'boolean', 'null'] } }, required: ['id'] } as const;
-const participantRowSchema = { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, avatar: { type: ['string', 'null'] }, role: { type: 'string' }, enabled: { type: 'integer' } }, required: ['id', 'name', 'role', 'enabled'] } as const;
-const runStatusListSchema = { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' } }, required: ['id', 'status'] } as const;
-const idRowSchema = { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } as const;
+import { sql } from './storage/sql.js';
+import { authUserRowSchema, expectRow, expectRows, type AuthUserRow } from './storage/row-schema.js';
+import { registerDeploymentRoutes } from './routes/deployment.js';
+import { registerAuthRoutes } from './routes/auth.js';
+import { registerChatAgentRoutes } from './routes/agents.js';
+import { registerThreadRoutes } from './routes/threads.js';
+import { registerFileRoutes } from './routes/files.js';
+import { registerConversationRoutes } from './routes/conversation.js';
 
 const defaultDataDir = process.env.DATA_DIR ?? path.resolve(process.cwd(), 'data');
 const messageKinds = new Set(['text', 'progress', 'attachment', 'widget', 'question', 'approval']);
@@ -122,19 +94,10 @@ const parseCookies = (header = '') => {
   }
   return result;
 };
-const publicUser = (user: any) => ({ id: user.id, name: user.name });
+const publicUser = (user: { id: string; name?: string }) => ({ id: user.id, name: user.name ?? '' });
 
-function webauthnChallengeFromResponse(body: unknown): string | null {
-  const clientDataJSON = (body as { response?: { clientDataJSON?: unknown } } | null)?.response?.clientDataJSON;
-  if (typeof clientDataJSON !== 'string' || clientDataJSON.length > 16384) return null;
-  try {
-    const clientData = JSON.parse(Buffer.from(clientDataJSON, 'base64url').toString('utf8')) as { challenge?: unknown };
-    return typeof clientData.challenge === 'string' && clientData.challenge.length > 0 ? clientData.challenge : null;
-  } catch {
-    return null;
-  }
-}
-
+/** 路由按域拆到 src/routes/;本文件只保留装配、中间件、会话/来源校验与生命周期。
+ * 路由注册顺序与旧版逐条对应(Fastify 的 notFoundHandler 与 hook 顺序对行为有影响)。 */
 export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sandbox?: SandboxExecutor; sandboxCleanup?: SandboxCleanup } = {}) {
   const secretFile = process.env.BOOTSTRAP_SECRET_FILE ?? path.join(defaultDataDir, 'config/bootstrap-secret');
   const releaseId = process.env.API_RELEASE_ID;
@@ -208,9 +171,8 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   });
   app.addContentTypeParser('application/octet-stream', (_request, stream, done) => done(null, stream));
   app.addContentTypeParser(/^multipart\/form-data/, (_request, stream, done) => done(null, stream));
-  if (!held) { runner.start(); memoryWorker.start(); gateway.start(); boardScheduler.start(); }
-  const attempts = new Map<string, { count: number; until: number; seen: number }>();
-  const dummyHash = argon2.hash('unusable-login-dummy', { type: argon2.argon2id });
+  const startWorkers = () => { runner.start(); memoryWorker.start(); gateway.start(); boardScheduler.start(); };
+  if (!held) startWorkers();
   const secureCookie = (process.env.PUBLIC_ORIGIN ?? '').startsWith('https://');
   const expectedOrigin = process.env.PUBLIC_ORIGIN;
   const rpID = process.env.WEBAUTHN_RP_ID;
@@ -263,6 +225,8 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if (!authorization?.startsWith('Bearer ')) return null;
     const bearer = authorization.slice(7).trim();
     if (!bearer || bearer.length > 256) return null;
+    /** `api_tokens` 的会话行只带 `{ id, name, token_id }`(没有密码列),因此用宽松 schema。 */
+    const authTokenRowSchema = { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, token_id: { type: 'string' }, session_id: { type: ['string', 'null'] } }, required: ['id', 'name'] } as const;
     return expectRow<AuthUserRow>(authTokenRowSchema, store.db.prepare(sql`SELECT NULL AS session_id, t.id AS token_id, u.id, u.name FROM api_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>?`.sql).get(hashToken(bearer), now()), 'auth_row_invalid') ?? null;
   }
   function requireAuth(request: FastifyRequest, reply: FastifyReply) {
@@ -290,80 +254,40 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   // 准入拒绝多带一个 `status` 字段(契约 ApiAdmissionErrorResponse):客户端按它区分
   // 「改配置可恢复」与「真故障」,其余错误响应保持历史最小形状不动。
   const admissionBad = (reply: FastifyReply, code: number, error: string) => reply.code(code).send({ error, status: code });
-  const pruneAttempts = () => { const cutoff = Date.now() - 15 * 60_000; for (const [ip, value] of attempts) if (value.until < cutoff && value.seen < cutoff) attempts.delete(ip); while (attempts.size > 10_000) attempts.delete(attempts.keys().next().value!); };
 
-   const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch, mcp, sandbox: options.sandbox, sandboxCleanup: options.sandboxCleanup,
-     canStart: () => !held && !draining,
-   });
-   registerBilibiliRoutes(app, { store, configuration: cloudConfig, requireAuth, checkOrigin, fetch: options.fetch });
-   registerResourceRoutes(app, resources, requireAuth, checkOrigin);
-   registerSystemRoutes(app, systemMaterials, cloudConfig, requireAuth, checkOrigin);
-   registerBoardRoutes(app, boardFiles, cloudRunner, botService, requireAuth, checkOrigin);
-    const pluginService = registerPluginRoutes(app, store, botService, cloudRunner, requireAuth, checkOrigin, { filesDir, resources });
-     cloudRunner.pluginService = pluginService;
-      const clientRuntime = registerClientRuntime(app, { store, plugins: pluginService,
-         resources, configuration: cloudConfig,
-       identity: request => session(request as FastifyRequest),
-         origin: checkOrigin, canStart: () => !held && !draining, canExecute: () => !held,
-        submitTask: (owner, request) => submitOwnerTask(store, cloudRecords, cloudConfig, owner, request) });
-    study.register(pluginTool(pluginService));
-   registerMcpRoutes(app, { manager: mcp, store, records: cloudRecords, requireAuth, checkOrigin });
-   registerWebSearchRoutes(app, { service: webSearch, store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin });
-   registerLinkIconRoutes(app, { requireAuth, checkOrigin, fetch: options.fetch });
-   registerProjectRoutes(app, { projects, requireAuth, checkOrigin, maxFileBytes, stopProject: (id) => {
-     const runs = expectRows<{ id: string }>(idRowSchema, store.db.prepare(sql`SELECT r.id FROM runs r JOIN threads t ON t.id=r.thread_id
-       LEFT JOIN bot_workspaces b ON b.owner_id=t.owner_id AND t.mode='bot'
-         AND (t.agent_id IS NOT NULL OR EXISTS(SELECT 1 FROM thread_participants WHERE thread_id=t.id))
-       WHERE COALESCE(t.project_id,b.project_id)=? AND r.status IN ('queued','running','waiting_user')`.sql).all(id), 'run_row_invalid');
-     for (const run of runs) { store.db.prepare("UPDATE runs SET status='cancelled',completed_at=?,wake_at=NULL WHERE id=?").run(now(), run.id); runner.cancel(run.id); }
-   } });
-  app.get('/api/v1/health', async () => ({ status: 'ok', version: process.env.APP_VERSION ?? '0.1.0', cloud: true, auth: ['password', 'token', 'passkey'] }));
-  app.get('/api/v1/cloud/storage', async (request, reply) => {
-    if (!requireAuth(request, reply)) return;
-    return readStorageUsage();
+  // ---- 路由装配:顺序与旧 server.ts 逐条一致 ----
+  const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch, mcp, sandbox: options.sandbox, sandboxCleanup: options.sandboxCleanup,
+    canStart: () => !held && !draining,
   });
-  app.get('/api/v1/ready', async (_request, reply) => {
-    if (draining) return reply.code(503).send({ status: 'draining' });
-    if (held) return reply.code(503).send({ status: 'staged' });
-    return { status: 'ready' };
-  });
-  const deploymentAuthorized = (request: FastifyRequest, reply: FastifyReply) => {
-    const token = request.headers['x-deployment-token'];
-    if (!releaseId || !['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(request.raw.socket.remoteAddress ?? '') || typeof token !== 'string' || !crypto.timingSafeEqual(Buffer.from(hashToken(token)), Buffer.from(hashToken(releaseToken)))) {
-      reply.code(403).send({ error: 'deployment_control_denied' }); return false;
-    }
-    return true;
-  };
-  const deploymentDatabase = () => {
-    const metadataFile = [new URL('../../../database-identity.json', import.meta.url), new URL('../dist/database-identity.json', import.meta.url)].find(url => fs.existsSync(url));
-    if (!metadataFile) throw new Error('database_metadata_missing');
-    const database = JSON.parse(fs.readFileSync(metadataFile, 'utf8'));
-    if (inspectDatabase(store.db).schemaHash !== database.schemaHash) throw new Error('database_schema_identity_mismatch');
-    return database;
-  };
-  app.get('/api/v1/deployment/status', async (request, reply) => {
-    if (!deploymentAuthorized(request, reply)) return;
-    return { releaseId, held, draining, database: deploymentDatabase() };
-  });
-  app.post('/api/v1/deployment/activate', async (request, reply) => {
-    if (!deploymentAuthorized(request, reply)) return;
-    if (draining) return reply.code(409).send({ error: 'api_draining' });
-    deploymentDatabase();
-    if (held) {
-      // Durable before admitting any request or scheduler. A restarted container
-      // cannot silently fall back to staged after a successful activation.
-      const fd = fs.openSync(activationFile!, 'w', 0o600);
-      try { fs.writeFileSync(fd, hashToken(releaseToken)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-      const directory = fs.openSync(path.dirname(activationFile!), 'r');
-      try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
-      held = false;
-      recoverResourceCommands(resources);
-      runner.start(); memoryWorker.start(); gateway.start(); boardScheduler.start();
-      const address = app.server.address();
-      if (process.env.CLOUD_WORKER_DISABLED !== '1' && address && typeof address === 'object') cloudRunner.start(`http://127.0.0.1:${address.port}`);
-    }
-    return { releaseId, activated: true };
-  });
+  registerBilibiliRoutes(app, { store, configuration: cloudConfig, requireAuth, checkOrigin, fetch: options.fetch });
+  registerResourceRoutes(app, resources, requireAuth, checkOrigin);
+  registerSystemRoutes(app, systemMaterials, cloudConfig, requireAuth, checkOrigin);
+  registerBoardRoutes(app, boardFiles, cloudRunner, botService, requireAuth, checkOrigin);
+  const pluginService = registerPluginRoutes(app, store, botService, cloudRunner, requireAuth, checkOrigin, { filesDir, resources });
+  cloudRunner.pluginService = pluginService;
+  const clientRuntime = registerClientRuntime(app, { store, plugins: pluginService,
+    resources, configuration: cloudConfig,
+    identity: request => session(request as FastifyRequest),
+    origin: checkOrigin, canStart: () => !held && !draining, canExecute: () => !held,
+    submitTask: (owner, request) => submitOwnerTask(store, cloudRecords, cloudConfig, owner, request) });
+  study.register(pluginTool(pluginService));
+  registerMcpRoutes(app, { manager: mcp, store, records: cloudRecords, requireAuth, checkOrigin });
+  registerWebSearchRoutes(app, { service: webSearch, store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin });
+  registerLinkIconRoutes(app, { requireAuth, checkOrigin, fetch: options.fetch });
+  registerProjectRoutes(app, { projects, requireAuth, checkOrigin, maxFileBytes, stopProject: (id) => {
+    const runs = expectRows<{ id: string }>({ type: 'object', properties: { id: { type: 'string' } }, required: ['id'] }, store.db.prepare(sql`SELECT r.id FROM runs r JOIN threads t ON t.id=r.thread_id
+      LEFT JOIN bot_workspaces b ON b.owner_id=t.owner_id AND t.mode='bot'
+        AND (t.agent_id IS NOT NULL OR EXISTS(SELECT 1 FROM thread_participants WHERE thread_id=t.id))
+      WHERE COALESCE(t.project_id,b.project_id)=? AND r.status IN ('queued','running','waiting_user')`.sql).all(id), 'run_row_invalid');
+    for (const run of runs) { store.db.prepare("UPDATE runs SET status='cancelled',completed_at=?,wake_at=NULL WHERE id=?").run(now(), run.id); runner.cancel(run.id); }
+  } });
+  registerDeploymentRoutes(app, { db: store.db, releaseId, releaseToken, activationFile, draining: () => draining, held: () => held, requireAuth, readStorageUsage, activate: () => {
+    held = false;
+    recoverResourceCommands(resources);
+    startWorkers();
+    const address = app.server.address();
+    if (process.env.CLOUD_WORKER_DISABLED !== '1' && address && typeof address === 'object') cloudRunner.start(`http://127.0.0.1:${address.port}`);
+  } });
   app.addHook('onRequest', async (request, reply) => {
     if (request.url.split('?')[0] === '/api/v1/files' && request.method === 'POST') {
       if (!checkOrigin(request, reply)) return;
@@ -373,611 +297,19 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     }
     if (request.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
   });
-   app.get('/api/v1/bootstrap/status', async () => {
-     const initialized = repo.isInitialized();
-     const available = !initialized && Date.now() < bootstrap.createdAt + bootstrapTtlMs;
-     const hasPasskey = initialized && Boolean(store.db.prepare('SELECT 1 FROM passkey_credentials LIMIT 1').get());
-     return { initialized, bootstrapAvailable: available, expiresAt: available ? new Date(bootstrap.createdAt + bootstrapTtlMs).toISOString() : null, botSyncVersion: 1, hasPasskey };
-   });
-  app.post<{ Body: BootstrapInitializeRequest }>('/api/v1/bootstrap/initialize', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    if (repo.isInitialized()) return bad(reply, 410, 'bootstrap_closed');
-     if (Date.now() >= bootstrap.createdAt + bootstrapTtlMs || request.headers['x-bootstrap-secret'] !== bootstrap.secret) return bad(reply, 403, 'invalid_or_expired_bootstrap_secret');
-    const { adminPassword } = request.body ?? {};
-    if (typeof adminPassword !== 'string' || adminPassword.length < 12 || adminPassword.length > 256) return bad(reply, 400, 'admin_password_must_be_12_to_256_characters');
-    const initialized = repo.initializeAdmin('Administrator', await argon2.hash(adminPassword, { type: argon2.argon2id }));
-    if (!initialized) return bad(reply, 410, 'bootstrap_closed');
-    fs.rmSync(secretFile, { force: true });
-    return reply.code(201).send({ initialized: true });
+  registerAuthRoutes(app, { store, repo, secretFile, bootstrap, bootstrapTtlMs, sessionTtlMs, tokenTtlMs, secureCookie, sameSite, expectedOrigin, rpID, rpName, hashToken, issueSession, session, checkOrigin, requireAuth, bad, publicUser,
+    resetOwner: async () => {
+      await cloudRunner.reset();
+      await runner.reset();
+      clearDirectory(filesDir);
+      store.resetData();
+    },
+    replaceBootstrapSecret: () => { bootstrap = replaceBootstrapSecret(secretFile); return bootstrap; },
   });
-
-  /** 密码校验 + 按 IP 退避。浏览器登录（发 Cookie）和原生壳层登录（发 token）共用。 */
-  async function verifyPassword(request: FastifyRequest<{ Body: { password?: string } }>) {
-    pruneAttempts(); const key = request.ip; const attempt = attempts.get(key); const wait = attempt && attempt.until > Date.now() ? attempt.until - Date.now() : 0;
-    if (wait) await new Promise((resolve) => setTimeout(resolve, Math.min(wait, 1500)));
-    // Each personal deployment has one administrator; fail closed if ambiguous.
-    const records = expectRows<AuthUserRow>(authUserRowSchema, store.db.prepare('SELECT u.id,u.name,p.password_hash FROM users u JOIN password_credentials p ON p.user_id=u.id LIMIT 2').all(), 'auth_row_invalid');
-    const record = records.length === 1 ? records[0] : undefined;
-    const valid = typeof request.body?.password === 'string' && request.body.password.length <= 256 && await argon2.verify(record?.password_hash ?? await dummyHash, request.body.password) && Boolean(record);
-    if (!valid) { const seen = Date.now(); attempts.set(key, { count: (attempt?.count ?? 0) + 1, until: seen + Math.min(1000 * 2 ** Math.min(attempt?.count ?? 0, 4), 10000), seen }); return null; }
-    // 走到这里 valid 已包含 Boolean(record) 的检查;显式再收窄一次,避免可选链泄漏到调用方。
-    attempts.delete(key); return record ? { id: record.id, name: record.name } : null;
-  }
-  app.post<{ Body: { password?: string } }>('/api/v1/auth/password/login', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const record = await verifyPassword(request);
-    if (!record) return bad(reply, 401, 'invalid_credentials');
-    issueSession(record.id, reply); return { user: publicUser(record) };
-  });
-  /**
-   * 原生壳层（iOS / macOS）和脚本的登录：密码换一个 Bearer token。
-   * token 只在这次响应里出现一次，库里只存哈希；`POST /auth/logout` 带上它即可吊销。
-   */
-  app.post<{ Body: { password?: string; deviceName?: string } }>('/api/v1/auth/token', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const record = await verifyPassword(request);
-    if (!record) return bad(reply, 401, 'invalid_credentials');
-    const token = crypto.randomBytes(32).toString('base64url');
-    const createdAt = Date.now();
-    const expiresAt = new Date(createdAt + tokenTtlMs).toISOString();
-    const deviceName = typeof request.body?.deviceName === 'string' ? request.body.deviceName.trim().slice(0, 100) : '';
-    const tokenId = crypto.randomUUID();
-    store.db.prepare('INSERT INTO api_tokens(id,user_id,token_hash,name,created_at,expires_at) VALUES(?,?,?,?,?,?)').run(tokenId, record.id, hashToken(token), deviceName || 'Native client', new Date(createdAt).toISOString(), expiresAt);
-    return reply.code(201).send({ token, tokenId, tokenType: 'Bearer', expiresAt, user: publicUser(record) });
-  });
-  app.get('/api/v1/auth/session', async (request) => { const user = session(request); return { authenticated: Boolean(user), user: user ? publicUser(user) : null }; });
-  app.post('/api/v1/auth/logout', async (request, reply) => { if (!checkOrigin(request, reply)) return; const user = session(request); const authorization = request.headers.authorization; if (authorization?.startsWith('Bearer ')) { const bearer = authorization.slice(7).trim(); if (bearer) store.db.prepare('UPDATE api_tokens SET revoked_at=? WHERE token_hash=? AND revoked_at IS NULL').run(now(), hashToken(bearer)); } else if (user?.session_id) store.db.prepare('UPDATE sessions SET revoked_at=? WHERE id=?').run(now(), user.session_id); reply.header('set-cookie', `wangke_session=; Path=/; HttpOnly; SameSite=${sameSite}${secureCookie ? '; Secure' : ''}; Max-Age=0`); return { ok: true }; });
-  app.post<{ Body: { password?: string } }>('/api/v1/account/reset', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const current = session(request);
-    if (!current) return bad(reply, 401, 'unauthorized');
-    const record = await verifyPassword(request);
-    if (!record || record.id !== current.id) return bad(reply, 401, 'invalid_credentials');
-    await cloudRunner.reset();
-    await runner.reset();
-    clearDirectory(filesDir);
-    store.resetData();
-    bootstrap = replaceBootstrapSecret(secretFile);
-    attempts.clear();
-    reply.header('set-cookie', `wangke_session=; Path=/; HttpOnly; SameSite=${sameSite}${secureCookie ? '; Secure' : ''}; Max-Age=0`);
-    return { reset: true, initialized: false, bootstrapSecret: bootstrap.secret, expiresAt: new Date(bootstrap.createdAt + bootstrapTtlMs).toISOString() };
-  });
-
-  app.post<{ Body: { deviceName?: string } }>('/api/v1/pairing/create', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const code = crypto.randomBytes(32).toString('base64url');
-    const createdAt = Date.now();
-    const expiresAt = new Date(createdAt + 5 * 60_000).toISOString();
-    const deviceName = typeof request.body?.deviceName === 'string' ? request.body.deviceName.trim().slice(0, 100) : '';
-    store.db.prepare('INSERT INTO device_pairings(id,owner_id,code_hash,device_name,created_at,expires_at) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), user.id, hashToken(code), deviceName || null, new Date(createdAt).toISOString(), expiresAt);
-    return reply.code(201).send({ code, expiresAt });
-  });
-
-  app.get<{ Params: { code: string } }>('/api/v1/pairing/:code', async (request, reply) => {
-    const code = request.params.code;
-    if (typeof code !== 'string' || code.length < 32 || code.length > 128) return bad(reply, 404, 'pairing_not_found');
-    const pairing = store.db.prepare('SELECT approved_at,used_at,expires_at FROM device_pairings WHERE code_hash=?').get(hashToken(code)) as { approved_at: string | null; used_at: string | null; expires_at: string } | undefined;
-    if (!pairing || pairing.used_at || pairing.expires_at <= now()) return { status: 'expired' as const };
-    return { status: pairing.approved_at ? 'approved' as const : 'pending' as const, expiresAt: pairing.expires_at };
-  });
-
-  app.post<{ Params: { code: string }; Body: { deviceName?: string } }>('/api/v1/pairing/:code/approve', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const deviceName = typeof request.body?.deviceName === 'string' ? request.body.deviceName.trim().slice(0, 100) : '';
-    const approved = store.transaction(() => {
-      const pairing = store.db.prepare('SELECT id FROM device_pairings WHERE code_hash=? AND owner_id=? AND used_at IS NULL AND expires_at>?').get(hashToken(request.params.code), user.id, now()) as { id: string } | undefined;
-      if (!pairing) return false;
-      store.db.prepare('UPDATE device_pairings SET approved_at=COALESCE(approved_at,?), device_name=COALESCE(?,device_name) WHERE id=?').run(now(), deviceName || null, pairing.id);
-      return true;
-    });
-    if (!approved) return bad(reply, 404, 'pairing_not_found');
-    return { approved: true };
-  });
-
-  app.post<{ Params: { code: string }; Body: { deviceName?: string } }>('/api/v1/pairing/:code/exchange', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const token = crypto.randomBytes(32).toString('base64url');
-    const createdAt = Date.now();
-    const expiresAt = new Date(createdAt + 90 * 24 * 60 * 60_000).toISOString();
-    const deviceName = typeof request.body?.deviceName === 'string' ? request.body.deviceName.trim().slice(0, 100) : '';
-    const exchanged = store.transaction(() => {
-      const pairing = store.db.prepare('SELECT id,owner_id,device_name FROM device_pairings WHERE code_hash=? AND approved_at IS NOT NULL AND used_at IS NULL AND expires_at>?').get(hashToken(request.params.code), now()) as { id: string; owner_id: string; device_name: string | null } | undefined;
-      if (!pairing) return false;
-      const claimed = store.db.prepare('UPDATE device_pairings SET used_at=? WHERE id=? AND used_at IS NULL').run(new Date(createdAt).toISOString(), pairing.id);
-      if (claimed.changes !== 1) return false;
-      const tokenId = crypto.randomUUID();
-      store.db.prepare('INSERT INTO api_tokens(id,user_id,token_hash,name,created_at,expires_at) VALUES(?,?,?,?,?,?)').run(tokenId, pairing.owner_id, hashToken(token), deviceName || pairing.device_name || 'Paired device', new Date(createdAt).toISOString(), expiresAt);
-      return tokenId;
-    });
-    if (!exchanged) return bad(reply, 403, 'pairing_not_approved_or_expired');
-    return { token, tokenId: exchanged, tokenType: 'Bearer', expiresAt };
-  });
-
-  function webauthnConfigured(reply: FastifyReply) { if (!expectedOrigin || !rpID || !rpName || (!expectedOrigin.startsWith('https://') && !/^http:\/\/localhost(?::\d+)?$/.test(expectedOrigin))) { bad(reply, 503, 'webauthn_not_configured'); return false; } return true; }
-  app.post('/api/v1/auth/passkey/register/options', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return; const user = requireAuth(request, reply); if (!user || !webauthnConfigured(reply)) return;
-    store.db.prepare("DELETE FROM webauthn_challenges WHERE (used_at IS NOT NULL OR expires_at<=?) AND (user_id=? OR user_id IS NULL)").run(now(), user.id);
-    const credentials = expectRows<{ id: string }>(idRowSchema, store.db.prepare('SELECT id FROM passkey_credentials WHERE user_id=?').all(user.id), 'passkey_row_invalid');
-      const options = await generateRegistrationOptions({ rpName: rpName!, rpID: rpID!, userName: user.name, userID: new TextEncoder().encode(user.id), attestationType: 'none', authenticatorSelection: { residentKey: 'required', userVerification: 'required' }, excludeCredentials: credentials.map((x) => ({ id: x.id })) });
-    store.db.prepare('INSERT INTO webauthn_challenges(id,user_id,kind,challenge,created_at,expires_at) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), user.id, 'registration', options.challenge, now(), new Date(Date.now() + 120000).toISOString());
-    return options;
-  });
-  app.post('/api/v1/auth/passkey/register/verify', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return; const user = requireAuth(request, reply); if (!user || !webauthnConfigured(reply)) return;
-    const responseChallenge = webauthnChallengeFromResponse(request.body);
-    if (!responseChallenge) return bad(reply, 400, 'challenge_missing_or_expired');
-    const challenge = expectRow<{ id: string; challenge: string }>(challengeRowSchema, store.db.prepare("SELECT * FROM webauthn_challenges WHERE user_id=? AND kind='registration' AND challenge=? AND used_at IS NULL AND expires_at>? LIMIT 1").get(user.id, responseChallenge, now()), 'challenge_row_invalid');
-    if (!challenge) return bad(reply, 400, 'challenge_missing_or_expired');
-    // simplewebauthn 的 response 是客户端提交的 JSON:库内自己做结构校验,失败会抛出并被下面的 catch 统一返回 400。
-    try { const result = await verifyRegistrationResponse({ response: request.body as RegistrationResponseJSON, expectedChallenge: challenge.challenge, expectedOrigin: expectedOrigin!, expectedRPID: rpID!, requireUserVerification: true }); if (!result.verified || !result.registrationInfo) return bad(reply, 400, 'passkey_verification_failed'); const c = result.registrationInfo.credential; const consumed = store.transaction(() => { const claimed = store.db.prepare("UPDATE webauthn_challenges SET used_at=? WHERE id=? AND used_at IS NULL").run(now(), challenge.id); if (claimed.changes !== 1) return false; store.db.prepare('INSERT INTO passkey_credentials(id,user_id,public_key,counter,transports,created_at) VALUES(?,?,?,?,?,?)').run(c.id, user.id, Buffer.from(c.publicKey), c.counter, JSON.stringify(c.transports ?? []), now()); return true; }); if (!consumed) return bad(reply, 400, 'challenge_missing_or_expired'); return { verified: true }; } catch { return bad(reply, 400, 'passkey_verification_failed'); }
-  });
-  app.post('/api/v1/auth/passkey/login/options', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return; if (!webauthnConfigured(reply)) return;
-    store.db.prepare("DELETE FROM webauthn_challenges WHERE used_at IS NOT NULL OR expires_at<=?").run(now());
-    const options = await generateAuthenticationOptions({ rpID: rpID!, userVerification: 'required' }); const id = crypto.randomUUID(); store.db.prepare('INSERT INTO webauthn_challenges(id,kind,challenge,created_at,expires_at) VALUES(?,?,?,?,?)').run(id, 'authentication', options.challenge, now(), new Date(Date.now() + 120000).toISOString()); return options;
-  });
-  app.post('/api/v1/auth/passkey/login/verify', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return; if (!webauthnConfigured(reply)) return;
-    const body = request.body as AuthenticationResponseJSON;
-    const credential = expectRow<{ id: string; user_id: string | null; public_key: Uint8Array; counter: number }>(credentialRowSchema, store.db.prepare('SELECT * FROM passkey_credentials WHERE id=?').get(body?.id), 'passkey_row_invalid');
-    const responseChallenge = webauthnChallengeFromResponse(body);
-    const challenge = responseChallenge ? expectRow<{ id: string; challenge: string }>(challengeRowSchema, store.db.prepare("SELECT * FROM webauthn_challenges WHERE kind='authentication' AND challenge=? AND used_at IS NULL AND expires_at>? LIMIT 1").get(responseChallenge, now()), 'challenge_row_invalid') : null;
-    if (!credential || !challenge) return bad(reply, 401, 'passkey_verification_failed');
-    try { const result = await verifyAuthenticationResponse({ response: body, expectedChallenge: challenge.challenge, expectedOrigin: expectedOrigin!, expectedRPID: rpID!, credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter }, requireUserVerification: true }); if (!result.verified) return bad(reply, 401, 'passkey_verification_failed'); const consumed = store.transaction(() => { const claimed = store.db.prepare("UPDATE webauthn_challenges SET used_at=?, credential_id=?, user_id=? WHERE id=? AND used_at IS NULL AND (credential_id IS NULL OR credential_id=?) AND (user_id IS NULL OR user_id=?)").run(now(), credential.id, credential.user_id, challenge.id, credential.id, credential.user_id); if (claimed.changes !== 1) return false; store.db.prepare('UPDATE passkey_credentials SET counter=? WHERE id=?').run(result.authenticationInfo.newCounter, credential.id); return true; }); // 认证成功的凭据必然绑定过 user_id(注册时写入);为空说明库被改坏,按失败处理而不是写入无主会话。
-      if (!consumed || !credential.user_id) return bad(reply, 401, 'passkey_verification_failed');
-      issueSession(credential.user_id, reply);
-      return { verified: true, user: publicUser(expectRow<{ id: string; name: string }>(userRowSchema, store.db.prepare('SELECT * FROM users WHERE id=?').get(credential.user_id), 'user_row_invalid')) }; } catch { return bad(reply, 401, 'passkey_verification_failed'); }
-  });
-
-  /** Agent 行只投影这五个字段;行在查询处已用 agentProfileRowSchema 收窄。 */
-  function agentDto(row: Pick<AgentProfileRow, 'id' | 'name' | 'avatar' | 'role' | 'enabled'>) {
-    return { id: row.id, name: row.name, avatar: row.avatar ?? null, role: row.role, enabled: Boolean(row.enabled) };
-  }
-  function ensureDefaultAgent(userId: string) {
-    // Reuse the old default profile so a branding change does not create a second Bot.
-    const existing = expectRow<AgentProfileRow>(agentProfileRowSchema, store.db.prepare("SELECT * FROM agent_profiles WHERE owner_id=? AND name IN ('DeepStudent Go', 'Wangke Bot') ORDER BY created_at LIMIT 1").get(userId), 'agent_profile_row_invalid');
-    if (existing) return existing;
-    const timestamp = now();
-    const row = { id: crypto.randomUUID(), owner_id: userId, name: 'DeepStudent Go', avatar: null, role: '本机学习助手', system_prompt: 'You are DeepStudent Go, a safe learning assistant.', enabled: 1, created_at: timestamp, updated_at: timestamp };
-    store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,avatar,role,system_prompt,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(row.id, row.owner_id, row.name, row.avatar, row.role, row.system_prompt, row.enabled, row.created_at, row.updated_at);
-    projects.provisionAgent(userId, row.id);
-    return row;
-  }
-  function ownedThread(userId: string, threadId: string) { return expectRow<ThreadRow>(threadRowSchema, store.db.prepare('SELECT * FROM threads WHERE id=? AND owner_id=?').get(threadId, userId), 'thread_row_invalid'); }
-  function appendEvent(threadId: string, type: string, payload: unknown) {
-    const seq = (store.db.prepare('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM message_events WHERE thread_id=?').get(threadId) as { seq: number }).seq;
-    store.db.prepare('INSERT INTO message_events(id,thread_id,seq,type,payload,created_at) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), threadId, seq, type, JSON.stringify(payload), now());
-  }
-
-  app.get('/api/v1/agents', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    ensureDefaultAgent(user.id);
-    return { agents: expectRows<AgentProfileRow>(agentProfileRowSchema, store.db.prepare('SELECT * FROM agent_profiles WHERE owner_id=? ORDER BY created_at').all(user.id), 'agent_profile_row_invalid').map(agentDto) };
-  });
-  app.post<{ Body: { name?: string; avatar?: string; role?: string; systemPrompt?: string } }>('/api/v1/agents', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const body = request.body ?? {};
-    const name = typeof body.name === 'string' ? body.name.trim() : '';
-    const role = typeof body.role === 'string' ? body.role.trim() : '';
-    const systemPrompt = typeof body.systemPrompt === 'string' ? body.systemPrompt.trim() : '';
-    const avatar = typeof body.avatar === 'string' ? body.avatar.trim() : '';
-    if (!name || name.length > 80 || /[\u0000\r\n]/.test(name) || role.length > 120 || systemPrompt.length > 4000 || avatar.length > 500) return bad(reply, 400, 'invalid_agent_profile');
-    if ((expectRow<{ count: number }>({ type: 'object', properties: { count: { type: 'integer' } }, required: ['count'] }, store.db.prepare('SELECT COUNT(*) AS count FROM agent_profiles WHERE owner_id=?').get(user.id), 'agent_profile_count_invalid')?.count ?? 0) >= 16) return bad(reply, 409, 'agent_limit_reached');
-    const timestamp = now(); const row = { id: crypto.randomUUID(), name, avatar: avatar || null, role: role || '协作 Agent', system_prompt: systemPrompt || `You are ${name}, a safe collaborative learning assistant.`, enabled: 1, created_at: timestamp, updated_at: timestamp };
-    try { store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,avatar,role,system_prompt,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(row.id, user.id, row.name, row.avatar, row.role, row.system_prompt, row.enabled, row.created_at, row.updated_at); } catch (error: any) { if (String(error?.code) === 'SQLITE_CONSTRAINT_UNIQUE') return bad(reply, 409, 'agent_name_taken'); throw error; }
-    projects.provisionAgent(user.id, row.id);
-    return reply.code(201).send(agentDto(row));
-  });
-
-  const threadFields = sqlKeyword('id,mode,title,project_id AS projectId,agent_id AS agentId,archived,created_at AS createdAt,updated_at AS updatedAt');
-  /** 只读线程摘要投影;`archived` 是 SQLite 的 0/1,由调用方转成布尔。 */
-  type ThreadProjection = ThreadRow & { projectId: string | null; agentId: string | null; createdAt: string; updatedAt: string; preview?: string | null };
-  /** 拍照式读取:只读线程摘要列并收窄行形状,summary/patch 两处共用同一语句。 */
-  const threadSummary = (threadId: string) => expectRow<ThreadProjection>(threadProjectionSchema, store.db.prepare(sql`SELECT ${threadFields} FROM threads WHERE id=?`.sql).get(threadId), 'thread_row_invalid')!;
-  /** 分页/全量列表共用的行形状:线程摘要 + 可选的最后一句话预览。 */
-  const threadProjectionSchema = {
-    type: 'object', additionalProperties: true,
-    properties: { id: { type: 'string' }, mode: { type: 'string' }, title: { type: ['string', 'null'] }, projectId: { type: ['string', 'null'] },
-      agentId: { type: ['string', 'null'] }, archived: { type: ['integer', 'boolean', 'null'] }, createdAt: { type: 'string' }, updatedAt: { type: 'string' }, preview: { type: ['string', 'null'] } },
-    required: ['id', 'mode', 'createdAt', 'updatedAt'],
-  } as const;
-  app.get<{ Querystring: { projectId?: string; cursor?: string; limit?: string } }>('/api/v1/threads/page', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const { projectId, cursor } = request.query;
-    if (projectId) projects.get(user.id, projectId);
-    const limit = request.query.limit === undefined ? 50 : Number(request.query.limit);
-    let before: { at: string; id: string } | undefined;
-    if (cursor !== undefined) {
-      try {
-        if (cursor.length > 1000) throw new Error('invalid_cursor');
-        const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-        if (!value || typeof value.at !== 'string' || value.at.length > 100 || typeof value.id !== 'string' || !value.id || value.id.length > 200) throw new Error('invalid_cursor');
-        before = value;
-      } catch { return bad(reply, 400, 'invalid_thread_cursor'); }
-    }
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) return bad(reply, 400, 'invalid_thread_cursor');
-    const preview = sqlVariant("(SELECT substr(content,1,160) FROM messages WHERE thread_id=threads.id AND kind='text' ORDER BY seq DESC LIMIT 1) AS preview", 0);
-    // 分页文本只随「有没有项目筛选 / 有没有游标」变化,两种都来自查询参数的存在性而非其内容;
-    // 项目 id、游标三列与 limit 全部走绑定值。
-    const pageQuery = sqlFixed(`SELECT ${threadFields.sql},${preview.sql} FROM threads WHERE owner_id=? AND mode='bot'
-      AND ${projectId ? 'project_id=?' : 'project_id IS NULL'}`, projectId ? 2 : 1, [
-      ...(before ? [sqlVariant('AND (updated_at<? OR (updated_at=? AND id>?))', 3)] : []),
-      sqlVariant('ORDER BY updated_at DESC,id LIMIT ?', 1),
-    ]);
-    const rows = expectRows<ThreadProjection>(threadProjectionSchema,
-      store.db.prepare(pageQuery.sql).all(user.id, ...(projectId ? [projectId] : []), ...(before ? [before.at, before.at, before.id] : []), limit + 1), 'thread_row_invalid');
-    const page = rows.slice(0, limit), last = page.at(-1);
-    return { threads: page.map(row => ({ ...row, archived: Boolean(row.archived) })), nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify({ at: last.updatedAt, id: last.id })).toString('base64url') : null };
-  });
-  app.get<{ Params: { id: string } }>('/api/v1/threads/:id/summary', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    return { ...threadSummary(thread.id), archived: Boolean(thread.archived) };
-  });
-  app.get<{ Querystring: { projectId?: string; agentId?: string } }>('/api/v1/threads', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const { projectId, agentId } = request.query;
-    if (projectId) projects.get(user.id, projectId);
-    if (agentId) projects.agent(user.id, agentId);
-    // preview：最近一条文本消息，给会话列表显示「最后一句话」。走 messages(thread_id, seq) 唯一索引，每行一次索引查找。
-    const preview = sqlVariant("(SELECT content FROM messages WHERE thread_id=threads.id AND kind='text' ORDER BY seq DESC LIMIT 1) AS preview", 0);
-    // 两个筛选都只在其存在时追加,数量随存在性变化,值一律绑定。
-    const listQuery = sqlFixed(`SELECT ${threadFields.sql},${preview.sql} FROM threads WHERE owner_id=?`, 1, [
-      ...(projectId ? [sqlVariant('AND project_id=?', 1)] : []),
-      ...(agentId ? [sqlVariant('AND agent_id=?', 1)] : []),
-      sqlVariant('ORDER BY updated_at DESC,id'),
-    ]);
-    const rows = expectRows<ThreadProjection>(threadProjectionSchema, store.db.prepare(listQuery.sql).all(user.id, ...(projectId ? [projectId] : []), ...(agentId ? [agentId] : [])), 'thread_row_invalid');
-    return { threads: rows.map(row => ({ ...row, archived: Boolean(row.archived), preview: typeof row.preview === 'string' ? row.preview.slice(0, 160) : null })) };
-  });
-  app.post<{ Body: { mode?: ConversationMode; title?: string; projectId?: string; agentId?: string } }>('/api/v1/threads', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    if (request.body?.mode !== 'chat' && request.body?.mode !== 'bot') return bad(reply, 400, 'invalid_mode');
-    const projectId = request.body.projectId ?? null;
-    if (projectId !== null && (typeof projectId !== 'string' || !projectId || request.body.mode !== 'bot')) return bad(reply, 400, 'invalid_project');
-    const agentId = request.body.agentId ?? (request.body.mode === 'bot' ? ensureDefaultAgent(user.id).id : null);
-    if (agentId !== null) projects.agent(user.id, agentId);
-    if (projectId) projects.authorize(user.id, projectId, agentId);
-    const id = crypto.randomUUID(); const timestamp = now(); const title = String(request.body.title ?? '').slice(0, 200) || null;
-    store.transaction(() => {
-      store.db.prepare('INSERT INTO threads(id,owner_id,mode,title,project_id,agent_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(id, user.id, request.body!.mode, title, projectId, agentId, timestamp, timestamp);
-      if (request.body!.mode === 'bot') {
-        store.db.prepare('INSERT INTO thread_participants(thread_id,agent_id,joined_at) VALUES(?,?,?)').run(id, agentId, timestamp);
-      }
-    });
-    return reply.code(201).send({ id, mode: request.body.mode, title, projectId, agentId, archived: false, createdAt: timestamp, updatedAt: timestamp });
-  });
-  app.patch<{ Params: { id: string }; Body: { title?: unknown; archived?: unknown } }>('/api/v1/threads/:id', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    const body = request.body;
-    if (!body || Object.keys(body).some(k => !['title', 'archived'].includes(k)) || (body.title !== undefined && (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 200)) || (body.archived !== undefined && typeof body.archived !== 'boolean')) return bad(reply, 400, 'invalid_thread');
-    store.db.prepare('UPDATE threads SET title=?,archived=?,updated_at=? WHERE id=?').run(body.title ?? thread.title, Number(body.archived ?? thread.archived), now(), thread.id);
-    if (body.archived === true) {
-      const runs = store.db.prepare("SELECT id FROM runs WHERE thread_id=? AND status IN ('queued','running','waiting_user')").all(thread.id) as Array<{ id: string }>;
-      for (const run of runs) { store.db.prepare("UPDATE runs SET status='cancelled',completed_at=?,wake_at=NULL WHERE id=?").run(now(), run.id); runner.cancel(run.id); }
-    }
-    return { ...threadSummary(thread.id), archived: Boolean(body.archived ?? thread.archived) };
-  });
-  app.delete<{ Params: { id: string } }>('/api/v1/threads/:id', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    if (runner.isThreadActive(thread.id) || store.db.prepare("SELECT 1 FROM runs WHERE thread_id=? AND status IN ('queued','running','waiting_user','paused')").get(thread.id) || store.db.prepare("SELECT 1 FROM cloud_tasks t JOIN runs r ON r.id=t.parent_run_id WHERE r.thread_id=? AND t.status IN ('queued','running','waiting_user')").get(thread.id)) return bad(reply, 409, 'thread_busy');
-    store.transaction(() => {
-      // Gateway study tasks keep a parent_run_id without cascading to runs;
-      // remove those terminal child tasks before the thread's run history is
-      // deleted, otherwise SQLite correctly rejects the thread deletion.
-      store.db.prepare('DELETE FROM approvals WHERE thread_id=?').run(thread.id);
-      store.db.prepare('DELETE FROM bot_operations WHERE step_id IN (SELECT id FROM run_steps WHERE run_id IN (SELECT id FROM runs WHERE thread_id=?))').run(thread.id);
-      // Keep owner-level usage even after conversation deletion; deleting the
-      // ledger here would allow a chat deletion to reset the daily budget.
-      store.db.prepare('UPDATE bot_requests SET run_id=NULL,step_id=NULL WHERE run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread.id);
-      store.db.prepare('DELETE FROM bot_artifacts WHERE run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread.id);
-      store.db.prepare('DELETE FROM bot_summaries WHERE run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread.id);
-      store.db.prepare('DELETE FROM cloud_tasks WHERE parent_run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread.id);
-      store.db.prepare('DELETE FROM threads WHERE id=?').run(thread.id);
-    });
-    return { deleted: true };
-   });
-  app.post<{ Params: { id: string }; Body: { agentId?: string } }>('/api/v1/threads/:id/participants', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread || thread.mode !== 'bot') return bad(reply, 404, 'thread_not_found');
-    if (thread.project_id) return bad(reply, 409, 'project_thread_single_agent');
-    const agent = expectRow<AgentProfileRow>(agentProfileRowSchema, store.db.prepare('SELECT * FROM agent_profiles WHERE id=? AND owner_id=? AND enabled=1').get(request.body?.agentId, user.id), 'agent_profile_row_invalid');
-    if (!agent) return bad(reply, 404, 'agent_not_found');
-    if ((expectRow<{ count: number }>({ type: 'object', properties: { count: { type: 'integer' } }, required: ['count'] }, store.db.prepare('SELECT COUNT(*) AS count FROM thread_participants WHERE thread_id=?').get(thread.id), 'participant_count_invalid')?.count ?? 0) >= 8) return bad(reply, 409, 'participant_limit_reached');
-    store.db.prepare('INSERT OR IGNORE INTO thread_participants(thread_id,agent_id,joined_at) VALUES(?,?,?)').run(thread.id, agent.id, now());
-    return agentDto(agent);
-  });
-  app.delete<{ Params: { id: string; agentId: string } }>('/api/v1/threads/:id/participants/:agentId', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    if (thread.project_id) return bad(reply, 409, 'project_thread_single_agent');
-    const agent = store.db.prepare('SELECT id,name FROM agent_profiles WHERE id=? AND owner_id=?').get(request.params.agentId, user.id) as { id: string; name: string } | undefined;
-    if (!agent) return bad(reply, 404, 'agent_not_found');
-    const removed = store.db.prepare('DELETE FROM thread_participants WHERE thread_id=? AND agent_id=?').run(thread.id, agent.id);
-    if (!removed.changes) return bad(reply, 404, 'participant_not_found');
-    return { removed: true };
-  });
-
-  function fileDto(row: FileRecordRow) {
-    return { id: row.id, originalName: row.original_name, mimeType: row.mime_type, sizeBytes: row.size_bytes, sha256: row.sha256, createdAt: row.created_at };
-  }
-  app.get('/api/v1/files/config', async () => ({ maxFileBytes }));
-  app.post<{ Querystring: { afterRevision?: string } }>('/api/v1/files/migrate-chat-attachments', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const afterRevision = request.query.afterRevision === undefined ? 0 : Number(request.query.afterRevision);
-    if (!Number.isSafeInteger(afterRevision) || afterRevision < 0) return bad(reply, 400, 'invalid_migration_cursor');
-    return migrateChatAttachmentReferences(store, cloudRecords, filesDir, user.id, 20, afterRevision);
-  });
-  app.post<{ Querystring: { afterId?: string } }>('/api/v1/files/migrate-task-attachments', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    if (request.query.afterId !== undefined && request.query.afterId.length > 100) return bad(reply, 400, 'invalid_migration_cursor');
-    return migrateTerminalTaskAttachmentReferences(store, filesDir, user.id, 20, request.query.afterId);
-  });
-  app.get('/api/v1/files', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    return { files: expectRows<FileRecordRow>(fileRecordRowSchema, store.db.prepare('SELECT * FROM files WHERE owner_id=? ORDER BY created_at DESC LIMIT 500').all(user.id), 'file_row_invalid').map(fileDto) };
-  });
-  app.post<{ Querystring: { operationId?: string } }>('/api/v1/files', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const body = request.body instanceof Readable ? request.body : null;
-    const declaredSize = request.headers['content-length'] === undefined ? undefined : Number(request.headers['content-length']);
-    if (!body || (declaredSize !== undefined && (!Number.isSafeInteger(declaredSize) || declaredSize < 1 || declaredSize > maxFileBytes))) return bad(reply, 413, 'file_too_large_or_invalid');
-    const encodedName = request.headers['x-file-name'];
-    const mimeHeader = request.headers['x-file-mime'];
-    let originalName = typeof encodedName === 'string' ? encodedName : '';
-    try { originalName = decodeURIComponent(originalName); } catch { return bad(reply, 400, 'invalid_file_name'); }
-    if ((encodedName !== undefined && !originalName) || originalName.length > 255 || /[\u0000\\/]/.test(originalName)) return bad(reply, 400, 'invalid_file_name');
-    const mimeType = typeof mimeHeader === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(mimeHeader) ? mimeHeader.slice(0, 200) : 'application/octet-stream';
-    if (request.query.operationId !== undefined) {
-      const operationId = request.query.operationId;
-      const admitted = store.db.prepare('SELECT digest,status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(user.id, operationId) as { digest: string; status: string; result: string } | undefined;
-      if (!admitted) return bad(reply, 409, 'library_blob_not_admitted');
-      const receipt = JSON.parse(admitted.result);
-      if (receipt.operation?.kind !== 'importLibraryBlob') return bad(reply, 403, 'library_blob_not_admitted');
-      if (admitted.status === 'completed') return reply.code(201).send(receipt.file);
-      if (admitted.status !== 'pending' || receipt.phase !== 'admitted') return bad(reply, 409, 'library_blob_uncertain');
-      const assertBlobPrincipal = () => {
-        if (session(request)?.id !== user.id) throw new Error('library_import_account_changed');
-      };
-      assertBlobPrincipal();
-      store.db.prepare('UPDATE client_commands SET result=? WHERE owner_id=? AND operation_id=?').run(JSON.stringify({ ...receipt, phase: 'receiving' }), user.id, operationId);
-      try {
-        const operation = receipt.operation;
-        const file = await receiveFile(store, filesDir, user.id, body, 'cache-blob', operation.contentType || 'application/octet-stream', maxFileBytes, operation.size,
-          assertBlobPrincipal, fileOperationId(user.id, operationId, 'library-import'));
-        if (file.sha256 !== operation.sha256 || file.sizeBytes !== operation.size) throw new Error('library_blob_hash_mismatch');
-        store.db.prepare("UPDATE client_commands SET status='completed',result=? WHERE owner_id=? AND operation_id=?").run(JSON.stringify({ ...receipt, phase: 'completed', file }), user.id, operationId);
-        return reply.code(201).send(file);
-      } catch (error) {
-        store.db.prepare('UPDATE client_commands SET error=? WHERE owner_id=? AND operation_id=?').run(String(error), user.id, operationId);
-        throw error;
-      }
-    }
-    const file = await receiveFile(store, filesDir, user.id, body, originalName, mimeType, maxFileBytes, declaredSize);
-    const metadata = /^image\/(png|jpeg|webp|gif)$/.test(file.mimeType)
-      ? await ensureImageReference(store, filesDir, user.id, file.id, () => { if (session(request)?.id !== user.id) throw new Error('file_account_changed'); }) : {};
-    return reply.code(201).send({ ...file, ...metadata });
-  });
-  app.get<{ Params: { id: string } }>('/api/v1/files/:id', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const file = expectRow<FileRecordRow>(fileRecordRowSchema, store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(request.params.id, user.id), 'file_row_invalid');
-    if (!file) return bad(reply, 404, 'file_not_found');
-    const previewOwner = store.db.prepare('SELECT f.owner_id FROM attachment_images a LEFT JOIN files f ON f.id=a.original_id WHERE a.preview_id=?').get(file.id) as { owner_id: string | null } | undefined;
-    if (previewOwner && previewOwner.owner_id !== user.id) return bad(reply, 404, 'file_not_found');
-    const resolved = path.resolve(filesDir, file.storage_name);
-    if (!resolved.startsWith(`${path.resolve(filesDir)}${path.sep}`)) return bad(reply, 404, 'file_not_found');
-    if (!fs.existsSync(resolved)) return bad(reply, 404, 'file_not_found');
-    // Lazy <img> consumers can reuse bytes, but must reauthorize on every
-    // revalidation. Never mark account-owned files public or immutable.
-    const etag = `"${file.sha256}"`;
-    reply.header('cache-control', 'private, no-cache').header('etag', etag);
-    if (request.headers['if-none-match']?.split(',').some(value => value.trim() === '*' || value.trim().replace(/^W\//, '') === etag)) return reply.code(304).send();
-    reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.original_name)}`);
-    reply.type(file.mime_type);
-    reply.header('accept-ranges', 'bytes');
-    const range = byteRange(request.headers.range, file.size_bytes);
-    if (range === false) return reply.code(416).header('content-range', `bytes */${file.size_bytes}`).send();
-    if (range) {
-      reply.code(206).header('content-range', `bytes ${range.start}-${range.end}/${file.size_bytes}`).header('content-length', range.end - range.start + 1);
-      return reply.send(fs.createReadStream(resolved, range));
-    }
-    reply.header('content-length', file.size_bytes);
-    return reply.send(fs.createReadStream(resolved));
-  });
-  app.delete<{ Params: { id: string } }>('/api/v1/files/:id', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const file = expectRow<FileRecordRow>(fileRecordRowSchema, store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(request.params.id, user.id), 'file_row_invalid');
-    if (!file) return bad(reply, 404, 'file_not_found');
-    if (attachmentFileInUse(store, user.id, file.id)) return bad(reply, 409, 'file_in_use');
-    const preview = store.db.prepare('SELECT f.id,f.storage_name FROM attachment_images a JOIN files f ON f.id=a.preview_id WHERE a.original_id=? AND f.owner_id=?').get(file.id, user.id) as { id: string; storage_name: string } | undefined;
-    store.db.prepare('DELETE FROM files WHERE id=? AND owner_id=?').run(file.id, user.id);
-    fs.rmSync(path.join(filesDir, file.storage_name), { force: true });
-    if (preview && !attachmentFileInUse(store, user.id, preview.id)) {
-      store.db.prepare('DELETE FROM files WHERE id=? AND owner_id=?').run(preview.id, user.id);
-      fs.rmSync(path.join(filesDir, preview.storage_name), { force: true });
-    }
-    return { deleted: true };
-  });
-  app.get<{ Params: { id: string }; Querystring: { beforeSeq?: string } }>('/api/v1/threads/:id/snapshot', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    if (!ownedThread(user.id, request.params.id)) return bad(reply, 404, 'thread_not_found');
-    const beforeSeq = request.query.beforeSeq === undefined ? Number.MAX_SAFE_INTEGER : Number(request.query.beforeSeq);
-    if (!Number.isSafeInteger(beforeSeq) || beforeSeq < 1) return bad(reply, 400, 'invalid_message_cursor');
-    return messageHistory.snapshot(request.params.id, beforeSeq);
-  });
-  app.get<{ Params: { id: string }; Querystring: { beforeSeq?: string; limit?: string } }>('/api/v1/threads/:id/messages', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    if (!ownedThread(user.id, request.params.id)) return bad(reply, 404, 'thread_not_found');
-    const before = request.query.beforeSeq === undefined ? Number.MAX_SAFE_INTEGER : Number(request.query.beforeSeq);
-    const limit = request.query.limit === undefined ? 50 : Number(request.query.limit);
-    if (!Number.isSafeInteger(before) || before < 1 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) return bad(reply, 400, 'invalid_message_cursor');
-    return store.db.transaction(() => messageHistory.page(request.params.id, before, limit))();
-  });
-  app.get<{ Params: { id: string }; Querystring: { fromSeq?: string; toSeq?: string } }>('/api/v1/threads/:id/sync-state', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    if (!ownedThread(user.id, request.params.id)) return bad(reply, 404, 'thread_not_found');
-    const from = request.query.fromSeq === undefined ? Number.MAX_SAFE_INTEGER : Number(request.query.fromSeq);
-    const to = request.query.toSeq === undefined ? Number.MAX_SAFE_INTEGER : Number(request.query.toSeq);
-    if (!Number.isSafeInteger(from) || from < 1 || !Number.isSafeInteger(to) || to < from) return bad(reply, 400, 'invalid_message_cursor');
-    return messageHistory.state(request.params.id, from, to);
-  });
-  app.get<{ Params: { id: string } }>('/api/v1/threads/:id', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    const participants = expectRows<AgentProfileRow>(agentProfileSummaryRowSchema, store.db.prepare('SELECT a.* FROM agent_profiles a JOIN thread_participants p ON p.agent_id=a.id WHERE p.thread_id=? ORDER BY p.joined_at').all(thread.id), 'agent_profile_row_invalid').map(agentDto);
-    const approvals = store.db.prepare('SELECT id,message_id AS messageId,run_id AS runId,status,created_at AS createdAt,resolved_at AS resolvedAt,resolution FROM approvals WHERE thread_id=? ORDER BY created_at').all(thread.id);
-    const questions = store.db.prepare(sql`SELECT q.id,q.run_id AS runId,q.message_id AS messageId,q.status,
-      q.created_at AS createdAt,q.answered_at AS answeredAt,q.answer_message_id AS answerMessageId
-      FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE r.thread_id=? ORDER BY q.created_at`.sql).all(thread.id);
-    const runs = store.db.prepare(sql`SELECT id,status,error_code AS errorCode,wake_at AS wakeAt
-      FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 20`.sql).all(thread.id);
-    // running：有没有排队或正在跑的任务，前端据此显示「正在输入」和已读。
-    const running = Boolean(store.db.prepare("SELECT 1 FROM runs WHERE thread_id=? AND status IN ('queued','running','waiting_event') LIMIT 1").get(thread.id));
-    return { id: thread.id, mode: thread.mode, title: thread.title, projectId: thread.project_id, agentId: thread.agent_id, archived: Boolean(thread.archived), createdAt: thread.created_at, updatedAt: thread.updated_at, participants, approvals, questions, runs, running, messages: store.db.prepare('SELECT id,thread_id AS threadId,client_nonce AS clientNonce,seq,role,kind,content,reply_to AS replyTo,created_at AS createdAt FROM messages WHERE thread_id=? ORDER BY seq').all(thread.id) };
-  });
-  app.get<{ Params: { id: string } }>('/api/v1/threads/:id/state', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    const runs = expectRows<{ id: string; status: string }>(runStatusListSchema, store.db.prepare("SELECT id,status,error_code AS errorCode,wake_at AS wakeAt FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 20").all(thread.id), 'run_row_invalid');
-    const questions = store.db.prepare("SELECT q.id,q.run_id AS runId,q.message_id AS messageId,q.status,q.created_at AS createdAt,q.answered_at AS answeredAt,q.answer_message_id AS answerMessageId FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE r.thread_id=? ORDER BY q.created_at").all(thread.id);
-    return { runs, questions, running: runs.some(run => ['queued','running','waiting_user','waiting_event'].includes(run.status)) };
-  });
-  app.post<{ Params: { id: string } }>('/api/v1/threads/:id/stop', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    return botService.stop(user.id, thread.id);
-  });
-  app.get<{ Params: { id: string } }>('/api/v1/threads/:id/runs', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    return { runs: botService.status(user.id, thread.id) };
-  });
-  app.post<{ Params: { id: string }; Body: { clientNonce?: string; role?: MessageRole; kind?: string; content?: string; replyTo?: string; modelSelection?: import('@wangke/contracts/cloud').TaskModelSelection; target?: { kind?: string; runId?: string; questionId?: string } } }>('/api/v1/threads/:id/messages', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    if (thread.archived) return bad(reply, 409, 'thread_archived');
-    if (thread.project_id) projects.authorize(user.id, thread.project_id, thread.agent_id);
-    const b = request.body ?? {};
-    const nonce = b.clientNonce;
-    const kind = b.kind ?? 'text';
-    // This endpoint accepts client-authored messages only. Server roles cannot be forged by a browser client.
-    if (typeof nonce !== 'string' || nonce.length < 1 || nonce.length > 200 ||
-        (b.role !== undefined && b.role !== 'user') || !messageKinds.has(kind) ||
-        typeof b.content !== 'string' || b.content.length > 100000 ||
-        (kind === 'attachment' && (() => {
-          try {
-            const parsed = parseBotAttachments(b.content);
-            if (!parsed) return true;
-            return parsed.files.some(value => {
-              if (thread.project_id) {
-                if (value.projectId !== thread.project_id || typeof value.projectPath !== 'string') return true;
-                if (process.platform !== 'linux') projects.assertNoExecution(thread.project_id);
-                const file = projects.files.open(thread.project_id, value.projectPath); fs.closeSync(file.fd); return false;
-              }
-              return typeof value.fileId !== 'string' || !store.db.prepare('SELECT 1 FROM files WHERE id=? AND owner_id=?').get(value.fileId, user.id);
-            });
-          } catch { return true; }
-        })())) return bad(reply, 400, 'invalid_message');
-    if (b.replyTo && !store.db.prepare('SELECT 1 FROM messages WHERE id=? AND thread_id=?').get(b.replyTo, thread.id)) return bad(reply, 400, 'invalid_reply_to');
-    const makeDto = (row: MessageRecordRow, deduplicated = false) => ({ id: row.id, threadId: row.thread_id, clientNonce: row.client_nonce, seq: row.seq, role: row.role, kind: row.kind, content: row.content, replyTo: row.reply_to, createdAt: row.created_at, ...(deduplicated ? { deduplicated: true } : {}) });
-    if (b.target !== undefined && (!b.target || !['run', 'question'].includes(b.target.kind ?? '') || (b.target.kind === 'run' ? typeof b.target.runId !== 'string' : typeof b.target.questionId !== 'string'))) return bad(reply, 400, 'invalid_target');
-    try {
-      const message = botService.send(user.id, thread.id, { clientNonce: nonce, kind, content: b.content!, replyTo: b.replyTo, modelSelection: b.modelSelection, target: b.target?.kind === 'run' ? { kind: 'run', runId: b.target.runId } : b.target?.kind === 'question' ? { kind: 'question', questionId: b.target.questionId } : undefined });
-      if (thread.mode === 'bot') {
-        // send() 的回执可能带 runId(同步入队);否则按触发消息找回。两者都只读 id,不存在就是没有 run。
-        const receiptRunId = 'receipt' in message && message.receipt && typeof message.receipt === 'object' && 'runId' in message.receipt ? message.receipt.runId : undefined;
-        const run = typeof receiptRunId === 'string' ? { id: receiptRunId } : expectRow<{ id: string }>(idRowSchema, store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id), 'run_row_invalid');
-        if (run) runner.enqueue(run.id);
-      }
-      return reply.code(message.deduplicated ? 200 : 201).send(message);
-    } catch (error: any) {
-      // 准入类拒绝(含未配置模型)统一按契约折叠:具名错误类与旧式 message 码都要认,
-      // 折不出码的才是真故障,原样上抛保持 500。
-      const admission = botMessageAdmissionError(error, null);
-      if (admission) return admissionBad(reply, botMessageAdmissionStatus(admission), admission);
-      if (String(error?.code) === 'SQLITE_CONSTRAINT_UNIQUE') {
-        const row = expectRow<MessageRecordRow>(messageRecordRowSchema, store.db.prepare('SELECT * FROM messages WHERE thread_id=? AND client_nonce=?').get(thread.id, nonce), 'message_row_invalid');
-        if (row) return makeDto(row, true);
-      }
-      throw error;
-    }
-  });
-
-  app.post<{ Params: { id: string }; Body: { reaction?: string } }>('/api/v1/messages/:id/reactions', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const reaction = typeof request.body?.reaction === 'string' ? request.body.reaction.trim() : '';
-    if (!/^(?:\p{Extended_Pictographic}|[+\-_*#]){1,8}$/u.test(reaction)) return bad(reply, 400, 'invalid_reaction');
-    const message = store.db.prepare('SELECT m.id,m.thread_id FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.id=? AND t.owner_id=?').get(request.params.id, user.id) as { id: string; thread_id: string } | undefined;
-    if (!message) return bad(reply, 404, 'message_not_found');
-    const result = store.transaction(() => {
-      const existing = store.db.prepare('SELECT 1 FROM message_reactions WHERE message_id=? AND user_id=? AND reaction=?').get(message.id, user.id, reaction);
-      if (existing) { store.db.prepare('DELETE FROM message_reactions WHERE message_id=? AND user_id=? AND reaction=?').run(message.id, user.id, reaction); appendEvent(message.thread_id, 'message.reaction', { messageId: message.id, reaction, active: false }); return false; }
-      store.db.prepare('INSERT INTO message_reactions(message_id,user_id,reaction,created_at) VALUES(?,?,?,?)').run(message.id, user.id, reaction, now());
-      appendEvent(message.thread_id, 'message.reaction', { messageId: message.id, reaction, active: true });
-      return true;
-    });
-    return { messageId: message.id, reaction, active: result };
-  });
-
-  app.get<{ Params: { id: string } }>('/api/v1/messages/:id/reactions', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const message = store.db.prepare('SELECT m.id FROM messages m JOIN threads t ON t.id=m.thread_id WHERE m.id=? AND t.owner_id=?').get(request.params.id, user.id) as { id: string } | undefined;
-    if (!message) return bad(reply, 404, 'message_not_found');
-    return { reactions: store.db.prepare('SELECT reaction,COUNT(*) AS count,MAX(CASE WHEN user_id=? THEN 1 ELSE 0 END) AS mine FROM message_reactions WHERE message_id=? GROUP BY reaction ORDER BY reaction').all(user.id, message.id) };
-  });
-
-  app.get<{ Params: { id: string } }>('/api/v1/approvals/:id', async (request, reply) => {
-    const user = requireAuth(request, reply); if (!user) return;
-    const approval = expectRow<ApprovalProjectionRow>(approvalProjectionRowSchema, store.db.prepare('SELECT a.id,a.message_id AS messageId,a.thread_id AS threadId,a.run_id AS runId,a.status,a.created_at AS createdAt,a.resolved_at AS resolvedAt,a.resolution FROM approvals a JOIN threads t ON t.id=a.thread_id WHERE a.id=? AND t.owner_id=?').get(request.params.id, user.id), 'approval_row_invalid');
-    if (!approval) return bad(reply, 404, 'approval_not_found');
-    return approval;
-  });
-  app.post<{ Params: { id: string }; Body: { approved?: boolean; resolution?: string } }>('/api/v1/approvals/:id/resolve', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    if (typeof request.body?.approved !== 'boolean') return bad(reply, 400, 'invalid_approval_resolution');
-    const resolution = typeof request.body.resolution === 'string' ? request.body.resolution.trim().slice(0, 2000) : '';
-    const resolved = botService.resolve(user.id, request.params.id, request.body.approved, resolution);
-    if ('error' in resolved) {
-      const errorCode = resolved.error ?? 'approval_not_found';
-      return bad(reply, errorCode === 'approval_not_found' ? 404 : 409, errorCode);
-    }
-    if (resolved.runId) runner.enqueue(resolved.runId);
-    return resolved;
-  });
-
-  app.post<{ Body: { threadId?: string; mode?: ConversationMode } }>('/api/v1/runs', async (request, reply) => {
-    if (!checkOrigin(request, reply)) return;
-    const user = requireAuth(request, reply); if (!user) return;
-    const thread = ownedThread(user.id, request.body?.threadId ?? '');
-    if (!thread || (request.body?.mode && request.body.mode !== thread.mode)) return bad(reply, 404, 'thread_not_found');
-    if (thread.archived) return bad(reply, 409, 'thread_archived');
-    if (thread.project_id) projects.authorize(user.id, thread.project_id, thread.agent_id);
-    const id = crypto.randomUUID(); const timestamp = now();
-    store.db.prepare('INSERT INTO runs(id,thread_id,mode,status,created_at) VALUES(?,?,?,?,?)').run(id, thread.id, thread.mode, 'queued', timestamp);
-    if (thread.mode === 'bot') runner.enqueue(id);
-    return reply.code(201).send({ id, threadId: thread.id, mode: thread.mode, status: 'queued', createdAt: timestamp, completedAt: null });
-  });
-  app.get<{ Params: { id: string } }>('/api/v1/runs/:id', async (request, reply) => { const user = requireAuth(request, reply); if (!user) return; const run = expectRow<RunRow>(runRowSchema, store.db.prepare('SELECT r.* FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=? AND t.owner_id=?').get(request.params.id, user.id), 'run_row_invalid'); if (!run) return bad(reply, 404, 'run_not_found'); return { id: run.id, threadId: run.thread_id, mode: run.mode, status: run.status, createdAt: run.created_at, startedAt: run.started_at ?? null, completedAt: run.completed_at ?? null, errorCode: run.error_code ?? null }; });
-  app.post<{ Params: { id: string } }>('/api/v1/runs/:id/cancel', async (request, reply) => { if (!checkOrigin(request, reply)) return; const user = requireAuth(request, reply); if (!user) return; return botService.cancelRun(user.id, request.params.id) ?? bad(reply, 404, 'run_not_found'); });
-
+  const { ensureDefaultAgent } = registerChatAgentRoutes(app, { store, projects, requireAuth, checkOrigin, bad });
+  registerThreadRoutes(app, { store, projects, botService, runner, requireAuth, checkOrigin, bad, admissionBad, ensureDefaultAgent, messageKinds });
+  registerFileRoutes(app, { store, records: cloudRecords, filesDir, maxFileBytes, requireAuth, session, checkOrigin, bad });
+  registerConversationRoutes(app, { store, botService, runner, messageHistory, projects, requireAuth, checkOrigin, bad });
   app.setNotFoundHandler((_request, reply) => reply.code(404).send({ error: 'not_found' }));
   registerGatewayRoutes(app, gateway, requireAuth, checkOrigin);
   registerBotManagement(app, store, cloudConfig, runner, memoryWorker, requireAuth, checkOrigin);
