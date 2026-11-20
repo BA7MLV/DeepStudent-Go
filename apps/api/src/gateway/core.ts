@@ -20,6 +20,12 @@ import {
   type GatewayAccountListRow, type GatewayAccountRow, type GatewayBindingRow, type GatewayInboxRow, type GatewayInboxWorkRow,
   type GatewayOutboxDeliveryRow, type GatewayOutboxStatusRow, type GatewayReminderRow,
 } from '../storage/row-schema.js';
+import {
+  botReminderRowSchema, gatewayApprovalRowSchema, gatewayBindingCursorRowSchema, gatewayOutboxOwnerRowSchema,
+  gatewayProjectionFailureRowSchema, messageEventRowSchema,
+  type BotReminderRow, type GatewayApprovalRow, type GatewayBindingCursorRow, type GatewayOutboxOwnerRow,
+  type GatewayProjectionFailureRow, type MessageEventRow,
+} from './row-schema.js';
 
 /** 只读单列的通用行形状:`{ id }`、`{ thread_id }`、`{ status }`、计数与时间戳。 */
 const idRowSchema = { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } as const;
@@ -27,7 +33,9 @@ const threadIdRowSchema = { type: 'object', properties: { thread_id: { type: 'st
 const statusRowSchema = { type: 'object', properties: { status: { type: 'string' } }, required: ['status'] } as const;
 const stringOrNullSchema = { type: 'object', properties: { value: { type: ['string', 'null'] } }, required: ['value'] } as const;
 const countRowSchema = { type: 'object', properties: { n: { type: 'integer' } }, required: ['n'] } as const;
-const capacityRowSchema = { type: 'object', properties: { total: { type: 'integer' }, pending: { type: 'integer' } }, required: ['total', 'pending'] } as const;
+/** 空表/无匹配行时 SQL 的 SUM(CASE ...) 返回 NULL 而不是 0,所以 pending 允许为 null,
+ * 调用点按 null 视作 0;total 来自 COUNT(*) 恒为整数。 */
+const capacityRowSchema = { type: 'object', properties: { total: { type: 'integer' }, pending: { type: ['integer', 'null'] } }, required: ['total', 'pending'] } as const;
 const lastInboundRowSchema = { type: 'object', properties: { lastInboundAt: { type: ['integer', 'null'] }, failures: { type: 'integer' } }, required: ['lastInboundAt', 'failures'] } as const;
 const failureCountRowSchema = { type: 'object', properties: { failures: { type: 'integer' } }, required: ['failures'] } as const;
 const projectionCountRowSchema = { type: 'object', properties: { n: { type: 'integer' } }, required: ['n'] } as const;
@@ -38,14 +46,25 @@ const latestRunRowSchema = {
 const nextAtRowSchema = { type: 'object', properties: { next_at: { type: ['integer', 'null'] } }, required: ['next_at'] } as const;
 const outboxFailureRowSchema = { type: 'object', properties: { failures: { type: 'integer' } }, required: ['failures'] } as const;
 const approvalSeqRowSchema = { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, seq: { type: 'integer' } }, required: ['id', 'status', 'seq'] } as const;
-const pendingApprovalRowSchema = { type: 'object', properties: { id: { type: 'string' }, event_id: { type: 'integer' } }, required: ['id', 'event_id'] } as const;
 const pendingSeqRowSchema = { type: 'object', properties: { seq: { type: 'integer' }, content: { type: 'string' } }, required: ['seq', 'content'] } as const;
 const fileNameRowSchema = { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } as const;
 const envelopeRowSchema = { type: 'object', properties: { id: { type: 'integer' }, envelope: { type: 'string' } }, required: ['id', 'envelope'] } as const;
+/** 只读 `{ envelope }` 的收件箱信封（撤回与配对后刷新各自只取这一列）。 */
+const inboxEnvelopeRowSchema = { type: 'object', properties: { envelope: { type: 'string' } }, required: ['envelope'] } as const;
 const inboxNeighbourRowSchema = {
   type: 'object', properties: { id: { type: 'integer' }, received_at: { type: 'integer' }, status: { type: 'string' }, envelope: { type: 'string' } },
   required: ['id', 'received_at', 'status', 'envelope'],
 } as const;
+/** `gateway_pairings` 主键是 account_id，没有 id 列；这里只判断「有没有一行」，
+ * 不强制任何列，避免把合法的配对记录误判成坏行。 */
+const pairRowSchema = { type: 'object' } as const;
+const filesRowSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, originalName: { type: 'string' }, mimeType: { type: 'string' }, sizeBytes: { type: 'integer' } },
+  required: ['id', 'originalName', 'mimeType', 'sizeBytes'],
+} as const;
+const userNameRowSchema = { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } as const;
+const bindingContextRowSchema = { type: 'object', properties: { context: { type: ['string', 'null'] } }, required: ['context'] } as const;
 /** 账号开启状态下的「当前行」:enabled 在 SQL 里已过滤,这里只要少数字段。 */
 interface GatewayAccountState { id: string; enabled: number; channel: string; owner_id: string }
 const gatewayAccountStateSchema = {
@@ -367,7 +386,7 @@ export class GatewayCore {
     return Object.fromEntries(Object.entries(result).filter(([key]) => plugin.manifest.loginPublicFields?.includes(key) && !plugin.manifest.loginConfigFields?.includes(key)));
   }
   receive(id: string, batch: GatewayEnvelope[], cursor?: string) {
-    const a = this.store.db.prepare('SELECT * FROM gateway_accounts WHERE id=?').get(id) as any;
+    const a = expectRow<GatewayAccountRow>(gatewayAccountRowSchema, this.store.db.prepare('SELECT * FROM gateway_accounts WHERE id=?').get(id), 'gateway_account_row_invalid');
     if (!a?.enabled || this.stopped) throw new Error('gateway_account_disabled');
     this.store.transaction(() => {
       for (const message of batch) {
@@ -375,8 +394,9 @@ export class GatewayCore {
         if (typeof message.text !== 'string' || message.text.length > 100000) throw new Error('gateway_envelope_too_large');
         const external = JSON.stringify([message.tenant, message.messageId]);
         if (this.store.db.prepare('SELECT 1 FROM gateway_inbox WHERE account_id=? AND external_id=?').get(id, external)) continue;
-        const capacity = this.store.db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending FROM gateway_inbox WHERE account_id=?").get(id) as { total: number; pending: number };
-        if (capacity.total >= gatewayLimits().dedupe || capacity.pending >= gatewayLimits().pending && message.text.trim() !== '/stop') throw new Error('gateway_inbox_capacity');
+        const capacity = expectRow<{ total: number; pending: number }>(capacityRowSchema, this.store.db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending FROM gateway_inbox WHERE account_id=?").get(id), 'gateway_inbox_capacity_invalid');
+        if (!capacity) throw new Error('gateway_inbox_capacity_invalid');
+        if (capacity.total >= gatewayLimits().dedupe || (capacity.pending ?? 0) >= gatewayLimits().pending && message.text.trim() !== '/stop') throw new Error('gateway_inbox_capacity');
         if (JSON.stringify(message).length > 128000) throw new Error('gateway_envelope_too_large');
         const b = this.binding(id, message);
         // Capture the exact approval when the reply arrives, not after queued
@@ -390,7 +410,7 @@ export class GatewayCore {
         // Control path never waits behind media, model, or another inbox item.
         if (b && !b.revoked && message.text.trim() === '/stop') {
           this.bot.stop(a.owner_id, b.thread_id);
-          for (const pending of this.store.db.prepare("SELECT id,envelope FROM gateway_inbox WHERE account_id=? AND status='pending' AND id<?").all(id, inserted.lastInsertRowid) as any[]) {
+          for (const pending of expectRows<{ id: number; envelope: string }>(envelopeRowSchema, this.store.db.prepare("SELECT id,envelope FROM gateway_inbox WHERE account_id=? AND status='pending' AND id<?").all(id, inserted.lastInsertRowid), 'gateway_inbox_row_invalid')) {
             const envelope: GatewayEnvelope = JSON.parse(this.secrets.open(pending.envelope));
             if (envelope.tenant === message.tenant && envelope.peer === message.peer && envelope.chat === message.chat && envelope.topic === message.topic) this.store.db.prepare("UPDATE gateway_inbox SET status='cancelled' WHERE id=?").run(pending.id);
           }
@@ -401,31 +421,32 @@ export class GatewayCore {
       if (cursor !== undefined) this.store.db.prepare('UPDATE gateway_accounts SET cursor=? WHERE id=?').run(cursor, id);
     });
   }
-  private binding(id: string, m: GatewayEnvelope): any {
-    return this.store.db.prepare('SELECT * FROM gateway_bindings WHERE account_id=? AND tenant=? AND peer=? AND chat=? AND topic=?').get(id, m.tenant, m.peer, m.chat, m.topic);
+  private binding(id: string, m: GatewayEnvelope): GatewayBindingRow | undefined {
+    return expectRow<GatewayBindingRow>(gatewayBindingRowSchema, this.store.db.prepare('SELECT * FROM gateway_bindings WHERE account_id=? AND tenant=? AND peer=? AND chat=? AND topic=?').get(id, m.tenant, m.peer, m.chat, m.topic), 'gateway_binding_row_invalid');
   }
   private refreshContext(binding: string, context: string, channel: string) {
     this.store.db.prepare('UPDATE gateway_bindings SET context=? WHERE id=? AND revoked=0').run(this.secrets.seal(context), binding);
     if (channel === 'ilink') this.store.db.prepare(`UPDATE gateway_outbox SET status='pending',attempts=0,next_at=0,error=NULL
       WHERE binding_id=? AND status IN ('pending','failed') AND error='context_required'`).run(binding);
   }
-  private approvalReply(binding: any, text: string): ApprovalReply | undefined {
+  private approvalReply(binding: GatewayBindingRow, text: string): ApprovalReply | undefined {
     const exact = /^(\/?approve|\/?reject|批准|同意|拒绝|可以|不可以|不用了|不用)\s+([\w-]{1,100})$/i.exec(text.trim().replace(/[。！!]+$/, ''));
     if (exact) {
       const approved = !/reject|拒绝|不可以|不用/i.test(exact[1]);
       if (!/^\d+$/.test(exact[2])) return { id: exact[2], approved }; // Legacy full IDs remain supported.
       // Message sequence numbers are stable within a thread, never a changing list index.
-      const a = this.store.db.prepare(`SELECT a.id FROM approvals a JOIN messages m ON m.id=a.message_id
-        WHERE a.thread_id=? AND m.seq=?`).get(binding.thread_id, exact[2]) as { id: string } | undefined;
+      const a = expectRow<{ id: string }>(idRowSchema, this.store.db.prepare(`SELECT a.id FROM approvals a JOIN messages m ON m.id=a.message_id
+        WHERE a.thread_id=? AND m.seq=?`).get(binding.thread_id, exact[2]), 'gateway_approval_row_invalid');
       return { id: a?.id ?? 'unknown-approval-number', approved };
     }
     const word = text.trim().replace(/[。！!]+$/, '').toLowerCase();
     const yes = ['同意', '批准', '允许', '确认', '可以', 'approve', '/approve'];
     const no = ['拒绝', '不同意', '不允许', '不可以', '不用', '不用了', 'reject', '/reject'];
     if (!yes.includes(word) && !no.includes(word)) return undefined;
-    const pending = this.store.db.prepare(`SELECT a.id,e.event_id FROM approvals a JOIN messages m ON m.id=a.message_id
+    const pending = expectRows<{ id: string; event_id: number }>(approvalSeqRowSchema, this.store.db.prepare(`SELECT a.id,e.event_id FROM approvals a JOIN messages m ON m.id=a.message_id
       JOIN message_events e ON e.thread_id=m.thread_id AND e.seq=m.seq AND e.type='message.accepted'
-       WHERE a.thread_id=? AND a.status='pending' ORDER BY m.seq LIMIT 2`).all(binding.thread_id) as { id: string; event_id: number }[];
+       WHERE a.thread_id=? AND a.status='pending' ORDER BY m.seq LIMIT 2`).all(binding.thread_id), 'gateway_approval_row_invalid');
+    // 仍然只按数量区分 0/1/N:多于一条时只回 { approved },不猜指哪一项。
     if (!pending.length && !word.startsWith('/')) return undefined;
     const approved = yes.includes(word);
     if (pending.length !== 1) return { approved };
@@ -450,13 +471,13 @@ export class GatewayCore {
   }
   private async process(gate: symbol) {
     if (Date.now() >= this.cleanupAt) { cleanupGateway(this.store); this.cleanupAt = Date.now() + 60000; }
-    for (const a of this.store.db.prepare('SELECT id FROM gateway_accounts WHERE enabled=1').all() as any[]) {
+    for (const a of expectRows<{ id: string }>(idRowSchema, this.store.db.prepare('SELECT id FROM gateway_accounts WHERE enabled=1').all(), 'gateway_account_row_invalid')) {
       if (!this.live.has(a.id) && (this.restartAfter.get(a.id) ?? 0) <= Date.now()) this.launch(a.id);
     }
     this.reminders();
     // Small bounded batch; network has a timeout and stop/revoke aborts it.
-    const rows = this.store.db.prepare("SELECT * FROM (SELECT i.*,a.owner_id,a.agent_id,a.enabled,a.channel,ROW_NUMBER() OVER(PARTITION BY i.account_id ORDER BY i.id) AS position FROM gateway_inbox i JOIN gateway_accounts a ON a.id=i.account_id WHERE i.status='pending' AND a.enabled=1 AND i.account_id NOT IN (SELECT value FROM json_each(?))) WHERE position<=10 ORDER BY id LIMIT 40").all(JSON.stringify([...this.processingAccounts])) as any[];
-    const groups = new Map<string, any[]>();
+    const rows = expectRows<GatewayInboxWorkRow>(gatewayInboxWorkRowSchema, this.store.db.prepare("SELECT * FROM (SELECT i.*,a.owner_id,a.agent_id,a.enabled,a.channel,ROW_NUMBER() OVER(PARTITION BY i.account_id ORDER BY i.id) AS position FROM gateway_inbox i JOIN gateway_accounts a ON a.id=i.account_id WHERE i.status='pending' AND a.enabled=1 AND i.account_id NOT IN (SELECT value FROM json_each(?))) WHERE position<=10 ORDER BY id LIMIT 40").all(JSON.stringify([...this.processingAccounts])), 'gateway_inbox_row_invalid');
+    const groups = new Map<string, GatewayInboxWorkRow[]>();
     for (const row of rows) { const group = groups.get(row.account_id) ?? []; group.push(row); groups.set(row.account_id, group); }
     const tasks: Promise<void>[] = [];
     for (const [account, group] of groups) {
@@ -493,7 +514,7 @@ export class GatewayCore {
     const items: PhotoInboxItem[] = [{ id: row.id, received_at: row.received_at, message }];
     // Include terminal rows as boundaries: a cancelled/failed/control item must
     // not disappear from ordering merely because only pending work is runnable.
-    for (const next of this.store.db.prepare('SELECT id,received_at,status,envelope FROM gateway_inbox WHERE account_id=? AND id>? ORDER BY id LIMIT ?').all(row.account_id, row.id, MAX_BOT_MESSAGE_ATTACHMENTS + 1) as any[]) {
+    for (const next of expectRows<{ id: number; received_at: number; status: string; envelope: string }>(inboxNeighbourRowSchema, this.store.db.prepare('SELECT id,received_at,status,envelope FROM gateway_inbox WHERE account_id=? AND id>? ORDER BY id LIMIT ?').all(row.account_id, row.id, MAX_BOT_MESSAGE_ATTACHMENTS + 1), 'gateway_inbox_row_invalid')) {
       if (next.status !== 'pending') return { ...photoBatch(items), ready: true };
       try {
         const message: InboundEnvelope = JSON.parse(this.secrets.open(next.envelope));
@@ -504,7 +525,7 @@ export class GatewayCore {
     }
     return photoBatch(items);
   }
-  private async processInbox(rows: any[]) {
+  private async processInbox(rows: GatewayInboxWorkRow[]) {
     for (const row of rows) {
       if (this.stopped) return;
       const live = this.live.get(row.account_id); if (!live) continue;
@@ -513,23 +534,25 @@ export class GatewayCore {
       try {
         const m: InboundEnvelope = JSON.parse(this.secrets.open(row.envelope));
         let b = this.binding(row.account_id, m);
-        if ((this.store.db.prepare('SELECT status FROM gateway_inbox WHERE id=?').get(row.id) as any)?.status !== 'pending') continue;
+        if (expectRow<{ status: string }>(statusRowSchema, this.store.db.prepare('SELECT status FROM gateway_inbox WHERE id=?').get(row.id), 'gateway_inbox_row_invalid')?.status !== 'pending') continue;
         if (b) this.inbound.set(row.id, { binding: b.id, controller });
         const code = this.pairingCode(row.account_id, row.channel, m);
         if (code !== undefined) {
           this.store.transaction(() => {
             if (row.channel === 'ilink') {
-              const failures = this.store.db.prepare("SELECT COUNT(*) n FROM gateway_inbox WHERE account_id=? AND error='invalid_pairing_code' AND received_at>=?").get(row.account_id, Date.now() - 10 * 60_000) as { n: number };
+              const failures = expectRow<{ n: number }>(countRowSchema, this.store.db.prepare("SELECT COUNT(*) n FROM gateway_inbox WHERE account_id=? AND error='invalid_pairing_code' AND received_at>=?").get(row.account_id, Date.now() - 10 * 60_000), 'gateway_inbox_row_invalid');
+              if (!failures) throw new Error('gateway_inbox_row_invalid');
               if (failures.n >= 5) {
                 this.store.db.prepare('DELETE FROM gateway_pairings WHERE account_id=?').run(row.account_id);
                 return;
               }
             }
-            const pair = this.store.db.prepare('SELECT * FROM gateway_pairings WHERE account_id=? AND code_hash=? AND expires_at>?').get(row.account_id, pairHash(code), stamp());
+            const pair = expectRow<{ account_id?: string }>(pairRowSchema, this.store.db.prepare('SELECT * FROM gateway_pairings WHERE account_id=? AND code_hash=? AND expires_at>?').get(row.account_id, pairHash(code), stamp()), 'gateway_pairing_row_invalid');
             if (!pair) {
               if (row.channel === 'ilink') {
                 this.store.db.prepare("UPDATE gateway_inbox SET error='invalid_pairing_code' WHERE id=?").run(row.id);
-                const failures = this.store.db.prepare("SELECT COUNT(*) n FROM gateway_inbox WHERE account_id=? AND error='invalid_pairing_code' AND received_at>=?").get(row.account_id, Date.now() - 10 * 60_000) as { n: number };
+                const failures = expectRow<{ n: number }>(countRowSchema, this.store.db.prepare("SELECT COUNT(*) n FROM gateway_inbox WHERE account_id=? AND error='invalid_pairing_code' AND received_at>=?").get(row.account_id, Date.now() - 10 * 60_000), 'gateway_inbox_row_invalid');
+                if (!failures) throw new Error('gateway_inbox_row_invalid');
                 if (failures.n >= 5) this.store.db.prepare('DELETE FROM gateway_pairings WHERE account_id=?').run(row.account_id);
               }
               return;
@@ -544,7 +567,8 @@ export class GatewayCore {
               // Messages accepted alongside the pairing code had no active
               // binding at receive time. Preserve their newest context too.
               const binding = this.binding(row.account_id, m);
-              for (const pending of this.store.db.prepare("SELECT envelope FROM gateway_inbox WHERE account_id=? AND id>? AND status='pending' ORDER BY id").all(row.account_id, row.id) as { envelope: string }[]) {
+              if (!binding) throw new Error('gateway_binding_row_invalid');
+              for (const pending of expectRows<{ envelope: string }>(inboxEnvelopeRowSchema, this.store.db.prepare("SELECT envelope FROM gateway_inbox WHERE account_id=? AND id>? AND status='pending' ORDER BY id").all(row.account_id, row.id), 'gateway_inbox_row_invalid')) {
                 const next: GatewayEnvelope = JSON.parse(this.secrets.open(pending.envelope));
                 if (next.context && next.tenant === m.tenant && next.peer === m.peer && next.chat === m.chat && next.topic === m.topic) this.refreshContext(binding.id, next.context, row.channel);
               }
@@ -552,7 +576,9 @@ export class GatewayCore {
             this.store.db.prepare('DELETE FROM gateway_pairings WHERE account_id=?').run(row.account_id);
             if (row.channel === 'ilink') {
               const binding = this.binding(row.account_id, m);
-              const user = this.store.db.prepare('SELECT name FROM users WHERE id=?').get(row.owner_id) as { name: string };
+              if (!binding) throw new Error('gateway_binding_row_invalid');
+              const user = expectRow<{ name: string }>(userNameRowSchema, this.store.db.prepare('SELECT name FROM users WHERE id=?').get(row.owner_id), 'gateway_user_row_invalid');
+              if (!user) throw new Error('gateway_user_row_invalid');
               // Send onboarding only after the user's pairing message supplies the
               // identity and context. No chat messages/events/runs: no model context.
               // The consumed code and stable source IDs make replay/restart inert.
@@ -574,7 +600,9 @@ export class GatewayCore {
               this.store.db.prepare("UPDATE gateway_inbox SET status='done' WHERE id=?").run(row.id);
             });
            } else if (m.text.trim() === '/status') {
-            const latest = (this.bot.status(row.owner_id, b.thread_id) as { status: string }[])[0];
+            // bot.status 是本地同进程的 BotApplicationService 查询结果,不跨信任边界;
+            // 只读第一条的 status 文案,不改原有最近任务语义。
+            const latest = expectRows<{ status: string }>(statusRowSchema, this.bot.status(row.owner_id, b.thread_id), 'gateway_run_row_invalid')[0];
             const labels: Record<string, string> = { queued: '等待处理', running: '正在处理', waiting_user: '等待你的确认', completed: '已完成', failed: '未能完成', cancelled: '已停止', paused: '已暂停' };
              this.bot.append(b.thread_id, 'assistant', 'text', latest ? `最近的任务：${labels[latest.status] ?? latest.status}。` : '当前没有任务。');
              const pending = this.store.db.prepare(`SELECT m.seq,m.content FROM approvals a JOIN messages m ON m.id=a.message_id
@@ -599,7 +627,7 @@ export class GatewayCore {
               controller.signal.throwIfAborted(); live.controller.signal.throwIfAborted();
               const current = this.binding(row.account_id, m);
               if (!current || current.revoked || current.id !== b.id) throw new Error('binding_revoked');
-              for (const item of selected) if ((this.store.db.prepare('SELECT status FROM gateway_inbox WHERE id=?').get(item.id) as any)?.status !== 'pending') throw new Error('inbound_cancelled');
+              for (const item of selected) if (expectRow<{ status: string }>(statusRowSchema, this.store.db.prepare('SELECT status FROM gateway_inbox WHERE id=?').get(item.id), 'gateway_inbox_row_invalid')?.status !== 'pending') throw new Error('inbound_cancelled');
             };
             if (selected.some(item => item.message.attachments?.some(attachment => typeof attachment.mime === 'string' && attachment.mime.startsWith('image/')))) {
               this.bot.append(b.thread_id, 'assistant', 'progress', '图片已就绪，正在准备读取。', `web:status:ready:${row.account_id}:${row.id}`);
@@ -612,7 +640,7 @@ export class GatewayCore {
               // Always use the original inbox identity, even if the batch grows
               // during I/O or is reconstructed after a restart.
               const id = fileOperationId(row.owner_id, `${row.account_id}:${item.id}`, `gateway:${index}`);
-              const saved = this.store.db.prepare('SELECT id,original_name AS originalName,mime_type AS mimeType,size_bytes AS sizeBytes FROM files WHERE id=? AND owner_id=?').get(id, row.owner_id) as { id: string; originalName: string; mimeType: string; sizeBytes: number } | undefined;
+              const saved = expectRow<{ id: string; originalName: string; mimeType: string; sizeBytes: number }>(filesRowSchema, this.store.db.prepare('SELECT id,original_name AS originalName,mime_type AS mimeType,size_bytes AS sizeBytes FROM files WHERE id=? AND owner_id=?').get(id, row.owner_id), 'gateway_file_row_invalid');
               if (saved) { attachments.push({ fileId: saved.id, originalName: saved.originalName, mimeType: saved.mimeType, sizeBytes: saved.sizeBytes }); continue; }
               const media = await live.plugin.download(this.config(a), item.message, attachment, AbortSignal.any([controller.signal, live.controller.signal, AbortSignal.timeout(30_000)]));
               checkActive();
@@ -647,14 +675,15 @@ export class GatewayCore {
     }
   }
   project() {
-      for (const b of this.store.db.prepare('SELECT * FROM gateway_bindings WHERE revoked=0').all() as any[]) {
-        const account = this.store.db.prepare('SELECT channel FROM gateway_accounts WHERE id=?').get(b.account_id) as { channel: string } | undefined;
+      for (const b of expectRows<GatewayBindingCursorRow>(gatewayBindingCursorRowSchema, this.store.db.prepare('SELECT * FROM gateway_bindings WHERE revoked=0').all(), 'gateway_binding_row_invalid')) {
+        const account = expectRow<{ channel: string }>({ type: 'object', properties: { channel: { type: 'string' } }, required: ['channel'] }, this.store.db.prepare('SELECT channel FROM gateway_accounts WHERE id=?').get(b.account_id), 'gateway_account_row_invalid');
         // Web activity can be high-volume (parallel tools / image batches).
         // It must not consume the delivery page and delay the actual IM reply.
-        const events = this.store.db.prepare("SELECT * FROM message_events WHERE thread_id=? AND event_id>? AND type!='thread.activity' ORDER BY event_id LIMIT 200").all(b.thread_id, b.checkpoint) as any[];
+        const events = expectRows<MessageEventRow>(messageEventRowSchema, this.store.db.prepare("SELECT * FROM message_events WHERE thread_id=? AND event_id>? AND type!='thread.activity' ORDER BY event_id LIMIT 200").all(b.thread_id, b.checkpoint), 'gateway_event_row_invalid');
         for (const event of events) {
-          const failed = this.store.db.prepare('SELECT next_at FROM gateway_projection_failures WHERE binding_id=? AND event_id=?').get(b.id, event.event_id) as any;
-          if (failed?.next_at > Date.now()) break;
+          const failed = expectRow<GatewayProjectionFailureRow>(gatewayProjectionFailureRowSchema, this.store.db.prepare('SELECT binding_id,event_id,error,next_at FROM gateway_projection_failures WHERE binding_id=? AND event_id=?').get(b.id, event.event_id), 'gateway_projection_row_invalid');
+          // 无失败记录时 failed 为 undefined（?? 保持原语义：继续投影）。
+          if ((failed?.next_at ?? 0) > Date.now()) break;
           try { this.store.transaction(() => {
           const m = JSON.parse(event.payload);
           if (!m || typeof m !== 'object' || (event.type === 'message.accepted' && (typeof m.content !== 'string' || typeof m.role !== 'string'))) throw new Error('invalid_projection');
@@ -677,13 +706,14 @@ export class GatewayCore {
               }
             }
             if (m.kind === 'approval') {
-              const a = this.store.db.prepare('SELECT a.id,a.status,m.seq FROM approvals a JOIN messages m ON m.id=a.message_id WHERE a.message_id=?').get(m.id) as any;
+              const a = expectRow<GatewayApprovalRow>(gatewayApprovalRowSchema, this.store.db.prepare('SELECT a.id,a.status,m.seq FROM approvals a JOIN messages m ON m.id=a.message_id WHERE a.message_id=?').get(m.id), 'gateway_approval_row_invalid');
               if (!a || a.status !== 'pending') {
                 this.store.db.prepare('UPDATE gateway_bindings SET checkpoint=? WHERE id=?').run(event.event_id, b.id);
                 this.store.db.prepare('DELETE FROM gateway_projection_failures WHERE binding_id=? AND event_id=?').run(b.id, event.event_id);
                 return;
               }
-              const pending = this.store.db.prepare("SELECT COUNT(*) n FROM approvals WHERE thread_id=? AND status='pending'").get(b.thread_id) as { n: number };
+              const pending = expectRow<{ n: number }>(countRowSchema, this.store.db.prepare("SELECT COUNT(*) n FROM approvals WHERE thread_id=? AND status='pending'").get(b.thread_id), 'gateway_approval_row_invalid');
+              if (!pending) throw new Error('gateway_approval_row_invalid');
               text = approvalPrompt(text, pending.n > 1 ? a.seq : undefined);
             }
             const maxMessageLength = this.live.get(b.account_id)?.plugin.manifest.capabilities.maxMessageLength ?? 1500;
@@ -706,19 +736,20 @@ export class GatewayCore {
     const id = hash(`${binding}:${source}`).slice(0, 32);
     if (this.store.db.prepare('SELECT 1 FROM gateway_outbox WHERE id=?').get(id)) return;
     if (JSON.stringify(payload).length > 128000) throw new Error('gateway_payload_too_large');
-    const capacity = this.store.db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN o.status IN ('pending','sending','uncertain','failed') THEN 1 ELSE 0 END) AS pending FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id WHERE b.account_id=(SELECT account_id FROM gateway_bindings WHERE id=?)").get(binding) as { total: number; pending: number };
-    if (capacity.pending >= gatewayLimits().pending || capacity.total >= gatewayLimits().dedupe) throw new Error('gateway_outbox_capacity');
+    const capacity = expectRow<{ total: number; pending: number }>(capacityRowSchema, this.store.db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN o.status IN ('pending','sending','uncertain','failed') THEN 1 ELSE 0 END) AS pending FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id WHERE b.account_id=(SELECT account_id FROM gateway_bindings WHERE id=?)").get(binding), 'gateway_outbox_row_invalid');
+    if (!capacity) throw new Error('gateway_outbox_row_invalid');
+    if ((capacity.pending ?? 0) >= gatewayLimits().pending || capacity.total >= gatewayLimits().dedupe) throw new Error('gateway_outbox_capacity');
     this.store.db.prepare('INSERT OR IGNORE INTO gateway_outbox(id,binding_id,payload,created_at) VALUES(?,?,?,?)').run(hash(`${binding}:${source}`).slice(0, 32), binding, JSON.stringify(payload), Date.now());
   }
   private async deliver() {
-    const rows = this.store.db.prepare(`SELECT o.*,b.account_id,b.tenant,b.peer,b.chat,b.topic,b.context,a.owner_id,a.channel,a.config
+    const rows = expectRows<GatewayOutboxDeliveryRow>(gatewayOutboxDeliveryRowSchema, this.store.db.prepare(`SELECT o.*,b.account_id,b.tenant,b.peer,b.chat,b.topic,b.context,a.owner_id,a.channel,a.config
       FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id JOIN gateway_accounts a ON a.id=b.account_id
       WHERE o.status='pending' AND o.next_at<=? AND b.revoked=0 AND a.enabled=1
-      AND NOT EXISTS(SELECT 1 FROM gateway_outbox p WHERE p.binding_id=o.binding_id AND p.seq<o.seq AND p.status IN ('pending','sending','uncertain','failed')) ORDER BY o.seq LIMIT 10`).all(Date.now()) as any[];
+      AND NOT EXISTS(SELECT 1 FROM gateway_outbox p WHERE p.binding_id=o.binding_id AND p.seq<o.seq AND p.status IN ('pending','sending','uncertain','failed')) ORDER BY o.seq LIMIT 10`).all(Date.now()), 'gateway_outbox_row_invalid');
     for (const row of rows) {
       const live = this.live.get(row.account_id); if (!live || live.controller.signal.aborted) continue;
       if (!this.store.db.prepare("UPDATE gateway_outbox SET status='sending',attempts=attempts+1 WHERE id=? AND status='pending'").run(row.id).changes) continue;
-      const context = (this.store.db.prepare('SELECT context FROM gateway_bindings WHERE id=?').get(row.binding_id) as { context: string | null }).context;
+      const context = expectRow<{ context: string | null }>(bindingContextRowSchema, this.store.db.prepare('SELECT context FROM gateway_bindings WHERE id=?').get(row.binding_id), 'gateway_binding_row_invalid')?.context;
       try {
         const platformId = await live.plugin.send(this.config(row), { messageId: '', tenant: row.tenant, peer: row.peer, chat: row.chat, topic: row.topic, direct: true, human: true, text: '', context: context ? this.secrets.open(context) : undefined }, JSON.parse(row.payload), row.id, AbortSignal.any([live.controller.signal, AbortSignal.timeout(30_000)]));
         this.store.db.prepare("UPDATE gateway_outbox SET status='sent',platform_id=?,error=NULL WHERE id=? AND status='sending'").run(platformId, row.id);
@@ -731,7 +762,7 @@ export class GatewayCore {
         // A fresh inbound may commit while sendmessage is still in flight.
         // Do not let its later rejection undo that recovery. Compare sealed
         // revisions, since even an unchanged token can get a new reply quota.
-        const current = this.store.db.prepare('SELECT context FROM gateway_bindings WHERE id=? AND revoked=0').get(row.binding_id) as { context: string | null } | undefined;
+        const current = expectRow<{ context: string | null }>(bindingContextRowSchema, this.store.db.prepare('SELECT context FROM gateway_bindings WHERE id=? AND revoked=0').get(row.binding_id), 'gateway_binding_row_invalid');
         const refreshed = row.channel === 'ilink' && error.code === 'context_required' && !error.uncertain && Boolean(current?.context && current.context !== context);
         const state = error.code === 'context_required' || error.code === 'login_required' ? 'failed' : !retrySafe ? 'uncertain' : !error.retryable || row.attempts >= 7 ? 'failed' : 'pending';
         this.store.db.prepare("UPDATE gateway_outbox SET status=?,error=?,next_at=?,attempts=CASE WHEN ? THEN 0 ELSE attempts END WHERE id=? AND status='sending'").run(refreshed ? 'pending' : state, refreshed ? null : error.code, refreshed ? 0 : Date.now() + Math.max(error.retryAfterMs, Math.min(300_000, 1000 * 2 ** row.attempts)), Number(refreshed), row.id);
@@ -739,21 +770,21 @@ export class GatewayCore {
     }
   }
   retry(owner: string, id: string, acknowledgeUncertain: boolean) {
-    const row = this.store.db.prepare('SELECT o.* FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id JOIN gateway_accounts a ON a.id=b.account_id WHERE o.id=? AND a.owner_id=? AND b.revoked=0').get(id, owner) as any;
+    const row = expectRow<GatewayOutboxOwnerRow>(gatewayOutboxOwnerRowSchema, this.store.db.prepare('SELECT o.* FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id JOIN gateway_accounts a ON a.id=b.account_id WHERE o.id=? AND a.owner_id=? AND b.revoked=0').get(id, owner), 'gateway_outbox_row_invalid');
     if (!row || !['failed','uncertain'].includes(row.status)) throw new Error('delivery_not_retryable');
     if (row.status === 'uncertain' && !acknowledgeUncertain) throw new Error('duplicate_risk_confirmation_required');
     this.store.db.prepare("UPDATE gateway_outbox SET status='pending',next_at=0,attempts=0 WHERE id=?").run(id);
     this.secrets.audit(owner, 'gateway.delivery_retry', { id, acknowledgeUncertain });
   }
   discard(owner: string, id: string) {
-    const row = this.store.db.prepare('SELECT o.* FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id JOIN gateway_accounts a ON a.id=b.account_id WHERE o.id=? AND a.owner_id=?').get(id, owner) as any;
+    const row = expectRow<GatewayOutboxOwnerRow>(gatewayOutboxOwnerRowSchema, this.store.db.prepare('SELECT o.* FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id JOIN gateway_accounts a ON a.id=b.account_id WHERE o.id=? AND a.owner_id=?').get(id, owner), 'gateway_outbox_row_invalid');
     if (!row || !['pending','failed','uncertain'].includes(row.status)) throw new Error('delivery_not_discardable');
     this.store.db.prepare("UPDATE gateway_outbox SET status='cancelled',error='discarded_by_owner' WHERE id=?").run(id);
     this.secrets.audit(owner, 'gateway.delivery_discarded', { id, previousStatus: row.status });
   }
   reminders() {
     this.store.transaction(() => {
-      for (const r of this.store.db.prepare("SELECT * FROM bot_reminders WHERE status='active' AND next_at<=?").all(Date.now()) as any[]) {
+      for (const r of expectRows<BotReminderRow>(botReminderRowSchema, this.store.db.prepare("SELECT * FROM bot_reminders WHERE status='active' AND next_at<=?").all(Date.now()), 'gateway_reminder_row_invalid')) {
         this.bot.append(r.thread_id, 'assistant', 'text', `提醒（${r.timezone}；计划时间 ${new Date(r.next_at).toISOString()}）：${r.text}`);
         // Missed repeating reminders coalesce once after restart, not a flood of stale notifications.
         const next = r.interval_seconds ? r.next_at + (Math.floor((Date.now() - r.next_at) / (r.interval_seconds * 1000)) + 1) * r.interval_seconds * 1000 : r.next_at;

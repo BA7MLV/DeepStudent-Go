@@ -9,6 +9,7 @@ import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { BotApplicationService } from '../apps/api/src/agent/service.ts';
 import { BotRunner } from '../apps/api/src/agent/runner.ts';
+import { freezeTaskModel } from '../apps/api/src/agent/task-model.ts';
 import { StudyTools } from '../apps/api/src/agent/study.ts';
 import { GatewayCore } from '../apps/api/src/gateway/core.ts';
 import { IlinkPlugin } from '../apps/api/src/gateway/adapters/ilink.ts';
@@ -64,8 +65,22 @@ async function fixture(t) {
   const secrets = new CloudConfiguration(store, path.join(directory, 'config'));
   const at = new Date().toISOString();
   store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run('owner', 'owner', at);
+  // BotApplicationService.send 在事务前做模型准入(P1 契约)：未配置模型的消息会被拒收，
+  // 照片批次根本落不进 runs/messages。夹具与 test-memory-context 一致，先落一份可用的
+  // 默认对话模型；读图测试随后用 imageRunner 覆写 vision/llm 指向离线替身。
+  secrets.save('owner', { ...secrets.get('owner', true), providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://offline.invalid', apiKey: 'test', protocol: 'openai-chat', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture-chat' } });
   store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,role,system_prompt,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('agent', 'owner', 'Bot', 'study', 'Study', at, at);
-  const bot = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  // send 的准入与建 run 都要调 runner.freezeModel；这里用最小 stamper 顶替 BotRunner，
+  // 判定本身仍走生产 freezeTaskModel（经 ModelTargetResolver 读上面的默认模型）。
+  // 准入那次快照的 id 是占位（生产里不会落到任何 run），所以只在 run 真实存在时写入。
+  const bot = new BotApplicationService(store, {
+    freezeModel(id, owner) {
+      if (!store.db.prepare('SELECT 1 FROM runs WHERE id=?').get(id)) return;
+      const snapshot = freezeTaskModel(store, owner, secrets.get(owner, true), 'bot');
+      store.db.prepare('UPDATE runs SET model_snapshot=? WHERE id=? AND model_snapshot IS NULL').run(JSON.stringify(snapshot), id);
+    },
+    enqueue() {}, cancel() {},
+  });
   const downloads = [], sent = [], hooks = {};
   const gateway = new GatewayCore(store, secrets, bot, { ilink: () => ({
     manifest: new IlinkPlugin(async () => {}).manifest,
@@ -213,8 +228,13 @@ function reply(protocol, text, truncated = false) {
   return Response.json({ choices: [{ finish_reason: truncated ? 'length' : 'stop', message: { content: text } }] });
 }
 
-function imageRunner(f, protocol = 'openai-chat', hook) {
+async function imageRunner(f, protocol = 'openai-chat', hook) {
   f.secrets.save('owner', { ...f.secrets.get('owner', true), providers: [{ id: 'test', name: 'Test', baseUrl: 'https://offline.invalid', apiKey: 'test', protocol, serves: ['chat', 'vision'] }], llmModel: { providerId: 'test', model: 'chat' }, visionModel: { providerId: 'test', model: 'vision' } });
+  // 夹具里 run 的 model_snapshot 是默认模型的冻结结果（生产里 BotRunner 真的从 currentConfig 冻结）。
+  // 上面刚把 currentConfig 换成离线替身，不重盖的话 runner 会去解析已不存在的 fixture provider，
+  // 直接 model_provider_not_found 失败。用生产 freezeTaskModel 按最新配置重算，而不是猜候选。
+  const snap = JSON.stringify(freezeTaskModel(f.store, 'owner', f.secrets.get('owner', true), 'bot'));
+  f.store.db.prepare('UPDATE runs SET model_snapshot=?').run(snap);
   const requests = [], readings = [];
   const fetch = async (_url, init) => {
     const body = JSON.parse(init.body);
@@ -234,7 +254,9 @@ function imageRunner(f, protocol = 'openai-chat', hook) {
 async function until(condition) {
   for (let i = 0; i < 1000; i++) {
     if (condition()) return;
-    await new Promise(resolve => setTimeout(resolve, 10));
+    // 让步给事件循环里的其它宏任务，而不只是 10ms 定时器：单个 run 的迁移会占用同一线程，
+    // 定时器久了可能被饿到调用方先超时。每轮一毫秒与十毫秒交替，既公平又不拖长用例。
+    await new Promise(resolve => setTimeout(resolve, i % 2 ? 10 : 1));
   }
   throw new Error('timed out waiting for image pipeline');
 }
@@ -249,7 +271,7 @@ for (const protocol of ['openai-chat', 'openai-responses', 'anthropic-messages']
   const payload = JSON.parse(f.userMessages()[0].content);
   assert.equal(payload.attachments.length, count);
   const release = deferred();
-  const { runner, requests, readings } = imageRunner(f, protocol, async index => {
+  const { runner, requests, readings } = await imageRunner(f, protocol, async index => {
     if (index === count) await release.promise;
   });
   try {
@@ -275,7 +297,7 @@ for (const protocol of ['openai-chat', 'openai-responses', 'anthropic-messages']
 for (const failure of ['empty', 'truncated', 'denied']) test(`${failure} image reading produces an honest failure notice, never a partial answer`, async t => {
   const f = await fixture(t);
   f.gateway.receive(f.account.id, [photo(1), photo(2)]); f.advance(PHOTO_QUIET_MS); await f.gateway.tick();
-  const { runner, requests, readings } = imageRunner(f, 'openai-chat', index => index === 2 ? reply('openai-chat', failure === 'empty' ? '' : '不完整的内容', failure === 'truncated') : undefined);
+  const { runner, requests, readings } = await imageRunner(f, 'openai-chat', index => index === 2 ? reply('openai-chat', failure === 'empty' ? '' : '不完整的内容', failure === 'truncated') : undefined);
   if (failure === 'denied') f.secrets.save('owner', { ...f.secrets.get('owner', true), policy: { ...f.secrets.get('owner', true).policy, read: 'deny' } });
   try {
     runner.start();
@@ -293,7 +315,7 @@ for (const failure of ['empty', 'truncated', 'denied']) test(`${failure} image r
 test('stop while vision is reading prevents synthesis and late replies', async t => {
   const f = await fixture(t), started = deferred();
   f.gateway.receive(f.account.id, [photo(1), photo(2)]); f.advance(PHOTO_QUIET_MS); await f.gateway.tick();
-  const { runner, requests } = imageRunner(f, 'openai-chat', async (index, signal) => {
+  const { runner, requests } = await imageRunner(f, 'openai-chat', async (index, signal) => {
     if (index !== 2) return;
     started.resolve();
     await new Promise((_resolve, reject) => { if (signal.aborted) reject(signal.reason); else signal.addEventListener('abort', () => reject(signal.reason), { once: true }); });
@@ -311,7 +333,7 @@ test('stop while vision is reading prevents synthesis and late replies', async t
 test('budget pause and runner restart reuse sixteen completed reads before reading the remaining image', async t => {
   const f = await fixture(t);
   f.gateway.receive(f.account.id, Array.from({ length: 17 }, (_, i) => photo(i + 1))); f.advance(PHOTO_QUIET_MS); await f.gateway.tick();
-  const first = imageRunner(f);
+  const first = await imageRunner(f);
   f.secrets.save('owner', { ...f.secrets.get('owner', true), policy: { ...f.secrets.get('owner', true).policy, maxSteps: 16 } });
   try {
     first.runner.start();
@@ -319,7 +341,7 @@ test('budget pause and runner restart reuse sixteen completed reads before readi
     assert.equal(f.store.db.prepare('SELECT status FROM runs').get().status, 'paused');
     assert.equal(first.readings.length, 16); assert.equal(first.requests.length, 0);
   } finally { await first.runner.close(); }
-  const second = imageRunner(f);
+  const second = await imageRunner(f);
   f.secrets.save('owner', { ...f.secrets.get('owner', true), policy: { ...f.secrets.get('owner', true).policy, maxSteps: 100 } });
   f.store.db.prepare("UPDATE runs SET status='queued',error_code=NULL").run();
   try {
@@ -335,7 +357,7 @@ test('budget pause and runner restart reuse sixteen completed reads before readi
 test('image preprocessing respects configured read approval before invoking vision', async t => {
   const f = await fixture(t);
   f.gateway.receive(f.account.id, [photo(1)]); f.advance(PHOTO_QUIET_MS); await f.gateway.tick();
-  const { runner, requests, readings } = imageRunner(f);
+  const { runner, requests, readings } = await imageRunner(f);
   f.secrets.save('owner', { ...f.secrets.get('owner', true), policy: { ...f.secrets.get('owner', true).policy, read: 'ask' } });
   try {
     runner.start();
