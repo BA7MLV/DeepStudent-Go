@@ -12,7 +12,9 @@ export function preloadOnIdle(loaders: Array<() => Promise<unknown>>): () => voi
   let handle = 0;
   const idle = (fn: () => void) => {
     if (typeof window.requestIdleCallback === 'function') handle = window.requestIdleCallback(fn, { timeout: 4000 });
-    else handle = globalThis.setTimeout(fn, 1500) as unknown as number;
+    // window.setTimeout 在浏览器侧固定返回 number,不需要任何断言;
+    // (globalThis.setTimeout 会命中 Node 的 Timeout 类型,才被迫用链式断言。)
+    else handle = window.setTimeout(fn, 1500);
   };
   const queue = [...loaders];
   const next = () => {
@@ -62,7 +64,8 @@ export function preloadOnIntent(routes: Record<string, () => Promise<unknown>>):
     cancelDwell();
     if (!target) return;
     dwellLink = target.link;
-    dwell = globalThis.setTimeout(() => { if (dwellLink === target.link) prefetch(target.route); }, 100) as unknown as number;
+    // 同上:浏览器句柄就是 number,不借用 Node 的 setTimeout 类型。
+    dwell = window.setTimeout(() => { if (dwellLink === target.link) prefetch(target.route); }, 100);
   };
   const out = (event: PointerEvent) => {
     if (dwellLink && !(event.relatedTarget instanceof Node && dwellLink.contains(event.relatedTarget))) cancelDwell();

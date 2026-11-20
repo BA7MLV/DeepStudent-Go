@@ -225,7 +225,7 @@ export function audit(root = repository) {
   const errors = [];
   // AGENTS 禁止链式类型断言,但存量太大不能一次清完:设一个只降不升的上限,
   // 新增 as unknown as 会让边界检查直接失败,存量随清理逐步下调这个数字。
-  const CAST_CEILING = 118;
+  const CAST_CEILING = 117;
   let casts = 0;
   for (const directory of ['apps/web/src', 'apps/api/src', 'packages/contracts/src', 'packages/study-core/src', 'packages/client-core/src', 'packages/remote-artifacts/src', 'packages/remote-host/src']) {
     for (const file of files(path.join(root, directory))) {
