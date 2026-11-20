@@ -1,0 +1,235 @@
+/* 级联菜单 CascadeMenu。时长放在 interactionTiming.ts;这里的数值是动效(CSS)时长。 */
+
+.cm-root {
+  position: relative;
+  display: inline-flex;
+}
+
+.cm-anchor {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.cm-menu {
+  --cm-menu-width: 236px;
+  /* 主题令牌:浅色 */
+  --cm-surface: rgba(255, 255, 255, 0.96);
+  --cm-border: rgba(0, 0, 0, 0.14);
+  --cm-ink: #263140;
+  --cm-ink-hover: rgba(15, 23, 42, 0.07);
+  --cm-ink-quiet: #7a8491;
+  --cm-chevron: #94a3b8;
+  --cm-shadow:
+    0 18px 34px rgba(15, 23, 42, 0.12),
+    0 2px 4px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  position: absolute;
+  z-index: 60;
+  width: min(var(--cm-menu-width), fit-content);
+  min-width: 210px;
+  max-width: 260px;
+  max-height: min(420px, calc(100vh - 24px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  border: 1px solid var(--cm-border);
+  border-radius: 12px;
+  background: var(--cm-surface);
+  box-shadow: var(--cm-shadow);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  color: var(--cm-ink);
+  /* 主题切换交叉淡化颜色/边框/阴影 */
+  transition:
+    background-color 500ms,
+    border-color 500ms,
+    box-shadow 500ms,
+    color 500ms;
+  transform-origin: top left;
+  animation: cm-submenu-in 360ms cubic-bezier(0.2, 1.45, 0.35, 1), cm-fade-in 170ms ease-out;
+}
+
+/* html.dark 由主题系统(theme.ts)挂载;深色为中性灰,无蓝味 */
+html.dark .cm-menu {
+  --cm-surface: rgba(34, 34, 34, 0.96);
+  --cm-border: rgba(255, 255, 255, 0.12);
+  --cm-ink: #e4e4e4;
+  --cm-ink-hover: rgba(255, 255, 255, 0.08);
+  --cm-ink-quiet: #9a9a9a;
+  --cm-chevron: #8a8a8a;
+  --cm-shadow:
+    0 18px 34px rgba(0, 0, 0, 0.42),
+    0 2px 4px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* 根层级:从锚点下方展开 */
+.cm-menu[data-cm-menu='root'] {
+  top: calc(100% + 6px);
+  left: 0;
+  animation: cm-root-in 360ms cubic-bezier(0.2, 1.45, 0.35, 1), cm-fade-in 170ms ease-out;
+}
+
+.cm-menu.cm-menu--flipped-x {
+  left: auto;
+  right: calc(100% - 2px);
+}
+
+.cm-menu[data-cm-menu='root'].cm-menu--flipped-x {
+  right: 0;
+}
+
+.cm-row-slot {
+  position: relative;
+}
+
+.cm-menu .cm-menu {
+  /* 行槽比父菜单窄 12px(padding 6px),行槽宽的 100% 减 2px
+     恰好等于与父菜单重叠 8px。top 由挂载后的对齐效果写入 inline style。 */
+  left: calc(100% - 2px);
+  top: -25px;
+  transform-origin: left center;
+}
+
+.cm-title {
+  padding: 4px 8px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--cm-ink-quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  margin: 4px 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  outline: none;
+}
+
+.cm-row[data-state='hovered'],
+.cm-row[data-state='active'],
+.cm-row:focus-visible {
+  background: var(--cm-ink-hover);
+}
+
+.cm-row[data-state='active'] {
+  color: var(--cm-ink);
+}
+
+.cm-row[data-state='skipped'] {
+  background: transparent;
+}
+
+.cm-icon,
+.cm-row .cm-folder,
+.cm-chevron {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.cm-folder {
+  position: relative;
+}
+
+.cm-folder svg {
+  position: absolute;
+  inset: 0;
+  width: 18px;
+  height: 18px;
+}
+
+.cm-folder__closed,
+.cm-folder__open {
+  transition:
+    opacity 460ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 460ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cm-folder__closed { opacity: 1; transform: translateY(0); }
+.cm-folder__open { opacity: 0; transform: translateY(2px); }
+
+.cm-folder[data-open='true'] .cm-folder__closed { opacity: 0; transform: translateY(-1px); }
+.cm-folder[data-open='true'] .cm-folder__open { opacity: 1; transform: translateY(0); }
+
+.cm-chevron {
+  margin-left: auto;
+  color: var(--cm-chevron);
+}
+
+.cm-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes cm-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes cm-root-in {
+  from {
+    transform: translateY(-6px) scale(0.96, 0.86);
+  }
+}
+
+@keyframes cm-submenu-in {
+  from {
+    transform: translateX(-8px) scale(0.88, 0.98);
+  }
+}
+
+/* 调试覆盖层:默认关闭,组件 debug 属性打开时才渲染 */
+.cm-debug {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+
+.cm-debug__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.cm-debug__svg polygon {
+  fill: rgba(59, 130, 246, 0.16);
+  stroke: #3b82f6;
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.cm-debug__panel {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #1d4ed8;
+  font: 12px/1.5 ui-monospace, monospace;
+  white-space: pre;
+}
