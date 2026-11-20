@@ -9,6 +9,7 @@ import { inspectInteraction } from './interaction-recovery.js';
 import { preferencesProjection } from './preferences.js';
 import { RecordProjections, recordsEpoch } from './record-projections.js';
 import { studyOverview } from './study-overview.js';
+import { cloudTaskRowSchema, expectRow, type CloudTaskRow } from '../storage/row-schema.js';
 
 export interface RuntimeChange { revision: number; owner_id: string; domain: string; entity: string }
 type ReadKind = RuntimeRead['kind'];
@@ -119,12 +120,12 @@ function activityReads({ store }: Ports): Pick<ReadHandlers, 'permissions' | 'in
     executorRecovery: {
       read: (owner, request) => {
         if (request.operationIds.length > 20000 || request.operationIds.some(id => !id || id.length > 200)) throw new Error('invalid_recovery_operations');
-        const task = request.taskId ? store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId) : undefined;
+        const task = request.taskId ? expectRow<CloudTaskRow>(cloudTaskRowSchema, store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId), 'cloud_task_row_invalid') : undefined;
         return { task: task ? taskDto(task) : null, operations: request.operationIds.map(id => ({ id, committed: !!store.db.prepare('SELECT 1 FROM cloud_operations WHERE owner_id=? AND id=?').get(owner, id) })) };
       }, matches: (_, change) => inDomains(change, ['cloud_tasks', 'cloud_records']),
     },
     tasks: { read: owner => ({ tasks: listOwnerTasks(store, owner, 'activity') }), matches: (_, change) => inDomains(change, ['cloud_tasks', 'threads', 'agent_profiles']) },
-    task: { read: (owner, request) => { const row = store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId); if (!row) throw new Error('task_not_found'); return taskDto(row); }, matches: (request, change) => ['cloud_tasks', 'cloud_task_progress'].includes(change.domain) && change.entity === request.taskId },
+    task: { read: (owner, request) => { const row = expectRow<CloudTaskRow>(cloudTaskRowSchema, store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, request.taskId), 'cloud_task_row_invalid'); if (!row) throw new Error('task_not_found'); return taskDto(row); }, matches: (request, change) => ['cloud_tasks', 'cloud_task_progress'].includes(change.domain) && change.entity === request.taskId },
   };
 }
 

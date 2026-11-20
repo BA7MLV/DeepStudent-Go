@@ -11,6 +11,7 @@ import { handoutEditBaseline, parseHandoutPersist } from './handout-edit.js';
 import { admitContextCompression } from '../../runtime/context-compression.js';
 import { parseBiliImport } from '../bilibili/input.js';
 import { normalizeChatAttachments } from '../../runtime/chat-attachments.js';
+import { cloudTaskRowSchema, expectRow, type CloudTaskRow } from '../storage/row-schema.js';
 
 /** Compare user intent, not mutable server-derived metadata or the current file
  * index. A receipt replay must not need the original to remain present forever. */
@@ -35,7 +36,7 @@ export function submitOwnerTask(store: DatabaseStore, records: CloudRecords, con
   if (!command || !TASK_KINDS.includes(command.kind) || !command.operationId || command.operationId.length > 100 || !command.resource || command.resource.length > 256 || !command.input || Array.isArray(command.input)) throw new Error('invalid_task');
   const resource = ['chat', 'qa'].includes(command.kind) ? `session:${Number(command.input.sessionId)}` : typeof command.input.videoId === 'string' ? `course:${command.input.videoId}` : command.resource;
   return store.transaction(() => {
-    const previous = store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, command.operationId) as { kind: string; resource: string; input: string } | undefined;
+    const previous = expectRow<CloudTaskRow>(cloudTaskRowSchema, store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, command.operationId), 'cloud_task_row_invalid');
     if (previous) {
       const previousInput = JSON.parse(previous.input);
       if (previous.kind !== command.kind || previous.resource !== resource || !isDeepStrictEqual(taskIntent(previousInput, command.kind), taskIntent(command.input, command.kind))) throw new Error('task_nonce_conflict');
@@ -56,7 +57,7 @@ export function submitOwnerTask(store: DatabaseStore, records: CloudRecords, con
     const session = ['chat', 'qa'].includes(command.kind) ? records.get(owner, 'chatSessions', Number(input.sessionId)) : undefined;
     if (['chat', 'qa'].includes(command.kind) && (!session || session.archived)) throw new Error('session_not_found');
     const active = store.db.prepare("SELECT * FROM cloud_tasks WHERE owner_id=? AND kind=? AND resource=? AND status IN ('queued','running','waiting_user')").get(owner, command.kind, resource);
-    if (active && !['chat', 'qa', 'modelOnce', 'artifactEdit', 'handoutEdit', 'bilibiliImport'].includes(command.kind)) return taskDto(active);
+    if (active && !['chat', 'qa', 'modelOnce', 'artifactEdit', 'handoutEdit', 'bilibiliImport'].includes(command.kind)) return taskDto(expectRow<CloudTaskRow>(cloudTaskRowSchema, active, 'cloud_task_row_invalid')!);
     const id = crypto.randomUUID(), now = new Date().toISOString();
     store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at) VALUES(?,?,?,?,?,?,'queued',?,?)").run(id, owner, command.operationId, command.kind, resource, JSON.stringify(input), now, now);
     if (['chat', 'qa', 'modelOnce', 'artifactEdit', 'handoutEdit', 'cards', 'comments', 'danmaku', 'handout'].includes(command.kind) && !(command.kind === 'handoutEdit' && input.action === 'persist')) {
@@ -66,6 +67,6 @@ export function submitOwnerTask(store: DatabaseStore, records: CloudRecords, con
       store.db.prepare('UPDATE cloud_tasks SET model_snapshot=? WHERE id=?').run(JSON.stringify(frozen), id);
     }
     configuration.audit(owner, 'task.created', { id, kind: command.kind, resource });
-    return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(id));
+    return taskDto(expectRow<CloudTaskRow>(cloudTaskRowSchema, store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(id), 'cloud_task_row_invalid')!);
   });
 }

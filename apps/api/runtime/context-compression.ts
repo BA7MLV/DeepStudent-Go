@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { attachmentMessage } from '@wangke/study-core/chat/attachments';
 import { compareChatRows } from '@wangke/study-core/chat-order';
 import { chatOnce, textOf } from '@wangke/study-core/model/client';
-import { messageTokens, replayTrace } from '@wangke/study-core/model/transcript';
+import { messageTokens, replayTrace, type ModelTrace } from '@wangke/study-core/model/transcript';
 import type { TaskModelSelection } from '@wangke/contracts/cloud';
 import { validateTaskModelSelection } from '../src/agent/task-model.js';
 import { gatewayTaskFetch, gatewayTaskTarget } from '../src/agent/model-gateway-runtime.js';
@@ -88,31 +88,43 @@ export function admitContextCompression(records: CloudRecords, owner: string, va
   return { ...input, compressionBaseline: baseline(session, history) };
 }
 
+/** `replayTrace` 只读这几个字段；行来自 cloud_records 的外部 JSON，
+ * 按结构取出可重放字段，缺字段即视为没有可重放的模型轨迹（原行为）。 */
+function traceRow(row: Row): { content: string; originalContent?: string; modelTrace?: ModelTrace } | undefined {
+  if (typeof row.content !== 'string' || row.originalContent !== undefined && typeof row.originalContent !== 'string') return undefined;
+  const modelTrace = row.modelTrace;
+  if (modelTrace !== undefined && (typeof modelTrace !== 'object' || modelTrace === null || Array.isArray(modelTrace))) return undefined;
+  return { content: row.content, ...(typeof row.originalContent === 'string' ? { originalContent: row.originalContent } : {}), ...(modelTrace === undefined ? {} : { modelTrace }) };
+}
+function traceOf(row: Row): ReturnType<typeof replayTrace> {
+  const traced = traceRow(row);
+  return traced ? replayTrace(traced) : undefined;
+}
 function turnsOf(rows: Row[]): Row[][] {
   const turns: Row[][] = [];
   for (const row of rows) {
-    if ((row.role === 'user' && replayTrace(row as any)?.length !== 0) || !turns.length) turns.push([]);
+    if ((row.role === 'user' && traceOf(row)?.length !== 0) || !turns.length) turns.push([]);
     turns.at(-1)!.push(row);
   }
   return turns;
 }
 function cost(rows: Row[]) {
   return rows.reduce((sum, row) => {
-    const trace = replayTrace(row as any);
+    const trace = traceOf(row);
     return sum + (trace ? messageTokens(trace) : row.attachments?.length
       ? messageTokens([attachmentMessage({ role: row.role, content: row.content, attachments: row.attachments })])
       : Math.ceil(row.content.length * 0.7));
   }, 0);
 }
 function evidence(row: Row) {
-  const trace = replayTrace(row as any) ?? (row.attachments?.length ? [attachmentMessage({ role: row.role, content: row.content, attachments: row.attachments })] : undefined);
+  const trace = traceOf(row) ?? (row.attachments?.length ? [attachmentMessage({ role: row.role, content: row.content, attachments: row.attachments })] : undefined);
   return { role: row.role, content: row.content, ...(trace ? { modelHistory: trace.map(({ role, content, tool_calls, tool_call_id }) => ({ role, content, tool_calls, tool_call_id })) } : {}) };
 }
 function unsafeTurn(turn: Row[]) {
   // Embedded tool envelopes may cross UI row boundaries. Conservatively keep
   // tool-bearing turns, rather than risk orphaning calls/results or signed state.
   return turn.some(row => row.resume || row.interrupted || row.providerState || 'tool_calls' in row || 'tool_call_id' in row ||
-    replayTrace(row as any)?.some(message => message.role === 'tool' || message.tool_calls?.length || message.providerState));
+    traceOf(row)?.some(message => message.role === 'tool' || message.tool_calls?.length || message.providerState));
 }
 
 /** Apply only intact, whole-turn omission receipts. Never reorder or clone

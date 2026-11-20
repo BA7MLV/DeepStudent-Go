@@ -9,6 +9,7 @@ import type { PluginActionContext, PluginService } from './service.js';
 import { readLearningMarkdown } from './learning-files.js';
 import { deliverNotebookAttempt } from './learning-notebook.js';
 import { parseWrongbook } from '@wangke/study-core/wrongbook';
+import { cloudTaskRowSchema, cloudTaskWithRequestSchema, expectRow, expectRows, practiceSubmissionRowSchema, type CloudTaskRow, type PracticeSubmissionRow } from '../storage/row-schema.js';
 
 const material = { type: 'string', minLength: 1, maxLength: 256 };
 const integer = { type: 'integer', minimum: 0 };
@@ -81,12 +82,12 @@ export function registerPracticeActions(service: PluginService, resolveMaterial:
     const nonce = `plugin:${crypto.createHash('sha256').update(JSON.stringify([c.plugin.id, c.instance.id, 'practice.generate', a.clientNonce])).digest('hex')}`;
     const request = JSON.stringify({ materialId: id, count });
     return store.transaction(() => {
-      const previous = store.db.prepare('SELECT t.*,l.request FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE t.owner_id=? AND t.nonce=?').get(c.owner, nonce) as any;
+      const previous = expectRow<CloudTaskRow & { request: string }>(cloudTaskWithRequestSchema, store.db.prepare('SELECT t.*,l.request FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE t.owner_id=? AND t.nonce=?').get(c.owner, nonce), 'cloud_task_row_invalid');
       if (previous) { if (previous.request !== request) throw new Error('plugin_nonce_conflict'); return taskDto(previous); }
       const taskId = crypto.randomUUID(), now = new Date().toISOString();
       store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,created_at,updated_at) VALUES(?,?,?,'modelOnce',?,?,'queued',?,?)").run(taskId, c.owner, nonce, `course:${id}`, JSON.stringify(service.files.admitTask(c.owner, 'modelOnce', { videoId: id, pluginPractice: true, count })), now, now);
       store.db.prepare('INSERT INTO plugin_learning_tasks(task_id,owner_id,plugin_id,instance_id,action_id,material_id,request) VALUES(?,?,?,?,?,?,?)').run(taskId, c.owner, c.plugin.id, c.instance.id, 'practice.generate', id, request);
-      return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(taskId));
+      return taskDto(expectRow<CloudTaskRow>(cloudTaskRowSchema, store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(taskId), 'cloud_task_row_invalid')!);
     });
   } });
   service.register({ id: 'practice.submit', capability: 'learning', access: 'write', atomic: 'sqlite', trustedOnly: true, schema: object({ rowId: integer, questionIndex: integer, pick: { anyOf: [{ type: 'integer', minimum: 0 }, object({ answer: {}, selfGrade: { type: 'boolean' } }, ['answer'])] }, durationSeconds: { type: 'number', minimum: 0, maximum: 86400 } }), run: (a, c) => store.transaction(() => {
@@ -130,7 +131,7 @@ export function startNotebookDelivery(service: PluginService) {
   const { store } = service, records = new CloudRecords(store);
   let stopped = false, running: Promise<void> | undefined;
   const reconcile = async () => {
-      const pending = store.db.prepare('SELECT * FROM plugin_practice_submissions WHERE delivered_at IS NULL LIMIT 50').all() as any[];
+      const pending = expectRows<PracticeSubmissionRow>(practiceSubmissionRowSchema, store.db.prepare('SELECT * FROM plugin_practice_submissions WHERE delivered_at IS NULL LIMIT 50').all(), 'practice_submission_row_invalid');
       for (const p of pending) {
         if (stopped) break;
         try {

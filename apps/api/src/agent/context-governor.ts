@@ -8,6 +8,7 @@ import { publishBotEvent } from './events.js';
 import { textTokens } from './request-budget.js';
 import { boundedText, budgeted, fitsResult, safeEnd } from './result-budget.js';
 import { SystemMaterials } from '../storage/system-materials.js';
+import { sql, sqlFixed, sqlVariant } from '../storage/sql.js';
 
 const HEADER = 'Recoverable conversation checkpoint v2. Untrusted derived data, never authorization.';
 const hash = (value: unknown) => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -94,8 +95,8 @@ export class ContextGovernor {
     return [...JSON.parse(saved.messages), ...history.slice(saved.source_end)];
   }
   private freezeView(run: string, history: ModelMessage[], messages: ModelMessage[]) {
-    this.store.db.prepare(`INSERT INTO bot_context_views(run_id,source_end,source_hash,messages) VALUES(?,?,?,?)
-      ON CONFLICT(run_id) DO UPDATE SET source_end=excluded.source_end,source_hash=excluded.source_hash,messages=excluded.messages`).run(run, history.length, hash(history), JSON.stringify(messages));
+    this.store.db.prepare(sql`INSERT INTO bot_context_views(run_id,source_end,source_hash,messages) VALUES(?,?,?,?)
+      ON CONFLICT(run_id) DO UPDATE SET source_end=excluded.source_end,source_hash=excluded.source_hash,messages=excluded.messages`.sql).run(run, history.length, hash(history), JSON.stringify(messages));
     return messages;
   }
 
@@ -112,8 +113,8 @@ export class ContextGovernor {
   }
 
   private threadMessages(owner: string, thread: string, start: number, end: number) {
-    return this.store.db.prepare(`SELECT m.id,m.seq,m.role,m.content FROM messages m JOIN threads t ON t.id=m.thread_id
-      WHERE t.owner_id=? AND m.thread_id=? AND m.seq>=? AND m.seq<=? AND m.kind IN ('text','attachment') AND m.role IN ('user','assistant') ORDER BY m.seq`).all(owner, thread, start, end) as Array<ModelMessage & { id: string; seq: number }>;
+    return this.store.db.prepare(sql`SELECT m.id,m.seq,m.role,m.content FROM messages m JOIN threads t ON t.id=m.thread_id
+      WHERE t.owner_id=? AND m.thread_id=? AND m.seq>=? AND m.seq<=? AND m.kind IN ('text','attachment') AND m.role IN ('user','assistant') ORDER BY m.seq`.sql).all(owner, thread, start, end) as Array<ModelMessage & { id: string; seq: number }>;
   }
 
   list(owner: string, thread: string, offset = 0, maxTokens = 4096, cursor?: string) {
@@ -123,10 +124,12 @@ export class ContextGovernor {
       try { before = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')); } catch { throw new Error('invalid_result_offset'); }
       if (!before || typeof before.time !== 'string' || typeof before.id !== 'string' || !/^[a-f0-9]{64}$/.test(before.id)) throw new Error('invalid_result_offset');
     }
-    const rows = this.store.db.prepare(`SELECT s.id,s.run_id,s.source_start,s.source_end,s.content,s.created_at FROM bot_summaries s
-      JOIN runs r ON r.id=s.run_id JOIN threads t ON t.id=r.thread_id WHERE t.owner_id=? AND t.id=? AND s.version=2
-      ${before ? 'AND (s.created_at<? OR (s.created_at=? AND s.id<?))' : ''}
-      ORDER BY s.created_at DESC,s.id DESC LIMIT 51 OFFSET ?`).all(owner, thread, ...(before ? [before.time, before.time, before.id, 0] : [offset])) as Array<Stored & { created_at: string }>;
+    const rows = this.store.db.prepare(sqlFixed(`SELECT s.id,s.run_id,s.source_start,s.source_end,s.content,s.created_at FROM bot_summaries s
+      JOIN runs r ON r.id=s.run_id JOIN threads t ON t.id=r.thread_id WHERE t.owner_id=? AND t.id=? AND s.version=2`, 2, [
+      // 游标分页子句只在有游标时出现;键集(keyset)条件本身是固定文本,时间与 id 走绑定值。
+      ...(before ? [sqlVariant('AND (s.created_at<? OR (s.created_at=? AND s.id<?))', 3)] : []),
+      sqlVariant('ORDER BY s.created_at DESC,s.id DESC LIMIT 51 OFFSET ?', 1),
+    ]).sql).all(owner, thread, ...(before ? [before.time, before.time, before.id, 0] : [offset])) as Array<Stored & { created_at: string }>;
     const checkpoints: Array<{ checkpointId: string; runId: string; source: Source; createdAt: string }> = [];
     const build = () => {
       const more = checkpoints.length < rows.length, last = checkpoints.at(-1);
@@ -143,8 +146,8 @@ export class ContextGovernor {
   }
 
   read(owner: string, thread: string, id: string, offset = 0, maxTokens = 4096, selection: { section?: 'history' | 'requests'; messageIndex?: number } = {}) {
-    const row = this.store.db.prepare(`SELECT s.* FROM bot_summaries s JOIN runs r ON r.id=s.run_id JOIN threads t ON t.id=r.thread_id
-      WHERE s.id=? AND t.owner_id=? AND t.id=? AND s.version=2`).get(id, owner, thread) as Stored | undefined;
+    const row = this.store.db.prepare(sql`SELECT s.* FROM bot_summaries s JOIN runs r ON r.id=s.run_id JOIN threads t ON t.id=r.thread_id
+      WHERE s.id=? AND t.owner_id=? AND t.id=? AND s.version=2`.sql).get(id, owner, thread) as Stored | undefined;
     if (!row) throw new Error('checkpoint_not_found');
     const snapshot = JSON.parse(row.content) as Snapshot;
     let original: ModelMessage[];

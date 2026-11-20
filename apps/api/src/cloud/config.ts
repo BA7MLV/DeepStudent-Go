@@ -185,7 +185,8 @@ export class CloudConfiguration {
       throw new ModelConfigurationError('invalid_model_presets');
     }
     const policy = value.policy;
-    if (!policy || !['read', 'write', 'remove', 'shell'].every(k => ['allow', 'ask', 'deny'].includes((policy as any)[k])) ||
+    const permissions = policy ? permissionSwitches(policy) : undefined;
+    if (!permissions || !Object.values(permissions).every(v => v !== undefined && ['allow', 'ask', 'deny'].includes(v)) ||
         !['allow', 'deny'].includes(policy.network) || !Number.isInteger(policy.maxSteps) || policy.maxSteps < 1 || policy.maxSteps > 1000) throw new Error('invalid_policy');
     const cleanRef = (ref: { providerId: string; model: string }) => ref?.model
       ? { providerId: ref.providerId, model: ref.model } : { providerId: '', model: '' };
@@ -213,7 +214,7 @@ export class CloudConfiguration {
     return policy;
   }
   taskPolicy(owner: string, taskId: string) {
-    const task = this.store.db.prepare('SELECT t.parent_step_id,r.thread_id FROM cloud_tasks t LEFT JOIN runs r ON r.id=t.parent_run_id WHERE t.id=? AND t.owner_id=?').get(taskId, owner) as any;
+    const task = expectRow<{ parent_step_id: string | null; thread_id: string | null }>({ type: 'object', properties: { parent_step_id: { type: ['string', 'null'] }, thread_id: { type: ['string', 'null'] } }, required: ['parent_step_id', 'thread_id'], additionalProperties: true }, this.store.db.prepare('SELECT t.parent_step_id,r.thread_id FROM cloud_tasks t LEFT JOIN runs r ON r.id=t.parent_run_id WHERE t.id=? AND t.owner_id=?').get(taskId, owner), 'task_policy_row_invalid');
     const policy = task?.thread_id ? this.policy(owner, task.thread_id) : this.get(owner).policy;
     if (task?.parent_step_id && this.store.db.prepare("SELECT 1 FROM approvals WHERE step_id=? AND status='approved'").get(task.parent_step_id)) return { ...policy, read: policy.read === 'ask' ? 'allow' as const : policy.read, write: policy.write === 'ask' ? 'allow' as const : policy.write };
     return policy;
@@ -223,3 +224,11 @@ export class CloudConfiguration {
   }
 }
 import { appendAudit } from '../storage/audit.js';
+import { expectRow } from '../storage/row-schema.js';
+
+/** 旧配置可能缺字段或带非字符串：显式取出四个开关（缺失即 undefined），白名单比较在调用处做。 */
+function permissionSwitches(value: CloudConfig['policy']): Record<'read' | 'write' | 'remove' | 'shell', string | undefined> {
+  const policy = value as unknown as Record<string, unknown>;
+  const text = (item: unknown) => typeof item === 'string' ? item : undefined;
+  return { read: text(policy.read), write: text(policy.write), remove: text(policy.remove), shell: text(policy.shell) };
+}

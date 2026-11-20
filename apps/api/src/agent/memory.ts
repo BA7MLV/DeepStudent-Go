@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { DatabaseStore } from '../storage/database.js';
 import { publishBotEvent } from './events.js';
 import { memoryPath, memoryName, memoryId, diaryDate } from '@wangke/contracts/system';
+import { sql } from '../storage/sql.js';
 
 export interface MemoryInput { scope: 'owner' | 'bot' | 'course'; scopeId: string; kind: 'preference' | 'course_fact' | 'note' | 'diary'; content: string; source: string; sourceRevision?: string }
 export type MemoryRow = { id: string; owner_id: string; scope: MemoryInput['scope']; scope_id: string; kind: MemoryInput['kind']; content: string; source: string; source_revision: string | null; revision: number; status: string; origin: string; created_at: string; updated_at: string };
@@ -96,7 +97,11 @@ export class BotMemory {
     }
     if (source.startsWith('message:') || source.startsWith('run:')) {
       const message = source.startsWith('message:');
-      if (!this.store.db.prepare(`SELECT 1 FROM ${message ? 'messages' : 'runs'} s JOIN threads t ON t.id=s.thread_id WHERE s.id=? AND t.owner_id=?`).get(source.slice(source.indexOf(':') + 1), owner)) throw new Error('memory_source_not_found');
+      // 表名原先由条件表达式拼进 FROM;改成两条固定语句后,SQL 文本完全不随输入变化。
+      const linked = message
+        ? this.store.db.prepare('SELECT 1 FROM messages s JOIN threads t ON t.id=s.thread_id WHERE s.id=? AND t.owner_id=?').get(source.slice(source.indexOf(':') + 1), owner)
+        : this.store.db.prepare('SELECT 1 FROM runs s JOIN threads t ON t.id=s.thread_id WHERE s.id=? AND t.owner_id=?').get(source.slice(source.indexOf(':') + 1), owner);
+      if (!linked) throw new Error('memory_source_not_found');
       return undefined;
     }
     if (!source.startsWith('user:')) throw new Error('invalid_memory_source');
@@ -114,7 +119,7 @@ export class BotMemory {
   list(owner: string, query = '', offset = 0, includeDeleted = false) {
     this.sync(owner);
     this.refreshStale(owner);
-    const rows = this.store.db.prepare(`SELECT * FROM bot_memories WHERE owner_id=? AND (? OR status!='deleted') AND instr(lower(content || COALESCE((SELECT path FROM system_file_entries WHERE memory_id=bot_memories.id),'')),lower(?))>0 ORDER BY updated_at DESC,id LIMIT 50 OFFSET ?`).all(owner, Number(includeDeleted), query.slice(0, 200), Math.max(0, offset)) as MemoryRow[];
+    const rows = this.store.db.prepare(sql`SELECT * FROM bot_memories WHERE owner_id=? AND (? OR status!='deleted') AND instr(lower(content || COALESCE((SELECT path FROM system_file_entries WHERE memory_id=bot_memories.id),'')),lower(?))>0 ORDER BY updated_at DESC,id LIMIT 50 OFFSET ?`.sql).all(owner, Number(includeDeleted), query.slice(0, 200), Math.max(0, offset)) as MemoryRow[];
     return rows.map(row => ({ ...row, path: this.path(row) }));
   }
   get(owner: string, id: string) {
@@ -129,8 +134,8 @@ export class BotMemory {
       if (existing && existing.revision !== options.revision) throw new Error('memory_revision_conflict');
       if (options.origin === 'consolidated' && this.store.db.prepare("SELECT 1 FROM bot_memories WHERE owner_id=? AND source=? AND scope=? AND scope_id=? AND status='deleted'").get(owner, value.source, value.scope, value.scopeId)) throw new Error('memory_source_tombstoned');
       const id = existing?.id ?? crypto.randomUUID(), at = new Date().toISOString(), revision = (existing?.revision ?? 0) + 1;
-      this.store.db.prepare(`INSERT INTO bot_memories(id,owner_id,scope,scope_id,kind,content,source,source_revision,revision,status,origin,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'active',?,?,?)
-        ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,scope_id=excluded.scope_id,kind=excluded.kind,content=excluded.content,source=excluded.source,source_revision=excluded.source_revision,revision=excluded.revision,status='active',origin=excluded.origin,updated_at=excluded.updated_at`).run(id, owner, value.scope, value.scopeId, value.kind, value.content, value.source, value.sourceRevision ?? null, revision, options.origin ?? 'explicit', existing?.created_at ?? at, at);
+      this.store.db.prepare(sql`INSERT INTO bot_memories(id,owner_id,scope,scope_id,kind,content,source,source_revision,revision,status,origin,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'active',?,?,?)
+        ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,scope_id=excluded.scope_id,kind=excluded.kind,content=excluded.content,source=excluded.source,source_revision=excluded.source_revision,revision=excluded.revision,status='active',origin=excluded.origin,updated_at=excluded.updated_at`.sql).run(id, owner, value.scope, value.scopeId, value.kind, value.content, value.source, value.sourceRevision ?? null, revision, options.origin ?? 'explicit', existing?.created_at ?? at, at);
       const row = this.raw(owner, id);
       const resource = options.path ?? this.path(row);
       if (!memoryName(resource)) throw new Error('invalid_system_path');
@@ -193,9 +198,9 @@ export class BotMemory {
     this.sync(owner);
     this.refreshStale(owner);
     if (!this.store.db.prepare('SELECT 1 FROM threads WHERE id=? AND owner_id=?').get(thread, owner)) throw new Error('thread_not_found');
-    const rows = this.store.db.prepare(`SELECT * FROM bot_memories m WHERE owner_id=? AND status='active' AND kind='preference'
+    const rows = this.store.db.prepare(sql`SELECT * FROM bot_memories m WHERE owner_id=? AND status='active' AND kind='preference'
       AND (scope='owner' OR scope='bot' AND EXISTS(SELECT 1 FROM thread_participants p WHERE p.thread_id=? AND p.agent_id=m.scope_id))
-      ORDER BY updated_at DESC,id LIMIT 20`).all(owner, thread) as MemoryRow[];
+      ORDER BY updated_at DESC,id LIMIT 20`.sql).all(owner, thread) as MemoryRow[];
     // Course facts are retrieved explicitly with course scope, never guessed
     // from an attachment or injected into unrelated conversations.
     let characters = 0;

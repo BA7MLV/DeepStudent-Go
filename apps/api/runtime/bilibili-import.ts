@@ -18,6 +18,7 @@ import { submitOwnerTask } from '../src/cloud/task-commands.js';
 import { ProjectRepository } from '../src/projects/repository.js';
 import { ResourceFiles } from '../src/projects/resources.js';
 import { journaledResourceCommand } from '../src/realtime/resource-workflows.js';
+import { webBody } from '../src/storage/row-schema.js';
 
 /** Local descriptor inputs only. No URL, cookie, user argument or shell reaches
  * FFmpeg. MP4 is streamed to disk with an output cap, not accumulated in RAM. */
@@ -84,7 +85,7 @@ export async function serverBilibiliImport(context: TaskContext) {
         const declared = Number(response.headers.get('content-length') ?? 0);
         if (declared > limit - bytes) { await response.body?.cancel(); throw new Error('视频超过服务器单文件大小限制。'); }
         let received = 0;
-        await pipeline(Readable.fromWeb(response.body as any), new Transform({ transform(chunk, _encoding, callback) {
+        await pipeline(Readable.fromWeb(webBody(response.body)), new Transform({ transform(chunk, _encoding, callback) {
           received += chunk.length; bytes += chunk.length;
           if (bytes > limit) { callback(new Error('视频超过服务器单文件大小限制。')); return; }
           try {

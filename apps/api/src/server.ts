@@ -6,8 +6,10 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import helmet from '@fastify/helmet';
 import argon2 from 'argon2';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
+// 这些 JSON 类型只作为「客户端提交的凭据」的形状入口;内容由 simplewebauthn 自己校验。
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import type { BootstrapInitializeRequest, ConversationMode, MessageRole } from '@wangke/contracts';
-import { parseBotAttachments } from '@wangke/contracts';
+import { parseBotAttachments, botMessageAdmissionError, botMessageAdmissionStatus } from '@wangke/contracts';
 import { DatabaseStore } from './storage/database.js';
 import { BootstrapRepository } from './storage/bootstrapRepository.js';
 import { BotRunner } from './agent/runner.js';
@@ -53,6 +55,31 @@ import { storageUsageReader } from './storage/usage.js';
 import { BotMessageHistory } from './agent/message-history.js';
 import { registerClientRuntime } from './realtime/host.js';
 import { submitOwnerTask } from './cloud/task-commands.js';
+import { sql, sqlFixed, sqlKeyword, sqlVariant } from './storage/sql.js';
+import {
+  agentProfileRowSchema, agentProfileSummaryRowSchema, approvalProjectionRowSchema, runRowSchema, type RunRow, authUserRowSchema, expectRow, expectRows, fileRecordRowSchema,
+  messageRecordRowSchema, threadRowSchema,
+  type AgentProfileRow, type ApprovalProjectionRow, type AuthUserRow, type FileRecordRow, type MessageRecordRow, type ThreadRow,
+} from './storage/row-schema.js';
+
+/** 行形状:server.ts 的 SQL 结果一律在信任边界收窄,不再 `as any`。
+ * `api_tokens` 的会话行只带 `{ id, name, token_id }`(没有密码列),因此用宽松 schema。 */
+const authTokenRowSchema = { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, token_id: { type: 'string' }, session_id: { type: ['string', 'null'] } }, required: ['id', 'name'] } as const;
+const credentialRowSchema = {
+  type: 'object', properties: { id: { type: 'string' }, public_key: {}, counter: { type: 'integer' }, user_id: { type: ['string', 'null'] } },
+  required: ['id', 'public_key', 'counter'],
+} as const;
+const challengeRowSchema = { type: 'object', properties: { id: { type: 'string' }, challenge: { type: 'string' } }, required: ['id', 'challenge'] } as const;
+const userRowSchema = { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } }, required: ['id', 'name'] } as const;
+const previewRowSchema = {
+  type: 'object', additionalProperties: true,
+  properties: { id: { type: 'string' }, updatedAt: { type: 'string' }, archived: { type: ['integer', 'boolean', 'null'] }, preview: { type: ['string', 'null'] } },
+  required: ['id', 'updatedAt'],
+} as const;
+const threadSummarySchema = { type: 'object', additionalProperties: true, properties: { id: { type: 'string' }, archived: { type: ['integer', 'boolean', 'null'] } }, required: ['id'] } as const;
+const participantRowSchema = { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, avatar: { type: ['string', 'null'] }, role: { type: 'string' }, enabled: { type: 'integer' } }, required: ['id', 'name', 'role', 'enabled'] } as const;
+const runStatusListSchema = { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' } }, required: ['id', 'status'] } as const;
+const idRowSchema = { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } as const;
 
 const defaultDataDir = process.env.DATA_DIR ?? path.resolve(process.cwd(), 'data');
 const messageKinds = new Set(['text', 'progress', 'attachment', 'widget', 'question', 'approval']);
@@ -229,14 +256,14 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   function session(request: FastifyRequest) {
     const cookieToken = parseCookies(request.headers.cookie).wangke_session;
     if (cookieToken) {
-      const cookieSession = store.db.prepare(`SELECT s.id AS session_id, u.id, u.name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?`).get(hashToken(cookieToken), now()) as any;
+      const cookieSession = expectRow<AuthUserRow>(authUserRowSchema, store.db.prepare(sql`SELECT s.id AS session_id, u.id, u.name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?`.sql).get(hashToken(cookieToken), now()), 'auth_row_invalid');
       if (cookieSession) return cookieSession;
     }
     const authorization = request.headers.authorization;
     if (!authorization?.startsWith('Bearer ')) return null;
     const bearer = authorization.slice(7).trim();
     if (!bearer || bearer.length > 256) return null;
-    return store.db.prepare(`SELECT NULL AS session_id, t.id AS token_id, u.id, u.name FROM api_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>?`).get(hashToken(bearer), now()) as any ?? null;
+    return expectRow<AuthUserRow>(authTokenRowSchema, store.db.prepare(sql`SELECT NULL AS session_id, t.id AS token_id, u.id, u.name FROM api_tokens t JOIN users u ON u.id=t.user_id WHERE t.token_hash=? AND t.revoked_at IS NULL AND t.expires_at>?`.sql).get(hashToken(bearer), now()), 'auth_row_invalid') ?? null;
   }
   function requireAuth(request: FastifyRequest, reply: FastifyReply) {
     const user = session(request);
@@ -260,6 +287,9 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     reply.header('set-cookie', `wangke_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=${sameSite}${secureCookie ? '; Secure' : ''}; Max-Age=${Math.floor(sessionTtlMs / 1000)}`);
   }
   const bad = (reply: FastifyReply, code: number, error: string) => reply.code(code).send({ error });
+  // 准入拒绝多带一个 `status` 字段(契约 ApiAdmissionErrorResponse):客户端按它区分
+  // 「改配置可恢复」与「真故障」,其余错误响应保持历史最小形状不动。
+  const admissionBad = (reply: FastifyReply, code: number, error: string) => reply.code(code).send({ error, status: code });
   const pruneAttempts = () => { const cutoff = Date.now() - 15 * 60_000; for (const [ip, value] of attempts) if (value.until < cutoff && value.seen < cutoff) attempts.delete(ip); while (attempts.size > 10_000) attempts.delete(attempts.keys().next().value!); };
 
    const cloudRunner = registerCloudRoutes(app, { store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin, filesDir, maxFileBytes, fetch: options.fetch, webSearch, mcp, sandbox: options.sandbox, sandboxCleanup: options.sandboxCleanup,
@@ -281,10 +311,10 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
    registerWebSearchRoutes(app, { service: webSearch, store, records: cloudRecords, configuration: cloudConfig, requireAuth, checkOrigin });
    registerLinkIconRoutes(app, { requireAuth, checkOrigin, fetch: options.fetch });
    registerProjectRoutes(app, { projects, requireAuth, checkOrigin, maxFileBytes, stopProject: (id) => {
-     const runs = store.db.prepare(`SELECT r.id FROM runs r JOIN threads t ON t.id=r.thread_id
+     const runs = expectRows<{ id: string }>(idRowSchema, store.db.prepare(sql`SELECT r.id FROM runs r JOIN threads t ON t.id=r.thread_id
        LEFT JOIN bot_workspaces b ON b.owner_id=t.owner_id AND t.mode='bot'
          AND (t.agent_id IS NOT NULL OR EXISTS(SELECT 1 FROM thread_participants WHERE thread_id=t.id))
-       WHERE COALESCE(t.project_id,b.project_id)=? AND r.status IN ('queued','running','waiting_user')`).all(id) as Array<{ id: string }>;
+       WHERE COALESCE(t.project_id,b.project_id)=? AND r.status IN ('queued','running','waiting_user')`.sql).all(id), 'run_row_invalid');
      for (const run of runs) { store.db.prepare("UPDATE runs SET status='cancelled',completed_at=?,wake_at=NULL WHERE id=?").run(now(), run.id); runner.cancel(run.id); }
    } });
   app.get('/api/v1/health', async () => ({ status: 'ok', version: process.env.APP_VERSION ?? '0.1.0', cloud: true, auth: ['password', 'token', 'passkey'] }));
@@ -366,11 +396,12 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     pruneAttempts(); const key = request.ip; const attempt = attempts.get(key); const wait = attempt && attempt.until > Date.now() ? attempt.until - Date.now() : 0;
     if (wait) await new Promise((resolve) => setTimeout(resolve, Math.min(wait, 1500)));
     // Each personal deployment has one administrator; fail closed if ambiguous.
-    const records = store.db.prepare('SELECT u.id,u.name,p.password_hash FROM users u JOIN password_credentials p ON p.user_id=u.id LIMIT 2').all() as any[];
+    const records = expectRows<AuthUserRow>(authUserRowSchema, store.db.prepare('SELECT u.id,u.name,p.password_hash FROM users u JOIN password_credentials p ON p.user_id=u.id LIMIT 2').all(), 'auth_row_invalid');
     const record = records.length === 1 ? records[0] : undefined;
     const valid = typeof request.body?.password === 'string' && request.body.password.length <= 256 && await argon2.verify(record?.password_hash ?? await dummyHash, request.body.password) && Boolean(record);
     if (!valid) { const seen = Date.now(); attempts.set(key, { count: (attempt?.count ?? 0) + 1, until: seen + Math.min(1000 * 2 ** Math.min(attempt?.count ?? 0, 4), 10000), seen }); return null; }
-    attempts.delete(key); return record as { id: string; name: string };
+    // 走到这里 valid 已包含 Boolean(record) 的检查;显式再收窄一次,避免可选链泄漏到调用方。
+    attempts.delete(key); return record ? { id: record.id, name: record.name } : null;
   }
   app.post<{ Body: { password?: string } }>('/api/v1/auth/password/login', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
@@ -468,7 +499,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   app.post('/api/v1/auth/passkey/register/options', async (request, reply) => {
     if (!checkOrigin(request, reply)) return; const user = requireAuth(request, reply); if (!user || !webauthnConfigured(reply)) return;
     store.db.prepare("DELETE FROM webauthn_challenges WHERE (used_at IS NOT NULL OR expires_at<=?) AND (user_id=? OR user_id IS NULL)").run(now(), user.id);
-    const credentials = store.db.prepare('SELECT id FROM passkey_credentials WHERE user_id=?').all(user.id) as any[];
+    const credentials = expectRows<{ id: string }>(idRowSchema, store.db.prepare('SELECT id FROM passkey_credentials WHERE user_id=?').all(user.id), 'passkey_row_invalid');
       const options = await generateRegistrationOptions({ rpName: rpName!, rpID: rpID!, userName: user.name, userID: new TextEncoder().encode(user.id), attestationType: 'none', authenticatorSelection: { residentKey: 'required', userVerification: 'required' }, excludeCredentials: credentials.map((x) => ({ id: x.id })) });
     store.db.prepare('INSERT INTO webauthn_challenges(id,user_id,kind,challenge,created_at,expires_at) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), user.id, 'registration', options.challenge, now(), new Date(Date.now() + 120000).toISOString());
     return options;
@@ -477,9 +508,10 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if (!checkOrigin(request, reply)) return; const user = requireAuth(request, reply); if (!user || !webauthnConfigured(reply)) return;
     const responseChallenge = webauthnChallengeFromResponse(request.body);
     if (!responseChallenge) return bad(reply, 400, 'challenge_missing_or_expired');
-    const challenge = store.db.prepare("SELECT * FROM webauthn_challenges WHERE user_id=? AND kind='registration' AND challenge=? AND used_at IS NULL AND expires_at>? LIMIT 1").get(user.id, responseChallenge, now()) as any;
+    const challenge = expectRow<{ id: string; challenge: string }>(challengeRowSchema, store.db.prepare("SELECT * FROM webauthn_challenges WHERE user_id=? AND kind='registration' AND challenge=? AND used_at IS NULL AND expires_at>? LIMIT 1").get(user.id, responseChallenge, now()), 'challenge_row_invalid');
     if (!challenge) return bad(reply, 400, 'challenge_missing_or_expired');
-    try { const result = await verifyRegistrationResponse({ response: request.body as any, expectedChallenge: challenge.challenge, expectedOrigin: expectedOrigin!, expectedRPID: rpID!, requireUserVerification: true }); if (!result.verified || !result.registrationInfo) return bad(reply, 400, 'passkey_verification_failed'); const c = result.registrationInfo.credential; const consumed = store.transaction(() => { const claimed = store.db.prepare("UPDATE webauthn_challenges SET used_at=? WHERE id=? AND used_at IS NULL").run(now(), challenge.id); if (claimed.changes !== 1) return false; store.db.prepare('INSERT INTO passkey_credentials(id,user_id,public_key,counter,transports,created_at) VALUES(?,?,?,?,?,?)').run(c.id, user.id, Buffer.from(c.publicKey), c.counter, JSON.stringify(c.transports ?? []), now()); return true; }); if (!consumed) return bad(reply, 400, 'challenge_missing_or_expired'); return { verified: true }; } catch { return bad(reply, 400, 'passkey_verification_failed'); }
+    // simplewebauthn 的 response 是客户端提交的 JSON:库内自己做结构校验,失败会抛出并被下面的 catch 统一返回 400。
+    try { const result = await verifyRegistrationResponse({ response: request.body as RegistrationResponseJSON, expectedChallenge: challenge.challenge, expectedOrigin: expectedOrigin!, expectedRPID: rpID!, requireUserVerification: true }); if (!result.verified || !result.registrationInfo) return bad(reply, 400, 'passkey_verification_failed'); const c = result.registrationInfo.credential; const consumed = store.transaction(() => { const claimed = store.db.prepare("UPDATE webauthn_challenges SET used_at=? WHERE id=? AND used_at IS NULL").run(now(), challenge.id); if (claimed.changes !== 1) return false; store.db.prepare('INSERT INTO passkey_credentials(id,user_id,public_key,counter,transports,created_at) VALUES(?,?,?,?,?,?)').run(c.id, user.id, Buffer.from(c.publicKey), c.counter, JSON.stringify(c.transports ?? []), now()); return true; }); if (!consumed) return bad(reply, 400, 'challenge_missing_or_expired'); return { verified: true }; } catch { return bad(reply, 400, 'passkey_verification_failed'); }
   });
   app.post('/api/v1/auth/passkey/login/options', async (request, reply) => {
     if (!checkOrigin(request, reply)) return; if (!webauthnConfigured(reply)) return;
@@ -488,17 +520,24 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   });
   app.post('/api/v1/auth/passkey/login/verify', async (request, reply) => {
     if (!checkOrigin(request, reply)) return; if (!webauthnConfigured(reply)) return;
-    const body = request.body as any; const credential = store.db.prepare('SELECT * FROM passkey_credentials WHERE id=?').get(body?.id) as any; const responseChallenge = webauthnChallengeFromResponse(body); const challenge = responseChallenge ? store.db.prepare("SELECT * FROM webauthn_challenges WHERE kind='authentication' AND challenge=? AND used_at IS NULL AND expires_at>? LIMIT 1").get(responseChallenge, now()) as any : null;
+    const body = request.body as AuthenticationResponseJSON;
+    const credential = expectRow<{ id: string; user_id: string | null; public_key: Uint8Array; counter: number }>(credentialRowSchema, store.db.prepare('SELECT * FROM passkey_credentials WHERE id=?').get(body?.id), 'passkey_row_invalid');
+    const responseChallenge = webauthnChallengeFromResponse(body);
+    const challenge = responseChallenge ? expectRow<{ id: string; challenge: string }>(challengeRowSchema, store.db.prepare("SELECT * FROM webauthn_challenges WHERE kind='authentication' AND challenge=? AND used_at IS NULL AND expires_at>? LIMIT 1").get(responseChallenge, now()), 'challenge_row_invalid') : null;
     if (!credential || !challenge) return bad(reply, 401, 'passkey_verification_failed');
-    try { const result = await verifyAuthenticationResponse({ response: body, expectedChallenge: challenge.challenge, expectedOrigin: expectedOrigin!, expectedRPID: rpID!, credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter }, requireUserVerification: true }); if (!result.verified) return bad(reply, 401, 'passkey_verification_failed'); const consumed = store.transaction(() => { const claimed = store.db.prepare("UPDATE webauthn_challenges SET used_at=?, credential_id=?, user_id=? WHERE id=? AND used_at IS NULL AND (credential_id IS NULL OR credential_id=?) AND (user_id IS NULL OR user_id=?)").run(now(), credential.id, credential.user_id, challenge.id, credential.id, credential.user_id); if (claimed.changes !== 1) return false; store.db.prepare('UPDATE passkey_credentials SET counter=? WHERE id=?').run(result.authenticationInfo.newCounter, credential.id); return true; }); if (!consumed) return bad(reply, 401, 'passkey_verification_failed'); issueSession(credential.user_id, reply); return { verified: true, user: publicUser(store.db.prepare('SELECT * FROM users WHERE id=?').get(credential.user_id)) }; } catch { return bad(reply, 401, 'passkey_verification_failed'); }
+    try { const result = await verifyAuthenticationResponse({ response: body, expectedChallenge: challenge.challenge, expectedOrigin: expectedOrigin!, expectedRPID: rpID!, credential: { id: credential.id, publicKey: new Uint8Array(credential.public_key), counter: credential.counter }, requireUserVerification: true }); if (!result.verified) return bad(reply, 401, 'passkey_verification_failed'); const consumed = store.transaction(() => { const claimed = store.db.prepare("UPDATE webauthn_challenges SET used_at=?, credential_id=?, user_id=? WHERE id=? AND used_at IS NULL AND (credential_id IS NULL OR credential_id=?) AND (user_id IS NULL OR user_id=?)").run(now(), credential.id, credential.user_id, challenge.id, credential.id, credential.user_id); if (claimed.changes !== 1) return false; store.db.prepare('UPDATE passkey_credentials SET counter=? WHERE id=?').run(result.authenticationInfo.newCounter, credential.id); return true; }); // 认证成功的凭据必然绑定过 user_id(注册时写入);为空说明库被改坏,按失败处理而不是写入无主会话。
+      if (!consumed || !credential.user_id) return bad(reply, 401, 'passkey_verification_failed');
+      issueSession(credential.user_id, reply);
+      return { verified: true, user: publicUser(expectRow<{ id: string; name: string }>(userRowSchema, store.db.prepare('SELECT * FROM users WHERE id=?').get(credential.user_id), 'user_row_invalid')) }; } catch { return bad(reply, 401, 'passkey_verification_failed'); }
   });
 
-  function agentDto(row: any) {
+  /** Agent 行只投影这五个字段;行在查询处已用 agentProfileRowSchema 收窄。 */
+  function agentDto(row: Pick<AgentProfileRow, 'id' | 'name' | 'avatar' | 'role' | 'enabled'>) {
     return { id: row.id, name: row.name, avatar: row.avatar ?? null, role: row.role, enabled: Boolean(row.enabled) };
   }
   function ensureDefaultAgent(userId: string) {
     // Reuse the old default profile so a branding change does not create a second Bot.
-    const existing = store.db.prepare("SELECT * FROM agent_profiles WHERE owner_id=? AND name IN ('DeepStudent Go', 'Wangke Bot') ORDER BY created_at LIMIT 1").get(userId) as any;
+    const existing = expectRow<AgentProfileRow>(agentProfileRowSchema, store.db.prepare("SELECT * FROM agent_profiles WHERE owner_id=? AND name IN ('DeepStudent Go', 'Wangke Bot') ORDER BY created_at LIMIT 1").get(userId), 'agent_profile_row_invalid');
     if (existing) return existing;
     const timestamp = now();
     const row = { id: crypto.randomUUID(), owner_id: userId, name: 'DeepStudent Go', avatar: null, role: '本机学习助手', system_prompt: 'You are DeepStudent Go, a safe learning assistant.', enabled: 1, created_at: timestamp, updated_at: timestamp };
@@ -506,7 +545,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     projects.provisionAgent(userId, row.id);
     return row;
   }
-  function ownedThread(userId: string, threadId: string) { return store.db.prepare('SELECT * FROM threads WHERE id=? AND owner_id=?').get(threadId, userId) as any; }
+  function ownedThread(userId: string, threadId: string) { return expectRow<ThreadRow>(threadRowSchema, store.db.prepare('SELECT * FROM threads WHERE id=? AND owner_id=?').get(threadId, userId), 'thread_row_invalid'); }
   function appendEvent(threadId: string, type: string, payload: unknown) {
     const seq = (store.db.prepare('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM message_events WHERE thread_id=?').get(threadId) as { seq: number }).seq;
     store.db.prepare('INSERT INTO message_events(id,thread_id,seq,type,payload,created_at) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), threadId, seq, type, JSON.stringify(payload), now());
@@ -515,7 +554,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   app.get('/api/v1/agents', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     ensureDefaultAgent(user.id);
-    return { agents: (store.db.prepare('SELECT * FROM agent_profiles WHERE owner_id=? ORDER BY created_at').all(user.id) as any[]).map(agentDto) };
+    return { agents: expectRows<AgentProfileRow>(agentProfileRowSchema, store.db.prepare('SELECT * FROM agent_profiles WHERE owner_id=? ORDER BY created_at').all(user.id), 'agent_profile_row_invalid').map(agentDto) };
   });
   app.post<{ Body: { name?: string; avatar?: string; role?: string; systemPrompt?: string } }>('/api/v1/agents', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
@@ -526,14 +565,25 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const systemPrompt = typeof body.systemPrompt === 'string' ? body.systemPrompt.trim() : '';
     const avatar = typeof body.avatar === 'string' ? body.avatar.trim() : '';
     if (!name || name.length > 80 || /[\u0000\r\n]/.test(name) || role.length > 120 || systemPrompt.length > 4000 || avatar.length > 500) return bad(reply, 400, 'invalid_agent_profile');
-    if ((store.db.prepare('SELECT COUNT(*) AS count FROM agent_profiles WHERE owner_id=?').get(user.id) as { count: number }).count >= 16) return bad(reply, 409, 'agent_limit_reached');
+    if ((expectRow<{ count: number }>({ type: 'object', properties: { count: { type: 'integer' } }, required: ['count'] }, store.db.prepare('SELECT COUNT(*) AS count FROM agent_profiles WHERE owner_id=?').get(user.id), 'agent_profile_count_invalid')?.count ?? 0) >= 16) return bad(reply, 409, 'agent_limit_reached');
     const timestamp = now(); const row = { id: crypto.randomUUID(), name, avatar: avatar || null, role: role || '协作 Agent', system_prompt: systemPrompt || `You are ${name}, a safe collaborative learning assistant.`, enabled: 1, created_at: timestamp, updated_at: timestamp };
     try { store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,avatar,role,system_prompt,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)').run(row.id, user.id, row.name, row.avatar, row.role, row.system_prompt, row.enabled, row.created_at, row.updated_at); } catch (error: any) { if (String(error?.code) === 'SQLITE_CONSTRAINT_UNIQUE') return bad(reply, 409, 'agent_name_taken'); throw error; }
     projects.provisionAgent(user.id, row.id);
     return reply.code(201).send(agentDto(row));
   });
 
-  const threadFields = 'id,mode,title,project_id AS projectId,agent_id AS agentId,archived,created_at AS createdAt,updated_at AS updatedAt';
+  const threadFields = sqlKeyword('id,mode,title,project_id AS projectId,agent_id AS agentId,archived,created_at AS createdAt,updated_at AS updatedAt');
+  /** 只读线程摘要投影;`archived` 是 SQLite 的 0/1,由调用方转成布尔。 */
+  type ThreadProjection = ThreadRow & { projectId: string | null; agentId: string | null; createdAt: string; updatedAt: string; preview?: string | null };
+  /** 拍照式读取:只读线程摘要列并收窄行形状,summary/patch 两处共用同一语句。 */
+  const threadSummary = (threadId: string) => expectRow<ThreadProjection>(threadProjectionSchema, store.db.prepare(sql`SELECT ${threadFields} FROM threads WHERE id=?`.sql).get(threadId), 'thread_row_invalid')!;
+  /** 分页/全量列表共用的行形状:线程摘要 + 可选的最后一句话预览。 */
+  const threadProjectionSchema = {
+    type: 'object', additionalProperties: true,
+    properties: { id: { type: 'string' }, mode: { type: 'string' }, title: { type: ['string', 'null'] }, projectId: { type: ['string', 'null'] },
+      agentId: { type: ['string', 'null'] }, archived: { type: ['integer', 'boolean', 'null'] }, createdAt: { type: 'string' }, updatedAt: { type: 'string' }, preview: { type: ['string', 'null'] } },
+    required: ['id', 'mode', 'createdAt', 'updatedAt'],
+  } as const;
   app.get<{ Querystring: { projectId?: string; cursor?: string; limit?: string } }>('/api/v1/threads/page', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     const { projectId, cursor } = request.query;
@@ -549,17 +599,23 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
       } catch { return bad(reply, 400, 'invalid_thread_cursor'); }
     }
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) return bad(reply, 400, 'invalid_thread_cursor');
-    const preview = "(SELECT substr(content,1,160) FROM messages WHERE thread_id=threads.id AND kind='text' ORDER BY seq DESC LIMIT 1) AS preview";
-    const rows = store.db.prepare(`SELECT ${threadFields},${preview} FROM threads WHERE owner_id=? AND mode='bot'
-      AND ${projectId ? 'project_id=?' : 'project_id IS NULL'} ${before ? 'AND (updated_at<? OR (updated_at=? AND id>?))' : ''}
-      ORDER BY updated_at DESC,id LIMIT ?`).all(user.id, ...(projectId ? [projectId] : []), ...(before ? [before.at, before.at, before.id] : []), limit + 1) as Array<{ id: string; updatedAt: string; archived: number }>;
+    const preview = sqlVariant("(SELECT substr(content,1,160) FROM messages WHERE thread_id=threads.id AND kind='text' ORDER BY seq DESC LIMIT 1) AS preview", 0);
+    // 分页文本只随「有没有项目筛选 / 有没有游标」变化,两种都来自查询参数的存在性而非其内容;
+    // 项目 id、游标三列与 limit 全部走绑定值。
+    const pageQuery = sqlFixed(`SELECT ${threadFields.sql},${preview.sql} FROM threads WHERE owner_id=? AND mode='bot'
+      AND ${projectId ? 'project_id=?' : 'project_id IS NULL'}`, projectId ? 2 : 1, [
+      ...(before ? [sqlVariant('AND (updated_at<? OR (updated_at=? AND id>?))', 3)] : []),
+      sqlVariant('ORDER BY updated_at DESC,id LIMIT ?', 1),
+    ]);
+    const rows = expectRows<ThreadProjection>(threadProjectionSchema,
+      store.db.prepare(pageQuery.sql).all(user.id, ...(projectId ? [projectId] : []), ...(before ? [before.at, before.at, before.id] : []), limit + 1), 'thread_row_invalid');
     const page = rows.slice(0, limit), last = page.at(-1);
     return { threads: page.map(row => ({ ...row, archived: Boolean(row.archived) })), nextCursor: rows.length > limit && last ? Buffer.from(JSON.stringify({ at: last.updatedAt, id: last.id })).toString('base64url') : null };
   });
   app.get<{ Params: { id: string } }>('/api/v1/threads/:id/summary', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    return { ...store.db.prepare(`SELECT ${threadFields} FROM threads WHERE id=?`).get(thread.id) as object, archived: Boolean(thread.archived) };
+    return { ...threadSummary(thread.id), archived: Boolean(thread.archived) };
   });
   app.get<{ Querystring: { projectId?: string; agentId?: string } }>('/api/v1/threads', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
@@ -567,8 +623,14 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if (projectId) projects.get(user.id, projectId);
     if (agentId) projects.agent(user.id, agentId);
     // preview：最近一条文本消息，给会话列表显示「最后一句话」。走 messages(thread_id, seq) 唯一索引，每行一次索引查找。
-    const preview = "(SELECT content FROM messages WHERE thread_id=threads.id AND kind='text' ORDER BY seq DESC LIMIT 1) AS preview";
-    const rows = store.db.prepare(`SELECT ${threadFields},${preview} FROM threads WHERE owner_id=?${projectId ? ' AND project_id=?' : ''}${agentId ? ' AND agent_id=?' : ''} ORDER BY updated_at DESC,id`).all(user.id, ...(projectId ? [projectId] : []), ...(agentId ? [agentId] : [])) as Array<Record<string, unknown>>;
+    const preview = sqlVariant("(SELECT content FROM messages WHERE thread_id=threads.id AND kind='text' ORDER BY seq DESC LIMIT 1) AS preview", 0);
+    // 两个筛选都只在其存在时追加,数量随存在性变化,值一律绑定。
+    const listQuery = sqlFixed(`SELECT ${threadFields.sql},${preview.sql} FROM threads WHERE owner_id=?`, 1, [
+      ...(projectId ? [sqlVariant('AND project_id=?', 1)] : []),
+      ...(agentId ? [sqlVariant('AND agent_id=?', 1)] : []),
+      sqlVariant('ORDER BY updated_at DESC,id'),
+    ]);
+    const rows = expectRows<ThreadProjection>(threadProjectionSchema, store.db.prepare(listQuery.sql).all(user.id, ...(projectId ? [projectId] : []), ...(agentId ? [agentId] : [])), 'thread_row_invalid');
     return { threads: rows.map(row => ({ ...row, archived: Boolean(row.archived), preview: typeof row.preview === 'string' ? row.preview.slice(0, 160) : null })) };
   });
   app.post<{ Body: { mode?: ConversationMode; title?: string; projectId?: string; agentId?: string } }>('/api/v1/threads', async (request, reply) => {
@@ -600,7 +662,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
       const runs = store.db.prepare("SELECT id FROM runs WHERE thread_id=? AND status IN ('queued','running','waiting_user')").all(thread.id) as Array<{ id: string }>;
       for (const run of runs) { store.db.prepare("UPDATE runs SET status='cancelled',completed_at=?,wake_at=NULL WHERE id=?").run(now(), run.id); runner.cancel(run.id); }
     }
-    return { ...store.db.prepare(`SELECT ${threadFields} FROM threads WHERE id=?`).get(thread.id) as object, archived: Boolean(body.archived ?? thread.archived) };
+    return { ...threadSummary(thread.id), archived: Boolean(body.archived ?? thread.archived) };
   });
   app.delete<{ Params: { id: string } }>('/api/v1/threads/:id', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
@@ -628,9 +690,9 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     const user = requireAuth(request, reply); if (!user) return;
     const thread = ownedThread(user.id, request.params.id); if (!thread || thread.mode !== 'bot') return bad(reply, 404, 'thread_not_found');
     if (thread.project_id) return bad(reply, 409, 'project_thread_single_agent');
-    const agent = store.db.prepare('SELECT * FROM agent_profiles WHERE id=? AND owner_id=? AND enabled=1').get(request.body?.agentId, user.id) as any;
+    const agent = expectRow<AgentProfileRow>(agentProfileRowSchema, store.db.prepare('SELECT * FROM agent_profiles WHERE id=? AND owner_id=? AND enabled=1').get(request.body?.agentId, user.id), 'agent_profile_row_invalid');
     if (!agent) return bad(reply, 404, 'agent_not_found');
-    if ((store.db.prepare('SELECT COUNT(*) AS count FROM thread_participants WHERE thread_id=?').get(thread.id) as { count: number }).count >= 8) return bad(reply, 409, 'participant_limit_reached');
+    if ((expectRow<{ count: number }>({ type: 'object', properties: { count: { type: 'integer' } }, required: ['count'] }, store.db.prepare('SELECT COUNT(*) AS count FROM thread_participants WHERE thread_id=?').get(thread.id), 'participant_count_invalid')?.count ?? 0) >= 8) return bad(reply, 409, 'participant_limit_reached');
     store.db.prepare('INSERT OR IGNORE INTO thread_participants(thread_id,agent_id,joined_at) VALUES(?,?,?)').run(thread.id, agent.id, now());
     return agentDto(agent);
   });
@@ -646,7 +708,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     return { removed: true };
   });
 
-  function fileDto(row: any) {
+  function fileDto(row: FileRecordRow) {
     return { id: row.id, originalName: row.original_name, mimeType: row.mime_type, sizeBytes: row.size_bytes, sha256: row.sha256, createdAt: row.created_at };
   }
   app.get('/api/v1/files/config', async () => ({ maxFileBytes }));
@@ -665,7 +727,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   });
   app.get('/api/v1/files', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
-    return { files: (store.db.prepare('SELECT * FROM files WHERE owner_id=? ORDER BY created_at DESC LIMIT 500').all(user.id) as any[]).map(fileDto) };
+    return { files: expectRows<FileRecordRow>(fileRecordRowSchema, store.db.prepare('SELECT * FROM files WHERE owner_id=? ORDER BY created_at DESC LIMIT 500').all(user.id), 'file_row_invalid').map(fileDto) };
   });
   app.post<{ Querystring: { operationId?: string } }>('/api/v1/files', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
@@ -711,7 +773,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   });
   app.get<{ Params: { id: string } }>('/api/v1/files/:id', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
-    const file = store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(request.params.id, user.id) as any;
+    const file = expectRow<FileRecordRow>(fileRecordRowSchema, store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(request.params.id, user.id), 'file_row_invalid');
     if (!file) return bad(reply, 404, 'file_not_found');
     const previewOwner = store.db.prepare('SELECT f.owner_id FROM attachment_images a LEFT JOIN files f ON f.id=a.original_id WHERE a.preview_id=?').get(file.id) as { owner_id: string | null } | undefined;
     if (previewOwner && previewOwner.owner_id !== user.id) return bad(reply, 404, 'file_not_found');
@@ -738,7 +800,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   app.delete<{ Params: { id: string } }>('/api/v1/files/:id', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
     const user = requireAuth(request, reply); if (!user) return;
-    const file = store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(request.params.id, user.id) as any;
+    const file = expectRow<FileRecordRow>(fileRecordRowSchema, store.db.prepare('SELECT * FROM files WHERE id=? AND owner_id=?').get(request.params.id, user.id), 'file_row_invalid');
     if (!file) return bad(reply, 404, 'file_not_found');
     if (attachmentFileInUse(store, user.id, file.id)) return bad(reply, 409, 'file_in_use');
     const preview = store.db.prepare('SELECT f.id,f.storage_name FROM attachment_images a JOIN files f ON f.id=a.preview_id WHERE a.original_id=? AND f.owner_id=?').get(file.id, user.id) as { id: string; storage_name: string } | undefined;
@@ -776,13 +838,13 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   app.get<{ Params: { id: string } }>('/api/v1/threads/:id', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    const participants = (store.db.prepare('SELECT a.* FROM agent_profiles a JOIN thread_participants p ON p.agent_id=a.id WHERE p.thread_id=? ORDER BY p.joined_at').all(thread.id) as any[]).map(agentDto);
+    const participants = expectRows<AgentProfileRow>(agentProfileSummaryRowSchema, store.db.prepare('SELECT a.* FROM agent_profiles a JOIN thread_participants p ON p.agent_id=a.id WHERE p.thread_id=? ORDER BY p.joined_at').all(thread.id), 'agent_profile_row_invalid').map(agentDto);
     const approvals = store.db.prepare('SELECT id,message_id AS messageId,run_id AS runId,status,created_at AS createdAt,resolved_at AS resolvedAt,resolution FROM approvals WHERE thread_id=? ORDER BY created_at').all(thread.id);
-    const questions = store.db.prepare(`SELECT q.id,q.run_id AS runId,q.message_id AS messageId,q.status,
+    const questions = store.db.prepare(sql`SELECT q.id,q.run_id AS runId,q.message_id AS messageId,q.status,
       q.created_at AS createdAt,q.answered_at AS answeredAt,q.answer_message_id AS answerMessageId
-      FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE r.thread_id=? ORDER BY q.created_at`).all(thread.id);
-    const runs = store.db.prepare(`SELECT id,status,error_code AS errorCode,wake_at AS wakeAt
-      FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 20`).all(thread.id);
+      FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE r.thread_id=? ORDER BY q.created_at`.sql).all(thread.id);
+    const runs = store.db.prepare(sql`SELECT id,status,error_code AS errorCode,wake_at AS wakeAt
+      FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 20`.sql).all(thread.id);
     // running：有没有排队或正在跑的任务，前端据此显示「正在输入」和已读。
     const running = Boolean(store.db.prepare("SELECT 1 FROM runs WHERE thread_id=? AND status IN ('queued','running','waiting_event') LIMIT 1").get(thread.id));
     return { id: thread.id, mode: thread.mode, title: thread.title, projectId: thread.project_id, agentId: thread.agent_id, archived: Boolean(thread.archived), createdAt: thread.created_at, updatedAt: thread.updated_at, participants, approvals, questions, runs, running, messages: store.db.prepare('SELECT id,thread_id AS threadId,client_nonce AS clientNonce,seq,role,kind,content,reply_to AS replyTo,created_at AS createdAt FROM messages WHERE thread_id=? ORDER BY seq').all(thread.id) };
@@ -790,9 +852,9 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   app.get<{ Params: { id: string } }>('/api/v1/threads/:id/state', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
     const thread = ownedThread(user.id, request.params.id); if (!thread) return bad(reply, 404, 'thread_not_found');
-    const runs = store.db.prepare("SELECT id,status,error_code AS errorCode,wake_at AS wakeAt FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 20").all(thread.id);
+    const runs = expectRows<{ id: string; status: string }>(runStatusListSchema, store.db.prepare("SELECT id,status,error_code AS errorCode,wake_at AS wakeAt FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 20").all(thread.id), 'run_row_invalid');
     const questions = store.db.prepare("SELECT q.id,q.run_id AS runId,q.message_id AS messageId,q.status,q.created_at AS createdAt,q.answered_at AS answeredAt,q.answer_message_id AS answerMessageId FROM run_questions q JOIN runs r ON r.id=q.run_id WHERE r.thread_id=? ORDER BY q.created_at").all(thread.id);
-    return { runs, questions, running: Boolean((runs as any[]).some(run => ['queued','running','waiting_user','waiting_event'].includes(run.status))) };
+    return { runs, questions, running: runs.some(run => ['queued','running','waiting_user','waiting_event'].includes(run.status)) };
   });
   app.post<{ Params: { id: string } }>('/api/v1/threads/:id/stop', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
@@ -833,20 +895,24 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
           } catch { return true; }
         })())) return bad(reply, 400, 'invalid_message');
     if (b.replyTo && !store.db.prepare('SELECT 1 FROM messages WHERE id=? AND thread_id=?').get(b.replyTo, thread.id)) return bad(reply, 400, 'invalid_reply_to');
-    const makeDto = (row: any, deduplicated = false) => ({ id: row.id, threadId: row.thread_id, clientNonce: row.client_nonce, seq: row.seq, role: row.role, kind: row.kind, content: row.content, replyTo: row.reply_to, createdAt: row.created_at, ...(deduplicated ? { deduplicated: true } : {}) });
+    const makeDto = (row: MessageRecordRow, deduplicated = false) => ({ id: row.id, threadId: row.thread_id, clientNonce: row.client_nonce, seq: row.seq, role: row.role, kind: row.kind, content: row.content, replyTo: row.reply_to, createdAt: row.created_at, ...(deduplicated ? { deduplicated: true } : {}) });
     if (b.target !== undefined && (!b.target || !['run', 'question'].includes(b.target.kind ?? '') || (b.target.kind === 'run' ? typeof b.target.runId !== 'string' : typeof b.target.questionId !== 'string'))) return bad(reply, 400, 'invalid_target');
     try {
       const message = botService.send(user.id, thread.id, { clientNonce: nonce, kind, content: b.content!, replyTo: b.replyTo, modelSelection: b.modelSelection, target: b.target?.kind === 'run' ? { kind: 'run', runId: b.target.runId } : b.target?.kind === 'question' ? { kind: 'question', questionId: b.target.questionId } : undefined });
       if (thread.mode === 'bot') {
-        const run = (message as any).receipt?.runId ? { id: (message as any).receipt.runId } : store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id) as { id: string } | undefined;
+        // send() 的回执可能带 runId(同步入队);否则按触发消息找回。两者都只读 id,不存在就是没有 run。
+        const receiptRunId = 'receipt' in message && message.receipt && typeof message.receipt === 'object' && 'runId' in message.receipt ? message.receipt.runId : undefined;
+        const run = typeof receiptRunId === 'string' ? { id: receiptRunId } : expectRow<{ id: string }>(idRowSchema, store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id), 'run_row_invalid');
         if (run) runner.enqueue(run.id);
       }
       return reply.code(message.deduplicated ? 200 : 201).send(message);
     } catch (error: any) {
-      if (['target_expired', 'question_already_answered', 'target_waiting_for_specific_answer', 'message_nonce_conflict', 'task_model_requires_new_attempt'].includes(error?.message)) return bad(reply, 409, error.message);
-      if (error?.message === 'invalid_model_selection') return bad(reply, 400, error.message);
+      // 准入类拒绝(含未配置模型)统一按契约折叠:具名错误类与旧式 message 码都要认,
+      // 折不出码的才是真故障,原样上抛保持 500。
+      const admission = botMessageAdmissionError(error, null);
+      if (admission) return admissionBad(reply, botMessageAdmissionStatus(admission), admission);
       if (String(error?.code) === 'SQLITE_CONSTRAINT_UNIQUE') {
-        const row = store.db.prepare('SELECT * FROM messages WHERE thread_id=? AND client_nonce=?').get(thread.id, nonce) as any;
+        const row = expectRow<MessageRecordRow>(messageRecordRowSchema, store.db.prepare('SELECT * FROM messages WHERE thread_id=? AND client_nonce=?').get(thread.id, nonce), 'message_row_invalid');
         if (row) return makeDto(row, true);
       }
       throw error;
@@ -879,7 +945,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
 
   app.get<{ Params: { id: string } }>('/api/v1/approvals/:id', async (request, reply) => {
     const user = requireAuth(request, reply); if (!user) return;
-    const approval = store.db.prepare('SELECT a.id,a.message_id AS messageId,a.thread_id AS threadId,a.run_id AS runId,a.status,a.created_at AS createdAt,a.resolved_at AS resolvedAt,a.resolution FROM approvals a JOIN threads t ON t.id=a.thread_id WHERE a.id=? AND t.owner_id=?').get(request.params.id, user.id) as any;
+    const approval = expectRow<ApprovalProjectionRow>(approvalProjectionRowSchema, store.db.prepare('SELECT a.id,a.message_id AS messageId,a.thread_id AS threadId,a.run_id AS runId,a.status,a.created_at AS createdAt,a.resolved_at AS resolvedAt,a.resolution FROM approvals a JOIN threads t ON t.id=a.thread_id WHERE a.id=? AND t.owner_id=?').get(request.params.id, user.id), 'approval_row_invalid');
     if (!approval) return bad(reply, 404, 'approval_not_found');
     return approval;
   });
@@ -909,7 +975,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if (thread.mode === 'bot') runner.enqueue(id);
     return reply.code(201).send({ id, threadId: thread.id, mode: thread.mode, status: 'queued', createdAt: timestamp, completedAt: null });
   });
-  app.get<{ Params: { id: string } }>('/api/v1/runs/:id', async (request, reply) => { const user = requireAuth(request, reply); if (!user) return; const run = store.db.prepare('SELECT r.* FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=? AND t.owner_id=?').get(request.params.id, user.id) as any; if (!run) return bad(reply, 404, 'run_not_found'); return { id: run.id, threadId: run.thread_id, mode: run.mode, status: run.status, createdAt: run.created_at, startedAt: run.started_at ?? null, completedAt: run.completed_at ?? null, errorCode: run.error_code ?? null }; });
+  app.get<{ Params: { id: string } }>('/api/v1/runs/:id', async (request, reply) => { const user = requireAuth(request, reply); if (!user) return; const run = expectRow<RunRow>(runRowSchema, store.db.prepare('SELECT r.* FROM runs r JOIN threads t ON t.id=r.thread_id WHERE r.id=? AND t.owner_id=?').get(request.params.id, user.id), 'run_row_invalid'); if (!run) return bad(reply, 404, 'run_not_found'); return { id: run.id, threadId: run.thread_id, mode: run.mode, status: run.status, createdAt: run.created_at, startedAt: run.started_at ?? null, completedAt: run.completed_at ?? null, errorCode: run.error_code ?? null }; });
   app.post<{ Params: { id: string } }>('/api/v1/runs/:id/cancel', async (request, reply) => { if (!checkOrigin(request, reply)) return; const user = requireAuth(request, reply); if (!user) return; return botService.cancelRun(user.id, request.params.id) ?? bad(reply, 404, 'run_not_found'); });
 
   app.setNotFoundHandler((_request, reply) => reply.code(404).send({ error: 'not_found' }));

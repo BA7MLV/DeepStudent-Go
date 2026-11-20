@@ -6,6 +6,7 @@ import { taskDto } from '../cloud/tasks.js';
 import { readLearningMarkdown } from './learning-files.js';
 import { recordLearningReceipt } from './learning-results.js';
 import type { PluginActionContext, PluginService } from './service.js';
+import { cloudTaskRowSchema, cloudTaskWithRequestSchema, expectRow, practiceExtractionRowSchema, type CloudTaskRow, type PluginLearningTaskRow } from '../storage/row-schema.js';
 
 /** Server extraction reads owned source pixels and saves via resource CAS. */
 export function registerPracticeExtraction(service: PluginService, resolveMaterial: (args: Record<string, any>, context: PluginActionContext) => string) {
@@ -18,7 +19,7 @@ export function registerPracticeExtraction(service: PluginService, resolveMateri
       const request = JSON.stringify({ materialId: id });
       const nonce = `plugin:${crypto.createHash('sha256').update(JSON.stringify([c.plugin.id, c.instance.id, 'practice.extract', a.clientNonce])).digest('hex')}`;
       return store.transaction(() => {
-        const previous = store.db.prepare('SELECT t.*,l.request FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE t.owner_id=? AND t.nonce=?').get(c.owner, nonce) as any;
+        const previous = expectRow<CloudTaskRow & { request: string }>(cloudTaskWithRequestSchema, store.db.prepare('SELECT t.*,l.request FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE t.owner_id=? AND t.nonce=?').get(c.owner, nonce), 'cloud_task_row_invalid');
         if (previous) { if (previous.request !== request) throw new Error('plugin_nonce_conflict'); return taskDto(previous); }
         if (store.db.prepare("SELECT 1 FROM plugin_learning_tasks l JOIN cloud_tasks t ON t.id=l.task_id WHERE l.owner_id=? AND l.material_id=? AND l.action_id='practice.extract' AND t.status IN ('queued','running','waiting_user')").get(c.owner, id)) throw new Error('plugin_generation_conflict');
         let bankRevision: string | null = null;
@@ -30,7 +31,7 @@ export function registerPracticeExtraction(service: PluginService, resolveMateri
         records.apply(c.owner, [recordMutation('chatSessions', sessionId, null, { id: sessionId, videoId: id, title: '插件原题提取', createdAt: Date.now() })]);
         store.db.prepare("INSERT INTO cloud_tasks(id,owner_id,nonce,kind,resource,input,status,executor,created_at,updated_at) VALUES(?,?,?,'qa',?,?,'queued','node',?,?)").run(taskId, c.owner, nonce, `session:${sessionId}`, JSON.stringify(service.files.admitTask(c.owner, 'qa', input)), now, now);
         store.db.prepare('INSERT INTO plugin_learning_tasks(task_id,owner_id,plugin_id,instance_id,action_id,material_id,request) VALUES(?,?,?,?,?,?,?)').run(taskId, c.owner, c.plugin.id, c.instance.id, 'practice.extract', id, request);
-        return taskDto(store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(taskId));
+        return taskDto(expectRow<CloudTaskRow>(cloudTaskRowSchema, store.db.prepare('SELECT * FROM cloud_tasks WHERE id=?').get(taskId), 'cloud_task_row_invalid')!);
       });
     },
   });
@@ -42,7 +43,7 @@ export function reconcilePracticeExtractions(service: PluginService) {
   const { store } = service;
   const rows = store.db.prepare(`SELECT l.*,t.input,t.status,t.progress FROM plugin_learning_tasks l JOIN cloud_tasks t ON t.id=l.task_id
     LEFT JOIN plugin_learning_receipts r ON r.task_id=l.task_id WHERE l.action_id='practice.extract' AND l.delivered_at IS NULL AND r.task_id IS NULL
-    AND t.status IN ('completed','failed','cancelled','interrupted') LIMIT 50`).all() as any[];
+    AND t.status IN ('completed','failed','cancelled','interrupted') LIMIT 50`).all().map(item => expectRow<PluginLearningTaskRow & Pick<CloudTaskRow, 'input' | 'status' | 'progress'>>(practiceExtractionRowSchema, item, 'plugin_learning_task_row_invalid')!);
   for (const row of rows) {
     try {
       if (JSON.parse(row.progress ?? '{}')?.questionBankSaved !== true) throw new Error('plugin_extraction_save_unconfirmed');

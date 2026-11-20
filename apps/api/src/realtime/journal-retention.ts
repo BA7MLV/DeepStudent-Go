@@ -1,4 +1,5 @@
 import type { DatabaseStore } from '../storage/database.js';
+import { sql } from '../storage/sql.js';
 
 const positive = (value: string | undefined, fallback: number, max: number) => value && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Math.min(Number(value), max) : fallback;
 
@@ -15,18 +16,20 @@ const EVENTS_PER_THREAD = 4000;
 export function cleanupBotJournal(store: DatabaseStore, protectedThreads: ReadonlySet<string> = new Set()) {
   const window = journalWindow();
   store.transaction(() => {
-    const rows = store.db.prepare(`SELECT t.owner_id AS owner, t.id AS thread, MAX(e.event_id) AS latest
+    // 三条语句都是固定文本(用 sql 校验形态);窗口大小、线程数与删除上限全部走绑定值,
+    // 绑定个数与文本里的 `?` 一一对应。
+    const rows = store.db.prepare(sql`SELECT t.owner_id AS owner, t.id AS thread, MAX(e.event_id) AS latest
       FROM threads t JOIN message_events e ON e.thread_id=t.id
       GROUP BY t.id
       HAVING MAX(e.event_id) - COALESCE((SELECT f.cursor FROM client_journal_floors f WHERE f.owner_id=t.owner_id AND f.thread_id=t.id), 0) > ?
-      LIMIT ?`).all(window, THREADS_PER_PASS) as Array<{ owner: string; thread: string; latest: number }>;
+      LIMIT ?`.sql).all(window, THREADS_PER_PASS) as Array<{ owner: string; thread: string; latest: number }>;
     for (const row of rows) {
       if (protectedThreads.has(row.thread)) continue;
       const floor = row.latest - window;
-      store.db.prepare(`INSERT INTO client_journal_floors(owner_id,thread_id,cursor) VALUES(?,?,?)
-        ON CONFLICT(owner_id,thread_id) DO UPDATE SET cursor=excluded.cursor WHERE excluded.cursor>client_journal_floors.cursor`).run(row.owner, row.thread, floor);
-      store.db.prepare(`DELETE FROM message_events WHERE event_id IN
-        (SELECT event_id FROM message_events WHERE thread_id=? AND event_id<=? ORDER BY event_id LIMIT ?)`).run(row.thread, floor, EVENTS_PER_THREAD);
+      store.db.prepare(sql`INSERT INTO client_journal_floors(owner_id,thread_id,cursor) VALUES(?,?,?)
+        ON CONFLICT(owner_id,thread_id) DO UPDATE SET cursor=excluded.cursor WHERE excluded.cursor>client_journal_floors.cursor`.sql).run(row.owner, row.thread, floor);
+      store.db.prepare(sql`DELETE FROM message_events WHERE event_id IN
+        (SELECT event_id FROM message_events WHERE thread_id=? AND event_id<=? ORDER BY event_id LIMIT ?)`.sql).run(row.thread, floor, EVENTS_PER_THREAD);
     }
   });
 }

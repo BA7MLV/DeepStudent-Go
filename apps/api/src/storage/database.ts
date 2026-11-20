@@ -8,6 +8,7 @@ import { SystemSkillRecords } from './system-skill-records.js';
 import { migrateMessageSync } from './message-sync-migration.js';
 import { migrateClientRuntime } from '../realtime/migration.js';
 import { ensureLearningResults } from '../plugins/learning-results.js';
+import { sqlIdentifier } from './sql.js';
 import { migrateFileIntents } from './file-intents.js';
 import { migrateTaskModels } from './task-model.js';
 import { attachmentImageSchema } from '../cloud/attachment-images.js';
@@ -560,7 +561,10 @@ export class DatabaseStore {
     // Versions 13-15 were assigned different meanings by the main and gateway
     // branches. Reconcile by schema shape instead of replaying ALTERs blindly.
     this.db.transaction(() => {
-      const columns = (db: Database.Database, table: string) => db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string; type: string; notnull: number; pk: number }>;
+      // PRAGMA 不接受参数绑定,表名只能作为标识符进入文本;表名来自文件内迁移常量与 sqlite_master,
+      // 仍统一过 sqlIdentifier(非纯标识符会加引号转义)。这里不能走 sql 模板:模板会把 `?` 当占位符,
+      // 修正版 sqlIdentifier 的 sql 属性是延迟解析的,直接拼接才得到纯文本。
+      const columns = (db: Database.Database, table: string) => db.prepare(`PRAGMA table_info(${sqlIdentifier(table).sql})`).all() as Array<{ name: string; type: string; notnull: number; pk: number }>;
       const expected = new Database(':memory:');
       try {
         for (const [, sql] of MIGRATIONS) expected.exec(sql);
@@ -601,7 +605,8 @@ export class DatabaseStore {
               const actual = columns(this.db, table).filter(c => !evolved(c.name));
               const trusted = columns(expected, table).filter(c => !evolved(c.name));
               if (JSON.stringify(actual) !== JSON.stringify(trusted)) throw new Error(`schema_layout_untrusted_${table}`);
-              if (JSON.stringify(this.db.prepare(`PRAGMA foreign_key_list(${table})`).all()) !== JSON.stringify(expected.prepare(`PRAGMA foreign_key_list(${table})`).all())) throw new Error(`schema_foreign_keys_untrusted_${table}`);
+              const foreignKeyList = (database: Database.Database) => database.prepare(`PRAGMA foreign_key_list(${sqlIdentifier(table).sql})`).all();
+              if (JSON.stringify(foreignKeyList(this.db)) !== JSON.stringify(foreignKeyList(expected))) throw new Error(`schema_foreign_keys_untrusted_${table}`);
             }
             for (const [table, name] of group.extra) {
               const actual = columns(this.db, table).find(c => c.name === name);
@@ -694,7 +699,8 @@ export class DatabaseStore {
     this.db.pragma('foreign_keys = OFF');
     try {
       this.transaction(() => {
-        for (const table of tables) this.db.prepare(`DELETE FROM "${table.replaceAll('"', '""')}"`).run();
+        // 表名来自 sqlite_master(外部输入),经 sqlIdentifier 加引号转义后进入 DELETE。
+        for (const table of tables) this.db.prepare(`DELETE FROM ${sqlIdentifier(table).sql}`).run();
       });
     } finally {
       this.db.pragma('foreign_keys = ON');

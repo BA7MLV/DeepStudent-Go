@@ -8,6 +8,8 @@ import type { Context } from '@deepseek-ai/cordis';
 import { RemoteError, type PeerScope } from '@deepseek-ai/dsh-typert-protocol';
 import { TYPERT_REMOTE } from '@wangke/remote-artifacts';
 import type { RuntimeDomain } from '@wangke/remote-host';
+import { sql, sqlFixed, sqlVariant } from '../storage/sql.js';
+import { cloudTaskRowSchema, expectRow, sessionMarkerRowSchema, type CloudTaskRow, type SessionMarkerRow } from '../storage/row-schema.js';
 import type { ResourceFiles } from '../projects/resources.js';
 import type { ResourceCommand } from '@wangke/contracts/resources';
 import { executeResourceCommand } from './resources.js';
@@ -36,6 +38,10 @@ import { CloudConfiguration } from '../cloud/config.js';
 import { RecordProjections, recordsEpoch } from './record-projections.js';
 import { sessionRow, sessionRowSql } from './session-row.js';
 import type { DelegationCommand } from '@wangke/contracts/client-runtime';
+
+/** `sessionRowSql` 是固定表达式;以 sqlVariant 片段身份参与 sql 模板 —— 它含成对的
+ * 字符串字面量引号,sqlKeyword 会误判为注入(那套检查假设输入是纯关键字)。 */
+const sessionRowSqlText = sqlVariant(sessionRowSql, 0);
 
 import type {} from './errors.js';
 
@@ -429,7 +435,7 @@ export class ClientRuntimeDomain implements RuntimeDomain {
   }
   async taskAdmission(owner: string, operationId: string): Promise<RuntimeTaskAdmission> {
     if (!operationId || operationId.length > 100) throw new RemoteError('gateway/bad-request', 'Invalid task operation id', {});
-    const row = this.store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, operationId);
+    const row = expectRow<CloudTaskRow>(cloudTaskRowSchema, this.store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(owner, operationId), 'cloud_task_row_invalid');
     return TYPERT_REMOTE.methods['clientRuntime/taskAdmission'].result.create().parse(row ? { status: 'accepted', task: taskDto(row) } : { status: 'missing' });
   }
   private sessionMetadata(owner: string, sessionId: number) {
@@ -448,15 +454,20 @@ export class ClientRuntimeDomain implements RuntimeDomain {
     const marker = request.before ?? request.after;
     if (marker && (!Number.isSafeInteger(marker.id) || !Number.isFinite(marker.createdAt))) throw new Error('invalid_session_cursor');
     const comparison = request.before ? '<' : '>=';
-    const markerRow = marker && !marker.role ? this.store.db.prepare(`SELECT json_extract(value,'$.role') AS role FROM cloud_records
+    // 游标里没带 role(老客户端)时回查记录本身;查不到或字段不是字符串就按缺省处理。
+    const markerRow = marker && !marker.role ? expectRow<SessionMarkerRow>(sessionMarkerRowSchema, this.store.db.prepare(`SELECT json_extract(value,'$.role') AS role FROM cloud_records
       WHERE owner_id=? AND table_name='chats' AND record_key=? AND json_extract(value,'$.sessionId')=?`)
-      .get(owner, JSON.stringify(marker.id), request.sessionId) as { role: string } | undefined : undefined;
-    const markerRole = marker?.role ?? markerRow?.role;
+      .get(owner, JSON.stringify(marker.id), request.sessionId), 'chat_record_row_invalid') : undefined;
+    const markerRole = marker?.role ?? markerRow?.role ?? undefined;
     const roleOrder = "CASE WHEN json_extract(value,'$.role')='user' THEN 0 ELSE 1 END";
-    const rows = this.store.db.prepare(`SELECT ${sessionRowSql} AS value FROM cloud_records WHERE owner_id=? AND table_name='chats'
-      AND json_extract(value,'$.sessionId')=?
-      ${marker ? `AND (json_extract(value,'$.createdAt'),${roleOrder},json_extract(value,'$.id')) ${comparison} (?,?,?)` : ''}
-      ORDER BY json_extract(value,'$.createdAt') DESC,${roleOrder} DESC,json_extract(value,'$.id') DESC LIMIT ?`)
+    // 键集条件只在带游标时出现;比较运算符来自 request.before 的布尔值,不是任意文本。
+    // 列名表达式与排序片段都是固定文本,值(createdAt/role 序/id/limit)全部走绑定。
+    const select = sqlFixed(`SELECT ${sessionRowSql} AS value FROM cloud_records WHERE owner_id=? AND table_name='chats'
+      AND json_extract(value,'$.sessionId')=?`, 2, [
+      ...(marker ? [sqlVariant(`AND (json_extract(value,'$.createdAt'),${roleOrder},json_extract(value,'$.id')) ${comparison} (?,?,?)`, 3)] : []),
+      sqlVariant(`ORDER BY json_extract(value,'$.createdAt') DESC,${roleOrder} DESC,json_extract(value,'$.id') DESC LIMIT ?`, 1),
+    ]);
+    const rows = this.store.db.prepare(select.sql)
       .all(owner, request.sessionId, ...(marker ? [marker.createdAt, markerRole === 'user' ? 0 : 1, marker.id] : []), request.after ? 501 : 41) as { value: string }[];
     if (request.after && rows.length > 500) throw new Error('session_window_limit');
     const hasOlder = !request.after && rows.length > 40;
@@ -491,16 +502,16 @@ export class ClientRuntimeDomain implements RuntimeDomain {
           const head = this.store.db.prepare('SELECT cursor,floor FROM client_session_cursors WHERE owner_id=? AND session_id=?')
             .get(owner, request.sessionId) as { cursor: number; floor: number } | undefined;
           const latest = head?.cursor ?? 0, floor = head?.floor ?? 0;
-          const batch = cursor === undefined ? [] : this.store.db.prepare(`SELECT cursor,row_id,${sessionRowSql} AS value FROM client_session_events
-            WHERE owner_id=? AND session_id=? AND cursor>? ORDER BY cursor LIMIT 64`).all(owner, request.sessionId, cursor) as { cursor: number; row_id: number; value: string | null }[];
+          const batch = cursor === undefined ? [] : this.store.db.prepare(sql`SELECT cursor,row_id,${sessionRowSqlText} AS value FROM client_session_events
+            WHERE owner_id=? AND session_id=? AND cursor>? ORDER BY cursor LIMIT 64`.sql).all(owner, request.sessionId, cursor) as { cursor: number; row_id: number; value: string | null }[];
           const gap = cursor !== undefined && (cursor < floor || cursor > latest
             || cursor < latest && (!batch.length || batch[0].cursor !== cursor + 1)
             || batch.some((event, index) => event.cursor !== cursor! + index + 1));
           // First paint stays paged. A lost range explicitly repairs the entire
           // loaded timeline, never silently replaces it with forty latest rows.
-          const rows = gap ? (this.store.db.prepare(`SELECT ${sessionRowSql} AS value FROM cloud_records WHERE owner_id=? AND table_name='chats'
+          const rows = gap ? (this.store.db.prepare(sql`SELECT ${sessionRowSqlText} AS value FROM cloud_records WHERE owner_id=? AND table_name='chats'
             AND json_extract(value,'$.sessionId')=? ORDER BY json_extract(value,'$.createdAt'),
-              CASE WHEN json_extract(value,'$.role')='user' THEN 0 ELSE 1 END,json_extract(value,'$.id')`)
+              CASE WHEN json_extract(value,'$.role')='user' THEN 0 ELSE 1 END,json_extract(value,'$.id')`.sql)
             .all(owner, request.sessionId) as { value: string }[]).map(row => sessionRow(JSON.parse(row.value))) : initial?.rows ?? [];
           return { ...metadata, hasOlder: initial?.hasOlder ?? false, latest, floor, batch, gap, rows };
         })();

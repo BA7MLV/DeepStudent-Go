@@ -91,24 +91,19 @@ try {
   assert.equal(cancelled.json().status, 'cancelled');
   const botThreadResponse = await app.inject({ method: 'POST', url: '/api/v1/threads', headers: { cookie }, payload: { mode: 'bot', title: 'Bot' } });
   const botThread = botThreadResponse.json();
+  // 未配置模型时可预期的拒收:稳定的 4xx + 稳定错误码,而不是 500 或"先接受再失败"。
   const botMessage = await app.inject({ method: 'POST', url: `/api/v1/threads/${botThread.id}/messages`, headers: { cookie }, payload: { clientNonce: 'bot-nonce', kind: 'text', content: 'hello bot' } });
-  assert.equal(botMessage.statusCode, 201);
-  assert.equal((await app.inject({ method: 'POST', url: `/api/v1/threads/${botThread.id}/messages`, headers: { cookie }, payload: { clientNonce: 'bot-nonce', kind: 'text', content: 'hello bot' } })).json().deduplicated, true);
+  assert.equal(botMessage.statusCode, 400);
+  assert.equal(botMessage.json().error, 'model_not_configured');
+  assert.equal(botMessage.json().status, 400);
   const botDb = new Database(path.join(dir, 'db/wangke.sqlite'), { readonly: true });
-  let botRun;
-  for (let i = 0; i < 20; i++) {
-    botRun = botDb.prepare('SELECT * FROM runs WHERE thread_id=? ORDER BY created_at DESC LIMIT 1').get(botThread.id);
-    if (botRun?.status === 'failed') break;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  assert.equal(botRun.status, 'failed');
-  assert.equal(botRun.error_code, 'model_not_configured');
-  const botMessages = botDb.prepare("SELECT role,kind,content FROM messages WHERE thread_id=? ORDER BY seq").all(botThread.id);
-  assert.deepEqual(botMessages, [{ role: 'user', kind: 'text', content: 'hello bot' }], 'model failures stay in run diagnostics, not conversation history');
-  const runDiagnostics = await app.inject({ method: 'GET', url: `/api/v1/threads/${botThread.id}/runs`, headers: { cookie } });
-  assert.equal(runDiagnostics.statusCode, 200);
-  assert.equal(runDiagnostics.json().runs[0].errorCode, 'model_not_configured');
+  assert.equal(botDb.prepare('SELECT COUNT(*) AS count FROM messages WHERE thread_id=?').get(botThread.id).count, 0, 'rejected admission leaves no message behind');
+  assert.equal(botDb.prepare('SELECT COUNT(*) AS count FROM runs WHERE thread_id=?').get(botThread.id).count, 0, 'rejected admission creates no durable run');
   botDb.close();
+  // 配置缺失是持久状态:同一个 nonce 重试仍然是被拒收,而不是被当成"已受理"去重。
+  const retried = await app.inject({ method: 'POST', url: `/api/v1/threads/${botThread.id}/messages`, headers: { cookie }, payload: { clientNonce: 'bot-nonce', kind: 'text', content: 'hello bot' } });
+  assert.equal(retried.statusCode, 400);
+  assert.equal(retried.json().error, 'model_not_configured');
   const agents = await app.inject({ method: 'GET', url: '/api/v1/agents', headers: { cookie } });
   assert.equal(agents.statusCode, 200);
   assert.equal(agents.json().agents.length, 1);
@@ -128,19 +123,23 @@ try {
     brandingDb.prepare('UPDATE agent_profiles SET name=?, system_prompt=? WHERE id=?').run(defaultAgent.name, originalPrompt, defaultAgent.id);
     brandingDb.close();
   }
+  // 管理配置接口不属于准入门控:多 Agent 会话仍然可以创建、加入参与者。
   const specialist = await app.inject({ method: 'POST', url: '/api/v1/agents', headers: { cookie }, payload: { name: '课程研究员', role: '检索协作', systemPrompt: '只提供课程范围内的安全建议。' } });
   assert.equal(specialist.statusCode, 201);
   const joined = await app.inject({ method: 'POST', url: `/api/v1/threads/${botThread.id}/participants`, headers: { cookie }, payload: { agentId: specialist.json().id } });
   assert.equal(joined.statusCode, 200);
   const mentioned = await app.inject({ method: 'POST', url: `/api/v1/threads/${botThread.id}/messages`, headers: { cookie }, payload: { clientNonce: 'mention-nonce', kind: 'text', content: '@课程研究员 请协作总结。' } });
-  assert.equal(mentioned.statusCode, 201);
+  assert.equal(mentioned.statusCode, 400);
+  assert.equal(mentioned.json().error, 'model_not_configured');
+  // 准入被拒的消息不进会话历史,也不产生 @ 提及。
   const mentionDb = new Database(path.join(dir, 'db/wangke.sqlite'), { readonly: true });
-  assert.equal(mentionDb.prepare('SELECT COUNT(*) AS count FROM message_mentions WHERE message_id=?').get(mentioned.json().id).count, 1);
+  assert.equal(mentionDb.prepare('SELECT COUNT(*) AS count FROM message_mentions WHERE agent_id=? AND created_at>=?').get(specialist.json().id, new Date(Date.now() - 60_000).toISOString()).count, 0);
   mentionDb.close();
-  const reaction = await app.inject({ method: 'POST', url: `/api/v1/messages/${mentioned.json().id}/reactions`, headers: { cookie }, payload: { reaction: '👍' } });
+  // 反应接口只依赖一条已存在的消息,用一个对话消息代替 Bot 消息验证。
+  const reaction = await app.inject({ method: 'POST', url: `/api/v1/messages/${message.json().id}/reactions`, headers: { cookie }, payload: { reaction: '👍' } });
   assert.equal(reaction.json().active, true);
-  assert.equal((await app.inject({ method: 'GET', url: `/api/v1/messages/${mentioned.json().id}/reactions`, headers: { cookie } })).json().reactions[0].count, 1);
-  assert.equal((await app.inject({ method: 'POST', url: `/api/v1/messages/${mentioned.json().id}/reactions`, headers: { cookie }, payload: { reaction: '👍' } })).json().active, false);
+  assert.equal((await app.inject({ method: 'GET', url: `/api/v1/messages/${message.json().id}/reactions`, headers: { cookie } })).json().reactions[0].count, 1);
+  assert.equal((await app.inject({ method: 'POST', url: `/api/v1/messages/${message.json().id}/reactions`, headers: { cookie }, payload: { reaction: '👍' } })).json().active, false);
   const approvalDb = new Database(path.join(dir, 'db/wangke.sqlite'));
   const approvalId = crypto.randomUUID(); const approvalMessageId = crypto.randomUUID(); const approvalRunId = crypto.randomUUID(); const approvalTimestamp = new Date().toISOString();
   const approvalSeq = approvalDb.prepare('SELECT COALESCE(MAX(seq),0)+1 AS seq FROM messages WHERE thread_id=?').get(botThread.id).seq;
@@ -184,7 +183,8 @@ try {
   assert.equal(download.statusCode, 200);
   assert.equal(download.body, 'private file');
   const attachment = await app.inject({ method: 'POST', url: `/api/v1/threads/${botThread.id}/messages`, headers: { cookie }, payload: { clientNonce: 'file-nonce', kind: 'attachment', content: JSON.stringify({ fileId: uploadedFile.id }) } });
-  assert.equal(attachment.statusCode, 201);
+  assert.equal(attachment.statusCode, 400);
+  assert.equal(attachment.json().error, 'model_not_configured', 'attachment messages share the same admission policy');
   assert.equal((await app.inject({ method: 'DELETE', url: `/api/v1/files/${uploadedFile.id}`, headers: { cookie } })).statusCode, 200);
   const passkeyConfig = await app.inject({ method: 'POST', url: '/api/v1/auth/passkey/login/options' });
   assert.equal(passkeyConfig.statusCode, 503);

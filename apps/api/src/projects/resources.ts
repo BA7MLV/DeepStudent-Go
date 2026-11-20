@@ -10,6 +10,7 @@ import type { ResourceDirectory, ResourceEntry } from '@wangke/contracts/resourc
 import { RESOURCE_FOLDER_COLORS, type ResourceFolderColor } from '@wangke/contracts/resources';
 import { extractMdUnits } from '@wangke/study-core/materials/markdown';
 import { chunkUnits, countChars, judgeMaterialText } from '@wangke/study-core/materials/chunk';
+import { sql } from '../storage/sql.js';
 
 type Placement = { owner_id: string; course_id: string; project_id: string; path: string; identity: string; revision: string; source_file: string | null };
 type Folder = { folder_id: number; project_id: string; path: string };
@@ -90,8 +91,8 @@ export class ResourceFiles {
     let identity: string;
     try { const stat = fs.fstatSync(opened.fd); identity = `${stat.dev}:${stat.ino}`; }
     finally { fs.closeSync(opened.fd); }
-    this.db.prepare(`INSERT INTO resource_files(owner_id,course_id,project_id,path,identity,revision,source_file) VALUES(?,?,?,?,?,?,?)
-      ON CONFLICT(owner_id,course_id) DO UPDATE SET project_id=excluded.project_id,path=excluded.path,identity=excluded.identity,revision=excluded.revision,source_file=excluded.source_file`)
+    this.db.prepare(sql`INSERT INTO resource_files(owner_id,course_id,project_id,path,identity,revision,source_file) VALUES(?,?,?,?,?,?,?)
+      ON CONFLICT(owner_id,course_id) DO UPDATE SET project_id=excluded.project_id,path=excluded.path,identity=excluded.identity,revision=excluded.revision,source_file=excluded.source_file`.sql)
       .run(owner, id, projectId, filename, identity, opened.revision, source);
     const previous = this.records.get(owner, 'courseFiles', id);
     const course = this.records.get(owner, 'videos', id);
@@ -226,7 +227,7 @@ export class ResourceFiles {
    * Draft uploads stay private. Receipts survive moves/deletion and prevent
    * retries, forks and lazy history scans from resurrecting existing copies. */
   private importChatAttachments(owner: string) {
-    const sources = this.db.prepare(`
+    const sources = this.db.prepare(sql`
       SELECT DISTINCT f.id,f.storage_name,f.original_name,f.sha256,refs.session_id
       FROM (
         SELECT json_extract(c.value,'$.sessionId') session_id,json_extract(a.value,'$.serverId') file_id
@@ -240,13 +241,13 @@ export class ResourceFiles {
       JOIN cloud_records s ON s.owner_id=f.owner_id AND s.table_name='chatSessions' AND s.record_key=CAST(refs.session_id AS TEXT) AND s.value IS NOT NULL
       WHERE NOT EXISTS (SELECT 1 FROM chat_resource_attachments r WHERE r.owner_id=f.owner_id AND r.session_id=refs.session_id AND r.file_id=f.id AND r.status='done')
       ORDER BY refs.session_id,f.created_at,f.id
-    `).all(owner, owner, owner) as { id: string; storage_name: string; original_name: string; sha256: string; session_id: number }[];
+    `.sql).all(owner, owner, owner) as { id: string; storage_name: string; original_name: string; sha256: string; session_id: number }[];
     for (const source of sources) {
       try {
         const original = path.resolve(this.filesDir, source.storage_name);
         if (path.dirname(original) !== path.resolve(this.filesDir) || !fs.existsSync(original)) continue;
-        let binding = this.db.prepare(`SELECT f.* FROM chat_resource_sessions s LEFT JOIN resource_folders f
-          ON f.owner_id=s.owner_id AND f.folder_id=s.folder_id WHERE s.owner_id=? AND s.session_id=?`).get(owner, source.session_id) as Folder | undefined;
+        let binding = this.db.prepare(sql`SELECT f.* FROM chat_resource_sessions s LEFT JOIN resource_folders f
+          ON f.owner_id=s.owner_id AND f.folder_id=s.folder_id WHERE s.owner_id=? AND s.session_id=?`.sql).get(owner, source.session_id) as Folder | undefined;
         // A deleted/moved-to-trash grouping is the user's decision, not a request
         // to reconstruct it from the retained chat/task history.
         if (binding && !binding.project_id) continue;
@@ -263,7 +264,8 @@ export class ResourceFiles {
           if (!this.db.prepare('SELECT 1 FROM projects WHERE id=? AND owner_id=? AND archived=0 AND id NOT IN (SELECT project_id FROM resource_trash)').get(root.project_id, owner)) continue;
           this.projects.assertNoExecution(root.project_id);
           const session = this.records.get(owner, 'chatSessions', source.session_id);
-          const first = this.db.prepare("SELECT json_extract(input,'$.text') text FROM cloud_tasks WHERE owner_id=? AND kind='chat' AND json_extract(input,'$.sessionId')=? ORDER BY created_at LIMIT 1").get(owner, source.session_id) as { text?: string } | undefined;
+          const first = this.db.prepare(sql`SELECT json_extract(input,'$.text') text FROM cloud_tasks WHERE owner_id=? AND kind='chat' AND json_extract(input,'$.sessionId')=?
+            ORDER BY created_at LIMIT 1`.sql).get(owner, source.session_id) as { text?: string } | undefined;
           const title = cleanName(String(session?.title && session.title !== '新会话' ? session.title : first?.text || '新会话')).slice(0, 40);
           const directory = this.unique(root.project_id, '', title);
           this.projects.files.mkdir(root.project_id, directory);
@@ -359,7 +361,14 @@ export class ResourceFiles {
         this.db.prepare('DELETE FROM cloud_tasks WHERE parent_run_id IN (SELECT id FROM runs WHERE thread_id=?)').run(thread);
         this.db.prepare('DELETE FROM threads WHERE id=?').run(thread);
       }
-      for (const table of ['resource_files', 'resource_folders', 'resource_attachments', 'resource_trash']) this.db.prepare(`DELETE FROM ${table} WHERE owner_id=? AND project_id=?`).run(owner, id);
+      // 表名原先由循环变量插进 FROM。四张表各自固定一条语句(WHERE 文本完全相同),SQL 文本不再随数据变化。
+      const deleteScoped = {
+        resource_files: this.db.prepare('DELETE FROM resource_files WHERE owner_id=? AND project_id=?'),
+        resource_folders: this.db.prepare('DELETE FROM resource_folders WHERE owner_id=? AND project_id=?'),
+        resource_attachments: this.db.prepare('DELETE FROM resource_attachments WHERE owner_id=? AND project_id=?'),
+        resource_trash: this.db.prepare('DELETE FROM resource_trash WHERE owner_id=? AND project_id=?'),
+      };
+      for (const table of ['resource_files', 'resource_folders', 'resource_attachments', 'resource_trash'] as const) deleteScoped[table].run(owner, id);
       this.db.prepare('DELETE FROM projects WHERE owner_id=? AND id=?').run(owner, id);
     }));
   }

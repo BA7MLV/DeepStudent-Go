@@ -6,6 +6,7 @@ import { taskDto } from '../../cloud/tasks.js';
 import { materialResolver } from '../learning.js';
 import { cardsRevision, learningCards } from '../learning-results.js';
 import type { PluginService } from '../service.js';
+import { cloudTaskRowSchema, expectRow, type CloudTaskRow } from '../../storage/row-schema.js';
 
 const material = { type: 'string', minLength: 1, maxLength: 256 };
 const schema = (properties: Record<string, unknown>, required = Object.keys(properties)) => ({ type: 'object', properties, required, additionalProperties: false });

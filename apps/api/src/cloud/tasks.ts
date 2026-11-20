@@ -2,6 +2,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { DatabaseStore } from '../storage/database.js';
 import type { CloudTask, CloudTaskKind } from '@wangke/contracts/cloud';
+import type { TaskStatus } from '@wangke/contracts/task-status';
 import { UNFINISHED_TASK_STATUSES } from '@wangke/contracts/task-status';
 import { CloudConfiguration } from './config.js';
 import { CloudRecords } from './records.js';
@@ -11,6 +12,10 @@ import { settleWithin } from '../lifecycle.js';
 import type { WebSearchService } from '../web-search/service.js';
 import { executeDelegatedTask } from './delegation.js';
 import { cleanBiliStaging } from '../bilibili/staging.js';
+import {
+  taskDtoRow, cloudTaskRowSchema, expectRow, expectRows, taskAgentCheckpointRowSchema, taskDelegationRowSchema,
+  type CloudTaskRow, type TaskAgentCheckpointRow, type TaskDelegationRow, type TaskDtoRow,
+} from '../storage/row-schema.js';
 
 export const TASK_KINDS: CloudTaskKind[] = ['chat', 'qa', 'transcribe', 'handout', 'cards', 'comments', 'danmaku', 'material', 'cover', 'artifactEdit', 'handoutEdit', 'modelOnce', 'bilibiliImport'];
 /** List/subscription projections are read on every streaming checkpoint. The
@@ -26,22 +31,27 @@ function progressSummary(progress: Record<string, unknown>) {
   return Object.keys(summary).length ? summary : null;
 }
 
-function progressDto(row: any, detail: TaskListDetail): CloudTask['progress'] {
+function progressDto(row: TaskDtoRow, detail: TaskListDetail): CloudTask['progress'] {
   if (!row.progress) return null;
-  const progress = JSON.parse(row.progress);
+  const progress: Record<string, unknown> = JSON.parse(row.progress);
   if (detail === 'full' || !progress || typeof progress !== 'object' || Array.isArray(progress)) return progress;
   // A chat row's modelTrace is the authoritative transcript. Keeping a second
   // copy in progress made every stream update serialize the whole answer twice.
   delete progress.modelTranscript;
-  if (!ACTIVE_TASK_STATUSES.has(row.status)) return progressSummary(progress);
+  if (!ACTIVE_TASK_STATUSES.has(row.status as TaskStatus)) return progressSummary(progress);
   // The global activity watcher only needs a chat task's status; its open
   // conversation receives the live text from the session projection instead.
   if (detail === 'activity' && row.kind === 'chat') return progressSummary(progress);
   return progress;
 }
 
-export function taskDto(row: any, detail: TaskListDetail = 'full'): CloudTask {
-  return buildTaskDto(row, detail, false);
+export { taskDtoRow } from '../storage/row-schema.js';
+export type { TaskDtoRow } from '../storage/row-schema.js';
+
+/** DTO 的唯一入口：行来自 SQLite(或测试夹具)，在信任边界上做形状收窄，
+ * 调用方不必逐个知道哪些列可缺省。 */
+export function taskDto(row: unknown, detail: TaskListDetail = 'full'): CloudTask {
+  return buildTaskDto(taskDtoRow(row), detail, false);
 }
 
 /** UI payload only. Recursively exclude historical private vision bytes from all
@@ -54,18 +64,23 @@ function taskUiValue(value: any): any {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, taskUiValue(item)]).filter(([, item]) => item !== undefined));
 }
 
-function buildTaskDto(row: any, detail: TaskListDetail, execution: boolean): CloudTask {
+/** 旧 media 执行器已并入 Node 运行时；历史回执仍按现行协议投影。 */
+function apiExecutor(executor: CloudTaskRow['executor']): CloudTask['executor'] {
+  return executor === 'node' || executor === 'media' ? 'node' : undefined;
+}
+
+function buildTaskDto(row: TaskDtoRow, detail: TaskListDetail, execution: boolean): CloudTask {
   const chat = row.kind === 'chat' || row.kind === 'qa';
   const ui = (value: any) => execution || !chat ? value : taskUiValue(value);
   const input = JSON.parse(row.input);
   const uiInput = execution ? input : chat && detail === 'activity'
     ? Object.fromEntries(['sessionId', 'videoId', 'action', 'rowId'].filter(key => input[key] !== undefined).map(key => [key, input[key]]))
     : taskUiValue(input);
-  return { id: row.id, kind: row.kind, resource: row.resource, status: row.status, input: execution ? input : uiInput,
+  return { id: row.id ?? '', kind: row.kind as CloudTaskKind, resource: row.resource ?? '', status: row.status as CloudTask['status'], input: execution ? input : uiInput,
     progress: ui(progressDto(row, detail)), result: detail === 'full' && row.result ? ui(JSON.parse(row.result)) : null,
     // Media tasks now execute in the Node runtime. Persisted historical receipts
     // must obey the current wire contract too, or one cover breaks watchTasks.
-    error: row.error, createdAt: row.created_at, executor: row.executor === 'media' ? 'node' : row.executor ?? undefined,
+    error: row.error ?? null, createdAt: row.created_at, executor: apiExecutor(row.executor ?? null),
     ...(detail === 'full' && row.model_snapshot ? { frozenModel: JSON.parse(row.model_snapshot) } : {}),
     source: row.parent_run_id ? { kind: 'bot', ...(typeof row.bot_name === 'string' ? { name: row.bot_name } : {}) } : { kind: 'app' },
     ...(typeof row.resource_name === 'string' ? { resourceName: row.resource_name } : {}),
@@ -114,7 +129,7 @@ export function listOwnerTasks(store: DatabaseStore, owner: string, detail: Task
       AND v.record_key=json_quote(json_extract(t.input,'$.videoId'))
     WHERE t.owner_id=?${sessionId === undefined ? '' : " AND t.kind IN ('chat','qa') AND CAST(json_extract(t.input,'$.sessionId') AS INTEGER)=?"}
     ORDER BY CASE WHEN t.status IN ('queued','running','waiting_user') THEN 0 ELSE 1 END, t.created_at DESC LIMIT 200`)
-    .all(...(sessionId === undefined ? [owner] : [owner, sessionId])) as any[]).map(row => taskDto(row, detail));
+    .all(...(sessionId === undefined ? [owner] : [owner, sessionId])).map(row => taskDto(row, detail)));
 }
 
 let nativeRuntime: Promise<{ executeNodeTask: TaskExecutor }> | undefined;
@@ -207,20 +222,21 @@ export class CloudTaskRunner {
         this.recovered = true;
       }
       for (const [id, controller] of this.active) {
-        const row = this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(id) as any;
+        const row = expectRow<Pick<CloudTaskRow, 'status'>>({ type: 'object', properties: { status: { type: 'string' } }, required: ['status'], additionalProperties: true }, this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(id), 'cloud_task_row_invalid');
         if (row?.status === 'cancelled' || this.store.db.prepare("SELECT 1 FROM cloud_tasks t JOIN runs r ON r.id=t.parent_run_id WHERE t.id=? AND r.status IN ('cancelled','failed','paused')").get(id)) controller.abort();
       }
       // Event barriers do not occupy a model call, process promise or concurrency slot.
       // Replayed dependency events only update the saved tool result once per wake.
       this.store.transaction(() => {
-        const parked = this.store.db.prepare("SELECT t.id,c.payload,c.wait_ids FROM cloud_tasks t JOIN task_agent_checkpoints c ON c.task_id=t.id WHERE t.status='waiting_event'").all() as any[];
+        const parked = expectRows<TaskAgentCheckpointRow & Pick<CloudTaskRow, 'id'>>({ ...taskAgentCheckpointRowSchema, required: ['id', 'payload', 'wait_ids'] }, this.store.db.prepare("SELECT t.id,c.payload,c.wait_ids FROM cloud_tasks t JOIN task_agent_checkpoints c ON c.task_id=t.id WHERE t.status='waiting_event'").all(), 'task_agent_checkpoint_row_invalid');
         for (const row of parked) {
           const ids = JSON.parse(row.wait_ids) as string[];
-          const tasks = ids.map(id => this.store.db.prepare('SELECT id,status,result,error FROM cloud_tasks WHERE id=?').get(id) as any);
-          if (tasks.some(t => !t || !['completed','failed','cancelled','interrupted'].includes(t.status))) continue;
+          const tasks = ids.map(id => expectRow<Pick<CloudTaskRow, 'id' | 'status' | 'result' | 'error'>>({ type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, result: { type: ['string', 'null'] }, error: { type: ['string', 'null'] } }, required: ['id', 'status', 'result', 'error'], additionalProperties: true }, this.store.db.prepare('SELECT id,status,result,error FROM cloud_tasks WHERE id=?').get(id), 'cloud_task_row_invalid'));
+          const ready = tasks.every(t => t && ['completed','failed','cancelled','interrupted'].includes(t.status));
+          if (!ready) continue;
           const payload = JSON.parse(row.payload);
           for (const message of payload.out) if (message.role === 'tool' && message.name === 'task_delegate') {
-            try { const value = JSON.parse(message.content); if (value.waiting === true) message.content = JSON.stringify({ waiting: false, tasks: tasks.map(t => ({ ...t, result: t.result ? JSON.parse(t.result) : null })) }); } catch { /* other tool output */ }
+            try { const value = JSON.parse(message.content); if (value.waiting === true) message.content = JSON.stringify({ waiting: false, tasks: tasks.filter(t => t).map(t => ({ ...t!, result: t!.result ? JSON.parse(t!.result) : null })) }); } catch { /* other tool output */ }
           }
           this.store.db.prepare('UPDATE task_agent_checkpoints SET payload=?,wait_ids=\'[]\' WHERE task_id=?').run(JSON.stringify(payload), row.id);
           this.store.db.prepare("UPDATE cloud_tasks SET status='queued',updated_at=? WHERE id=? AND status='waiting_event'").run(new Date().toISOString(), row.id);
@@ -229,7 +245,9 @@ export class CloudTaskRunner {
           FROM task_delegations d JOIN cloud_tasks child ON child.id=d.task_id JOIN cloud_tasks parent ON parent.id=d.parent_task_id
           WHERE d.delivery='background' AND parent.status='completed' AND child.status IN ('completed','failed','cancelled','interrupted')
           AND NOT EXISTS(SELECT 1 FROM cloud_task_events e WHERE e.task_id=child.id AND e.event='delegation_delivered')
-          AND NOT EXISTS(SELECT 1 FROM task_root_cancellations x WHERE x.root_id=d.root_id AND x.owner_id=d.owner_id)`).all() as any[];
+          AND NOT EXISTS(SELECT 1 FROM task_root_cancellations x WHERE x.root_id=d.root_id AND x.owner_id=d.owner_id)`).all().map(item => expectRow<CloudTaskRow & { child_id: string; child_status: string; child_result: string | null; child_error: string | null }>(
+            { ...cloudTaskRowSchema, required: ['child_id', 'child_status', 'owner_id', 'resource'], properties: { ...cloudTaskRowSchema.properties, child_id: { type: 'string' }, child_status: { type: 'string' }, child_result: { type: ['string', 'null'] }, child_error: { type: ['string', 'null'] } } },
+            item, 'cloud_task_row_invalid')!);
         for (const row of deliveries) {
           const parentInput = JSON.parse(row.input);
           if (typeof parentInput.sessionId !== 'number') continue;
@@ -240,18 +258,19 @@ export class CloudTaskRunner {
         }
       });
       const limit = Math.max(1, Math.min(4, Number(process.env.CLOUD_CONCURRENCY) || 2));
-      const rows = this.store.db.prepare("SELECT * FROM cloud_tasks WHERE status='queued' ORDER BY created_at LIMIT 50").all() as any[];
+      const rows = expectRows<CloudTaskRow>(cloudTaskRowSchema, this.store.db.prepare("SELECT * FROM cloud_tasks WHERE status='queued' ORDER BY created_at LIMIT 50").all(), 'cloud_task_row_invalid');
       for (const row of rows) {
-        const link = this.store.db.prepare('SELECT * FROM task_delegations WHERE task_id=?').get(row.id) as any;
+        const link = expectRow<TaskDelegationRow>(taskDelegationRowSchema, this.store.db.prepare('SELECT * FROM task_delegations WHERE task_id=?').get(row.id), 'task_delegation_row_invalid');
         if (link) {
-          const parent = link.parent_task_id ? this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(link.parent_task_id) as any : undefined;
+          const parent = link.parent_task_id ? expectRow<Pick<CloudTaskRow, 'status'>>({ type: 'object', properties: { status: { type: 'string' } }, required: ['status'], additionalProperties: true }, this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(link.parent_task_id), 'cloud_task_row_invalid') : undefined;
           if (parent && ['cancelled', 'failed', 'interrupted'].includes(parent.status)) {
             this.store.db.prepare("UPDATE cloud_tasks SET status='cancelled',updated_at=? WHERE id=? AND status='queued'").run(new Date().toISOString(), row.id);
             continue;
           }
-          const dependencies = (JSON.parse(link.dependencies) as string[]).map(id => this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(id) as any);
+          const dependencies = (JSON.parse(link.dependencies) as string[]).map(id => expectRow<Pick<CloudTaskRow, 'status'>>({ type: 'object', properties: { status: { type: 'string' } }, required: ['status'], additionalProperties: true }, this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(id), 'cloud_task_row_invalid'));
           if (dependencies.some(d => !d || !['completed','failed','cancelled','interrupted'].includes(d.status))) continue;
-          if (dependencies.some(d => d.status !== 'completed')) {
+          const pending = dependencies.filter((d): d is Pick<CloudTaskRow, 'status'> => d !== undefined);
+          if (pending.some(d => d.status !== 'completed')) {
             this.store.db.prepare("UPDATE cloud_tasks SET status='failed',error='dependency_not_completed',updated_at=? WHERE id=? AND status='queued'").run(new Date().toISOString(), row.id);
             continue;
           }
@@ -273,7 +292,7 @@ export class CloudTaskRunner {
       this.failures = 0; this.retryAt = 0;
     } finally { this.draining = false; }
   }
-  private async execute(origin: string, row: any, signal: AbortSignal) {
+  private async execute(origin: string, row: CloudTaskRow, signal: AbortSignal) {
     // A waiting_event suspension splits one task across executions; earlier
     // runs' effects are already persisted and must not be lost.
     const effects: TaskContext['effects'] = parseTaskEffects(row.effects).effects ?? [];
@@ -291,7 +310,7 @@ export class CloudTaskRunner {
       const checkActive = () => {
         signal.throwIfAborted();
         if (row.parent_run_id && this.store.db.prepare("SELECT 1 FROM runs WHERE id=? AND status IN ('cancelled','failed','paused')").get(row.parent_run_id)) throw new Error('parent_run_not_active');
-        const link = this.store.db.prepare('SELECT parent_task_id FROM task_delegations WHERE task_id=?').get(row.id) as any;
+        const link = expectRow<Pick<TaskDelegationRow, 'parent_task_id'>>({ type: 'object', properties: { parent_task_id: { type: ['string', 'null'] } }, required: ['parent_task_id'], additionalProperties: true }, this.store.db.prepare('SELECT parent_task_id FROM task_delegations WHERE task_id=?').get(row.id), 'task_delegation_row_invalid');
         if (link?.parent_task_id && this.store.db.prepare("SELECT 1 FROM cloud_tasks WHERE id=? AND status IN ('cancelled','failed','interrupted')").get(link.parent_task_id)) throw new Error('parent_task_not_active');
         if (link && contextPolicy().read === 'deny') throw new Error('delegation_permission_revoked');
         if (this.stopped || !['running', 'waiting_user'].includes((this.store.db.prepare('SELECT status FROM cloud_tasks WHERE id=?').get(row.id) as { status: string } | undefined)?.status ?? '')) {
@@ -340,7 +359,7 @@ export class CloudTaskRunner {
       // An explicit stop is not a resumable network interruption. Only clear
       // the marker on this task's existing owner; never recreate deleted rows
       // or overwrite a newer task's checkpoint. Shutdown remains interrupted.
-      const ended = this.store.db.prepare('SELECT status,progress FROM cloud_tasks WHERE id=?').get(row.id) as any;
+      const ended = expectRow<Pick<CloudTaskRow, 'status' | 'progress'>>({ type: 'object', properties: { status: { type: 'string' }, progress: { type: ['string', 'null'] } }, required: ['status', 'progress'], additionalProperties: true }, this.store.db.prepare('SELECT status,progress FROM cloud_tasks WHERE id=?').get(row.id), 'cloud_task_row_invalid');
       if (ended?.status === 'cancelled' && (row.kind === 'chat' || row.kind === 'qa')) {
         const progress = ended.progress ? JSON.parse(ended.progress) : {};
         const answer = typeof progress.rowId === 'number' ? this.records.get(row.owner_id, 'chats', progress.rowId) : null;

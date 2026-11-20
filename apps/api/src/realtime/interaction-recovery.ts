@@ -2,19 +2,20 @@ import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { DatabaseStore } from '../storage/database.js';
 import { CloudRecords } from '../cloud/records.js';
+import { clientCommandRow, interactionCommandRow, interactionTaskRow } from './interaction-recovery-schema.js';
 
 /** Historical browser interaction evidence is read-only. It cannot grant a
  * successor lease, consume an old command, or requeue an uncertain effect. */
 export function inspectInteraction(store: DatabaseStore, owner: string, taskId: string, sequence: number) {
-  const command = store.db.prepare(`SELECT c.*,t.target,r.snapshot,r.phase,r.effects,r.attempt FROM cloud_task_commands c
+  const command = interactionCommandRow(store.db.prepare(`SELECT c.*,t.target,r.snapshot,r.phase,r.effects,r.attempt FROM cloud_task_commands c
     JOIN cloud_tasks task ON task.id=c.task_id JOIN executor_interaction_targets t ON t.command_id=c.id
-    LEFT JOIN executor_interaction_recovery r ON r.command_id=c.id WHERE c.id=? AND c.task_id=? AND task.owner_id=?`).get(sequence, taskId, owner) as any;
+    LEFT JOIN executor_interaction_recovery r ON r.command_id=c.id WHERE c.id=? AND c.task_id=? AND task.owner_id=?`).get(sequence, taskId, owner));
   if (!command) throw new Error('interaction_not_found');
-  const task = store.db.prepare('SELECT status,worker_id,lease_expires_at,input,resource,kind FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, taskId) as any;
+  const task = interactionTaskRow(store.db.prepare('SELECT status,worker_id,lease_expires_at,input,resource,kind FROM cloud_tasks WHERE owner_id=? AND id=?').get(owner, taskId));
   const snapshot = command.snapshot ? JSON.parse(command.snapshot) : null;
   const current = snapshot ? new CloudRecords(store).get(owner, 'chats', snapshot.id) : null;
   const effects = (JSON.parse(command.effects ?? '[]') as { operationId: string; kind: string }[]).map(effect => {
-    const row = store.db.prepare('SELECT status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(owner, effect.operationId) as any;
+    const row = clientCommandRow(store.db.prepare('SELECT status,result FROM client_commands WHERE owner_id=? AND operation_id=?').get(owner, effect.operationId));
     return { ...effect, receipt: row ? { status: row.status, result: JSON.parse(row.result ?? 'null') } : null };
   });
   const target = effects.some(e => e.kind === 'target' && e.receipt?.status === 'completed');

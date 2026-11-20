@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type { DatabaseStore } from '../storage/database.js';
 import type { CloudConfiguration } from '../cloud/config.js';
+import { sqlFixed, type SqlParameters } from '../storage/sql.js';
 import { publishBotEvent } from './events.js';
 import { modelSettings } from './model-settings.js';
 
@@ -77,26 +78,27 @@ export class UsageLedger {
       const limits = this.limits(a.owner, a.run);
       const rootRun = this.rootRun(a.owner, a.run);
       const root = a.task ? (this.store.db.prepare('SELECT root_id FROM task_delegations WHERE task_id=? AND owner_id=?').get(a.task, a.owner) as { root_id: string } | undefined)?.root_id ?? (this.store.db.prepare('SELECT root_task_id FROM cloud_tasks WHERE id=? AND owner_id=?').get(a.task, a.owner) as { root_task_id: string | null } | undefined)?.root_task_id ?? a.task : undefined;
-      const sum = (where: string, params: string[]) => (this.store.db.prepare(`SELECT COALESCE(SUM(COALESCE(input_tokens+output_tokens,reserved_tokens)),0) AS tokens FROM bot_requests WHERE ${where}`).get(...params) as { tokens: number }).tokens;
+      // `where` 只来自本函数内的固定字面量;仍走 sqlFixed 让 `?` 个数与参数条数在改谓词时立即对账。
+      const sum = (where: string, params: SqlParameters) => (this.store.db.prepare(sqlFixed(`SELECT COALESCE(SUM(COALESCE(input_tokens+output_tokens,reserved_tokens)),0) AS tokens FROM bot_requests WHERE ${where}`, params.length).sql).get(...params) as { tokens: number }).tokens;
       // Ordinary pre-delegation calls stay in the original observation table.
       // Attach physical request evidence there, then include it in admission;
       // never copy it into bot_requests (which would double-count usage reports).
       const observedDay = limits.dayTokens === undefined ? 0 : (this.store.db.prepare('SELECT COALESCE(SUM(COALESCE(input_tokens+output_tokens,reserved_tokens)),0) AS tokens FROM model_observations WHERE owner_id=? AND task_id IS NOT NULL AND started_at>=?').get(a.owner, new Date().toISOString().slice(0, 10)) as { tokens: number }).tokens;
       if (limits.dayTokens !== undefined && sum('owner_id=? AND started_at>=?', [a.owner, new Date().toISOString().slice(0, 10)]) + observedDay + tokens > limits.dayTokens) throw new BudgetBlocked('owner_daily_token_budget');
-      const runScope = 'owner_id=? AND (run_id=? OR run_id IN (SELECT id FROM runs WHERE root_run_id=?))';
-      const taskScope = 'owner_id=? AND (task_id=? OR task_id IN (SELECT task_id FROM task_delegations WHERE root_id=? AND owner_id=?) OR task_id IN (SELECT id FROM cloud_tasks WHERE root_task_id=? AND owner_id=?))';
-      const runParams = [a.owner, rootRun!, rootRun!], taskParams = [a.owner, root!, root!, a.owner, root!, a.owner];
-      const observationScope = root && !a.run ? taskScope : 'owner_id=? AND task_id IN (SELECT id FROM cloud_tasks WHERE parent_run_id=? OR parent_run_id IN (SELECT id FROM runs WHERE root_run_id=?))';
-      const observationParams = root && !a.run ? taskParams : [a.owner, rootRun!, rootRun!];
-      const observed = a.run || root ? this.store.db.prepare(`SELECT input_tokens,output_tokens,cache_creation_tokens,reserved_tokens,provider,model,price_json FROM model_observations WHERE ${observationScope}`).all(...observationParams) as Array<{ input_tokens: number | null; output_tokens: number | null; cache_creation_tokens: number | null; reserved_tokens: number | null; provider: string; model: string; price_json: string | null }> : [];
+      // 每个作用域对应「固定语句 + 固定参数」的一对,用映射把两者绑在一起,
+      // 避免以后只改了一处 WHERE 而漏改参数顺序。
+      const runScope = { sql: 'owner_id=? AND (run_id=? OR run_id IN (SELECT id FROM runs WHERE root_run_id=?))', parameters: [a.owner, rootRun!, rootRun!] };
+      const taskScope = { sql: 'owner_id=? AND (task_id=? OR task_id IN (SELECT task_id FROM task_delegations WHERE root_id=? AND owner_id=?) OR task_id IN (SELECT id FROM cloud_tasks WHERE root_task_id=? AND owner_id=?))', parameters: [a.owner, root!, root!, a.owner, root!, a.owner] };
+      const observationScope = root && !a.run ? taskScope : { sql: 'owner_id=? AND task_id IN (SELECT id FROM cloud_tasks WHERE parent_run_id=? OR parent_run_id IN (SELECT id FROM runs WHERE root_run_id=?))', parameters: [a.owner, rootRun!, rootRun!] };
+      const observed = a.run || root ? this.store.db.prepare(sqlFixed(`SELECT input_tokens,output_tokens,cache_creation_tokens,reserved_tokens,provider,model,price_json FROM model_observations WHERE ${observationScope.sql}`, observationScope.parameters.length).sql).all(...observationScope.parameters) as Array<{ input_tokens: number | null; output_tokens: number | null; cache_creation_tokens: number | null; reserved_tokens: number | null; provider: string; model: string; price_json: string | null }> : [];
       const observedTokens = observed.reduce((n, r) => n + (r.input_tokens !== null && r.output_tokens !== null ? r.input_tokens + r.output_tokens : r.reserved_tokens ?? 0), 0);
-      if (a.run && limits.runTokens !== undefined && sum(runScope, runParams) + observedTokens + tokens > limits.runTokens) throw new BudgetBlocked('run_token_budget');
-      if (!a.run && root && limits.runTokens !== undefined && sum(taskScope, taskParams) + observedTokens + tokens > limits.runTokens) throw new BudgetBlocked('root_task_token_budget');
+      if (a.run && limits.runTokens !== undefined && sum(runScope.sql, runScope.parameters) + observedTokens + tokens > limits.runTokens) throw new BudgetBlocked('run_token_budget');
+      if (!a.run && root && limits.runTokens !== undefined && sum(taskScope.sql, taskScope.parameters) + observedTokens + tokens > limits.runTokens) throw new BudgetBlocked('root_task_token_budget');
       const price = limits.prices.find(p => p.provider === a.provider && p.model === a.model);
       if (limits.runCost !== undefined) {
         if (!price) throw new BudgetBlocked('model_price_required');
-        const current = (a.run ? this.store.db.prepare(`SELECT cost,input_tokens,output_tokens,reserved_tokens,provider,model,price_json FROM bot_requests WHERE ${runScope}`).all(...runParams)
-          : root ? this.store.db.prepare(`SELECT cost,input_tokens,output_tokens,reserved_tokens,provider,model,price_json FROM bot_requests WHERE ${taskScope}`).all(...taskParams) : []) as Array<{ cost: number | null; input_tokens: number | null; output_tokens: number | null; reserved_tokens: number; provider: string; model: string; price_json: string | null }>;
+        const current = (a.run ? this.store.db.prepare(sqlFixed(`SELECT cost,input_tokens,output_tokens,reserved_tokens,provider,model,price_json FROM bot_requests WHERE ${runScope.sql}`, runScope.parameters.length).sql).all(...runScope.parameters)
+          : root ? this.store.db.prepare(sqlFixed(`SELECT cost,input_tokens,output_tokens,reserved_tokens,provider,model,price_json FROM bot_requests WHERE ${taskScope.sql}`, taskScope.parameters.length).sql).all(...taskScope.parameters) : []) as Array<{ cost: number | null; input_tokens: number | null; output_tokens: number | null; reserved_tokens: number; provider: string; model: string; price_json: string | null }>;
         let cost = 0;
         for (const row of [...current, ...observed.map(row => ({ ...row, input_tokens: row.input_tokens === null ? null : row.input_tokens + (row.cache_creation_tokens ?? 0), cost: null }))]) {
           const p = row.price_json ? JSON.parse(row.price_json) as BotBudget['prices'][number] : limits.prices.find(p => p.provider === row.provider && p.model === row.model);

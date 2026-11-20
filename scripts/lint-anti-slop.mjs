@@ -20,7 +20,7 @@ for (const entry of fs.readdirSync(path.join(repository, 'packages'))) {
 
 const patterns = [
   { name: 'chained-type-assertion', regex: /\bas\s+(?:unknown|[A-Z][A-Za-z0-9_.]*)(?:<[^>]*>)?(?:\[\])?\s+as\s/, baseline: 102 },
-  { name: 'as-any', regex: /\bas\s+any\b/, baseline: 148 },
+  { name: 'asAny', regex: /\bas\s+any\b/, baseline: 48 },
   { name: 'empty-object-conditional-spread', regex: /\{\s*\.\.\.\(.+\?.+:\s*\{\}\s*\)\s*\}/, baseline: 11 },
 ];
 

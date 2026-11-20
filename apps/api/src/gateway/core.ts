@@ -12,6 +12,47 @@ import { splitGatewayMarkdown } from './chunk.js';
 import { photoBatch, type PhotoInboxItem } from './photo-batch.js';
 import { MAX_BOT_MESSAGE_ATTACHMENTS, parseBotAttachments } from '@wangke/contracts';
 import { readableApprovalText } from '../agent/approval-copy.js';
+import { sql } from '../storage/sql.js';
+import {
+  expectRow, expectRows, gatewayAccountListRowSchema, gatewayAccountRowSchema, gatewayBindingRowSchema,
+  gatewayInboxRowSchema, gatewayInboxWorkRowSchema, gatewayOutboxDeliveryRowSchema, gatewayOutboxStatusRowSchema,
+  gatewayReminderRowSchema,
+  type GatewayAccountListRow, type GatewayAccountRow, type GatewayBindingRow, type GatewayInboxRow, type GatewayInboxWorkRow,
+  type GatewayOutboxDeliveryRow, type GatewayOutboxStatusRow, type GatewayReminderRow,
+} from '../storage/row-schema.js';
+
+/** 只读单列的通用行形状:`{ id }`、`{ thread_id }`、`{ status }`、计数与时间戳。 */
+const idRowSchema = { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } as const;
+const threadIdRowSchema = { type: 'object', properties: { thread_id: { type: 'string' } }, required: ['thread_id'] } as const;
+const statusRowSchema = { type: 'object', properties: { status: { type: 'string' } }, required: ['status'] } as const;
+const stringOrNullSchema = { type: 'object', properties: { value: { type: ['string', 'null'] } }, required: ['value'] } as const;
+const countRowSchema = { type: 'object', properties: { n: { type: 'integer' } }, required: ['n'] } as const;
+const capacityRowSchema = { type: 'object', properties: { total: { type: 'integer' }, pending: { type: 'integer' } }, required: ['total', 'pending'] } as const;
+const lastInboundRowSchema = { type: 'object', properties: { lastInboundAt: { type: ['integer', 'null'] }, failures: { type: 'integer' } }, required: ['lastInboundAt', 'failures'] } as const;
+const failureCountRowSchema = { type: 'object', properties: { failures: { type: 'integer' } }, required: ['failures'] } as const;
+const projectionCountRowSchema = { type: 'object', properties: { n: { type: 'integer' } }, required: ['n'] } as const;
+const latestRunRowSchema = {
+  type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, errorCode: { type: ['string', 'null'] } },
+  required: ['id', 'status', 'errorCode'],
+} as const;
+const nextAtRowSchema = { type: 'object', properties: { next_at: { type: ['integer', 'null'] } }, required: ['next_at'] } as const;
+const outboxFailureRowSchema = { type: 'object', properties: { failures: { type: 'integer' } }, required: ['failures'] } as const;
+const approvalSeqRowSchema = { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, seq: { type: 'integer' } }, required: ['id', 'status', 'seq'] } as const;
+const pendingApprovalRowSchema = { type: 'object', properties: { id: { type: 'string' }, event_id: { type: 'integer' } }, required: ['id', 'event_id'] } as const;
+const pendingSeqRowSchema = { type: 'object', properties: { seq: { type: 'integer' }, content: { type: 'string' } }, required: ['seq', 'content'] } as const;
+const fileNameRowSchema = { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } as const;
+const envelopeRowSchema = { type: 'object', properties: { id: { type: 'integer' }, envelope: { type: 'string' } }, required: ['id', 'envelope'] } as const;
+const inboxNeighbourRowSchema = {
+  type: 'object', properties: { id: { type: 'integer' }, received_at: { type: 'integer' }, status: { type: 'string' }, envelope: { type: 'string' } },
+  required: ['id', 'received_at', 'status', 'envelope'],
+} as const;
+/** 账号开启状态下的「当前行」:enabled 在 SQL 里已过滤,这里只要少数字段。 */
+interface GatewayAccountState { id: string; enabled: number; channel: string; owner_id: string }
+const gatewayAccountStateSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, enabled: { type: 'integer' }, channel: { type: 'string' }, owner_id: { type: 'string' } },
+  required: ['id', 'enabled', 'channel', 'owner_id'],
+} as const;
 
 const stamp = () => new Date().toISOString();
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
@@ -52,15 +93,16 @@ export class GatewayCore {
   private timer?: ReturnType<typeof setInterval>;
   constructor(readonly store: DatabaseStore, readonly secrets: CloudConfiguration, readonly bot: BotApplicationService,
     readonly factories: Record<string, PluginFactory>, readonly filesDir: string) {}
-  account(owner: string, id: string): any {
-    const row = this.store.db.prepare('SELECT * FROM gateway_accounts WHERE id=? AND owner_id=?').get(id, owner);
-    if (!row) throw new Error('account_not_found'); return row;
+  account(owner: string, id: string): GatewayAccountRow {
+    const row = expectRow<GatewayAccountRow>(gatewayAccountRowSchema, this.store.db.prepare('SELECT * FROM gateway_accounts WHERE id=? AND owner_id=?').get(id, owner), 'gateway_account_row_invalid');
+    if (!row) throw new Error('account_not_found');
+    return row;
   }
-  config(account: any): Record<string, string> { return JSON.parse(this.secrets.open(account.config)); }
+  config(account: Pick<GatewayAccountRow, 'config'>): Record<string, string> { return JSON.parse(this.secrets.open(account.config)); }
   list(owner: string) {
     const model = this.secrets.get(owner);
     const modelConfigured = Boolean(model.llmModel.model && model.providers.some(p => p.id === model.llmModel.providerId && p.baseUrl && p.serves.includes('chat')));
-    return (this.store.db.prepare('SELECT id,channel,agent_id AS agentId,enabled,preset,health,created_at AS createdAt FROM gateway_accounts WHERE owner_id=? ORDER BY created_at,id').all(owner) as any[]).map(a => ({ ...a,
+    return expectRows<GatewayAccountListRow>(gatewayAccountListRowSchema, this.store.db.prepare('SELECT id,channel,agent_id AS agentId,enabled,preset,health,created_at AS createdAt FROM gateway_accounts WHERE owner_id=? ORDER BY created_at,id').all(owner), 'gateway_account_row_invalid').map(a => ({ ...a,
       readiness: this.readiness(a, modelConfigured),
       connection: this.connections.get(a.id),
       manifest: this.factories[a.channel]?.().manifest,
@@ -69,17 +111,20 @@ export class GatewayCore {
       bindings: this.store.db.prepare('SELECT id,tenant,peer,chat,thread_id AS threadId,revoked FROM gateway_bindings WHERE account_id=?').all(a.id),
     }));
   }
-  private readiness(a: any, modelConfigured: boolean): GatewayReadiness {
-    const agent = this.store.db.prepare('SELECT name,enabled FROM agent_profiles WHERE id=?').get(a.agentId) as any;
+  private readiness(a: GatewayAccountListRow, modelConfigured: boolean): GatewayReadiness {
+    const agent = expectRow<{ name: string; enabled: number }>({ type: 'object', properties: { name: { type: 'string' }, enabled: { type: 'integer' } }, required: ['name', 'enabled'] },
+      this.store.db.prepare('SELECT name,enabled FROM agent_profiles WHERE id=?').get(a.agentId), 'agent_profile_row_invalid');
     const bound = Boolean(this.store.db.prepare('SELECT 1 FROM gateway_bindings WHERE account_id=? AND revoked=0').get(a.id));
-    const inbox = this.store.db.prepare("SELECT MAX(received_at) lastInboundAt,COUNT(CASE WHEN status='failed' THEN 1 END) failures FROM gateway_inbox WHERE account_id=?").get(a.id) as any;
-    const outbox = this.store.db.prepare("SELECT COUNT(*) failures FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id WHERE b.account_id=? AND b.revoked=0 AND o.status IN ('failed','uncertain')").get(a.id) as any;
-    const projection = this.store.db.prepare('SELECT COUNT(*) n FROM gateway_projection_failures f JOIN gateway_bindings b ON b.id=f.binding_id WHERE b.account_id=? AND b.revoked=0').get(a.id) as any;
-    const latestRun = this.store.db.prepare('SELECT r.id,r.status,r.error_code AS errorCode FROM runs r JOIN gateway_bindings b ON b.thread_id=r.thread_id WHERE b.account_id=? AND b.revoked=0 ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1').get(a.id) as (GatewayReadiness['latestRun'] & { id: string }) | undefined;
-    const pending = this.store.db.prepare("SELECT envelope FROM gateway_inbox WHERE account_id=? AND status='pending' ORDER BY id LIMIT 1").get(a.id) as { envelope: string } | undefined;
+    const inbox = expectRow<{ lastInboundAt: number | null; failures: number }>(lastInboundRowSchema, this.store.db.prepare("SELECT MAX(received_at) lastInboundAt,COUNT(CASE WHEN status='failed' THEN 1 END) failures FROM gateway_inbox WHERE account_id=?").get(a.id), 'gateway_readiness_row_invalid')!;
+    const outbox = expectRow<{ failures: number }>(outboxFailureRowSchema, this.store.db.prepare("SELECT COUNT(*) failures FROM gateway_outbox o JOIN gateway_bindings b ON b.id=o.binding_id WHERE b.account_id=? AND b.revoked=0 AND o.status IN ('failed','uncertain')").get(a.id), 'gateway_readiness_row_invalid')!;
+    const projection = expectRow<{ n: number }>(projectionCountRowSchema, this.store.db.prepare('SELECT COUNT(*) n FROM gateway_projection_failures f JOIN gateway_bindings b ON b.id=f.binding_id WHERE b.account_id=? AND b.revoked=0').get(a.id), 'gateway_readiness_row_invalid')!;
+    const latestRun = expectRow<GatewayReadiness['latestRun'] & { id: string }>(latestRunRowSchema, this.store.db.prepare('SELECT r.id,r.status,r.error_code AS errorCode FROM runs r JOIN gateway_bindings b ON b.thread_id=r.thread_id WHERE b.account_id=? AND b.revoked=0 ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1').get(a.id), 'gateway_readiness_row_invalid');
+    const pending = expectRow<{ envelope: string }>(envelopeRowSchema, this.store.db.prepare("SELECT id,envelope FROM gateway_inbox WHERE account_id=? AND status='pending' ORDER BY id LIMIT 1").get(a.id), 'gateway_inbox_row_invalid');
     let processingStatus: GatewayReadiness['processingStatus'] = null;
     if (pending) {
-      try { processingStatus = JSON.parse(this.secrets.open(pending.envelope))?.attachments?.some((x: any) => String(x.mime ?? '').startsWith('image/')) ? 'collecting' : null; } catch { /* malformed inbox is reported separately */ }
+      // 收件信封是密文文本:解密后只关心「有没有待收的图片附件」,其它结构交给专项校验。
+      const envelope: { attachments?: Array<{ mime?: unknown }> } | undefined = JSON.parse(this.secrets.open(pending.envelope));
+      if (Array.isArray(envelope?.attachments) && envelope.attachments.some(attachment => String(attachment.mime ?? '').startsWith('image/'))) processingStatus = 'collecting';
     }
     if (!processingStatus && latestRun) {
       const readStep = this.store.db.prepare("SELECT 1 FROM run_steps WHERE run_id=? AND tool='study_file' AND status IN ('queued','running') LIMIT 1").get(latestRun.id);
@@ -96,7 +141,7 @@ export class GatewayCore {
   }
   /** One platform identity, one consumer; checking all owners also avoids cross-owner event theft. */
   private assertUnique(channel: string, config: Record<string, string>, except?: string) {
-    for (const account of this.store.db.prepare('SELECT * FROM gateway_accounts WHERE channel=? AND id<>?').all(channel, except ?? '') as any[]) {
+    for (const account of expectRows<GatewayAccountRow>(gatewayAccountRowSchema, this.store.db.prepare('SELECT * FROM gateway_accounts WHERE channel=? AND id<>?').all(channel, except ?? ''), 'gateway_account_row_invalid')) {
       const other = this.config(account);
       const duplicate = channel === 'ilink'
         ? config.botId && config.botId === other.botId || config.botToken && config.botToken === other.botToken
@@ -127,11 +172,11 @@ export class GatewayCore {
       if (old) this.account(owner, id);
       this.assertUnique(value.channel, config, id);
       this.store.transaction(() => {
-        this.store.db.prepare(`INSERT INTO gateway_accounts(id,owner_id,channel,agent_id,enabled,preset,config,created_at) VALUES(?,?,?,?,?,?,?,?)
-          ON CONFLICT(id) DO UPDATE SET agent_id=excluded.agent_id,enabled=excluded.enabled,preset=excluded.preset,config=excluded.config`)
+        this.store.db.prepare(sql`INSERT INTO gateway_accounts(id,owner_id,channel,agent_id,enabled,preset,config,created_at) VALUES(?,?,?,?,?,?,?,?)
+          ON CONFLICT(id) DO UPDATE SET agent_id=excluded.agent_id,enabled=excluded.enabled,preset=excluded.preset,config=excluded.config`.sql)
           .run(id, owner, value.channel, value.agentId, Number(value.enabled), value.preset ?? 'inherit', this.secrets.seal(JSON.stringify(config)), stamp());
         if (old && (!value.enabled || old.agent_id !== value.agentId || old.preset !== (value.preset ?? 'inherit'))) {
-          for (const b of this.store.db.prepare('SELECT thread_id FROM gateway_bindings WHERE account_id=? AND revoked=0').all(id) as any[]) {
+          for (const b of expectRows<{ thread_id: string }>(threadIdRowSchema, this.store.db.prepare('SELECT thread_id FROM gateway_bindings WHERE account_id=? AND revoked=0').all(id), 'gateway_binding_row_invalid')) {
             this.bot.stop(owner, b.thread_id);
             this.store.db.prepare('DELETE FROM thread_participants WHERE thread_id=?').run(b.thread_id);
             this.store.db.prepare('INSERT INTO thread_participants(thread_id,agent_id,joined_at) VALUES(?,?,?)').run(b.thread_id, value.agentId, stamp());
@@ -151,11 +196,11 @@ export class GatewayCore {
   }
   revoke(owner: string, id: string, binding: string) {
     const account = this.account(owner, id);
-    const b = this.store.db.prepare('SELECT * FROM gateway_bindings WHERE id=? AND account_id=?').get(binding, id) as any;
+    const b = expectRow<GatewayBindingRow>(gatewayBindingRowSchema, this.store.db.prepare('SELECT * FROM gateway_bindings WHERE id=? AND account_id=?').get(binding, id), 'gateway_binding_row_invalid');
     if (!b) throw new Error('binding_not_found');
     this.store.transaction(() => {
       this.store.db.prepare('DELETE FROM gateway_pairings WHERE account_id=?').run(id);
-      for (const pending of this.store.db.prepare("SELECT id,envelope FROM gateway_inbox WHERE account_id=? AND status='pending'").all(id) as any[]) {
+      for (const pending of expectRows<{ id: number; envelope: string }>(envelopeRowSchema, this.store.db.prepare("SELECT id,envelope FROM gateway_inbox WHERE account_id=? AND status='pending'").all(id), 'gateway_inbox_row_invalid')) {
         try {
           const m: GatewayEnvelope = JSON.parse(this.secrets.open(pending.envelope));
           if (m.text.trimStart().startsWith('/pair ') || (account.channel === 'ilink' && barePairCode(m.text))) this.store.db.prepare("UPDATE gateway_inbox SET status='cancelled',error='pairing_revoked' WHERE id=?").run(pending.id);
@@ -179,7 +224,7 @@ export class GatewayCore {
     try {
       // Delete atomically before yielding: no scheduler, pairing or late login can revive it.
       this.store.transaction(() => {
-        for (const binding of this.store.db.prepare('SELECT thread_id FROM gateway_bindings WHERE account_id=?').all(id) as any[]) {
+        for (const binding of expectRows<{ thread_id: string }>(threadIdRowSchema, this.store.db.prepare('SELECT thread_id FROM gateway_bindings WHERE account_id=?').all(id), 'gateway_binding_row_invalid')) {
           this.bot.stop(owner, binding.thread_id);
           this.store.db.prepare("UPDATE bot_reminders SET status='cancelled' WHERE thread_id=? AND status='active'").run(binding.thread_id);
         }
@@ -195,7 +240,7 @@ export class GatewayCore {
     this.stopped = false;
     // A process can die after remote acceptance. Never blindly replay an uncertain send.
     this.store.db.prepare("UPDATE gateway_outbox SET status='uncertain',error='process_interrupted_after_send_started' WHERE status='sending'").run();
-    for (const a of this.store.db.prepare('SELECT id FROM gateway_accounts WHERE enabled=1').all() as any[]) this.launch(a.id);
+    for (const a of expectRows<{ id: string }>(idRowSchema, this.store.db.prepare('SELECT id FROM gateway_accounts WHERE enabled=1').all(), 'gateway_account_row_invalid')) this.launch(a.id);
     if (automatic) { this.timer = setInterval(() => this.scheduleTick(), 500); this.timer.unref(); this.scheduleTick(); }
   }
   private scheduleTick() { void this.tick().catch(() => this.runtimeFailure()); }
@@ -235,7 +280,7 @@ export class GatewayCore {
   }
   private launch(id: string) {
     if (this.stopped || this.live.has(id) || this.changing.has(id)) return;
-    const a = this.store.db.prepare('SELECT * FROM gateway_accounts WHERE id=?').get(id) as any;
+    const a = expectRow<GatewayAccountRow>(gatewayAccountRowSchema, this.store.db.prepare('SELECT * FROM gateway_accounts WHERE id=?').get(id), 'gateway_account_row_invalid');
     if (!a?.enabled) return;
     try { this.assertUnique(a.channel, this.config(a), id); }
     catch {
@@ -253,11 +298,11 @@ export class GatewayCore {
     const task = Promise.resolve().then(() => plugin.start(this.config(a), {
       signal: controller.signal,
       receive: (batch, cursor) => { controller.signal.throwIfAborted(); this.receive(id, batch, cursor); },
-      cursor: () => (this.store.db.prepare('SELECT cursor FROM gateway_accounts WHERE id=?').get(id) as any)?.cursor ?? undefined,
+      cursor: () => expectRow<{ cursor: string | null }>({ type: 'object', properties: { cursor: { type: ['string', 'null'] } }, required: ['cursor'] }, this.store.db.prepare('SELECT cursor FROM gateway_accounts WHERE id=?').get(id), 'gateway_account_row_invalid')?.cursor ?? undefined,
       updateConfig: patch => {
         if (controller.signal.aborted) return;
-        const current = this.store.db.prepare('SELECT * FROM gateway_accounts WHERE id=?').get(id);
-        this.store.db.prepare('UPDATE gateway_accounts SET config=? WHERE id=?').run(this.secrets.seal(JSON.stringify({ ...this.config(current), ...patch })), id);
+        const current = expectRow<Pick<GatewayAccountRow, 'config'>>(gatewayAccountRowSchema, this.store.db.prepare('SELECT * FROM gateway_accounts WHERE id=?').get(id), 'gateway_account_row_invalid');
+        this.store.db.prepare('UPDATE gateway_accounts SET config=? WHERE id=?').run(this.secrets.seal(JSON.stringify({ ...this.config(current!), ...patch })), id);
       },
       health: (state, detail) => { if (!controller.signal.aborted) this.connectionHealth(id, state, detail); },
     })).catch(async () => {
@@ -523,7 +568,7 @@ export class GatewayCore {
             this.store.transaction(() => {
               const result = approval.id ? this.bot.resolve(row.owner_id, approval.id, approval.approved, m.text.trim(), b.thread_id) : { error: 'approval_selection_required' };
               const text = result.error === 'approval_selection_required' ? '我还不能确定你指的是哪项操作，暂时不会执行。可以发 /status 查看列表，再回复“同意 编号”或“拒绝 编号”。'
-                : result.error ? '这条确认已经处理过或失效了，请以最新的确认消息为准。'
+                : 'error' in result ? '这条确认已经处理过或失效了，请以最新的确认消息为准。'
                 : result.status === 'approved' ? '好，我会继续处理。' : '好，这次不执行。';
               this.bot.append(b.thread_id, 'assistant', 'text', text, `im:${row.id}:approval`);
               this.store.db.prepare("UPDATE gateway_inbox SET status='done' WHERE id=?").run(row.id);

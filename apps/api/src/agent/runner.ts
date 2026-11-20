@@ -36,6 +36,57 @@ import { settleWithin } from '../lifecycle.js';
 import { hasWechatLatex, wechatToolHasLatex, WECHAT_REPLY_POLICY, WECHAT_FORMAT_REPAIR } from './wechat-replies.js';
 import { imageInputReads, ImageInputFailure, IMAGE_INPUT_POLICY } from './image-input.js';
 import { executeToolBatch, recordToolResult, TOOL_BATCH_GUIDANCE } from '@wangke/study-core/tool-batch';
+import { sql } from '../storage/sql.js';
+import { expectRow, expectRows, runRowSchema, runWaitRowSchema, type RunRow, type RunWaitRow } from '../storage/row-schema.js';
+
+/** 查询结果的行形状。本类读的列很少,逐条声明比 `as any` 更能暴露迁移漂移。 */
+interface RunStepRow { id: string; run_id: string; status: string; tool: string; arguments: string; result: string | null }
+const runStepRowSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, run_id: { type: 'string' }, status: { type: 'string' }, tool: { type: 'string' }, arguments: { type: 'string' }, result: { type: ['string', 'null'] } },
+  required: ['id', 'run_id', 'status', 'tool', 'arguments'],
+} as const;
+interface RunContextRow { id: string; status: string; context_json: string | null }
+const runContextRowSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, status: { type: 'string' }, context_json: { type: ['string', 'null'] } },
+  required: ['id', 'status'],
+} as const;
+interface RunInputRow { message_id: string; seq: number; role: string; kind: string; content: string | null; reply_to: string | null }
+const runInputRowSchema = {
+  type: 'object',
+  properties: { message_id: { type: 'string' }, seq: { type: 'integer' }, role: { type: 'string' }, kind: { type: 'string' }, content: { type: ['string', 'null'] }, reply_to: { type: ['string', 'null'] } },
+  required: ['message_id', 'seq', 'role', 'kind', 'content'],
+} as const;
+/** 子任务等待体:`run_waits` 的列 + 任务终态投影。 */
+interface WaitedTask { id: string; status: string; result: string | null; error: string | null }
+const waitedTaskSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, status: { type: 'string' }, result: { type: ['string', 'null'] }, error: { type: ['string', 'null'] } },
+  required: ['id', 'status', 'result', 'error'],
+} as const;
+interface CloudPermissionProjection { id: string; thread_id: string; capability: string; arguments: string }
+const cloudPermissionProjectionSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, thread_id: { type: 'string' }, capability: { type: 'string' }, arguments: { type: ['string', 'null'] } },
+  required: ['id', 'thread_id', 'capability', 'arguments'],
+} as const;
+interface TerminalTaskProjection { id: string; thread_id: string; parent_run_id: string; kind: string; status: string; result: string | null; error: string | null }
+const terminalTaskProjectionSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, thread_id: { type: 'string' }, parent_run_id: { type: 'string' }, kind: { type: 'string' }, status: { type: 'string' }, result: { type: ['string', 'null'] }, error: { type: ['string', 'null'] } },
+  required: ['id', 'thread_id', 'parent_run_id', 'kind', 'status', 'result', 'error'],
+} as const;
+const runStatusSchema = { type: 'object', properties: { status: { type: 'string' } }, required: ['status'] } as const;
+interface ParentRunRow { id: string; status: string; context_json: string | null; trigger_message_id: string | null; model_snapshot: string | null; root_run_id: string | null }
+const parentRunRowSchema = {
+  type: 'object',
+  properties: { id: { type: 'string' }, status: { type: 'string' }, context_json: { type: ['string', 'null'] }, trigger_message_id: { type: ['string', 'null'] }, model_snapshot: { type: ['string', 'null'] }, root_run_id: { type: ['string', 'null'] } },
+  required: ['id', 'status', 'trigger_message_id'],
+} as const;
+
+/** 认领队列:只取本类会用到的列,created_at 用于判定线程上更早的暂停 run。 */
+type QueuedRun = Run & Pick<RunRow, 'created_at' | 'thread_id'> & { trigger_message_id: string | null };
 
 type Run = { id: string; thread_id: string; context_json: string | null; step_count: number; trigger_message_id: string | null; context_end_seq?: number | null };
 const now = () => new Date().toISOString();
@@ -133,12 +184,12 @@ export class BotRunner {
       // Recover legacy context pauses once, without reviving superseded work or
       // replaying operations whose outcome is uncertain. New context failures
       // are terminal and cannot loop back through this startup recovery.
-      this.store.db.prepare(`UPDATE runs SET status='queued',error_code=NULL,wake_at=NULL WHERE mode='bot' AND status='paused' AND error_code='context_capacity_exceeded'
+      this.store.db.prepare(sql`UPDATE runs SET status='queued',error_code=NULL,wake_at=NULL WHERE mode='bot' AND status='paused' AND error_code='context_capacity_exceeded'
         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.thread_id=runs.thread_id AND m.role='user'
           AND m.seq>COALESCE((SELECT seq FROM messages WHERE id=runs.trigger_message_id),0))
         AND NOT EXISTS (SELECT 1 FROM run_steps s WHERE s.run_id=runs.id AND s.status!='completed')
         AND NOT EXISTS (SELECT 1 FROM cloud_tasks c WHERE c.parent_run_id=runs.id AND c.status IN ('queued','running','waiting_user'))
-        AND EXISTS (SELECT 1 FROM threads t WHERE t.id=runs.thread_id AND t.archived=0)`).run();
+        AND EXISTS (SELECT 1 FROM threads t WHERE t.id=runs.thread_id AND t.archived=0)`.sql).run();
     });
     this.recoverNeeded = false;
   }
@@ -188,12 +239,21 @@ export class BotRunner {
       if (this.stopped || this.quiescing) return;
       this.syncChildren();
       const concurrency = Math.max(1, Math.min(8, Number(process.env.BOT_CONCURRENCY) || 1));
-      const rows = this.store.db.prepare("SELECT * FROM runs WHERE mode='bot' AND status='queued' AND (wake_at IS NULL OR wake_at<=?) ORDER BY created_at").all(now()) as Run[];
+      // 认领前提是这些列存在;缺列即库结构漂移,直接失败而不是跑一个半截 run。
+      // 注意两点:runRowSchema.required 已含 created_at 不能重复追;strictRequired
+      // 要求 required 里的键在 properties 有定义,context_json/step_count 本类
+      // 才读,一并补进 properties 而不是靠 additionalProperties 放行。
+      const rows = expectRows<QueuedRun>({
+        ...runRowSchema,
+        properties: { ...runRowSchema.properties, context_json: { type: ['string', 'null'] }, step_count: { type: ['integer', 'null'] } },
+        required: [...runRowSchema.required, 'context_json', 'step_count', 'trigger_message_id'],
+      },
+        this.store.db.prepare("SELECT * FROM runs WHERE mode='bot' AND status='queued' AND (wake_at IS NULL OR wake_at<=?) ORDER BY created_at").all(now()), 'run_row_invalid');
       for (const run of rows) {
         if (this.stopped || this.quiescing) break;
         if (this.active.size >= concurrency) break;
         const thread = this.thread(run.thread_id);
-        if (this.store.db.prepare("SELECT 1 FROM runs WHERE thread_id=? AND id!=? AND status IN ('waiting_user','waiting_event','paused') AND created_at<=?").get(run.thread_id, run.id, (run as any).created_at)) continue;
+        if (this.store.db.prepare("SELECT 1 FROM runs WHERE thread_id=? AND id!=? AND status IN ('waiting_user','waiting_event','paused') AND created_at<=?").get(run.thread_id, run.id, run.created_at)) continue;
         const workspaceId = this.workspaceId(thread);
         const scope = workspaceId ? `project:${workspaceId}` : `thread:${run.thread_id}`;
         if (workspaceId && this.projects?.hasExecution(workspaceId)) continue;
@@ -208,19 +268,24 @@ export class BotRunner {
         this.tasks.add(task);
       }
       this.failures = 0; this.retryAt = 0;
+    } catch (error) {
+      // 排空流程抛错不能无声吞掉:run 会停在 queued 无限等待,且没有任何痕迹。
+      // 记录后走既有退避路径,运维至少能从日志看到第一现场。
+      console.error('bot_drain_failed', error);
+      this.schedulerFailure();
     } finally { this.draining = false; }
   }
 
   private initialContext(run: Run, modelKey?: string): Message[] {
     const thread = this.thread(run.thread_id);
     const attachmentLocation = (fileId: string) => {
-      const location = this.store.db.prepare(`SELECT a.project_id AS projectId,a.path FROM resource_attachments a
+      const location = this.store.db.prepare(sql`SELECT a.project_id AS projectId,a.path FROM resource_attachments a
         JOIN projects p ON p.id=a.project_id AND p.owner_id=a.owner_id
-        WHERE a.owner_id=? AND a.file_id=? AND a.status='done'`).get(thread.owner_id, fileId);
+        WHERE a.owner_id=? AND a.file_id=? AND a.status='done'`.sql).get(thread.owner_id, fileId);
       return location ? ` Resource copy last recorded at ${JSON.stringify(location)}; verify the path with workspace. The fileId reads the original upload.` : '';
     };
-    const history = (this.store.db.prepare(`SELECT seq,role,kind,content FROM messages WHERE thread_id=? AND kind IN ('text','attachment') AND role IN ('user','assistant')
-      AND seq <= COALESCE((SELECT seq FROM messages WHERE id=?),9223372036854775807) ORDER BY seq DESC LIMIT 40`).all(run.thread_id, run.trigger_message_id) as Array<Message & { seq: number; kind: string }>).map(({ kind, ...message }) => {
+    const history = (this.store.db.prepare(sql`SELECT seq,role,kind,content FROM messages WHERE thread_id=? AND kind IN ('text','attachment') AND role IN ('user','assistant')
+      AND seq <= COALESCE((SELECT seq FROM messages WHERE id=?),9223372036854775807) ORDER BY seq DESC LIMIT 40`.sql).all(run.thread_id, run.trigger_message_id) as Array<Message & { seq: number; kind: string }>).map(({ kind, ...message }) => {
         const attachment = kind === 'attachment' ? parseBotAttachments(message.content ?? '') : null;
         return attachment ? { ...message, content: [attachment.text, ...attachment.files.map(file => file.fileId
           ? `Attachment fileId=${file.fileId}, name=${file.originalName ?? file.name ?? 'attachment'}, mime=${file.mimeType ?? 'application/octet-stream'}. Use study_file to read/understand it.${attachmentLocation(file.fileId)}`
@@ -242,9 +307,9 @@ export class BotRunner {
     const instructions = new CloudRecords(this.store).agentInstructions(thread.owner_id);
     const checkpoint = history.length === 40 ? new ContextGovernor(this.store).conversation(thread.owner_id, run.id, run.thread_id, history.at(-1)!.seq) : undefined;
     const instructionContext = instructions.trim() ? [{ role: 'system' as const, content: `User's lasting response preferences from /system/AGENTS.md. Apply to language, tone and explanation style; the current user request takes priority, and these preferences never expand permissions or override tool/safety contracts.\n\n${instructions}` }] : [];
-    const previous = modelKey ? this.store.db.prepare(`SELECT r.id,r.status,r.context_json,r.context_end_seq,r.context_model FROM runs r
+    const previous = modelKey ? this.store.db.prepare(sql`SELECT r.id,r.status,r.context_json,r.context_end_seq,r.context_model FROM runs r
       JOIN messages trigger ON trigger.id=r.trigger_message_id WHERE r.thread_id=? AND r.id!=? AND trigger.seq < COALESCE((SELECT seq FROM messages WHERE id=?),9223372036854775807)
-      ORDER BY trigger.seq DESC LIMIT 1`).get(run.thread_id, run.id, run.trigger_message_id) as { id: string; status: string; context_json: string | null; context_end_seq: number | null; context_model: string | null } | undefined : undefined;
+      ORDER BY trigger.seq DESC LIMIT 1`.sql).get(run.thread_id, run.id, run.trigger_message_id) as { id: string; status: string; context_json: string | null; context_end_seq: number | null; context_model: string | null } | undefined : undefined;
     const reusable = previous?.status === 'completed' && previous.context_json && previous.context_end_seq != null;
     const prior = reusable ? new ContextGovernor(this.store).replay(previous.id, JSON.parse(previous.context_json!)).filter(m => m.role !== 'system')
       .map(message => { if (previous.context_model === modelKey) return message; const { response_items: _native, providerState: _state, ...portable } = message; return portable; }) : [];
@@ -256,11 +321,11 @@ export class BotRunner {
 
   private async runSandbox(request: Parameters<SandboxExecutor>[0], signal: AbortSignal) {
     if (request.systemWrite) {
-      const step = this.store.db.prepare(`SELECT s.arguments,
+      const step = this.store.db.prepare(sql`SELECT s.arguments,
         EXISTS(SELECT 1 FROM approvals a WHERE a.step_id=s.id AND a.run_id=r.id AND a.status='approved') AS approved
         FROM run_steps s JOIN runs r ON r.id=s.run_id
         JOIN threads t ON t.id=r.thread_id WHERE s.id=? AND s.tool='shell' AND s.status='running'
-        AND r.status='running' AND t.id=? AND t.owner_id=?`).get(request.executionId, request.threadId, request.owner) as { arguments: string; approved: number } | undefined;
+        AND r.status='running' AND t.id=? AND t.owner_id=?`.sql).get(request.executionId, request.threadId, request.owner) as { arguments: string; approved: number } | undefined;
       const args = step ? JSON.parse(step.arguments) : undefined;
       if (args?.systemWrite !== true || args.command !== request.command || args.projectId !== request.projectId || args.network !== request.network || args.timeoutSeconds !== request.timeoutSeconds) throw new ProjectError('system_write_scope_mismatch', 403);
       const policy = this.policy(this.thread(request.threadId), request.projectId);
@@ -416,7 +481,7 @@ export class BotRunner {
       const last = envelope ? { ...envelope, tool_calls: envelope.tool_calls?.filter(c => !resolved.has(c.id)) } : undefined;
       if (last?.tool_calls?.length) {
         for (const call of last.tool_calls) {
-          const step = this.store.db.prepare('SELECT * FROM run_steps WHERE id=? AND run_id=?').get(call.id, run.id) as any;
+          const step = expectRow<RunStepRow>(runStepRowSchema, this.store.db.prepare('SELECT * FROM run_steps WHERE id=? AND run_id=?').get(call.id, run.id), 'run_step_row_invalid');
           if (step?.status === 'waiting_approval') {
             // Pre-fix checkpoints could omit the approval admission charge.
             // Normalize once from durable attempted states, never increment a
@@ -549,8 +614,8 @@ export class BotRunner {
         }
         // Resolve from the live binding, including resumed/old conversations.
         // Never let stale saved prompts assume that ClawBot renders LaTeX.
-        const wechat = Boolean(this.store.db.prepare(`SELECT 1 FROM gateway_bindings b JOIN gateway_accounts a ON a.id=b.account_id
-          WHERE b.thread_id=? AND b.revoked=0 AND a.enabled=1 AND a.owner_id=? AND a.channel='ilink'`).get(run.thread_id, owner));
+        const wechat = Boolean(this.store.db.prepare(sql`SELECT 1 FROM gateway_bindings b JOIN gateway_accounts a ON a.id=b.account_id
+          WHERE b.thread_id=? AND b.revoked=0 AND a.enabled=1 AND a.owner_id=? AND a.channel='ilink'`.sql).get(run.thread_id, owner));
         context = context.filter(m => !(m.role === 'system' && m.content?.startsWith('WeChat reply format:')));
         if (wechat) {
           const firstNonSystem = context.findIndex(m => m.role !== 'system');
@@ -838,8 +903,8 @@ export class BotRunner {
              }
             }
         } else if (call.function.name === 'finish_turn') {
-          const sent = this.store.db.prepare(`SELECT 1 FROM messages m WHERE m.thread_id=? AND m.role='assistant' AND m.kind IN ('text','attachment','question')
-            AND (m.client_nonce LIKE ? OR EXISTS (SELECT 1 FROM run_steps s WHERE s.run_id=? AND m.client_nonce IN ('bot:' || s.id || ':message','bot:' || s.id || ':attachment'))) LIMIT 1`).get(run.thread_id, `bot:${run.id}:reply:%`, run.id);
+          const sent = this.store.db.prepare(sql`SELECT 1 FROM messages m WHERE m.thread_id=? AND m.role='assistant' AND m.kind IN ('text','attachment','question')
+            AND (m.client_nonce LIKE ? OR EXISTS (SELECT 1 FROM run_steps s WHERE s.run_id=? AND m.client_nonce IN ('bot:' || s.id || ':message','bot:' || s.id || ':attachment'))) LIMIT 1`.sql).get(run.thread_id, `bot:${run.id}:reply:%`, run.id);
            if (this.pendingForegroundTasks(run.id)) result = 'A required foreground task is still running; do not finish the turn yet. Use study_task.wait and verify its terminal result.';
            else if (sent) { result = 'Turn finished; previously sent messages are the reply.'; state = 'completed'; }
           else result = 'Send a reply or file to the user before finishing the turn.';
@@ -980,12 +1045,12 @@ export class BotRunner {
           }
         }
       }
-      const rows = this.store.db.prepare(`SELECT i.message_id,m.seq,m.role,m.kind,m.content,m.reply_to
+      const rows = expectRows<RunInputRow>(runInputRowSchema, this.store.db.prepare(sql`SELECT i.message_id,m.seq,m.role,m.kind,m.content,m.reply_to
         FROM run_inputs i JOIN messages m ON m.id=i.message_id
-        WHERE i.run_id=? AND i.consumed_at IS NULL ORDER BY m.seq`).all(run.id) as any[];
+        WHERE i.run_id=? AND i.consumed_at IS NULL ORDER BY m.seq`.sql).all(run.id), 'run_input_row_invalid');
       for (const row of rows) {
         const content = row.kind === 'attachment' ? (() => {
-          try { const parsed = parseBotAttachments(row.content); return parsed ? [parsed.text, ...parsed.files.map((f: any) => `Attachment fileId=${f.fileId ?? ''}, name=${f.originalName ?? f.name ?? 'attachment'}. Read it with study_file.`)].filter(Boolean).join('\n') : row.content;
+          try { const parsed = parseBotAttachments(row.content ?? ''); return parsed ? [parsed.text, ...parsed.files.map(file => `Attachment fileId=${file.fileId ?? ''}, name=${file.originalName ?? file.name ?? 'attachment'}. Read it with study_file.`)].filter(Boolean).join('\n') : row.content;
           } catch { return row.content; }
         })() : row.content;
         context.push({ role: 'user', content: `${content}\n[explicit follow-up messageId=${row.message_id}]` });
@@ -1000,7 +1065,7 @@ export class BotRunner {
       const plugin = this.options.study!.plugins.get(name)!;
       const checkActive = () => {
         signal.throwIfAborted();
-        if ((this.store.db.prepare('SELECT status FROM runs WHERE id=?').get(run.id) as any)?.status !== 'running') throw new Error('run_not_active');
+        if (expectRow<{ status: string }>(runStatusSchema, this.store.db.prepare('SELECT status FROM runs WHERE id=?').get(run.id), 'run_row_invalid')?.status !== 'running') throw new Error('run_not_active');
         const policy = this.policy(this.thread(run.thread_id));
         const approved = Boolean(this.store.db.prepare("SELECT 1 FROM approvals WHERE run_id=? AND step_id=? AND status='approved'").get(run.id, step));
         const capabilities = plugin.permissions?.(args) ?? [plugin.capability(args)];
@@ -1061,33 +1126,35 @@ export class BotRunner {
   }
   private syncChildren() {
     this.store.transaction(() => {
-      const waits = this.store.db.prepare("SELECT * FROM run_waits WHERE status='waiting'").all() as any[];
+      const waits = expectRows<RunWaitRow>(runWaitRowSchema, this.store.db.prepare("SELECT * FROM run_waits WHERE status='waiting'").all(), 'run_wait_row_invalid');
       for (const wait of waits) {
-        const ids = JSON.parse(wait.task_ids) as string[];
-        const tasks = ids.map(id => this.store.db.prepare('SELECT id,status,result,error FROM cloud_tasks WHERE id=? AND owner_id=(SELECT owner_id FROM threads WHERE id=(SELECT thread_id FROM runs WHERE id=?))').get(id, wait.run_id) as any);
-        if (tasks.length !== ids.length || tasks.some(t => !t || !['completed','failed','cancelled','interrupted'].includes(t.status))) continue;
+        const ids: string[] = JSON.parse(wait.task_ids);
+        const tasks = ids.map(id => expectRow<WaitedTask>(waitedTaskSchema, this.store.db.prepare('SELECT id,status,result,error FROM cloud_tasks WHERE id=? AND owner_id=(SELECT owner_id FROM threads WHERE id=(SELECT thread_id FROM runs WHERE id=?))').get(id, wait.run_id), 'cloud_task_row_invalid'));
+        const ready = tasks.every((task): task is WaitedTask => Boolean(task) && ['completed', 'failed', 'cancelled', 'interrupted'].includes(task!.status));
+        if (tasks.length !== ids.length || !ready) continue;
         const result = JSON.stringify({ waitId: wait.id, tasks });
         this.store.db.prepare("UPDATE run_waits SET status='ready',result=?,resolved_at=? WHERE id=? AND status='waiting'").run(result, now(), wait.id);
         this.store.db.prepare("UPDATE run_steps SET result=? WHERE id=? AND status='completed'").run(result, wait.step_id);
-        const run = this.store.db.prepare('SELECT context_json,status FROM runs WHERE id=?').get(wait.run_id) as any;
+        const run = expectRow<{ context_json: string | null; status: string }>({ type: 'object', properties: { context_json: { type: ['string', 'null'] }, status: { type: 'string' } }, required: ['status'] },
+          this.store.db.prepare('SELECT context_json,status FROM runs WHERE id=?').get(wait.run_id), 'run_row_invalid');
         if (run?.context_json) {
-          const context = JSON.parse(run.context_json) as any[];
+          const context: Message[] = JSON.parse(run.context_json);
           const tool = context.find(m => m.tool_call_id === wait.step_id);
           if (tool) tool.content = result;
           this.store.db.prepare('UPDATE runs SET context_json=?,status=CASE WHEN status=\'waiting_event\' THEN \'queued\' ELSE status END,completed_at=NULL WHERE id=? AND status NOT IN (\'cancelled\',\'failed\')').run(JSON.stringify(context), wait.run_id);
         }
         this.store.db.prepare("UPDATE run_waits SET status='consumed' WHERE id=? AND status='ready'").run(wait.id);
       }
-      const permissions = this.store.db.prepare(`SELECT p.*,r.thread_id FROM cloud_permissions p JOIN cloud_tasks t ON t.id=p.task_id JOIN runs r ON r.id=t.parent_run_id WHERE p.status='pending' AND r.status NOT IN ('cancelled','failed','paused') AND NOT EXISTS(SELECT 1 FROM approvals a WHERE a.cloud_permission_id=p.id)`).all() as any[];
+      const permissions = expectRows<CloudPermissionProjection>(cloudPermissionProjectionSchema, this.store.db.prepare(sql`SELECT p.*,r.thread_id FROM cloud_permissions p JOIN cloud_tasks t ON t.id=p.task_id JOIN runs r ON r.id=t.parent_run_id WHERE p.status='pending' AND r.status NOT IN ('cancelled','failed','paused') AND NOT EXISTS(SELECT 1 FROM approvals a WHERE a.cloud_permission_id=p.id)`.sql).all(), 'cloud_permission_row_invalid');
       for (const p of permissions) {
         const m = this.append(p.thread_id, 'approval', `学习子任务权限 ${p.capability}\n${p.arguments}`);
         this.store.db.prepare('INSERT INTO approvals(id,thread_id,message_id,status,created_at,cloud_permission_id) VALUES(?,?,?,?,?,?)').run(crypto.randomUUID(), p.thread_id, m.id, 'pending', now(), p.id);
       }
-      this.store.db.prepare(`UPDATE cloud_permissions SET status=(SELECT CASE a.status WHEN 'approved' THEN 'approved' ELSE 'rejected' END FROM approvals a WHERE a.cloud_permission_id=cloud_permissions.id),resolved_at=? WHERE status='pending' AND EXISTS(SELECT 1 FROM approvals a WHERE a.cloud_permission_id=cloud_permissions.id AND a.status!='pending')`).run(now());
-      const tasks = this.store.db.prepare(`SELECT t.*,r.thread_id FROM cloud_tasks t JOIN runs r ON r.id=t.parent_run_id WHERE r.status NOT IN ('cancelled','failed','paused') AND t.status IN ('completed','failed','cancelled','interrupted') AND NOT EXISTS(SELECT 1 FROM cloud_task_events e WHERE e.task_id=t.id AND e.event='bot_terminal_projected')`).all() as any[];
+      this.store.db.prepare(sql`UPDATE cloud_permissions SET status=(SELECT CASE a.status WHEN 'approved' THEN 'approved' ELSE 'rejected' END FROM approvals a WHERE a.cloud_permission_id=cloud_permissions.id),resolved_at=? WHERE status='pending' AND EXISTS(SELECT 1 FROM approvals a WHERE a.cloud_permission_id=cloud_permissions.id AND a.status!='pending')`.sql).run(now());
+      const tasks = expectRows<TerminalTaskProjection>(terminalTaskProjectionSchema, this.store.db.prepare(sql`SELECT t.*,r.thread_id FROM cloud_tasks t JOIN runs r ON r.id=t.parent_run_id WHERE r.status NOT IN ('cancelled','failed','paused') AND t.status IN ('completed','failed','cancelled','interrupted') AND NOT EXISTS(SELECT 1 FROM cloud_task_events e WHERE e.task_id=t.id AND e.event='bot_terminal_projected')`.sql).all(), 'cloud_task_row_invalid');
       for (const t of tasks) {
         const delivery = this.store.db.prepare("SELECT 1 FROM task_delegations WHERE task_id=? AND delivery='background'").get(t.id);
-        const parent = this.store.db.prepare('SELECT * FROM runs WHERE id=?').get(t.parent_run_id) as any;
+        const parent = expectRow<ParentRunRow>(parentRunRowSchema, this.store.db.prepare('SELECT * FROM runs WHERE id=?').get(t.parent_run_id), 'run_row_invalid');
         if (delivery && parent?.status !== 'completed') continue;
         if (this.store.db.prepare('SELECT 1 FROM task_root_cancellations WHERE root_id=?').get(t.parent_run_id)) continue;
         this.append(t.thread_id, 'progress', `学习子任务 ${t.id} (${t.kind})：${t.status}\n${t.result ?? t.error ?? ''}`);

@@ -3,6 +3,7 @@ export type { BotApprovalDto, BotQuestionDto, BotRunDto, BotActivityDto, BotSync
 export { isBotActivity } from './bot-sync.js';
 export type { ServerStorageStats, StorageCategoryId } from './storage.js';
 export { parseBotAttachments, parseLegacyBotAttachments, MAX_BOT_ATTACHMENTS, MAX_BOT_MESSAGE_ATTACHMENTS, type BotAttachment } from './bot-attachments.js';
+export { BOT_MESSAGE_ADMISSION_ERRORS, BOT_MODEL_NOT_CONFIGURED_ERROR_NAME, isBotMessageAdmissionError, botMessageAdmissionStatus, botMessageAdmissionError, type BotMessageAdmissionError, type ApiErrorResponse, type ApiAdmissionErrorResponse } from './api-errors.js';
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 export type BotInputTarget = { kind: 'run'; runId: string } | { kind: 'question'; questionId: string };
 export type BotInputReceipt = { messageId: string; runId: string | null; disposition: 'created' | 'appended' | 'answered' };

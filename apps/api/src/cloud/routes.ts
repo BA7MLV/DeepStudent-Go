@@ -21,6 +21,23 @@ import type { SandboxExecutor, SandboxCleanup } from '../agent/sandbox.js';
 import { submitOwnerTask } from './task-commands.js';
 import { TaskDelegationService } from './delegation.js';
 import { validateAskAnswer, type AskUserData, type AskUserAnswer } from '@wangke/study-core/ask-user';
+import { cloudTaskRowSchema, expectRow, expectRows, webBody, type CloudTaskRow } from '../storage/row-schema.js';
+
+/** Node 的 Readable 与 @types/node 的 undici 全局 RequestInit 不共享流类型，
+ * 这里转换成 Web 流交给网关；语义仍是逐块转发原始请求体。 */
+const requestBody = (body: Readable) => new ReadableStream({
+  start(controller) {
+    body.on('data', chunk => controller.enqueue(chunk));
+    body.on('end', () => controller.close());
+    body.on('error', error => controller.error(error));
+  },
+  cancel() { body.destroy(); },
+});
+
+/** HTTP 边界上传来的 kind 是任意字符串；白名单外的值仍按原来的 400 处理。 */
+function isTaskKind(value: unknown): boolean {
+  return typeof value === 'string' && TASK_KINDS.some(kind => kind === value);
+}
 
 interface Dependencies {
   sandbox?: SandboxExecutor;
@@ -41,7 +58,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   const configurationError = (reply: FastifyReply, e: unknown) => e instanceof ModelConfigurationError
     ? reply.code(e.status).send({ error: e.message, issues: e.issues })
     : fail(reply, 400, e instanceof Error ? e.message : 'invalid_config');
-  const ownedTask = (owner: string, id: string) => store.db.prepare('SELECT * FROM cloud_tasks WHERE id=? AND owner_id=?').get(id, owner) as any;
+  const ownedTask = (owner: string, id: string) => expectRow<CloudTaskRow>(cloudTaskRowSchema, store.db.prepare('SELECT * FROM cloud_tasks WHERE id=? AND owner_id=?').get(id, owner), 'cloud_task_row_invalid');
   const authorize = (request: FastifyRequest, reply: FastifyReply, admin = false) => {
     if (!['GET', 'HEAD'].includes(request.method) && !checkOrigin(request, reply)) return null;
     const user = requireAuth(request, reply);
@@ -155,7 +172,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
       // here would silently override a longer configured stream budget.
       const init: RequestInit & { duplex?: 'half' } = { signal: disconnected.signal };
       if (request.method === 'POST') {
-        if (request.body instanceof Readable) { init.body = request.body as any; init.duplex = 'half'; }
+        if (request.body instanceof Readable) { init.body = requestBody(request.body); init.duplex = 'half'; }
         else {
           init.body = JSON.stringify(request.body);
         }
@@ -186,7 +203,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
         }
         reply.header('content-type', response.headers.get('content-type') ?? 'application/json');
         reply.header('cache-control', 'no-store');
-        return response.body ? reply.send(Readable.fromWeb(response.body as any)) : reply.send('');
+        return response.body ? reply.send(Readable.fromWeb(webBody(response.body))) : reply.send('');
       } catch (error) {
         if (error instanceof BudgetBlocked) {
           return fail(reply, 429, error.code);
@@ -261,7 +278,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   app.post<{ Body: { nonce: string; kind: string; resource: string; input: Record<string, unknown> } }>('/api/v1/cloud/tasks', async (request, reply) => {
     const user = authorize(request, reply, true); if (!user) return;
     const b = request.body;
-    if (!b || !TASK_KINDS.includes(b.kind as any) || typeof b.nonce !== 'string' || b.nonce.length > 100 || !b.nonce ||
+    if (!b || !isTaskKind(b.kind) || typeof b.nonce !== 'string' || b.nonce.length > 100 || !b.nonce ||
         typeof b.resource !== 'string' || b.resource.length > 256 || !b.resource || !b.input || typeof b.input !== 'object' || Array.isArray(b.input)) return fail(reply, 400, 'invalid_task');
     const previous = store.db.prepare('SELECT * FROM cloud_tasks WHERE owner_id=? AND nonce=?').get(user.id, b.nonce);
     try {
@@ -295,7 +312,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     if (!ownedTask(user.id, request.params.id)) return fail(reply, 404, 'task_not_found');
     const after = Number(request.query.after ?? 0);
     if (!Number.isSafeInteger(after) || after < 0) return fail(reply, 400, 'invalid_cursor');
-    return { events: (store.db.prepare('SELECT seq,event FROM cloud_task_events WHERE task_id=? AND seq>? ORDER BY seq LIMIT 500').all(request.params.id, after) as any[]).map(r => ({ seq: r.seq, ...JSON.parse(r.event) })) };
+    return { events: expectRows<{ seq: number; event: string }>({ type: 'object', properties: { seq: { type: 'integer' }, event: { type: 'string' } }, required: ['seq', 'event'], additionalProperties: true }, store.db.prepare('SELECT seq,event FROM cloud_task_events WHERE task_id=? AND seq>? ORDER BY seq LIMIT 500').all(request.params.id, after), 'cloud_task_event_row_invalid').map(r => ({ seq: r.seq, ...JSON.parse(r.event) })) };
   });
 
   app.post<{ Params: { id: string }; Body: { nonce: string; action: string; value?: unknown } }>('/api/v1/cloud/tasks/:id/commands', async (request, reply) => {

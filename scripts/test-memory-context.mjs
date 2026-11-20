@@ -22,7 +22,7 @@ try {
   for (const id of [owner, other]) store.db.prepare('INSERT INTO users VALUES(?,?,?)').run(id, id, at);
   const config = new CloudConfiguration(store, path.join(root, 'config'));
   config.save(owner, { ...config.get(owner, true), providers: [{ id: 'fake', name: 'Fake', baseUrl: 'https://fake.invalid/v1', protocol: 'openai-chat', apiKey: 'test', serves: ['chat'] }], llmModel: { providerId: 'fake', model: 'fake' }, policy: { ...config.get(owner).policy, read: 'allow', write: 'allow', maxSteps: 20 } });
-  const service = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  const service = new BotApplicationService(store, { enqueue() {}, cancel() {}, freezeModel() {} });
   const thread = service.create(owner, 'bot', 'Long memory'), another = service.create(owner, 'bot', 'Another thread');
   const message = service.send(owner, thread.id, { clientNonce: 'context', content: '继续当前任务，保留全部约束。' });
   const run = store.db.prepare('SELECT * FROM runs WHERE trigger_message_id=?').get(message.id);
@@ -195,9 +195,9 @@ try {
   assert.match(fileView.find(m => m.content?.startsWith('Recoverable conversation checkpoint')).content, /deleted: do not reuse excerpt/);
 
   // Restore a normal raw history for the next-turn window test.
-  const longThread = new BotApplicationService(store, { enqueue() {} }).create(owner, 'bot', 'Windowed history');
+  const longThread = new BotApplicationService(store, { enqueue() {}, freezeModel() {} }).create(owner, 'bot', 'Windowed history');
   for (let i = 0; i < 52; i++) store.db.prepare("INSERT INTO messages(id,thread_id,seq,role,kind,content,created_at) VALUES(?,?,?,?,'text',?,?)").run(crypto.randomUUID(), longThread.id, i + 1, i % 2 ? 'assistant' : 'user', i ? `历史消息 ${i}` : '最早约束：只读，不得删除。', at);
-  const trigger = new BotApplicationService(store, { enqueue() {} }).send(owner, longThread.id, { clientNonce: 'window', content: '继续，但仍然只读。' });
+  const trigger = new BotApplicationService(store, { enqueue() {}, freezeModel() {} }).send(owner, longThread.id, { clientNonce: 'window', content: '继续，但仍然只读。' });
   const nextRun = store.db.prepare('SELECT * FROM runs WHERE trigger_message_id=?').get(trigger.id);
   store.db.prepare("UPDATE runs SET status='running' WHERE id=?").run(nextRun.id);
   const currentConfig = new CloudConfiguration(store, path.join(root, 'config'));
@@ -241,7 +241,7 @@ try {
 
   await runner.close(); runner = undefined;
   currentConfig.save(owner, { ...currentConfig.get(owner, true), policy: { ...currentConfig.get(owner).policy, read: 'ask' } });
-  const approvalService = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  const approvalService = new BotApplicationService(store, { enqueue() {}, cancel() {}, freezeModel() {} });
   const requested = approvalService.send(owner, thread.id, { clientNonce: 'recover-permission', content: '恢复之前的任务证据，不执行操作。' });
   const permissionRun = store.db.prepare('SELECT * FROM runs WHERE trigger_message_id=?').get(requested.id);
   const recoverId = governor.list(owner, thread.id).checkpoints[0].checkpointId;
