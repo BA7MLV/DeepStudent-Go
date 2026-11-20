@@ -18,6 +18,7 @@ import {
   Label,
   ListBox,
   SearchField,
+  Select,
   ToggleButton,
   ToggleButtonGroup,
 } from '@heroui/react';
@@ -180,19 +181,38 @@ export function ExplorerCanvas(props: ExplorerCanvasProps) {
             <ToggleButton id="icons" aria-label={tr('library.aria.iconsView')}><Sym name="grid_view" /></ToggleButton>
             <ToggleButton id="list" aria-label={tr('library.aria.listView')}><Sym name="list" /></ToggleButton>
           </ToggleButtonGroup>
-          <Dropdown>
-            <Dropdown.Trigger className="finder-tool" aria-label={tr('library.aria.sortFilter')}><Sym name="sort" /></Dropdown.Trigger>
-            <Dropdown.Popover><Dropdown.Menu aria-label={tr('library.aria.sortFilter')} onAction={(key) => {
-              if (key === 'name' || key === 'recent') withViewTransition(() => props.setSort(key));
-              else { withViewTransition(() => props.setFilter(key as LibraryFilter)); setSelection(new Set()); }
-            }}>
-              <Dropdown.Item id="name" textValue={tr('library.sort.name')}>{tr('library.sort.name')} {props.sort === 'name' && <Sym name="check" className="size-4" />}</Dropdown.Item>
-              <Dropdown.Item id="recent" textValue={tr('library.sort.recent')}>{tr('library.sort.recent')} {props.sort === 'recent' && <Sym name="check" className="size-4" />}</Dropdown.Item>
-              <Dropdown.Section>
-                {LIBRARY_FILTERS.map((item) => <Dropdown.Item key={item.value} id={item.value} textValue={tr(item.label)}>{tr(item.label)} {props.filter === item.value && <Sym name="check" className="size-4" />}</Dropdown.Item>)}
-              </Dropdown.Section>
-            </Dropdown.Menu></Dropdown.Popover>
-          </Dropdown>
+          {/* 排序与筛选是两个值,不再是点完即走的动作菜单:触发器常驻显示当前值,选项前有对勾。(PR35 值型控件规则) */}
+          <Select
+            className="w-36 max-w-[40vw]"
+            aria-label={tr('library.aria.sort')}
+            data-testid="library-sort"
+            selectedKey={props.sort}
+            onSelectionChange={(key) => { if (key === 'name' || key === 'recent') withViewTransition(() => props.setSort(key)); }}
+          >
+              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  <ListBox.Item id="name" textValue={tr('library.sort.name')}>{tr('library.sort.name')}<ListBox.ItemIndicator /></ListBox.Item>
+                  <ListBox.Item id="recent" textValue={tr('library.sort.recent')}>{tr('library.sort.recent')}<ListBox.ItemIndicator /></ListBox.Item>
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            <Select
+              className="w-32 max-w-[40vw]"
+              aria-label={tr('library.aria.filter')}
+              data-testid="library-filter"
+              selectedKey={props.filter}
+              onSelectionChange={(key) => { withViewTransition(() => props.setFilter(key as LibraryFilter)); setSelection(new Set()); }}
+            >
+              <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+              <Select.Popover>
+                <ListBox>
+                  {LIBRARY_FILTERS.map((item) => (
+                    <ListBox.Item key={item.value} id={item.value} textValue={tr(item.label)}>{tr(item.label)}<ListBox.ItemIndicator /></ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
           <span className="finder-tool-divider" />
           <Button isIconOnly variant="ghost" data-testid="btn-new-folder" aria-label={tr('library.aria.newFolder')} isDisabled={props.inSystemFolder} onPress={() => props.onOpenFolderModal('create')}><Sym name="create_new_folder" /></Button>
           <Button isIconOnly={!isMobile} className="finder-import" variant="ghost" aria-label={tr('library.aria.import')} isDisabled={props.inSystemFolder} onPress={() => props.setImportOpen(true)}><Sym name="upload" />{isMobile && tr('library.aria.importShort')}</Button>

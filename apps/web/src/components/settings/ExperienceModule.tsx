@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, type ComponentType } from 'react';
-import { Button, Spinner } from '@heroui/react';
+import { Spinner, Tabs } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
 
 const AppearanceModule = lazy(() => import('./AppearanceModule'));
@@ -20,20 +20,26 @@ export default function ExperienceModule({ initialTab }: { initialTab?: string }
   );
   const Content: ComponentType = tab === 'appearance' ? AppearanceModule : tab === 'playback' ? PlaybackModule : ShortcutsModule;
 
+  /* 子页切换用真正的 Tabs：旧的自绘按钮只有 aria-pressed，键盘模型与其余页面的 Tabs 不一致。 */
+  const tabs: ExperienceTab[] = ['appearance', 'playback', 'shortcuts'];
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap gap-2" role="group" aria-label={t('modules.experience')}>
-        <Button variant={tab === 'appearance' ? 'primary' : 'tertiary'} aria-pressed={tab === 'appearance'} onPress={() => setTab('appearance')}>
-          {t('modules.appearance')}
-        </Button>
-        <Button variant={tab === 'playback' ? 'primary' : 'tertiary'} aria-pressed={tab === 'playback'} onPress={() => setTab('playback')}>
-          {t('modules.playback')}
-        </Button>
-        <Button variant={tab === 'shortcuts' ? 'primary' : 'tertiary'} aria-pressed={tab === 'shortcuts'} onPress={() => setTab('shortcuts')}>
-          {t('modules.shortcuts')}
-        </Button>
-      </div>
-      <Suspense fallback={<ModuleFallback />}><Content /></Suspense>
+      <Tabs selectedKey={tab} onSelectionChange={(key) => setTab(key as ExperienceTab)}>
+        <Tabs.ListContainer>
+          <Tabs.List aria-label={t('modules.experience')}>
+            {tabs.map((key) => (
+              <Tabs.Tab key={key} id={key} data-testid={`experience-tab-${key}`}>
+                <Tabs.Indicator />{t(`modules.${key}`)}
+              </Tabs.Tab>
+            ))}
+          </Tabs.List>
+        </Tabs.ListContainer>
+        {tabs.map((key) => (
+          <Tabs.Panel key={key} id={key} shouldForceMount hidden={tab !== key}>
+            {tab === key && <Suspense fallback={<ModuleFallback />}><Content /></Suspense>}
+          </Tabs.Panel>
+        ))}
+      </Tabs>
     </div>
   );
 }

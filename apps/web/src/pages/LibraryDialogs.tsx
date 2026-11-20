@@ -11,7 +11,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Label, Modal, Radio, RadioGroup, TextField } from '@heroui/react';
+import { Button, Input, ListBox, Modal, Select, TextField } from '@heroui/react';
 import { MODAL_CONTAINER_CLASS } from '../ui';
 import type { FolderRow, VideoRow } from '../store/db';
 
@@ -162,32 +162,24 @@ export function MoveDialog({
               <Modal.Heading>{video ? tr('library.chrome.moveTitle', { name: video.name }) : ''}</Modal.Heading>
             </Modal.Header>
             <Modal.Body>
-              {/* Radio 需要显式组合 Content/Control/Indicator 才有可点的圆点。 */}
-              <RadioGroup
-                value={target}
-                onChange={(value) => setTarget(String(value))}
-                data-testid="move-radio-group"
+              {/* 文件夹是用户自己建的、数量会增长 —— 用 Select 而不是铺开的单选组,长名单不会把弹窗顶破。(PR35 值型控件规则) */}
+              <Select
+                className="w-56 max-w-full"
+                selectedKey={target}
+                onSelectionChange={(key) => { if (key != null) setTarget(String(key)); }}
+                data-testid="move-target-select"
                 aria-label={tr('library.aria.moveTarget')}
               >
-                <Radio value="-1">
-                  <Radio.Content>
-                    <Radio.Control>
-                      <Radio.Indicator />
-                    </Radio.Control>
-                    {tr('library.t.uncategorized')}
-                  </Radio.Content>
-                </Radio>
-                {folders.map((f) => (
-                  <Radio key={f.id} value={String(f.id)}>
-                    <Radio.Content>
-                      <Radio.Control>
-                        <Radio.Indicator />
-                      </Radio.Control>
-                      <Label>{f.name}</Label>
-                    </Radio.Content>
-                  </Radio>
-                ))}
-              </RadioGroup>
+                <Select.Trigger><Select.Value /><Select.Indicator /></Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    <ListBox.Item id="-1" textValue={tr('library.t.uncategorized')}>{tr('library.t.uncategorized')}<ListBox.ItemIndicator /></ListBox.Item>
+                    {folders.map((f) => (
+                      <ListBox.Item key={f.id} id={String(f.id)} textValue={f.name}>{f.name}<ListBox.ItemIndicator /></ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
               <div className="row row--nowrap" style={{ marginTop: 16 }}>
                 <TextField data-testid="move-new-name" fullWidth>
                   <Input

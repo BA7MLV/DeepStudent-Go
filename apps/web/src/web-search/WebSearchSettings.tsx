@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Input, Switch } from '@heroui/react';
+import { Button, Checkbox, Input } from '@heroui/react';
 import { useTranslation } from 'react-i18next';
 import type { SearchProvider, SearchProviderKind, WebSearchConfig, WebSearchResult } from '@wangke/contracts/web-search';
 import { cloudRequest } from '../cloud/state';
@@ -62,10 +62,11 @@ export default function WebSearchSettings() {
       : <p role="status" className="text-sm text-muted">{t('saveBar.loading')}</p>
       : <>
       <fieldset disabled={busy} className="web-settings border-0 p-0">
-        <Switch isSelected={config.enabled} onChange={enabled => update({ enabled })}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{t('webSearch.enabled')}</span></Switch.Content></Switch>
-        <Switch isSelected={config.fetchEnabled} onChange={fetchEnabled => update({ fetchEnabled })}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{t('webSearch.fetchEnabled')}</span></Switch.Content></Switch>
+        {/* 配置随底部保存栏提交才生效,这些是表单里的答案,拨了不等于存了 —— 所以用复选框而不是开关。 */}
+        <Checkbox aria-label={t('webSearch.enabled')} isSelected={config.enabled} onChange={enabled => update({ enabled })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>{t('webSearch.enabled')}</span></Checkbox.Content></Checkbox>
+        <Checkbox aria-label={t('webSearch.fetchEnabled')} isSelected={config.fetchEnabled} onChange={fetchEnabled => update({ fetchEnabled })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>{t('webSearch.fetchEnabled')}</span></Checkbox.Content></Checkbox>
         <SettingSelect label={t('webSearch.defaultProvider')} value={config.providerId} onChange={providerId => update({ providerId })} options={config.providers.filter(p => p.enabled).map(p => ({ id: p.id, label: p.name }))} />
-        <Switch isSelected={config.fallback} onChange={fallback => update({ fallback })}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{t('webSearch.fallback')}</span></Switch.Content></Switch>
+        <Checkbox aria-label={t('webSearch.fallback')} isSelected={config.fallback} onChange={fallback => update({ fallback })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>{t('webSearch.fallback')}</span></Checkbox.Content></Checkbox>
         <p className="text-sm text-muted">{t('webSearch.fallbackHint')}</p>
         {config.providers.map(p => <div key={p.id} className="web-settings__provider">
           <div className="web-settings__row"><strong>{names[p.kind]}</strong><Button size="sm" variant="ghost" onPress={() => update({ providers: config.providers.filter(row => row.id !== p.id), ...(config.providerId === p.id ? { providerId: '', enabled: false } : {}) })}>{t('webSearch.remove')}</Button></div>
@@ -74,7 +75,7 @@ export default function WebSearchSettings() {
           <label className="web-settings__label">{t('webSearch.key')}<Input type="password" autoComplete="new-password" value={p.apiKey ?? ''} placeholder={p.configured ? t('webSearch.keySaved') : t('webSearch.keyPlaceholder')} onChange={e => provider(p.id, { apiKey: e.target.value || undefined })} /></label>
           {p.kind === 'yuanbao' ? <p className="text-sm text-muted">{t('webSearch.yuanbaoHint')} <a href="https://console.cloud.tencent.com/wsapi/index" target="_blank" rel="noopener noreferrer">{t('webSearch.yuanbaoConsole')}</a></p> : null}
           {p.configured ? <Button size="sm" variant="ghost" onPress={() => provider(p.id, { apiKey: '', configured: false, enabled: false })}>{t('webSearch.clearKey')}</Button> : null}
-          <Switch isSelected={p.enabled} onChange={enabled => provider(p.id, { enabled })}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control><span>{t('webSearch.providerEnabled')}</span></Switch.Content></Switch>
+          <Checkbox aria-label={t('webSearch.providerEnabled')} isSelected={p.enabled} onChange={enabled => provider(p.id, { enabled })}><Checkbox.Content><Checkbox.Control><Checkbox.Indicator /></Checkbox.Control><span>{t('webSearch.providerEnabled')}</span></Checkbox.Content></Checkbox>
         </div>)}
         <div className="web-settings__row">{kinds.map(kind => <Button key={kind} variant="secondary" isDisabled={config.providers.length >= 12} onPress={() => {
           const id = crypto.randomUUID();
