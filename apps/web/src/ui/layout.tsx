@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { buttonVariants } from '@heroui/styles';
 import {
   Alert,
@@ -18,6 +18,7 @@ import { Sym } from './icons';
 import BrandLogo from './BrandLogo';
 import { toast } from './feedback';
 import { useRailCollapsed } from './rail';
+import { withRegionViewTransition } from '../utils/viewTransition';
 import { DotBadge, MatrixDots } from '../components/motion';
 import { useChatNotifications } from '../store/chatNotifications';
 import { observeBrowserChrome } from './browserChrome';
@@ -57,7 +58,7 @@ export type NavItem = {
   /** 非目的地动作不显示当前页高亮。 */
   isAction?: boolean;
 } & (
-  | { to: string; onClick?: never }
+  | { to: string; onClick?: never; /** 跳转前先热好目标页 chunk，别让工作区转场落在首帧加载骨架上。 */ load?: () => Promise<unknown> }
   | { to?: never; onClick: () => void }
 );
 
@@ -200,6 +201,11 @@ export interface PageAside {
 }
 
 const ASIDE_INLINE_QUERY = '(min-width: 1100px)';
+
+/** 侧栏导航的工作区转场载体：NavigationShell 里那个含路由 Outlet 的常驻区块（见 NavigationShell 的 JSX）。 */
+export function workspaceRegion(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('.app-navigation-workspace');
+}
 function useAsideInline(): boolean {
   const [inline, setInline] = useState(() => window.matchMedia(ASIDE_INLINE_QUERY).matches);
   useEffect(() => {
@@ -219,6 +225,7 @@ function NavigationItem({ item, active, compact = false, onNavigate }: {
   compact?: boolean;
   onNavigate?: () => void;
 }) {
+  const navigate = useNavigate();
   const className = compact
     ? 'sidebar-control page-shell__rail-icon'
     : 'sidebar-control page-shell__nav-item h-11 min-h-11 w-full justify-start gap-3 rounded-full border border-transparent px-3 text-sm font-medium text-muted';
@@ -238,8 +245,16 @@ function NavigationItem({ item, active, compact = false, onNavigate }: {
       className={buttonVariants({ variant: 'ghost', isIconOnly: compact, className })}
       onClick={(event) => {
         // 修饰键和中键仍交给浏览器开新页，不收起当前页的手机抽屉。
-        if (!event.defaultPrevented && event.button === 0
-          && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) onNavigate?.();
+        if (event.defaultPrevented || event.button !== 0
+          || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        onNavigate?.();
+        // 页面切换发生在工作区内（侧栏不动）：先热好目标页 chunk 让转场落在
+        // 真实首帧而不是加载骨架上，再以工作区挂名的方式换页。
+        const target = item.to;
+        Promise.resolve(item.load?.().catch(() => {})).then(() => {
+          withRegionViewTransition(workspaceRegion(), 'page-workspace', () => navigate(target));
+        });
       }}>
       {content}
     </Link>;

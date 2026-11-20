@@ -402,7 +402,8 @@ export function ExplorerCanvas(props: ExplorerCanvasProps) {
                       onDragEnd={props.endFinderDrag}
                     >
                       <span className="finder-item__icon"><FinderFileIcon video={video} /></span>
-                      <span className="finder-item__name" title={video.name}>{video.name}{video.kind === 'material' && video.materialFormat && !video.name.toLowerCase().endsWith(`.${video.materialFormat}`) ? `.${video.materialFormat}` : ''}</span>
+                      {/* 与列表行共用 `lib-title-${id}`:图标视图打开播放页时标题长成页标题(封面仍是列表行专属,图标帧比例相差太大,不带)。(PR38 转场共享链) */}
+                      <span className="finder-item__name" title={video.name} style={{ viewTransitionName: `lib-title-${video.id}` }}>{video.name}{video.kind === 'material' && video.materialFormat && !video.name.toLowerCase().endsWith(`.${video.materialFormat}`) ? `.${video.materialFormat}` : ''}</span>
                       <span className="finder-item__meta" title={formatSize(video.size)}>{finderProgressText(video) ?? formatSize(video.size)}</span>
                       <span className="finder-item__date">{new Date(video.createdAt).toLocaleDateString()}</span>
                       <span className="finder-item__kind">{video.kind === 'material' ? video.materialFormat?.toUpperCase() ?? tr('library.chrome.kindDoc') : tr('library.chrome.kindVideo')}</span>

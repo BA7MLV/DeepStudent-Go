@@ -23,6 +23,7 @@ export {
 } from './feedback';
 export {
   PageShell,
+  workspaceRegion,
   SectionCard,
   Field,
   EmptyState,

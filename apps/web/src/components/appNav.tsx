@@ -1,12 +1,22 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Sym, type NavConfig, type NavItem } from '../ui';
+import { Sym, type NavConfig, type NavItem, workspaceRegion } from '../ui';
 import { useCourseChat } from '../store/courseChat';
 import { useBotPanel } from '../store/botPanel';
 import { focusChatComposer } from './chatComposerFocus';
 import { useTranslation } from 'react-i18next';
 import type { PluginCatalog } from '../plugins/catalog';
 import { hasBoardComponents, navigationEntries } from '../plugins/layout';
-import { preloadChunk } from '../utils/viewTransition';
+import { preloadChunk, withRegionViewTransition } from '../utils/viewTransition';
+
+/**
+ * 懒加载页与导航入口的对应：换页前先热好 chunk，工作区转场落在真实首帧上，
+ * 而不是加载骨架上（与 App.tsx 的 preloadOnIntent 同一套 chunk 标识）。
+ */
+const routeChunks: Record<string, () => Promise<unknown>> = {
+  '/': () => import('../pages/CourseChat'),
+  '/library': () => import('../pages/Library'),
+  '/board': () => import('../pages/Board'),
+};
 
 /**
  * 应用级导航的唯一来源：宽屏常驻左侧栏，窄屏由顶栏汉堡按钮弹成 Drawer
@@ -24,6 +34,12 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
   const query = new URLSearchParams(search);
   const selected = pages.find(p => pathname === `/plugins/${p.instance.id}` && (query.has('placement') ? query.get('placement') === p.placement.id : !query.has('view') || query.get('view') === p.placement.viewId));
   const navigate = useNavigate();
+  /** 主页 / Bot 两个动作项与普通导航同为换页：走工作区转场，把收尾动作带进转场后执行。 */
+  const goWorkspace = (from: string, after?: () => void) => {
+    Promise.resolve(routeChunks[from]().catch(() => {})).then(() => {
+      withRegionViewTransition(workspaceRegion(), 'page-workspace', () => { navigate(from); after?.(); });
+    });
+  };
   const createSession = useCourseChat((s) => s.createSession);
   const activeId = useCourseChat((s) => s.activeId);
   const botOpen = useBotPanel((s) => s.open);
@@ -39,8 +55,7 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
       onClick: () => {
         void createSession();
         useBotPanel.getState().setOpen(false);
-        navigate('/');
-        focusChatComposer();
+        goWorkspace('/', focusChatComposer);
       },
       testId: 'nav-rail-chat',
     },
@@ -49,6 +64,7 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
       label: text('nav.resources'),
       icon: <Sym name="video_library" />,
       to: '/library',
+      load: routeChunks['/library'],
       testId: 'nav-rail-home',
     },
     {
@@ -60,7 +76,7 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
         // Bot 面板是懒加载的：先热 chunk 再开面板，避免入口点下去后面板迟一拍凭空弹出。
         preloadChunk(() => import('../pages/BotWorkspace'));
         useBotPanel.getState().setOpen(true);
-        navigate('/');
+        goWorkspace('/');
       },
       testId: 'nav-rail-bot',
     },
@@ -72,8 +88,9 @@ export function useAppNav(catalog?: PluginCatalog): NavConfig {
     label: t('board.title'),
     icon: <Sym name="grid_view" />,
     to: '/board',
+    load: routeChunks['/board'],
     testId: 'nav-rail-tasks',
   });
-  items.push(...pages.map(p => ({ value: `plugin:${p.entry.id}`, label: p.title, icon: <Sym name="extension" />, to: p.url, testId: `nav-plugin-${p.entry.id}` })));
+  items.push(...pages.map(p => ({ value: `plugin:${p.entry.id}`, label: p.title, icon: <Sym name="extension" />, to: p.url, load: () => import('../plugins/PluginPage'), testId: `nav-plugin-${p.entry.id}` })));
   return { value, items };
 }

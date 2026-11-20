@@ -31,3 +31,23 @@ export function withViewTransition(update: () => void): void {
 export function preloadChunk(load: () => Promise<unknown>): void {
   void load().catch(() => {});
 }
+
+/**
+ * 只有导航这一刻才把「工作区」（含路由 Outlet 的常驻区块）挂名：页内的小型 VT
+ * （筛选、排序）仍整体交给 root 的短交叉淡化，不被工作区的慢节奏拖累；
+ * 导航时则由工作区独享这一帧，侧栏像素原地不动。名字在转场结束后摘回。
+ */
+export function withRegionViewTransition(region: HTMLElement | null, name: string, update: () => void): void {
+  const doc = document as VTDocument;
+  if (!region || typeof doc.startViewTransition !== 'function' || prefersReducedMotion()) {
+    update();
+    return;
+  }
+  region.style.viewTransitionName = name;
+  const transition = doc.startViewTransition(() => {
+    flushSync(update);
+  });
+  transition.finished.finally(() => {
+    region.style.viewTransitionName = '';
+  }).catch(() => {});
+}
