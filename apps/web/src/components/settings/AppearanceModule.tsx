@@ -12,7 +12,12 @@ import LanguageSelect from '../LanguageSelect';
  * 恰好也是这一屏里唯一的隐私相关开关 —— 分到「内容源」会让那个开关更难被想起来。
  */
 export default function AppearanceModule() {
-  const settings = useSettings();
+  const update = useSettings(s => s.update);
+  const theme = useSettings(s => s.theme);
+  const fontScale = useSettings(s => s.fontScale);
+  const accentColor = useSettings(s => s.accentColor);
+  const dynamicColor = useSettings(s => s.dynamicColor);
+  const htmlRemoteAssets = useSettings(s => s.htmlRemoteAssets);
   const { t } = useTranslation('settings');
   const { t: common } = useTranslation('common');
 
@@ -32,10 +37,10 @@ export default function AppearanceModule() {
             aria-label={t('appearance.theme')}
             selectionMode="single"
             disallowEmptySelection
-            selectedKeys={[settings.theme]}
+            selectedKeys={[theme]}
             onSelectionChange={(keys) => {
               const next = [...keys][0];
-              if (next) settings.update({ theme: next as AppTheme });
+              if (next) update({ theme: next as AppTheme });
             }}
           >
             <ToggleButton id="auto">{t('appearance.themes.auto')}</ToggleButton>
@@ -54,10 +59,10 @@ export default function AppearanceModule() {
             aria-label={t('appearance.fontScaleLabel')}
             selectionMode="single"
             disallowEmptySelection
-            selectedKeys={[settings.fontScale]}
+            selectedKeys={[fontScale]}
             onSelectionChange={(keys) => {
               const next = [...keys][0];
-              if (next) settings.update({ fontScale: next as FontScale });
+              if (next) update({ fontScale: next as FontScale });
             }}
           >
             {FONT_SCALE_OPTIONS.map(({ id }) => (
@@ -76,13 +81,13 @@ export default function AppearanceModule() {
             aria-label={t('appearance.accentColor')}
             data-testid="accent-color-picker"
             value={
-              ACCENT_COLOR_OPTIONS.find(({ id }) => id === settings.accentColor)?.value ??
+              ACCENT_COLOR_OPTIONS.find(({ id }) => id === accentColor)?.value ??
               ACCENT_COLOR_OPTIONS[0].value
             }
             onChange={(color) => {
               const value = color.toString('hex').toLowerCase();
               const next = ACCENT_COLOR_OPTIONS.find((option) => option.value === value);
-              if (next) settings.update({ accentColor: next.id });
+              if (next) update({ accentColor: next.id });
             }}
           >
             {ACCENT_COLOR_OPTIONS.map(({ id, value }) => (
@@ -103,8 +108,8 @@ export default function AppearanceModule() {
           <Switch
             data-testid="dynamic-color"
             aria-label={t('appearance.dynamicColor')}
-            isSelected={settings.dynamicColor}
-            onChange={(on) => settings.update({ dynamicColor: on })}
+            isSelected={dynamicColor}
+            onChange={(on) => update({ dynamicColor: on })}
           >
             <Switch.Content>
               <Switch.Control>
@@ -127,8 +132,8 @@ export default function AppearanceModule() {
           <Switch
             data-testid="html-remote-assets"
             aria-label={t('reading.remoteAssets')}
-            isSelected={settings.htmlRemoteAssets}
-            onChange={(on) => settings.update({ htmlRemoteAssets: on })}
+            isSelected={htmlRemoteAssets}
+            onChange={(on) => update({ htmlRemoteAssets: on })}
           >
             <Switch.Content>
               <Switch.Control>

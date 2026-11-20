@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -10,7 +11,7 @@ import { executeNodeTask } from '../apps/api/runtime/node.ts';
 
 // Run the production executor/history builder/native codec/Gateway. Only the
 // remote provider transport is scripted; no history helper or executor is mocked.
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/compression-consumption-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-compression-consumption-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
 const records = new CloudRecords(store);
 const configuration = new CloudConfiguration(store, path.join(directory, 'config'));

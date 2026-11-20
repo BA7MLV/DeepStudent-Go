@@ -223,6 +223,16 @@ export function inspectSource(filename, text, options = {}, root = repository) {
 
 export function audit(root = repository) {
   const errors = [];
+  // AGENTS 禁止链式类型断言,但存量太大不能一次清完:设一个只降不升的上限,
+  // 新增 as unknown as 会让边界检查直接失败,存量随清理逐步下调这个数字。
+  const CAST_CEILING = 118;
+  let casts = 0;
+  for (const directory of ['apps/web/src', 'apps/api/src', 'packages/contracts/src', 'packages/study-core/src', 'packages/client-core/src', 'packages/remote-artifacts/src', 'packages/remote-host/src']) {
+    for (const file of files(path.join(root, directory))) {
+      if (/\.(?:[cm]?[jt]sx?)$/.test(file)) casts += (fs.readFileSync(file, 'utf8').match(/as unknown as/g) ?? []).length;
+    }
+  }
+  if (casts > CAST_CEILING) errors.push(`as-unknown-as ceiling exceeded: ${casts} > ${CAST_CEILING} (lower the ceiling after cleanup, never raise it)`);
   for (const legacy of ['src', 'public', 'index.html', 'vite.config.ts', 'tsconfig.app.json', 'tsconfig.node.json']) {
     if (fs.existsSync(path.join(root, legacy))) errors.push(`Legacy Web root ${legacy} must live exclusively in apps/web`);
   }

@@ -1,6 +1,7 @@
 /** Real tracker + learning journal + browser IDB. Only settings and the network
  * carrier are fixtures; no API/production-performance or real-offline claim. */
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -8,7 +9,7 @@ import { build } from 'esbuild';
 import { chromium, webkit } from 'playwright';
 import { expect } from 'playwright/test';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/study-tracker-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-study-tracker-'));
 const evidence = { browser: process.env.BROWSER ?? 'chromium', checks: [], errors: [] };
 const root = process.cwd();
 const modules = {

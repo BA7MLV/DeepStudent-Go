@@ -1,6 +1,7 @@
 /** Real components + API + IDB with no startCloud. Display metadata adapter
  * evidence only, not production startup, directory pagination or offline UI. */
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -8,7 +9,7 @@ import { chromium, webkit } from 'playwright';
 import { expect } from 'playwright/test';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/course-metadata-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-course-metadata-'));
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret'), CLOUD_WORKER_DISABLED: '1' });
 const { buildServer } = await import('../apps/api/src/server.ts');
 const { DatabaseStore } = await import('../apps/api/src/storage/database.ts');

@@ -1,5 +1,9 @@
 {
-  "studyRead": { "loadError": "Study records could not be loaded. The last summary is preserved; clearing is disabled until refreshed.", "dashboardLoadError": "Study records are temporarily unavailable. Statistics are hidden until refreshed; this does not mean your records are lost.", "retry": "Reload" },
+  "studyRead": {
+    "loadError": "Study records could not be loaded. The last summary is preserved; clearing is disabled until refreshed.",
+    "dashboardLoadError": "Study records are temporarily unavailable. Statistics are hidden until refreshed; this does not mean your records are lost.",
+    "retry": "Reload"
+  },
   "recovery": {
     "taskErrors": {
       "modelNotConfigured": "No chat model is configured. Select a model in Settings, then retry.",
@@ -597,5 +601,21 @@
     "slotProviderGone": "The provider for the \"{{slot}}\" model was deleted; pick again in Settings → Model providers",
     "slotKeyMissing": "Fill in the API key for \"{{name}}\" in Settings → Model providers first",
     "fetchListLabel": "Fetch model list"
+  },
+  "conflictRecovery": {
+    "empty": "No conflicts need your attention right now.",
+    "discardTitle": "Keep the cloud copy and drop this local change?",
+    "discardAllTitle": "Keep the cloud copy and drop these {{count}} local changes?",
+    "discardDescription": "The draft moves to recovery evidence — nothing disappears silently and it stays exportable.",
+    "discardAllDescription": "Every draft moves to recovery evidence — nothing disappears silently.",
+    "discardConfirm": "Drop local change",
+    "discardAllConfirm": "Drop all local changes",
+    "keepCloud": "Keep cloud (drop local change)",
+    "keepLocal": "Keep local (resubmit)",
+    "keepAllLocal": "Keep all local",
+    "keepAllCloud": "Keep all cloud",
+    "exportDrafts": "Export conflict drafts",
+    "retried": "Resubmitted the local drafts",
+    "discarded": "Kept the cloud copy; local drafts moved to recovery evidence"
   }
 }

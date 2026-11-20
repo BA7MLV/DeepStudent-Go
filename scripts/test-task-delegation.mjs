@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,7 +22,8 @@ import { modelUsageReport } from '../apps/api/src/agent/model-observations.ts';
 import { WorkspaceHandoff } from '../apps/api/src/agent/workspace-handoff.ts';
 import { ProjectRepository } from '../apps/api/src/projects/repository.ts';
 
-const temp = '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode';
+const temp = path.join(os.tmpdir(), 'opencode');
+fs.mkdirSync(temp, { recursive: true });
 const ref = model => ({ providerId: 'fixture', model });
 const selection = model => ({ modelRef: ref(model) });
 function fixture() {

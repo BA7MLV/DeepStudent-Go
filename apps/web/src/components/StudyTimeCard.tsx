@@ -18,7 +18,9 @@ const IDLE_OPTIONS = [2, 5, 10, 15];
 /** 设置页「学习时长」卡片：开关 / 空闲判定 / 清空记录 + 一眼看得到的总账 */
 export default function StudyTimeCard() {
   const { t } = useTranslation('settings');
-  const settings = useSettings();
+  const update = useSettings(s => s.update);
+  const studyTrackingEnabled = useSettings(s => s.studyTrackingEnabled);
+  const studyIdleMinutes = useSettings(s => s.studyIdleMinutes);
   const flushCount = useStudyTime((s) => s.flushCount);
   const [summary, setSummary] = useState<{ days: number; total: number } | null>(null);
   const [snapshot, setSnapshot] = useState<{ date: string; seconds: number; updatedAt: number }[] | string>([]);
@@ -121,8 +123,8 @@ export default function StudyTimeCard() {
         testId="field-study-tracking"
       >
         <Switch
-          isSelected={settings.studyTrackingEnabled}
-          onChange={(on) => settings.update({ studyTrackingEnabled: on })}
+          isSelected={studyTrackingEnabled}
+          onChange={(on) => update({ studyTrackingEnabled: on })}
           data-testid="study-tracking"
           aria-label="自动记录学习时长"
         >
@@ -144,10 +146,10 @@ export default function StudyTimeCard() {
         <ToggleButtonGroup
           selectionMode="single"
           disallowEmptySelection
-          selectedKeys={[String(settings.studyIdleMinutes)]}
+          selectedKeys={[String(studyIdleMinutes)]}
           onSelectionChange={(keys) => {
             const next = Number([...keys][0]);
-            if (Number.isFinite(next)) settings.update({ studyIdleMinutes: next });
+            if (Number.isFinite(next)) update({ studyIdleMinutes: next });
           }}
           aria-label="多久没操作算离开"
           data-testid="study-idle"

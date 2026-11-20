@@ -2,6 +2,7 @@
  * Local isolated API + real product Chromium. Never reads production credentials.
  * Failures are accumulated, not skipped; evidence reports exactly what ran. */
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -9,7 +10,7 @@ import sharp from 'sharp';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/data-delivery-acceptance-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-data-delivery-acceptance-'));
 Object.assign(process.env, { NODE_ENV: 'test', CLOUD_WORKER_DISABLED: '1', DATA_DIR: directory,
   FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 const { buildServer } = await import('../apps/api/src/server.ts');

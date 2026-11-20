@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +16,8 @@ import { isBotActivity } from '@wangke/contracts';
 import { createMessageGrouper } from '../apps/web/src/pages/botMessages.ts';
 import { acquireBotImage, clearBotImageCache, invalidateBotImage } from '../apps/web/src/components/botImageCache.ts';
 
-const temporary = '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode';
+const temporary = path.join(os.tmpdir(), 'opencode');
+fs.mkdirSync(temporary, { recursive: true });
 const at = '2026-11-01T12:00:00.000Z';
 function fixture() {
   const root = fs.mkdtempSync(path.join(temporary, 'bot-sync-'));

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { fork } from 'node:child_process';
@@ -53,7 +54,7 @@ if (process.argv[2] === '--serve') {
   const { chromium } = await import('playwright');
   const baseline = path.resolve(process.argv[2] ?? ''), current = path.resolve(process.argv[3] ?? '.');
   assert.ok(baseline !== current && fs.existsSync(path.join(baseline, 'apps/web/dist/index.html')), 'pass isolated clean HEAD source directory');
-  const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/client-head-comparison-');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-client-head-comparison-'));
   // Frozen before measurement: no post-result threshold tuning.
   const thresholds = { firstScreenMs: { ratio: 1.2, allowance: 100 }, inputMs: { ratio: 1.2, allowance: 10 }, projectionMs: { ratio: 1.2, allowance: 25 }, heapBytes: { ratio: 1.2, allowance: 1048576 }, jsBytes: { ratio: 1.15, allowance: 0 }, idleBusinessHttp: { maximum: 0 } };
   fs.writeFileSync(path.join(directory, 'thresholds.json'), JSON.stringify(thresholds, null, 2));

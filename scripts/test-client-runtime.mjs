@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -12,7 +13,8 @@ import { TYPERT_REMOTE } from '@wangke/remote-artifacts';
 import { applyRuntimePatch } from '@wangke/contracts/runtime-projection';
 import { createClientRuntime } from '@wangke/client-core';
 
-const root = '/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode';
+const root = path.join(os.tmpdir(), 'opencode');
+fs.mkdirSync(root, { recursive: true });
 const directory = fs.mkdtempSync(path.join(root, 'client-runtime-'));
 // Board samples are test fixtures; the product seeds no components.
 process.env.BOARD_SEED_DIR = path.resolve("scripts/fixtures/board-plugins");

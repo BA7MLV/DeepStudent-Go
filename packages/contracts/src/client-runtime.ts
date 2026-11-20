@@ -177,7 +177,7 @@ export interface LearningTrack { id: number; videoId: string; lang: string; lanD
 export interface LearningBlock { id: number; materialId: string; idx: number; unit: number; unitLabel: string; text: string; kind: 'body' | 'title' | 'table' | 'caption' }
 export interface LearningFrame { id: number; videoId: string; ts: number; blob: LearningBlob; kind: 'slide' | 'other'; caption?: string }
 export interface LearningCover { videoId: string; blob: LearningBlob; w: number; h: number; ts: number; source: 'user' | 'slide' | 'auto' | 'material-page' | 'material-title'; createdAt: number }
-export interface LearningHandout { id: number; videoId: string; createdAt: number; title: string; blob: LearningBlob; outlineJson: string; sectionsJson?: string; usedSkills?: string[]; readPos?: { anchor: string; offset: number } }
+export interface LearningHandout { id: number; videoId: string; createdAt: number; title: string; blob: LearningBlob; outlineJson: string; sectionsJson?: string; usedSkills?: string[]; readPos?: { anchor: string; offset: number }; positionAt?: number }
 export interface LearningCard { id: number; videoId: string; q: string; a: string; time: number; status: 0 | 1 | 2; createdAt: number }
 export interface LearningComment { id: number; videoId: string; time: number; author: string; role: 'ask' | 'answer' | 'note'; text: string; parentId?: number; createdAt: number }
 export interface LearningDanmaku { id: number; videoId: string; time: number; text: string }
@@ -209,7 +209,7 @@ export type ClientLearningEdit = (
   | { kind: 'skillReference'; expected: LearningSkillReference | null; value: LearningSkillReference | null }
   | { kind: 'materialAnnotation'; expected: LearningInk | null; value: LearningInk | null }
   | { kind: 'reviewCard'; courseId: string; cardId: number; expected: 0 | 1 | 2; status: 0 | 1 | 2 }
-  | { kind: 'handoutReading'; courseId: string; handoutId: number; position: { anchor: string; offset: number } }
+  | { kind: 'handoutReading'; courseId: string; handoutId: number; position: { anchor: string; offset: number }; positionAt?: number }
   | { kind: 'studyTime'; date: string; seconds: number; updatedAt: number }
   | { kind: 'clearStudyTime'; expected: { date: string; seconds: number; updatedAt: number }[] }
   | { kind: 'clearStudySnapshot'; snapshot: string }

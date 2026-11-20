@@ -31,7 +31,8 @@ function RateChip({ rate, onDelete, removeLabel }: { rate: number; onDelete: () 
  * 两者改动频率与影响面都不同，混在一张卡里会让「改配色的人」顺手动到播放设置。
  */
 export default function PlaybackModule() {
-  const settings = useSettings();
+  const update = useSettings(s => s.update);
+  const customRates = useSettings(s => s.customRates);
   const { t } = useTranslation('settings');
   /** 自定义倍速的输入草稿（null = 输入框为空，「添加」按钮置灰） */
   const [rateDraft, setRateDraft] = useState<number | null>(null);
@@ -40,16 +41,16 @@ export default function PlaybackModule() {
   const addCustomRate = () => {
     if (rateDraft == null || !Number.isFinite(rateDraft)) return;
     const next = normalizeRate(rateDraft);
-    if ([...PRESET_RATES, ...settings.customRates].some((r) => sameRate(r, next))) {
+    if ([...PRESET_RATES, ...customRates].some((r) => sameRate(r, next))) {
       toast.info(t('playback.exists', { rate: formatRate(next) }));
     } else {
-      settings.update({ customRates: [...settings.customRates, next].sort((a, b) => a - b) });
+      update({ customRates: [...customRates, next].sort((a, b) => a - b) });
     }
     setRateDraft(null);
   };
 
   const removeCustomRate = (r: number) => {
-    settings.update({ customRates: settings.customRates.filter((x) => !sameRate(x, r)) });
+    update({ customRates: customRates.filter((x) => !sameRate(x, r)) });
   };
 
   return (
@@ -60,10 +61,10 @@ export default function PlaybackModule() {
       <Field label={t('playback.customRates')} testId="field-custom-rates">
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2" data-testid="rate-chips">
-            {settings.customRates.length === 0 ? (
+            {customRates.length === 0 ? (
               <span className="text-muted">{t('playback.empty')}</span>
             ) : (
-              settings.customRates.map((r) => (
+              customRates.map((r) => (
                 <RateChip key={r} rate={r} onDelete={() => removeCustomRate(r)} removeLabel={t('playback.remove', { rate: formatRate(r) })} />
               ))
             )}

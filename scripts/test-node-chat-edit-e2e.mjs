@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,7 +40,7 @@ if (process.argv[2] === '--host') {
   process.send({ origin });
   process.on('message', async message => { if (message === 'close') { await app.close(); process.exit(0); } });
 } else {
-  const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/node-chat-edit-');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-node-chat-edit-'));
   const checks = [], requests = [];
   let child, origin, cookie, cookieB, sessionId = 10000;
   const start = async () => {

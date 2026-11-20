@@ -10,7 +10,7 @@ const schemas = {
   skillDefinition: ['skills', 'id name description body enabled builtin updatedAt mcpRequired'],
   skillReference: ['skillRefs', 'id skillId path body'],
   materialAnnotation: ['materialInk', 'id materialId surface tool color width height points createdAt renderer nib opacity smoothing input anchor rects'],
-  handoutDocument: ['handouts', 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos'],
+  handoutDocument: ['handouts', 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos positionAt'],
 } as const;
 
 /** Supported client edits are conversation documents, explicit skill packages,
@@ -48,8 +48,9 @@ export function clientLearningMutations(records: CloudRecords, owner: string, ed
     if (edit.kind === 'handoutReading') {
       const current = get(owner, 'handouts', edit.handoutId);
       course(edit.courseId);
-      if (!current || current.videoId !== edit.courseId || !edit.position || edit.position.anchor.length > 200 || !Number.isFinite(edit.position.offset)) throw new Error('learning_handout_denied');
-      return mutation('handouts', edit.handoutId, current, { ...current, readPos: edit.position });
+      if (!current || current.videoId !== edit.courseId || !edit.position || edit.position.anchor.length > 200 || !Number.isFinite(edit.position.offset)
+        || (edit.positionAt !== undefined && (!Number.isSafeInteger(edit.positionAt) || edit.positionAt <= 0 || edit.positionAt > 4102444800000))) throw new Error('learning_handout_denied');
+      return mutation('handouts', edit.handoutId, current, { ...current, readPos: edit.position, ...(edit.positionAt === undefined ? {} : { positionAt: edit.positionAt }) });
     }
     const [table, fields] = schemas[edit.kind];
     const row = (edit.value ?? edit.expected) as unknown as Record<string, any>;

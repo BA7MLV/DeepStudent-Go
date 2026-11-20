@@ -10,7 +10,7 @@ const definitions = {
   // runHandout explicitly rebuilds its cover from the newly produced slides.
   // It shares only these closed cover products, never a generic write permit.
   courseCover: ['covers', 'cover handout', 'videoId blob w h ts source createdAt'],
-  handoutDocument: ['handouts', 'handout handoutEdit', 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos'],
+  handoutDocument: ['handouts', 'handout handoutEdit', 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos positionAt'],
   candidateCard: ['cards', 'cards', 'id videoId q a time status createdAt'],
   courseComment: ['comments', 'comments', 'id videoId time author role text parentId createdAt'],
   courseDanmaku: ['danmakus', 'danmaku', 'id videoId time text'],

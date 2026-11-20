@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/plugin-renderer-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-plugin-renderer-'));
 let web, browser;
 try {
   const fixture = `

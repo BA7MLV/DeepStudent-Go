@@ -69,10 +69,10 @@ export async function recordMediaDuration(courseId: string, duration: number) {
   await recordCourseFact({ kind: 'recordMediaDuration', courseId, duration });
 }
 export async function recordPlayback(courseId: string, position: number, finished?: boolean) {
-  await recordCourseFact({ kind: 'recordPlayback', courseId, position, ...(finished === undefined ? {} : { finished }) });
+  await recordCourseFact({ kind: 'recordPlayback', courseId, position, positionAt: Date.now(), ...(finished === undefined ? {} : { finished }) });
 }
 export async function recordReadingPosition(courseId: string, unit: number) {
-  await recordCourseFact({ kind: 'recordReadingPosition', courseId, unit });
+  await recordCourseFact({ kind: 'recordReadingPosition', courseId, unit, positionAt: Date.now() });
 }
 export async function setReadingView(courseId: string, view: 'raw' | 'blocks') {
   await recordCourseFact({ kind: 'setReadingView', courseId, view });

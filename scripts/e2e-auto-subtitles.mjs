@@ -1,6 +1,7 @@
 // Disposable account + real browser decoding/VAD/cover + mocked paid ASR.
 // macOS can synthesize a fixture; elsewhere provide TEST_FILE with spoken audio.
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -9,7 +10,7 @@ import { createServer } from 'vite';
 import { fixturePreference, seedFixtureRecords } from './fixture-domain.mjs';
 import { encodeMessage, fieldBytes, utf8 } from '../apps/web/src/bilibili/wire.ts';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/auto-subtitles-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-auto-subtitles-'));
 console.log(`Auto subtitles evidence: ${directory}`);
 Object.assign(process.env, { NODE_ENV: 'test', DATA_DIR: directory, FILES_DIR: path.join(directory, 'files'), BOOTSTRAP_SECRET_FILE: path.join(directory, 'secret') });
 delete process.env.CLOUD_WORKER_DISABLED;

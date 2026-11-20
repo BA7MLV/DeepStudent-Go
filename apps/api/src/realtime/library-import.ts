@@ -7,7 +7,7 @@ import type { CloudMutation } from '@wangke/contracts/cloud';
 import type { ResourceFiles } from '../projects/resources.js';
 
 const definitions = {
-  courses: ['videos', 'id', 'id name size mimeType duration createdAt status transcriptionPaused biliSource lastPosition finished fileDeleted pinned skillOverride folderId kind materialFormat unitCount lastUnit scanned empty htmlView dominantColor coverState'],
+  courses: ['videos', 'id', 'id name size mimeType duration createdAt status transcriptionPaused biliSource lastPosition finished fileDeleted pinned skillOverride folderId kind materialFormat unitCount lastUnit scanned empty htmlView dominantColor coverState positionAt'],
   folders: ['folders', 'id', 'id name createdAt parentId color'],
   files: ['files', 'id', 'id blob'],
   segments: ['segments', 'id', 'id videoId idx start end text status cues'],
@@ -15,7 +15,7 @@ const definitions = {
   blocks: ['materialBlocks', 'id', 'id materialId idx unit unitLabel text kind'],
   frames: ['frames', 'id', 'id videoId ts blob kind caption'],
   covers: ['covers', 'videoId', 'videoId blob w h ts source createdAt'],
-  handouts: ['handouts', 'id', 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos'],
+  handouts: ['handouts', 'id', 'id videoId createdAt title blob outlineJson sectionsJson usedSkills readPos positionAt'],
   cards: ['cards', 'id', 'id videoId q a time status createdAt'],
   comments: ['comments', 'id', 'id videoId time author role text parentId createdAt'],
   danmakus: ['danmakus', 'id', 'id videoId time text'],

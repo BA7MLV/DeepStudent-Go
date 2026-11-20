@@ -72,6 +72,8 @@ export interface VideoRow {
   unitCount?: number;
   /** 上次阅读到的单元（断点续读），与视频的 lastPosition 对称 */
   lastUnit?: number;
+  /** 位置类字段（lastPosition / lastUnit / finished）的客户端写入时钟（epoch ms），服务端只接受更新的值。非索引字段，无需升级版本 */
+  positionAt?: number;
   /** 解析判定为扫描件（**仅 PDF**：有页面但没有文本层）：不建检索索引，只能划词/框选提问 */
   scanned?: 1;
   /** 解析后没有任何正文单元（空文档 / 只有图片的 Word）：同样不建索引，但与扫描件是两回事 */
@@ -198,6 +200,8 @@ export interface HandoutRow {
    * docs/plans/2026-09-28-course-chat-generative-ui-design.md §3。
    */
   readPos?: { anchor: string; offset: number };
+  /** readPos 的客户端写入时钟（epoch ms）：服务端用它拒绝离线旧进度覆盖新进度。非索引字段，无需升级版本 */
+  positionAt?: number;
 }
 
 export interface ChatSessionRow {
@@ -668,6 +672,7 @@ export class WangkeDB extends Dexie {
     this.version(18).stores({ _learningCommands: '++sequence, &operationId', _historyRecovery: 'id', _historyTransactions: 'id', _projectionStage: 'id' });
     this.version(19).stores({ _widgetStates: '[rowId+widgetId], rowId' });
     this.version(20).stores({ _fileCache: 'id', _fileCacheMeta: 'id, usedAt' });
+    this.version(21).stores({ _learningCommands: '++sequence, &operationId, state, createdAt' });
     this.on('blocked', () => { setDatabaseNotice({ database: name, state: 'blocked' }); });
     this.on('ready', () => {
       if (databaseNotice()?.database === name && databaseNotice()?.state === 'blocked') setDatabaseNotice(null);

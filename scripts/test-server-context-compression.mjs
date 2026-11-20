@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -9,7 +10,7 @@ import { freezeTaskModel } from '../apps/api/src/agent/task-model.ts';
 import { submitOwnerTask } from '../apps/api/src/cloud/task-commands.ts';
 import { admitContextCompression, executeContextCompression, effectiveCompressionRows } from '../apps/api/runtime/context-compression.ts';
 
-const directory = fs.mkdtempSync('/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/server-compression-');
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-server-compression-'));
 const store = new DatabaseStore(path.join(directory, 'db.sqlite'));
 const records = new CloudRecords(store);
 const configuration = new CloudConfiguration(store, path.join(directory, 'config'));

@@ -11,6 +11,7 @@ import { logoutCloud } from './logout';
 import ServerStorageCard from './ServerStorageCard';
 import { resumeResourceCommands, useResourceCommands } from '../client/resource-commands';
 const HistoryRecovery = lazy(() => import('./HistoryRecovery'));
+const ConflictRecovery = lazy(() => import('./ConflictRecovery'));
 const LibraryImportFiles = lazy(() => import('./LibraryImportFiles'));
 
 /**
@@ -115,11 +116,14 @@ export default function DataSettings() {
           <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('sync', flushCloud, '已同步')}>立即同步</Button>
         </SettingRow>
         {conflict && (
-          <SettingRow label="冲突">
+          <div className="flex flex-col gap-3">
+            <SettingRow label="冲突">
             <Button size="sm" variant="secondary" isDisabled={busy !== null}
               onPress={() => void run('conflict', resolveCloudConflict, '原稿已导出，未改变服务器资料')}>导出冲突原稿</Button>
           </SettingRow>
-        )}
+          <Suspense fallback={<p role="status">正在加载冲突处理…</p>}><ConflictRecovery /></Suspense>
+          </div>
+          )}
           <SettingRow label="旧版浏览器数据">
             <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void importLegacy()}>导入</Button>
             <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('export-import', async () => (await import('./migrate')).exportLibraryImport())}>导出导入快照</Button>
