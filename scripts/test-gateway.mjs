@@ -19,6 +19,7 @@ import { readableApprovalText, shellApprovalText } from '../apps/api/src/agent/a
 import { DeliveryError } from '../apps/api/src/gateway/plugin.ts';
 import { normalizeFeishu, FeishuPlugin } from '../apps/api/src/gateway/adapters/feishu.ts';
 import { normalizeIlink, IlinkPlugin, tencentUrl } from '../apps/api/src/gateway/adapters/ilink.ts';
+import { freezeTaskModel } from '../apps/api/src/agent/task-model.ts';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gateway-test-'));
 const store = new DatabaseStore(path.join(dir, 'db.sqlite'));
@@ -27,7 +28,19 @@ const cfg = new CloudConfiguration(store, path.join(dir, 'config'));
 const owner = 'owner', other = 'other', at = new Date().toISOString();
 for (const id of [owner, other]) store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run(id, id, at);
 store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,role,system_prompt,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('agent', owner, 'Study', 'study', 'Use learning tools.', at, at);
-const fakeRunner = { enqueue() {}, cancel() {} };
+// P1-1 之后的准入契约:send 在事务前经 runner.freezeModel 判定「已配置模型」。
+// 这里为 owner 预配 fixture provider,后文真实 BotRunner 段落的请求也依赖它。
+cfg.save(owner, { ...cfg.get(owner, true), providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://offline.invalid', apiKey: 'test', protocol: 'openai-chat', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture-chat' } });
+// 最小 stamper 顶替 BotRunner:判定走生产 freezeTaskModel;准入快照的 id 是占位
+// (生产里不落任何 run),只在 run 真实存在时写入 model_snapshot。
+const fakeRunner = {
+  freezeModel(id, ownerId) {
+    if (!store.db.prepare('SELECT 1 FROM runs WHERE id=?').get(id)) return;
+    const snapshot = freezeTaskModel(store, ownerId, cfg.get(ownerId, true), 'bot');
+    store.db.prepare('UPDATE runs SET model_snapshot=? WHERE id=? AND model_snapshot IS NULL').run(JSON.stringify(snapshot), id);
+  },
+  enqueue() {}, cancel() {},
+};
 const bot = new BotApplicationService(store, fakeRunner);
 const sent = [], contexts = new Map(); let failure, downloadGate, downloads = 0;
 function plugin(channel) {
@@ -318,7 +331,13 @@ try {
   for (const protocol of ['openai-chat', 'openai-responses', 'anthropic-messages']) {
     cfg.save(owner, { ...cfg.get(owner, true), providers: [{ ...cfg.get(owner, true).providers[0], protocol }], visionModel: { providerId: 'mock', model: 'vision' } });
     const vision = new StudyTools(store, cfg, files, async (_url, init) => {
-      const body = JSON.parse(init.body); assert.equal(body.model, 'vision'); assert.match(init.body, /\/9j\//, 'vision uses the normalized JPEG, not the unvalidated original');
+      // 历史上这里断言归一化产物是 JPEG(/9j/);image-preparation.ts 早已固定
+      // 为 PNG-优先的快照管线(与基线逐字一致,从未产过 JPEG)。这条用例自
+      // 那次实现改动起就因更早的存量红被封存,从未与现在的实现同跑过。
+      // 断言目标仍是原意:走归一化管线的 data URL,不是未验证的外部 URL。
+      // 协议无关的断言:匹配归一化 PNG 的 base64 魔数(如历史上的 /9j/),
+      // openai 系嵌 data URL、anthropic 嵌裸 base64,两种都能命中。
+      const body = JSON.parse(init.body); assert.equal(body.model, 'vision'); assert.match(init.body, /iVBOR/, 'vision sends the prepared inline image, never an unvalidated remote URL');
       return Response.json(protocol === 'anthropic-messages' ? { content: [{ type: 'text', text: 'Cell diagram' }] } : protocol === 'openai-responses' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Cell diagram' }] }] } : { choices: [{ message: { content: 'Cell diagram' } }] });
     });
     assert.equal((await vision.plugins.get('study_file').execute({ fileId: image.id, question: 'Read this diagram' }, { ...ctx, run: 'vision-fixture' })).description, 'Cell diagram');

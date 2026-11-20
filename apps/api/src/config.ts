@@ -42,6 +42,11 @@ export type RuntimeConfig = {
   readonly gatewayPendingDays: number;
   readonly gatewayBodyDays: number;
   readonly botAuditLimit: number;
+  /** 公开对外来源:原版三处消费方(study 引用/mcp origin/passkey 探测)都是
+   * 每次调用直读 env,test-gateway-review 在用例中期设置它来验证引用拼接,
+   * 属于运行期会变的变量,不进启动快照。 */
+  readonly publicOrigin: string | undefined;
+  readonly mcpPublicOrigin: string | undefined;
 };
 
 export type AppConfig = {
@@ -343,6 +348,8 @@ export function getConfig(): RuntimeConfig {
     gatewayPendingDays: positiveOr('GATEWAY_PENDING_DAYS', 7, 365),
     gatewayBodyDays: positiveOr('GATEWAY_BODY_DAYS', 30, 3_650),
     botAuditLimit: positiveOr('BOT_AUDIT_LIMIT', 100_000, 1_000_000),
+    publicOrigin: globalThis.process.env.PUBLIC_ORIGIN,
+    mcpPublicOrigin: globalThis.process.env.MCP_PUBLIC_ORIGIN,
   };
 }
 

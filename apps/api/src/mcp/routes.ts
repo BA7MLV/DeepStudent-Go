@@ -4,7 +4,7 @@ import type { CloudRecords } from '../cloud/records.js';
 import type { McpContext, McpServerInput } from '@wangke/contracts/mcp';
 import { McpManager, mcpError } from './manager.js';
 import { mcpScope } from './scope.js';
-import { config } from '../config.js';
+import { config, getConfig } from '../config.js';
 
 export function registerMcpRoutes(app: FastifyInstance, deps: {
   manager: McpManager; store: DatabaseStore; records: CloudRecords;
@@ -43,7 +43,7 @@ export function registerMcpRoutes(app: FastifyInstance, deps: {
     try {
       const server = manager.repository.get(user.id, request.params.id);
       if (!server) throw new Error('mcp_not_found');
-      const origin = config().mcpPublicOrigin || config().publicOrigin || (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(request.host) ? `${request.protocol}://${request.host}` : '');
+      const origin = getConfig().mcpPublicOrigin || getConfig().publicOrigin || (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(request.host) ? `${request.protocol}://${request.host}` : '');
       if (!origin || !['http:', 'https:'].includes(new URL(origin).protocol)) throw new Error('mcp_oauth_origin');
       await manager.invalidate(user.id, server.id);
       manager.repository.resetOAuth(user.id, server.id);

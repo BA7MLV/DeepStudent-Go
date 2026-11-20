@@ -13,7 +13,7 @@ import { ModelFailure } from '../agent/model-client.js';
 import { createModelGateway } from '../agent/model-gateway-factory.js';
 import { ModelGatewayFailure } from '../agent/model-errors.js';
 import { gatewayDisabledPurposes } from '../agent/model-rollout.js';
-import { config } from '../config.js';
+import { config, getConfig } from '../config.js';
 import { modelUsageReport } from '../agent/model-observations.js';
 import type { WebSearchService } from '../web-search/service.js';
 import { PluginFiles } from '../plugins/files.js';
@@ -72,7 +72,7 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
   });
 
   app.get('/api/v1/cloud/status', async () => ({ cloud: true, maxFileBytes: deps.maxFileBytes,
-    passkeyConfigured: Boolean(config().publicOrigin && config().webauthnRpId), singleUser: true }));
+    passkeyConfigured: Boolean(getConfig().publicOrigin && config().webauthnRpId), singleUser: true }));
   app.get('/api/v1/cloud/config', async (request, reply) => {
     const user = authorize(request, reply); if (!user) return;
     return configuration.get(user.id);

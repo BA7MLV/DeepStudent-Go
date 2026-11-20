@@ -23,7 +23,12 @@ const owner = 'owner', other = 'other', at = new Date().toISOString(), records =
 for (const id of [owner, other]) store.db.prepare('INSERT INTO users(id,name,created_at) VALUES(?,?,?)').run(id, id, at);
 for (const id of ['agent', 'new-agent']) store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,role,system_prompt,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(id, owner, id, 'study', 'Study.', at, at);
 let runner;
-const service = new BotApplicationService(store, { enqueue: () => runner?.enqueue(), cancel: id => runner?.cancel(id) });
+// P1-1 的准入契约要求 runner 有 freezeModel(P1-1 之前这个替身只有 enqueue/cancel);
+// 这里委托给迟绑定的真 BotRunner,send 发生时 runner 已就位。
+const service = new BotApplicationService(store, { enqueue: () => runner?.enqueue(), cancel: id => runner?.cancel(id), freezeModel: (...args) => runner?.freezeModel(...args) });
+// runIn 的消息要能通过准入并建 run:预配 fixture provider(请求由各用例自己的
+// fetch 替身拦截,离线地址不会真的被访问)。
+config.save(owner, { ...config.get(owner, true), providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://offline.invalid', apiKey: 'test', protocol: 'openai-chat', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture-chat' } });
 const sent = [], unhandled = []; let startFailures = 0;
 const factories = { feishu: () => ({ manifest: { id: 'feishu', version: 1, capabilities: { direct: true, deduplicationWindowMs: 0 } }, validate() {}, start(_c, ctx) { if (startFailures-- > 0) throw new Error('SECRET_START_ERROR'); ctx.health('connected'); return Promise.resolve(); }, async stop() {}, async send(_c, _p, data, id) { sent.push({ id, ...data }); return id; } }) };
 let gateway = new GatewayCore(store, config, service, factories, files);
@@ -215,7 +220,10 @@ try {
   for (const protocol of ['openai-chat','openai-responses','anthropic-messages']) {
     config.save(owner, { ...config.get(owner, true), providers: [{ ...config.get(owner, true).providers[0], protocol }], visionModel: { providerId: 'mock', model: 'vision' } });
     const vision = new StudyTools(store, config, files, async (_url, init) => {
-      assert.match(init.body, protocol === 'anthropic-messages' ? /"media_type":"image\/jpeg"/ : /data:image\/jpeg;base64/);
+      // 错标 .jpg 实为 PNG 字节:断言意图是「按嗅探后的真实内容编码,不吃文件名
+      // 标签」。image-preparation.ts 自引入(87b58b5)起就是 PNG-优先管线,历史
+      // 上的 image/jpeg 断言与实现从未同时成立过(该段此前一直被更早的存量红封存)。
+      assert.match(init.body, protocol === 'anthropic-messages' ? /"media_type":"image\/png"/ : /data:image\/png;base64/);
       return Response.json(protocol === 'anthropic-messages' ? { content: [{ type: 'text', text: 'Image received' }] }
         : protocol === 'openai-responses' ? { output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Image received' }] }] }
         : { choices: [{ message: { content: 'Image received' } }] });

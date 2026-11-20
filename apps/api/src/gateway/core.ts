@@ -45,7 +45,9 @@ const latestRunRowSchema = {
 } as const;
 const nextAtRowSchema = { type: 'object', properties: { next_at: { type: ['integer', 'null'] } }, required: ['next_at'] } as const;
 const outboxFailureRowSchema = { type: 'object', properties: { failures: { type: 'integer' } }, required: ['failures'] } as const;
-const approvalSeqRowSchema = { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, seq: { type: 'integer' } }, required: ['id', 'status', 'seq'] } as const;
+/** approvalReply 的待审批查询只读 a.id 与 e.event_id;schema 必须与 SELECT 列集一致,
+ * 写成 {id,status,seq}(那是 709 行另一查询的形状)会让每条返回行都过不了校验。 */
+const approvalSeqRowSchema = { type: 'object', properties: { id: { type: 'string' }, event_id: { type: 'integer' } }, required: ['id', 'event_id'] } as const;
 const pendingSeqRowSchema = { type: 'object', properties: { seq: { type: 'integer' }, content: { type: 'string' } }, required: ['seq', 'content'] } as const;
 const fileNameRowSchema = { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } as const;
 const envelopeRowSchema = { type: 'object', properties: { id: { type: 'integer' }, envelope: { type: 'string' } }, required: ['id', 'envelope'] } as const;

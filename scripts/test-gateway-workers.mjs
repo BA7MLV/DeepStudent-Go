@@ -5,6 +5,7 @@ import path from 'node:path';
 import { DatabaseStore } from '../apps/api/src/storage/database.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { BotApplicationService } from '../apps/api/src/agent/service.ts';
+import { freezeTaskModel } from '../apps/api/src/agent/task-model.ts';
 import { GatewayCore } from '../apps/api/src/gateway/core.ts';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -30,7 +31,18 @@ try {
   store.db.prepare('INSERT INTO users VALUES(?,?,?)').run(owner, owner, at);
   store.db.prepare('INSERT INTO agent_profiles(id,owner_id,name,role,system_prompt,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('agent', owner, 'Agent', '', '', at, at);
   const config = new CloudConfiguration(store, path.join(root, 'config'));
-  const bot = new BotApplicationService(store, { enqueue() {}, cancel() {} });
+  // P1-1 之后的准入契约:send 前经 runner.freezeModel 判定已配置模型。预配
+  // fixture provider(所有请求都在进程内被替身拦截,离线地址不会被访问),
+  // 替身 freezeModel 走生产 freezeTaskModel 快照写入。
+  config.save(owner, { ...config.get(owner, true), providers: [{ id: 'fixture', name: 'Fixture', baseUrl: 'https://offline.invalid', apiKey: 'test', protocol: 'openai-chat', serves: ['chat'] }], llmModel: { providerId: 'fixture', model: 'fixture-chat' } });
+  const bot = new BotApplicationService(store, {
+    freezeModel(id, ownerId) {
+      if (!store.db.prepare('SELECT 1 FROM runs WHERE id=?').get(id)) return;
+      const snapshot = freezeTaskModel(store, ownerId, config.get(ownerId, true), 'bot');
+      store.db.prepare('UPDATE runs SET model_snapshot=? WHERE id=? AND model_snapshot IS NULL').run(JSON.stringify(snapshot), id);
+    },
+    enqueue() {}, cancel() {},
+  });
   const sends = [], downloads = [], sending = new Map(), downloading = new Map();
   gateway = new GatewayCore(store, config, bot, { fake: () => ({
     manifest: { id: 'fake', version: 1, name: 'Fake', capabilities: { direct: true, groups: false, images: true, files: true, proactive: 'yes', deduplicationWindowMs: 0 } },

@@ -42,7 +42,10 @@ export function parseRows<T>(key: string, schema: object, values: readonly unkno
   return values as T[];
 }
 export function optionalRow<T>(key: string, schema: object, value: unknown): T | undefined {
-  return value === undefined ? undefined : parseRow<T>(key, schema, value);
+  // SQLite 的 .get() 不命中时给 undefined;null 只可能是调用方在表达
+  // “这一行按语义不存在”(如 resolve() 里 cloud_permission_id 命中时跳过 run
+  // 查找),与 undefined 同义,不是坏行。
+  return value === undefined || value === null ? undefined : parseRow<T>(key, schema, value);
 }
 
 const nullableString = { type: ['string', 'null'] } as const;
