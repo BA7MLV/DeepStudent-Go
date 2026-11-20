@@ -8,6 +8,7 @@ import { MODEL_FIELDS, modelReferenceIssues, type ModelSettingsIssue, type Model
 import { migrateModelPresets, validateModelPresets, PresetConfigurationError } from './model-presets.js';
 import { validateModelDeployments } from './model-deployments.js';
 import { GO_PROVIDER, goBase } from '../agent/opencode-go.js';
+import { config } from '../config.js';
 
 export class ModelConfigurationError extends Error {
   constructor(message: string, readonly issues: ModelSettingsIssue[] = [], readonly status = 400) { super(message); }
@@ -43,16 +44,17 @@ export class CloudConfiguration {
   }
   get(owner: string, secrets = false): CloudConfig {
     const row = this.store.db.prepare('SELECT value FROM cloud_config WHERE owner_id=?').get(owner) as { value: string } | undefined;
+    const settings = config();
     const value: CloudConfig = row ? JSON.parse(this.open(row.value)) : {
-      providers: process.env.MODEL_API_KEY ? [{ id: 'server', name: '服务端模型', baseUrl: process.env.MODEL_BASE_URL || 'https://api.openai.com/v1', apiKey: process.env.MODEL_API_KEY, protocol: 'openai-chat', catalogId: '', serves: ['chat', 'vision', 'asr'] }] : [],
-      llmModel: { providerId: process.env.MODEL_API_KEY ? 'server' : '', model: process.env.MODEL_API_KEY ? process.env.MODEL_NAME || 'gpt-4o-mini' : '' },
+      providers: settings.modelApiKey ? [{ id: 'server', name: '服务端模型', baseUrl: settings.modelBaseUrl, apiKey: settings.modelApiKey, protocol: 'openai-chat', catalogId: '', serves: ['chat', 'vision', 'asr'] }] : [],
+      llmModel: { providerId: settings.modelApiKey ? 'server' : '', model: settings.modelApiKey ? settings.modelName : '' },
       visionModel: { providerId: '', model: '' }, asrModel: { providerId: '', model: '' },
       decisionModel: { providerId: '', model: '' },
       policy: { ...DEFAULT_AGENT_POLICY },
     };
     // A Go environment key is the simple single-key setup. It is intentionally
     // not bound to a project owner; saved accounts provide multi-key management.
-    for (const provider of value.providers) if (provider.id === GO_PROVIDER) provider.apiKey = process.env.OPENCODE_GO_API_KEY?.trim() ?? '';
+    for (const provider of value.providers) if (provider.id === GO_PROVIDER) provider.apiKey = settings.opencodeGoApiKey ?? '';
     Object.assign(value, migrateModelPresets(value));
     value.modelRevision = this.modelRevision(value);
     if (!secrets) for (const provider of value.providers) if (provider.accounts) {

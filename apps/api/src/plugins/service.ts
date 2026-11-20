@@ -11,7 +11,7 @@ import { PluginFiles } from './files.js';
 import { registerLearningPersistence } from './learning.js';
 import { registerNativeProviders } from './providers/index.js';
 import type { ResourceFiles } from '../projects/resources.js';
-import path from 'node:path';
+import { config } from '../config.js';
 import type { BoardTask } from '@wangke/contracts/board';
 
 export interface PluginActionContext { owner: string; plugin: PluginPackage; instance: PluginInstance; projectId?: string; checkActive(): void }
@@ -42,7 +42,7 @@ export class PluginService {
   private readonly knownProviders = new Map<string, PluginPackage>();
   private readonly accounts = new Map<string, { signature: string; context: Context; dispose: PluginDispose }>();
   private readonly releasing = new Set<Promise<void>>();
-  constructor(readonly store: DatabaseStore, bots?: BotApplicationService, runner?: CloudTaskRunner, readonly learningOptions: { filesDir: string; resources?: ResourceFiles } = { filesDir: process.env.FILES_DIR ?? path.resolve(process.env.DATA_DIR ?? 'data', 'files') }) {
+  constructor(readonly store: DatabaseStore, bots?: BotApplicationService, runner?: CloudTaskRunner, readonly learningOptions: { filesDir: string; resources?: ResourceFiles } = { filesDir: config().filesDir }) {
     this.files = new PluginFiles(store, learningOptions.resources?.projects, learningOptions.filesDir);
     this.files.nativeAvailable = id => this.providers.has(id);
     this.files.nativePackages = () => [...this.knownProviders.values()];

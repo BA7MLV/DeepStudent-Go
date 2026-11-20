@@ -26,6 +26,7 @@ import { resultBudgetSchema } from './result-budget.js';
 import { TaskDelegationService } from '../cloud/delegation.js';
 import { DELEGATION_TOOLS } from './delegation-tools.js';
 import { cloudTaskRowSchema, expectRow, fileRowSchema, type CloudTaskRow, type FileRow, type RunWaitRow } from '../storage/row-schema.js';
+import { config as startupConfig } from '../config.js';
 
 export interface StudyContext {
   owner: string; thread: string; run: string; step: string; signal: AbortSignal;
@@ -136,8 +137,10 @@ export class StudyTools {
       const more = list.length > page.length;
       const link = a.courseId ? `#/player/${encodeURIComponent(a.courseId)}` : undefined;
       let citation = link;
-      if (link && process.env.PUBLIC_ORIGIN) {
-        const origin = new URL(process.env.PUBLIC_ORIGIN);
+      // 公开来源按启动快照读取;别名避免与构造参数 configuration 重名。
+      const startup = startupConfig();
+      if (link && startup.publicOrigin) {
+        const origin = new URL(startup.publicOrigin);
         if (['http:', 'https:'].includes(origin.protocol) && !origin.username && !origin.password) citation = `${origin.origin}/${link}`;
       }
       return { records: page, nextCursor: more ? last : null, truncated: more || page.some(r => r.omitted), citation };

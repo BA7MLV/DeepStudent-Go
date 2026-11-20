@@ -12,10 +12,17 @@ import { settleWithin } from '../lifecycle.js';
 import type { WebSearchService } from '../web-search/service.js';
 import { executeDelegatedTask } from './delegation.js';
 import { cleanBiliStaging } from '../bilibili/staging.js';
+import { config, getConfig } from '../config.js';
 import {
   taskDtoRow, cloudTaskRowSchema, expectRow, expectRows, taskAgentCheckpointRowSchema, taskDelegationRowSchema,
   type CloudTaskRow, type TaskAgentCheckpointRow, type TaskDelegationRow, type TaskDtoRow,
 } from '../storage/row-schema.js';
+
+/** 未注入 configuration 的调用方(部分脚本/单测)退回一个以 filesDir 为根的实例;
+ * 凭据目录沿着启动期 filesDir 走,不再各自拼 env。 */
+function fallbackConfiguration(store: DatabaseStore, filesDir: string | undefined) {
+  return new CloudConfiguration(store, path.join(path.dirname(filesDir ?? config().filesDir), 'config'));
+}
 
 export const TASK_KINDS: CloudTaskKind[] = ['chat', 'qa', 'transcribe', 'handout', 'cards', 'comments', 'danmaku', 'material', 'cover', 'artifactEdit', 'handoutEdit', 'modelOnce', 'bilibiliImport'];
 /** List/subscription projections are read on every streaming checkpoint. The
@@ -218,7 +225,7 @@ export class CloudTaskRunner {
           this.store.db.prepare("UPDATE cloud_tasks SET executor='node',worker_id=NULL,lease_expires_at=NULL WHERE status='queued'").run();
           this.store.db.prepare("UPDATE cloud_permissions SET status='expired' WHERE status IN ('pending','approved','consumed') AND task_id IN (SELECT id FROM cloud_tasks WHERE status NOT IN ('running','waiting_user'))").run();
         });
-        cleanBiliStaging(this.store, this.options.filesDir ?? process.env.FILES_DIR ?? path.join(process.env.DATA_DIR ?? path.resolve('data'), 'files'));
+        void cleanBiliStaging(this.store, this.options.filesDir ?? config().filesDir).catch(() => { /* 清理失败不阻塞恢复 */ });
         this.recovered = true;
       }
       for (const [id, controller] of this.active) {
@@ -257,7 +264,8 @@ export class CloudTaskRunner {
           this.store.db.prepare("INSERT INTO cloud_task_events(task_id,event) VALUES(?,'delegation_delivered')").run(row.child_id);
         }
       });
-      const limit = Math.max(1, Math.min(4, Number(process.env.CLOUD_CONCURRENCY) || 2));
+      // 并发是测试用例级开关(见 config.ts 惰性清单),每次调度重读。
+      const limit = getConfig().cloudConcurrency;
       const rows = expectRows<CloudTaskRow>(cloudTaskRowSchema, this.store.db.prepare("SELECT * FROM cloud_tasks WHERE status='queued' ORDER BY created_at LIMIT 50").all(), 'cloud_task_row_invalid');
       for (const row of rows) {
         const link = expectRow<TaskDelegationRow>(taskDelegationRowSchema, this.store.db.prepare('SELECT * FROM task_delegations WHERE task_id=?').get(row.id), 'task_delegation_row_invalid');
@@ -317,8 +325,7 @@ export class CloudTaskRunner {
           throw new DOMException('任务已停止', 'AbortError');
         }
       };
-      const directory = process.env.DATA_DIR ?? path.resolve('data');
-      const contextPolicy = () => (this.options.configuration ?? new CloudConfiguration(this.store, path.join(directory, 'config'))).taskPolicy(row.owner_id, row.id);
+      const contextPolicy = () => (this.options.configuration ?? fallbackConfiguration(this.store, this.options.filesDir)).taskPolicy(row.owner_id, row.id);
       const context: TaskContext = {
         task, owner: row.owner_id, store: this.store, records: this.records,
         effects,
@@ -327,8 +334,8 @@ export class CloudTaskRunner {
         pluginService: this.pluginService,
         sandbox: this.options.sandbox,
         sandboxCleanup: this.options.sandboxCleanup,
-        configuration: this.options.configuration ?? new CloudConfiguration(this.store, path.join(directory, 'config')),
-        filesDir: this.options.filesDir ?? process.env.FILES_DIR ?? path.join(directory, 'files'),
+        configuration: this.options.configuration ?? fallbackConfiguration(this.store, this.options.filesDir),
+        filesDir: this.options.filesDir ?? config().filesDir,
         signal, fetch: async (url, init) => {
           checkActive();
           const response = await (this.options.fetch ?? fetch)(url, init);

@@ -28,6 +28,7 @@ export async function persistHandout(context: TaskContext): Promise<HandoutPersi
       const filename = taskFile(context, frame.blob);
       const fd = fs.openSync(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
       let bytes: Buffer;
+      // 已打开 fd 的一次性读取:大小校验与读取必须针对同一 fd,异步会改变位置语义。
       try { if (fs.fstatSync(fd).size > 4 * 1024 * 1024) throw new Error('frame_size_limit'); bytes = fs.readFileSync(fd); }
       finally { fs.closeSync(fd); }
       const dimensions = await imageStats(context, bytes);

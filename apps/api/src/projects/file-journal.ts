@@ -29,6 +29,8 @@ export class ProjectFileJournal {
     if (fs.existsSync(filename)) {
       const input = fs.lstatSync(filename);
       if (!input.isFile() || input.nlink !== 1 || input.size > 32 * 1024 * 1024) throw new Error('unsafe_resource_journal');
+      // 写前日志的恢复必须在进入任何写事务前完整读入:这里同步是刻意的,
+      // 一旦改成异步就会在 manifest 未就绪时暴露给并发写。
       this.manifest = JSON.parse(fs.readFileSync(filename, 'utf8'));
       if (this.manifest.version !== 1 || this.manifest.owner !== owner || this.manifest.operationId !== operationId) throw new Error('unsafe_resource_journal');
     } else {
@@ -48,6 +50,7 @@ export class ProjectFileJournal {
   private persist() {
     const filename = path.join(this.directory, 'manifest.json'), temporary = `${filename}.next`;
     const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
+    // 日志写入与 fsync 必须在同一同步段内完成(崩溃点语义),不拆成异步。
     try { fs.writeFileSync(fd, JSON.stringify(this.manifest)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
     fs.renameSync(temporary, filename); this.sync(this.directory); this.sync(path.dirname(this.directory));
   }

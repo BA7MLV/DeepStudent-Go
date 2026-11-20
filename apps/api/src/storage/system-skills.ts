@@ -86,6 +86,7 @@ export class SystemSkills {
         if (stat.isDirectory()) visit(filename, rel);
         else if (stat.isFile()) {
           if (stat.size > MAX_FILE_BYTES || (total += stat.size) > MAX_PACKAGE_BYTES) throw new Error('skill_package_too_large');
+          // 技能目录的哈希/读取与同步 SQLite 索引事务绑定,保持同步。
           hash.update(rel).update('\0').update(fs.readFileSync(filename));
         }
       }
@@ -100,6 +101,7 @@ export class SystemSkills {
     if (!stat) return {};
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) throw new Error('invalid_skill_metadata');
     try {
+      // sidecar 读取是索引事务的一部分(与上面的同步约束相同)。
       const value = JSON.parse(fs.readFileSync(filename, 'utf8')) as Record<string, unknown>;
       const sourceUrl = typeof value.sourceUrl === 'string' && value.sourceUrl.length <= 2048 ? value.sourceUrl : undefined;
       const version = typeof value.version === 'string' && value.version.length <= 100 ? value.version : undefined;
@@ -131,6 +133,7 @@ export class SystemSkills {
     const stat = fs.lstatSync(filename, { throwIfNoEntry: false });
     if (!stat) return;
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_FILE_BYTES) throw new Error('invalid_skill_path');
+    // readPackage 在 list/索引事务里被调用,读取需同步完成后再写索引行。
     const text = fs.readFileSync(filename, 'utf8');
     const parsed = parseSkillMarkdown('SKILL.md', text);
     if (!parsed.body) return;
@@ -166,6 +169,7 @@ export class SystemSkills {
     if (!real.startsWith(`${root}${path.sep}`)) throw new Error('invalid_skill_reference');
     const stat = fs.lstatSync(real);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_FILE_BYTES) throw new Error('invalid_skill_reference');
+    // load() 由 Agent 工具在同步事务/回调内调用,返回体必须已经读入。
     return { id, reference, body: fs.readFileSync(real, 'utf8'), revision: skill.revision, source: 'system' as const };
   }
 
@@ -199,6 +203,7 @@ export class SystemSkills {
     const skill = this.list(owner).find(item => item.slug === slug);
     if (!skill) throw new Error('skill_not_found');
     const filePath = `${SKILLS_PATH}/${slug}/${relative}`;
+    // 同上:document() 是同步事务内的投影,内容读取不拆分。
     return { path: filePath, name: path.basename(relative), content: fs.readFileSync(file.filename, 'utf8'), revision: skill.revision,
       updatedAt: new Date(file.stat.mtimeMs).toISOString(), source: skill.sourceUrl ?? 'system:skill', kind: 'skill', summary: skill.name,
       slug, version: skill.version, sha256: skill.sha256, enabled: skill.enabled === 1 };
@@ -225,6 +230,7 @@ export class SystemSkills {
     const temporary = path.join(path.dirname(file.filename), `.${path.basename(file.filename)}.${crypto.randomUUID()}.tmp`);
     try {
       const fd = fs.openSync(temporary, 'wx', file.stat.mode & 0o777);
+      // saveFile 的写入 + fsync 是一段临界区,与随后的 CAS 复读共同保证不丢更新。
       try { fs.writeFileSync(fd, content, 'utf8'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
       const latest = this.readFile(owner, resource);
       if (latest.content !== expected || latest.revision !== revision) throw new Error('system_revision_conflict');

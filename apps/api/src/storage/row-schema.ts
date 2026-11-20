@@ -92,7 +92,14 @@ export type TaskDtoRow = Pick<CloudTaskRow, 'id' | 'kind' | 'resource' | 'status
 };
 
 /** DTO 真正依赖的列；缺列说明库结构与代码不一致，直接失败而不是生成半截任务对象。 */
-const taskDtoRequired = { type: 'object', required: ['id', 'kind', 'resource', 'status', 'input', 'created_at'] } as const;
+const taskDtoRequired = {
+  type: 'object', required: ['id', 'kind', 'resource', 'status', 'input', 'created_at'],
+  // ajv strict 会把 required 里的每个键当成必须声明为属性;这里一次性列全 DTO 依赖的列。
+  properties: {
+    id: { type: 'string' }, kind: { type: 'string' }, resource: { type: 'string' }, status: { type: 'string' },
+    input: { type: 'string' }, created_at: { type: 'string' },
+  },
+} as const;
 /** 其余列可以缺省或为 NULL，但出现时必须是字符串。 */
 const taskDtoOptional = ['owner_id', 'progress', 'result', 'error', 'updated_at', 'parent_run_id', 'bot_name', 'resource_name', 'model_snapshot', 'effects', 'executor'] as const;
 

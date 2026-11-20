@@ -20,7 +20,7 @@ export async function serverQuestionExtraction(context: TaskContext) {
   if (!file) throw new Error('extraction_source_unavailable');
   try {
   const bankId=`__course_questions__${encodeURIComponent(id)}`;
-  const initial=context.records.get(context.owner,'videos',bankId) ? readLearningMarkdown(context.store,context.filesDir,context.owner,bankId,resources) : null;
+  const initial=context.records.get(context.owner,'videos',bankId) ? await readLearningMarkdown(context.store,context.filesDir,context.owner,bankId,resources) : null;
   if ((context.task.input.bankRevision ?? null) !== (initial?.revision ?? null)) throw new Error('question_bank_revision_changed');
   let expected=initial?.text ?? '';
   const skill=await fs.readFile(new URL(import.meta.resolve('@wangke/study-core/skills/builtin/question-bank/SKILL.md')),'utf8');
@@ -58,7 +58,7 @@ export async function serverQuestionExtraction(context: TaskContext) {
         executeResourceCommand(resources,context.owner,{operationId:`native-bank-${permission}`,operation:{kind:'saveMarkdown',courseId:bankId,expected,text:textAfter,name:`${String(source.name)} · 题库`,...(source.folderId?{folderId:source.folderId}:{})}});
         return '题库已保存';
       });
-      expected=readLearningMarkdown(context.store,context.filesDir,context.owner,bankId,resources).text;
+      expected=(await readLearningMarkdown(context.store,context.filesDir,context.owner,bankId,resources)).text;
       saved ||= bank.questions.length>0; covered=i+1;
       context.report({questionBankSaved:saved,covered,total:pages.length,coverage:'逐页原文读取；原卷答案仅在实际提供上下文内核对'});
     }

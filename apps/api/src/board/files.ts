@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { BOARD_PATH, BOARD_PLUGINS_PATH, boardPath, boardSlug, parseBoardManifest, parseBoardSchedules, type BoardPlugin } from '@wangke/contracts/board';
 import type { SystemDirectory, SystemDocument } from '@wangke/contracts/system';
 import type { DatabaseStore } from '../storage/database.js';
+import { config } from '../config.js';
 
 // Upgrade only byte-identical shipped files. Edited or removed files stay user-owned.
 const DEFAULT_UPGRADES: Record<string, string | string[]> = {
@@ -29,7 +30,7 @@ const sha256 = (value: string | Buffer) => crypto.createHash('sha256').update(va
 const sameJson = (text: string, expected: unknown) => { try { return JSON.stringify(JSON.parse(text)) === JSON.stringify(expected); } catch { return false; } };
 
 /** Operators may preinstall packages (and tests use fixtures); the product ships none. */
-const seedDirectory = () => process.env.BOARD_SEED_DIR ? path.resolve(process.env.BOARD_SEED_DIR) : undefined;
+const seedDirectory = () => config().boardSeedDir;
 
 // Bundled upgrades are a process/store bootstrap operation, not a catalog read.
 // Cache only a completed, committed bootstrap; live package reads below still
@@ -74,6 +75,8 @@ export class BoardFiles {
           if (!exists) continue;
           const resource = `${BOARD_PATH}/${relative}`, current = this.store.systemFiles.read(owner, resource);
           if (current !== undefined && (Array.isArray(hash) ? hash : [hash]).includes(sha256(current))) {
+            // ensure() 在 SystemFiles 的同步写事务里运行(存储层本身是同步 SQLite),
+            // 事务回调不能 await,因此这里保持同步读取内置包内容。
             this.store.systemFiles.write(owner, resource, fs.readFileSync(path.join(source, relative), 'utf8'), current);
           }
         } catch { /* A broken/edited default cannot block unrelated plugins. */ }
@@ -85,6 +88,7 @@ export class BoardFiles {
       for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
         const target = `${resource}/${entry.name}`;
         if (entry.isDirectory()) copy(path.join(folder, entry.name), target);
+        // 同上:整棵目录在同步事务内复制,读取与写入必须同属一次提交。
         else if (entry.isFile() && this.store.systemFiles.read(owner, target) === undefined) this.store.systemFiles.write(owner, target, fs.readFileSync(path.join(folder, entry.name), 'utf8'), null);
       }
     };

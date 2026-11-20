@@ -1,12 +1,16 @@
 import type { DatabaseStore } from '../storage/database.js';
+import { getConfig } from '../config.js';
 
-const positive = (value: string | undefined, fallback: number, max: number) => value && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Math.min(Number(value), max) : fallback;
-export const gatewayLimits = () => ({
-  pending: positive(process.env.GATEWAY_PENDING_LIMIT, 1000, 10000),
-  dedupe: positive(process.env.GATEWAY_DEDUPE_LIMIT, 200000, 1000000),
-  pendingMs: positive(process.env.GATEWAY_PENDING_DAYS, 7, 365) * 86400000,
-  bodyMs: positive(process.env.GATEWAY_BODY_DAYS, 30, 3650) * 86400000,
-});
+/** 容量与保留期会由测试在用例内改小并立刻触发清理,因此每次现读 env(惰性)。 */
+export const gatewayLimits = () => {
+  const settings = getConfig();
+  return {
+    pending: settings.gatewayPendingLimit,
+    dedupe: settings.gatewayDedupeLimit,
+    pendingMs: settings.gatewayPendingDays * 86400000,
+    bodyMs: settings.gatewayBodyDays * 86400000,
+  };
+};
 export function cleanupGateway(store: DatabaseStore, time = Date.now()) {
   const limits = gatewayLimits();
   store.transaction(() => {

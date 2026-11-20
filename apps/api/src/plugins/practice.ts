@@ -38,7 +38,7 @@ export function registerPracticeActions(service: PluginService, resolveMaterial:
     const submissions = store.db.prepare('SELECT question_index,delivered_at,error FROM plugin_practice_submissions WHERE row_id=? AND owner_id=?').all(a.rowId, c.owner);
     return { row, submissions };
   } });
-  service.register({ id: 'practice.present', capability: 'learning', access: 'write', trustedOnly: true, schema: object({ materialId: material, offset: integer, limit: { type: 'integer', minimum: 1, maximum: 20 }, clientNonce: { type: 'string', minLength: 1, maxLength: 100 } }, ['materialId', 'clientNonce']), run: (a, c) => {
+  service.register({ id: 'practice.present', capability: 'learning', access: 'write', trustedOnly: true, schema: object({ materialId: material, offset: integer, limit: { type: 'integer', minimum: 1, maximum: 20 }, clientNonce: { type: 'string', minLength: 1, maxLength: 100 } }, ['materialId', 'clientNonce']), run: async (a, c) => {
     const id = resolveMaterial(a, c), bankId = `__course_questions__${encodeURIComponent(id)}`;
     const operation = crypto.createHash('sha256').update(JSON.stringify([c.owner, c.plugin.id, c.instance.id, 'present', a.clientNonce])).digest('hex');
     // This is an operation receipt, never a second copy of a question bank.
@@ -48,12 +48,12 @@ export function registerPracticeActions(service: PluginService, resolveMaterial:
       if (row.quiz.data.bank?.offset !== (a.offset ?? 0) || row.videoId !== id || row.quiz.requestedLimit !== (a.limit ?? 10)) throw new Error('plugin_nonce_conflict');
       return { rowId: row.id };
     }
-    let file: ReturnType<typeof readLearningMarkdown> | undefined;
+    let file: Awaited<ReturnType<typeof readLearningMarkdown>> | undefined;
     let bankPath = `/courses/${encodeURIComponent(id)}/questions.md`;
     const source = records.get(c.owner, 'videos', id);
     if (source?.kind === 'material' && source.materialFormat === 'md') {
       try {
-        const original = readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, id, service.learningOptions.resources);
+        const original = await readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, id, service.learningOptions.resources);
         // An imported Markdown bank remains authoritative at /material. Invalid
         // quiz blocks must fail validation, not silently select a different bank.
         if (/^```quiz[ \t]*\r?$/m.test(original.text)) { file = original; bankPath = `/courses/${encodeURIComponent(id)}/material`; }
@@ -61,7 +61,7 @@ export function registerPracticeActions(service: PluginService, resolveMaterial:
         if (!(error instanceof Error) || error.message !== 'plugin_material_file_not_found') throw error;
       }
     }
-    file ??= readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, bankId, service.learningOptions.resources);
+    file ??= await readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, bankId, service.learningOptions.resources);
     const parsed = parseQuestionBank(file.text);
     const offset = a.offset ?? 0, limit = a.limit ?? 10;
     const questions = parsed.questions.slice(offset, offset + limit);
@@ -107,7 +107,7 @@ export function registerPracticeActions(service: PluginService, resolveMaterial:
 }
 export function registerReviewPresentation(service: PluginService, resolveMaterial: (args: Record<string, any>, c: PluginActionContext) => string) {
   const { store } = service, records = new CloudRecords(store), resolveRow = practiceRowResolver(service, resolveMaterial);
-  service.register({ id: 'review.present', capability: 'learning', access: 'write', trustedOnly: true, schema: object({ materialId: material, questionId: { type: 'string', minLength: 1, maxLength: 256 }, clientNonce: { type: 'string', minLength: 1, maxLength: 100 } }), run: (a, c) => {
+  service.register({ id: 'review.present', capability: 'learning', access: 'write', trustedOnly: true, schema: object({ materialId: material, questionId: { type: 'string', minLength: 1, maxLength: 256 }, clientNonce: { type: 'string', minLength: 1, maxLength: 100 } }), run: async (a, c) => {
     const id = resolveMaterial(a, c), operation = `review:${crypto.createHash('sha256').update(JSON.stringify([c.owner, c.plugin.id, c.instance.id, a.clientNonce])).digest('hex')}`;
     const previous = store.db.prepare('SELECT row_id FROM plugin_practice_submissions WHERE id=? AND owner_id=?').get(operation, c.owner) as { row_id: number } | undefined;
     if (previous) {
@@ -115,7 +115,7 @@ export function registerReviewPresentation(service: PluginService, resolveMateri
       if (row.videoId !== id || row.quiz.reviewQuestionId !== a.questionId) throw new Error('plugin_nonce_conflict');
       return { rowId: row.id };
     }
-    const notebook = readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, 'wrongbook.md', service.learningOptions.resources);
+    const notebook = await readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, 'wrongbook.md', service.learningOptions.resources);
     const question = parseWrongbook(notebook.text).find(q => q.id === a.questionId && q.source.courseId === id);
     if (!question) throw new Error('plugin_review_question_not_found');
     const rowId = newRecordId(), sessionId = newRecordId(), now = Date.now();

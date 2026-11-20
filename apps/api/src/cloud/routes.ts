@@ -13,6 +13,7 @@ import { ModelFailure } from '../agent/model-client.js';
 import { createModelGateway } from '../agent/model-gateway-factory.js';
 import { ModelGatewayFailure } from '../agent/model-errors.js';
 import { gatewayDisabledPurposes } from '../agent/model-rollout.js';
+import { config } from '../config.js';
 import { modelUsageReport } from '../agent/model-observations.js';
 import type { WebSearchService } from '../web-search/service.js';
 import { PluginFiles } from '../plugins/files.js';
@@ -65,13 +66,13 @@ export function registerCloudRoutes(app: FastifyInstance, deps: Dependencies) {
     return user;
   };
   app.addHook('onListen', async () => {
-    if (process.env.CLOUD_WORKER_DISABLED === '1' || deps.canStart?.() === false) return;
+    if (config().cloudWorkerDisabled || deps.canStart?.() === false) return;
     const address = app.server.address();
     if (address && typeof address === 'object') runner.start(`http://127.0.0.1:${address.port}`);
   });
 
   app.get('/api/v1/cloud/status', async () => ({ cloud: true, maxFileBytes: deps.maxFileBytes,
-    passkeyConfigured: Boolean(process.env.PUBLIC_ORIGIN && process.env.WEBAUTHN_RP_ID), singleUser: true }));
+    passkeyConfigured: Boolean(config().publicOrigin && config().webauthnRpId), singleUser: true }));
   app.get('/api/v1/cloud/config', async (request, reply) => {
     const user = authorize(request, reply); if (!user) return;
     return configuration.get(user.id);

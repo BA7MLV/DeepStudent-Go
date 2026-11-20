@@ -52,36 +52,12 @@ import { registerChatAgentRoutes } from './routes/agents.js';
 import { registerThreadRoutes } from './routes/threads.js';
 import { registerFileRoutes } from './routes/files.js';
 import { registerConversationRoutes } from './routes/conversation.js';
-
-const defaultDataDir = process.env.DATA_DIR ?? path.resolve(process.cwd(), 'data');
+import { config, getConfig, initializeConfig } from './config.js';
+import { releaseHeld } from './deployment-gate.js';
+import { loadOrCreateBootstrapSecretSync, removeBootstrapSecretSync, type BootstrapSecret } from './bootstrap-secret.js';
+import { clearDirectory, loadOrCreateBootstrapSecret, removeBootstrapSecret, replaceBootstrapSecret } from './bootstrap-secret.js';
 const messageKinds = new Set(['text', 'progress', 'attachment', 'widget', 'question', 'approval']);
 
-function loadOrCreateSecret(secretFile: string): { secret: string; createdAt: number } {
-  fs.mkdirSync(path.dirname(secretFile), { recursive: true });
-  if (fs.existsSync(secretFile)) return { secret: fs.readFileSync(secretFile, 'utf8').trim(), createdAt: fs.statSync(secretFile).birthtimeMs || fs.statSync(secretFile).ctimeMs };
-  const secret = crypto.randomBytes(32).toString('base64url');
-  try { fs.writeFileSync(secretFile, `${secret}\n`, { mode: 0o600, flag: 'wx' }); }
-  catch (error: any) {
-    if (error?.code !== 'EEXIST') throw error;
-    const stat = fs.statSync(secretFile);
-    return { secret: fs.readFileSync(secretFile, 'utf8').trim(), createdAt: stat.birthtimeMs || stat.ctimeMs };
-  }
-  fs.chmodSync(secretFile, 0o600);
-  return { secret, createdAt: Date.now() };
-}
-function replaceBootstrapSecret(secretFile: string): { secret: string; createdAt: number } {
-  fs.mkdirSync(path.dirname(secretFile), { recursive: true, mode: 0o700 });
-  const secret = crypto.randomBytes(32).toString('base64url');
-  const temporary = `${secretFile}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`;
-  fs.writeFileSync(temporary, `${secret}\n`, { mode: 0o600, flag: 'wx' });
-  fs.renameSync(temporary, secretFile);
-  fs.chmodSync(secretFile, 0o600);
-  return { secret, createdAt: Date.now() };
-}
-function clearDirectory(directory: string) {
-  fs.mkdirSync(directory, { recursive: true });
-  for (const entry of fs.readdirSync(directory)) fs.rmSync(path.join(directory, entry), { recursive: true, force: true });
-}
 const hashToken = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 const now = () => new Date().toISOString();
 const parseCookies = (header = '') => {
@@ -99,20 +75,23 @@ const publicUser = (user: { id: string; name?: string }) => ({ id: user.id, name
 /** 路由按域拆到 src/routes/;本文件只保留装配、中间件、会话/来源校验与生命周期。
  * 路由注册顺序与旧版逐条对应(Fastify 的 notFoundHandler 与 hook 顺序对行为有影响)。 */
 export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sandbox?: SandboxExecutor; sandboxCleanup?: SandboxCleanup } = {}) {
-  const secretFile = process.env.BOOTSTRAP_SECRET_FILE ?? path.join(defaultDataDir, 'config/bootstrap-secret');
-  const releaseId = process.env.API_RELEASE_ID;
-  const releaseToken = process.env.API_RELEASE_TOKEN ?? '';
-  if (releaseId && (!/^[a-f0-9-]{36}$/.test(releaseId) || !/^[a-f0-9]{64}$/.test(releaseToken))) throw new Error('invalid_release_control');
+  // 配置在装配入口一次性校验并快照;后面的模块只经 config() 读取,不再碰 env。
+  // 同一进程重建 server(测试)时重新校验,所以旧进程里改过的 env 依然生效。
+  initializeConfig();
+  const settings = config();
+  const secretFile = settings.bootstrapSecretFile;
+  const releaseId = settings.apiReleaseId;
+  const releaseToken = settings.apiReleaseToken;
   const activationFile = releaseId ? path.join(path.dirname(secretFile), `release-activated-${releaseId}`) : null;
-  let held = Boolean(releaseId && (!fs.existsSync(activationFile!) || fs.readFileSync(activationFile!, 'utf8') !== hashToken(releaseToken)));
-  const dbPath = options.dbPath ?? process.env.DB_PATH ?? path.join(defaultDataDir, 'db/wangke.sqlite');
-  const bootstrapTtlMs = Number(process.env.BOOTSTRAP_TTL_MS ?? 24 * 60 * 60 * 1000);
-  const sessionTtlMs = Number(process.env.SESSION_TTL_MS ?? 30 * 24 * 60 * 60 * 1000);
-  const filesDir = process.env.FILES_DIR ?? path.join(defaultDataDir, 'files');
-  const readStorageUsage = storageUsageReader({ dataDir: defaultDataDir, dbPath, filesDir, configDir: path.dirname(secretFile) });
-  const configuredMaxFileBytes = Number(process.env.MAX_FILE_BYTES ?? 512 * 1024 * 1024);
-  const maxFileBytes = Number.isFinite(configuredMaxFileBytes) ? Math.max(1, Math.min(512 * 1024 * 1024, Math.floor(configuredMaxFileBytes))) : 512 * 1024 * 1024;
-  fs.mkdirSync(filesDir, { recursive: true });
+  // 发布门禁必须在任何监听/worker 之前就确定;这里是启动期的一次只读探测。
+  let held = releaseHeld({ releaseId, releaseToken, activationFile, hashToken });
+  const dbPath = options.dbPath ?? settings.dbPath;
+  const bootstrapTtlMs = settings.bootstrapTtlMs;
+  const sessionTtlMs = settings.sessionTtlMs;
+  const filesDir = settings.filesDir;
+  const readStorageUsage = storageUsageReader({ dataDir: settings.dataDir, dbPath, filesDir, configDir: path.dirname(secretFile) });
+  const maxFileBytes = settings.maxFileBytes;
+  fs.mkdirSync(filesDir, { recursive: true }); // 启动期:数据库与系统文件目录随后立刻要用
   const store = new DatabaseStore(dbPath, path.join(filesDir, 'system-files'));
   const messageHistory = new BotMessageHistory(store);
   const systemMaterials = new SystemMaterials(store);
@@ -142,9 +121,21 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     }, options.fetch),
   }, filesDir);
   // Never recreate a bootstrap secret after the database has been initialized.
-  let bootstrap = repo.isInitialized() ? { secret: '', createdAt: 0 } : loadOrCreateSecret(secretFile);
-  if (repo.isInitialized()) fs.rmSync(secretFile, { force: true });
-  const app = Fastify({ logger: process.env.NODE_ENV !== 'test', bodyLimit: 16 * 1024 * 1024 });
+  // 口令文件只在装配期确定。装配期启动的这次读写在首个请求之前完成,属于允许的
+  // 同步 I/O;已初始化则同一时机删除残留文件(与旧实现一致)。
+  const initialized = repo.isInitialized();
+  // 启动期例外(与旧实现同一时机):口令必须在处理第一个请求前就绪,否则引导
+  // 接口会拿空口令比较。这里同步建/读一次,之后所有请求都走异步路径。
+  let bootstrap: BootstrapSecret = initialized ? { secret: '', createdAt: 0 } : loadOrCreateBootstrapSecretSync(secretFile);
+  if (initialized) removeBootstrapSecretSync(secretFile);
+  let sealing: Promise<BootstrapSecret> | undefined;
+  /** 后续只有「上一行遇到并发启动的 EEXIST 才落盘」这种情况需要补一次。 */
+  const ensureBootstrapSealed = () => {
+    if (initialized || bootstrap.secret) return Promise.resolve(bootstrap);
+    sealing ??= loadOrCreateBootstrapSecret(secretFile).then(value => (bootstrap = value)).catch(error => { sealing = undefined; throw error; });
+    return sealing;
+  };
+  const app = Fastify({ logger: getConfig().nodeEnv !== 'test', bodyLimit: 16 * 1024 * 1024 });
   let draining = false;
   let drainTask: Promise<boolean> | undefined;
   const writes = new Set<Promise<void>>();
@@ -173,23 +164,22 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
   app.addContentTypeParser(/^multipart\/form-data/, (_request, stream, done) => done(null, stream));
   const startWorkers = () => { runner.start(); memoryWorker.start(); gateway.start(); boardScheduler.start(); };
   if (!held) startWorkers();
-  const secureCookie = (process.env.PUBLIC_ORIGIN ?? '').startsWith('https://');
-  const expectedOrigin = process.env.PUBLIC_ORIGIN;
-  const rpID = process.env.WEBAUTHN_RP_ID;
-  const rpName = process.env.WEBAUTHN_RP_NAME;
+  const secureCookie = (settings.publicOrigin ?? '').startsWith('https://');
+  const expectedOrigin = settings.publicOrigin;
+  const rpID = settings.webauthnRpId;
+  const rpName = settings.webauthnRpName;
   /**
    * 前后端分离：浏览器前端在别的域名时，在 CORS_ORIGINS 里列出它（逗号分隔，完整 origin）。
    * 原生壳层（iOS / macOS）不发 Origin，也不需要 CORS，它们用 Bearer token。
    */
-  const corsOrigins = new Set((process.env.CORS_ORIGINS ?? '').split(',').map((value) => value.trim().replace(/\/+$/, '')).filter(Boolean));
+  const corsOrigins = new Set(settings.corsOrigins);
   /** 跨站点（不同注册域）部署时 Cookie 需要 SameSite=None（必须同时 HTTPS）；同站子域名用默认的 Lax 即可。 */
   const sameSite = (() => {
-    const value = (process.env.COOKIE_SAMESITE ?? 'lax').toLowerCase();
-    if (value === 'none' && secureCookie) return 'None';
-    if (value === 'strict') return 'Strict';
+    if (settings.cookieSameSite === 'none' && secureCookie) return 'None';
+    if (settings.cookieSameSite === 'strict') return 'Strict';
     return 'Lax';
   })();
-  const tokenTtlMs = Number(process.env.TOKEN_TTL_MS ?? 90 * 24 * 60 * 60 * 1000);
+  const tokenTtlMs = settings.tokenTtlMs;
 
   app.register(helmet, {
     contentSecurityPolicy: false,
@@ -241,7 +231,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     if (request.headers.authorization?.startsWith('Bearer ') && !request.headers.cookie?.includes('wangke_session=')) return true;
     if (corsOrigins.has(origin)) return true;
     const allowed = expectedOrigin ?? `${request.protocol}://${request.headers.host}`;
-    if (origin !== allowed && process.env.ALLOW_INSECURE_CSRF !== 'true') { reply.code(403).send({ error: 'origin_not_allowed' }); return false; }
+    if (origin !== allowed && !settings.allowInsecureCsrf) { reply.code(403).send({ error: 'origin_not_allowed' }); return false; }
     return true;
   }
   function issueSession(userId: string, reply: FastifyReply) {
@@ -286,7 +276,7 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     recoverResourceCommands(resources);
     startWorkers();
     const address = app.server.address();
-    if (process.env.CLOUD_WORKER_DISABLED !== '1' && address && typeof address === 'object') cloudRunner.start(`http://127.0.0.1:${address.port}`);
+    if (!settings.cloudWorkerDisabled && address && typeof address === 'object') cloudRunner.start(`http://127.0.0.1:${address.port}`);
   } });
   app.addHook('onRequest', async (request, reply) => {
     if (request.url.split('?')[0] === '/api/v1/files' && request.method === 'POST') {
@@ -297,14 +287,14 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
     }
     if (request.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
   });
-  registerAuthRoutes(app, { store, repo, secretFile, bootstrap, bootstrapTtlMs, sessionTtlMs, tokenTtlMs, secureCookie, sameSite, expectedOrigin, rpID, rpName, hashToken, issueSession, session, checkOrigin, requireAuth, bad, publicUser,
+  registerAuthRoutes(app, { store, repo, secretFile, bootstrap: () => bootstrap, ensureBootstrapSealed, bootstrapTtlMs, sessionTtlMs, tokenTtlMs, secureCookie, sameSite, expectedOrigin, rpID, rpName, hashToken, issueSession, session, checkOrigin, requireAuth, bad, publicUser,
     resetOwner: async () => {
       await cloudRunner.reset();
       await runner.reset();
-      clearDirectory(filesDir);
+      await clearDirectory(filesDir);
       store.resetData();
     },
-    replaceBootstrapSecret: () => { bootstrap = replaceBootstrapSecret(secretFile); return bootstrap; },
+    replaceBootstrapSecret: async () => { bootstrap = await replaceBootstrapSecret(secretFile); sealing = undefined; return bootstrap; },
   });
   const { ensureDefaultAgent } = registerChatAgentRoutes(app, { store, projects, requireAuth, checkOrigin, bad });
   registerThreadRoutes(app, { store, projects, botService, runner, requireAuth, checkOrigin, bad, admissionBad, ensureDefaultAgent, messageKinds });
@@ -334,9 +324,9 @@ export function buildServer(options: { dbPath?: string; fetch?: typeof fetch; sa
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const grace = Number(process.env.API_DRAIN_MS ?? 30_000);
-  if (!Number.isFinite(grace) || grace < 0 || grace > 300_000) throw new Error('invalid_API_DRAIN_MS');
+  // buildServer 内部完成校验;这里读到的已是校验过的快照。
   const app = buildServer();
+  const grace = config().apiDrainMs;
   let stopping = false;
   const shutdown = async () => {
     if (stopping) return;
@@ -353,5 +343,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
-  app.listen({ host: process.env.HOST ?? '0.0.0.0', port: Number(process.env.PORT ?? 3000) }).catch((error) => { app.log.error(error); process.exit(1); });
+  app.listen({ host: config().host, port: config().port }).catch((error) => { app.log.error(error); process.exit(1); });
 }

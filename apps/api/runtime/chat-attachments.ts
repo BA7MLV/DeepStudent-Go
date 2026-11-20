@@ -1,7 +1,7 @@
-import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import crypto from 'node:crypto';
 import { MAX_CHAT_ATTACHMENTS, MAX_ATTACHMENT_TEXT, type ChatAttachment } from '@wangke/study-core/chat/attachments';
-import type { ChatMessage } from '@wangke/study-core/model/client';
+import type { ChatMessage, ContentPart } from '@wangke/study-core/model/client';
 import type { TaskContext } from '../src/cloud/execution.js';
 import type { DatabaseStore } from '../src/storage/database.js';
 import { imageReference, ownedImagePath } from '../src/cloud/attachment-images.js';
@@ -43,11 +43,12 @@ export function normalizeChatAttachments(store: DatabaseStore, owner: string, va
   });
 }
 
-/** Model boundary only: never persist the returned expanded messages. */
-export function resolveAttachmentMessages(context: TaskContext, messages: ChatMessage[]): ChatMessage[] {
+/** Model boundary only: never persist the returned expanded messages.
+ * 读附件字节是文件 I/O,整段改为 async;调用点本来就是 await 链。 */
+export async function resolveAttachmentMessages(context: TaskContext, messages: ChatMessage[]): Promise<ChatMessage[]> {
   let total = 0;
   const cache = new Map<string, string>();
-  return messages.map(message => !Array.isArray(message.content) ? message : { ...message, content: message.content.map(part => {
+  const resolvePart = async (part: ContentPart): Promise<ContentPart> => {
     if (part.type !== 'image_url' || !part.image_url.url.startsWith('attachment-file:')) return part;
     const id = part.image_url.url.slice('attachment-file:'.length);
     let url = cache.get(id);
@@ -57,11 +58,20 @@ export function resolveAttachmentMessages(context: TaskContext, messages: ChatMe
       if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.mime_type) || file.size_bytes > 32_000_000) throw new Error('attachment_image_unavailable');
       total += file.size_bytes;
       if (total > 64_000_000) throw new Error('attachment_image_budget_exceeded');
-      const bytes = fs.readFileSync(ownedImagePath(context.filesDir, file.storage_name));
+      // 模型边界上的读:异步读取后再拼 data URL,避免阻塞其他会话。
+      const bytes = await fsp.readFile(ownedImagePath(context.filesDir, file.storage_name));
       if (bytes.length !== file.size_bytes || crypto.createHash('sha256').update(bytes).digest('hex') !== file.sha256) throw new Error('attachment_image_corrupt');
       url = `data:${file.mime_type};base64,${bytes.toString('base64')}`;
       cache.set(id, url);
     }
     return { ...part, image_url: { ...part.image_url, url } };
-  }) });
+  };
+  const result: ChatMessage[] = [];
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) { result.push(message); continue; }
+    const content: ContentPart[] = [];
+    for (const part of message.content) content.push(await resolvePart(part));
+    result.push({ ...message, content });
+  }
+  return result;
 }

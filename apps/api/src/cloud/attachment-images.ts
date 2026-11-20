@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -22,10 +23,11 @@ export function imageReference(store: DatabaseStore, owner: string, id: string) 
     WHERE f.id=? AND f.owner_id=? AND p.owner_id=f.owner_id`).get(id, owner) as { previewServerId: string; width: number; height: number } | undefined;
 }
 
-/** Original bytes are immutable. A deterministic preview ID makes crash/retry safe. */
+/** Original bytes are immutable. A deterministic preview ID makes crash/retry safe.
+ * 整个函数在模型附件解析/历史迁移的请求或执行链上,所有文件读取都走 fs/promises。 */
 export async function ensureImageReference(store: DatabaseStore, directory: string, owner: string, id: string, checkActive = () => {}) {
   const known = imageReference(store, owner, id);
-  if (known) { verifyStoredImage(store, directory, owner, known.previewServerId); return known; }
+  if (known) { await verifyStoredImage(store, directory, owner, known.previewServerId); return known; }
   const file = store.db.prepare('SELECT storage_name,mime_type FROM files WHERE id=? AND owner_id=?').get(id, owner) as { storage_name: string; mime_type: string } | undefined;
   if (!file || !/^image\/(png|jpeg|webp|gif)$/.test(file.mime_type)) throw new Error('attachment_image_not_owned');
   const filename = ownedImagePath(directory, file.storage_name);
@@ -37,19 +39,27 @@ export async function ensureImageReference(store: DatabaseStore, directory: stri
   const bytes = await image.rotate().resize({ width: 640, height: 640, fit: 'inside', withoutEnlargement: true }).webp({ quality: 76 }).toBuffer();
   if (bytes.length > 1_000_000) throw new Error('attachment_preview_too_large');
   const preview = await receiveFile(store, directory, owner, Readable.from(bytes), 'preview.webp', 'image/webp', 1_000_000, bytes.length, checkActive, fileOperationId(owner, id, 'attachment-preview-v1'));
-  verifyStoredImage(store, directory, owner, preview.id);
+  await verifyStoredImage(store, directory, owner, preview.id);
   checkActive();
   store.db.prepare('INSERT OR IGNORE INTO attachment_images VALUES(?,?,?,?)').run(id, preview.id, width, height);
   return imageReference(store, owner, id)!;
 }
 
-function verifyStoredImage(store: DatabaseStore, directory: string, owner: string, id: string) {
+/** 校验已落盘图片与 files 行一致:请求/执行链上的读,因此异步。 */
+export async function verifyStoredImage(store: DatabaseStore, directory: string, owner: string, id: string) {
   const file = store.db.prepare('SELECT storage_name,sha256,size_bytes FROM files WHERE id=? AND owner_id=?').get(id, owner) as { storage_name: string; sha256: string; size_bytes: number } | undefined;
   if (!file || file.size_bytes > 1_000_000) throw new Error('attachment_preview_unavailable');
-  const bytes = fs.readFileSync(ownedImagePath(directory, file.storage_name));
+  const bytes = await fsp.readFile(ownedImagePath(directory, file.storage_name));
   if (bytes.length !== file.size_bytes || crypto.createHash('sha256').update(bytes).digest('hex') !== file.sha256) throw new Error('attachment_preview_corrupt');
 }
 
+/** 读入图片字节并核对 sha(迁移/校验用),返回原始 Buffer。 */
+export async function readOwnedImage(directory: string, storage: string): Promise<Buffer> {
+  return fsp.readFile(ownedImagePath(directory, storage));
+}
+
+/** realpath 是路径收窄的一部分(拦截符号链接逃逸),保留同步形态:它只作用于目录项,
+ * 不读文件内容;其后的内容读取已经异步。 */
 export function ownedImagePath(directory: string, storage: string) {
   const root = fs.realpathSync(directory), filename = fs.realpathSync(path.resolve(root, storage));
   if (path.dirname(filename) !== root) throw new Error('invalid_attachment_path');

@@ -8,6 +8,7 @@ import { inheritedInput, ffmpegInputArgs } from './media-process.js';
 
 ort.env.wasm.numThreads=1;
 ort.env.wasm.proxy=false;
+// 独立子进程入口:模型文件只在启动时读一次,进程随后只做流式解码。
 const session=await ort.InferenceSession.create(fs.readFileSync(new URL(import.meta.resolve('@wangke/study-core/vad/model'))),{executionProviders:['wasm']});
 let h:ort.Tensor=new ort.Tensor('float32',new Float32Array(128),[2,1,64]);
 let c:ort.Tensor=new ort.Tensor('float32',new Float32Array(128),[2,1,64]);

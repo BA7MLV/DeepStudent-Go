@@ -1,8 +1,9 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { inspectDatabase } from '../storage/release.js';
+import { getConfig } from '../config.js';
 
 /** 探活/就绪/发布控制与云存储用量。这些路由刻意不依赖账号会话:
  * 发布控制在 staged 状态下仍必须可达,否则新版本无法自证激活。
@@ -19,7 +20,8 @@ export function registerDeploymentRoutes(app: FastifyInstance, deps: {
   requireAuth: (request: FastifyRequest, reply: FastifyReply) => { id: string } | null;
   readStorageUsage: () => Promise<unknown>;
 }) {
-  app.get('/api/v1/health', async () => ({ status: 'ok', version: process.env.APP_VERSION ?? '0.1.0', cloud: true, auth: ['password', 'token', 'passkey'] }));
+  // 版本号走 getConfig():发布脚本会改写 compose 后在同一进程探测新版本,必须读当前值。
+  app.get('/api/v1/health', async () => ({ status: 'ok', version: getConfig().appVersion, cloud: true, auth: ['password', 'token', 'passkey'] }));
   app.get('/api/v1/cloud/storage', async (request, reply) => {
     if (!deps.requireAuth(request, reply)) return;
     return deps.readStorageUsage();
@@ -36,28 +38,40 @@ export function registerDeploymentRoutes(app: FastifyInstance, deps: {
     }
     return true;
   };
-  const deploymentDatabase = () => {
-    const metadataFile = [new URL('../../../database-identity.json', import.meta.url), new URL('../dist/database-identity.json', import.meta.url)].find(url => fs.existsSync(url));
-    if (!metadataFile) throw new Error('database_metadata_missing');
-    const database = JSON.parse(fs.readFileSync(metadataFile, 'utf8'));
+  /** 发布元数据文件是构建产物;每次请求都要读,因此走异步 I/O。 */
+  const deploymentDatabase = async () => {
+    // 两种部署布局下的元数据位置:
+    // - tsx 直跑 src/routes/x.ts:apps/api/database-identity.json(路径是相对 URL 字符串拼接,不经反向路径合并)
+    // - 构建产物 dist/apps/api/src/routes/x.js:apps/api/dist/database-identity.json
+    const source = import.meta.url.replace(/src\/routes\/[^/]+$/, 'database-identity.json');
+    const compiled = import.meta.url.replace(/dist\/apps\/api\/src\/routes\/[^/]+$/, 'dist/database-identity.json');
+    const candidates = [...new Set([new URL(source), new URL(compiled)])];
+    let text: string | undefined;
+    for (const url of candidates) {
+      try { text = await fsp.readFile(url, 'utf8'); break; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    if (text === undefined) throw new Error('database_metadata_missing');
+    const database = JSON.parse(text);
     if (inspectDatabase(deps.db).schemaHash !== database.schemaHash) throw new Error('database_schema_identity_mismatch');
     return database;
   };
   app.get('/api/v1/deployment/status', async (request, reply) => {
     if (!deploymentAuthorized(request, reply)) return;
-    return { releaseId: deps.releaseId, held: deps.held(), draining: deps.draining(), database: deploymentDatabase() };
+    return { releaseId: deps.releaseId, held: deps.held(), draining: deps.draining(), database: await deploymentDatabase() };
   });
   app.post('/api/v1/deployment/activate', async (request, reply) => {
     if (!deploymentAuthorized(request, reply)) return;
     if (deps.draining()) return reply.code(409).send({ error: 'api_draining' });
-    deploymentDatabase();
+    await deploymentDatabase();
     if (deps.held()) {
       // Durable before admitting any request or scheduler. A restarted container
       // cannot silently fall back to staged after a successful activation.
-      const fd = fs.openSync(deps.activationFile!, 'w', 0o600);
-      try { fs.writeFileSync(fd, hashToken(deps.releaseToken)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-      const directory = fs.openSync(path.dirname(deps.activationFile!), 'r');
-      try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+      // 异步等价物:先 writeFile(默认会关闭 fd),再 fsync 文件与目录。
+      const handle = await fsp.open(deps.activationFile!, 'w', 0o600);
+      try { await handle.writeFile(hashToken(deps.releaseToken)); await handle.sync(); } finally { await handle.close(); }
+      const directory = await fsp.open(path.dirname(deps.activationFile!), 'r');
+      try { await directory.sync(); } finally { await directory.close(); }
       deps.activate();
     }
     return { releaseId: deps.releaseId, activated: true };

@@ -6,6 +6,7 @@ import { grayPixels, dominantColor, probeStats } from '@wangke/study-core/media/
 import { mdCoverText, readMdText } from '@wangke/study-core/materials/markdown';
 const mode=process.argv[2];
 if(fs.fstatSync(3).size>32*1024*1024)throw new Error('image_input_limit');
+// 独立子进程入口:只读一次继承的描述符,无人与之并发。
 const bytes=fs.readFileSync(3);
 if(mode==='text'||mode==='markdown') {
   const canvas=createCanvas(480,270);

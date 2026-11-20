@@ -60,12 +60,12 @@ export function readNodeDocument(context: TaskContext, args: Record<string, unkn
   return JSON.stringify(notebookRead(files.read(context.owner, path), args));
 }
 
-export function readRawCourse(context: TaskContext, args: Record<string, unknown>, videoId: string): string {
+export async function readRawCourse(context: TaskContext, args: Record<string, unknown>, videoId: string): Promise<string> {
   context.checkActive();
   if (context.configuration.taskPolicy(context.owner, context.task.id).read !== 'allow') throw new Error('native_document_read_permission_required');
   const resources = context.pluginService?.learningOptions.resources;
   if (!resources) throw new Error('resource_service_unavailable');
-  const { text, revision } = readLearningMarkdown(context.store, context.filesDir, context.owner, videoId, resources);
+  const { text, revision } = await readLearningMarkdown(context.store, context.filesDir, context.owner, videoId, resources);
   // Same bounded, revision-pinned reader used by system tools. Course edits use
   // exact bytes captured by the server, not a model-supplied revision grant.
   return JSON.stringify(notebookRead({ path: `/courses/${encodeURIComponent(videoId)}/material`, name: videoId, content: text, revision: Number.parseInt(revision.slice(0, 12), 16), updatedAt: null }, args));

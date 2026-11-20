@@ -292,6 +292,7 @@ export class ResourceFiles {
         let installed = false;
         if (entry?.kind === 'file') {
           const file = this.projects.files.open(receipt.project_id, receipt.path);
+          // 同 attachments.ts:按已打开 fd 校验字节,换异步会使 fd 位置漂移。
           try { installed = crypto.createHash('sha256').update(fs.readFileSync(file.fd)).digest('hex') === source.sha256; }
           finally { fs.closeSync(file.fd); }
         }

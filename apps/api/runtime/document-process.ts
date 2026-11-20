@@ -7,6 +7,7 @@ import { extractMdUnits, readMdText } from '@wangke/study-core/materials/markdow
 async function parse() {
 const stat = fs.fstatSync(3);
 if (!stat.isFile() || stat.size > 128 * 1024 * 1024) throw new Error('document_input_limit');
+// 独立子进程的入口:顺序读一次继承的只读描述符,进程内没有并发请求可阻塞。
 const bytes = fs.readFileSync(3), format = process.argv[2];
 let units;
 if (format === 'html') {

@@ -19,11 +19,14 @@ import { ProjectRepository } from '../src/projects/repository.js';
 import { ResourceFiles } from '../src/projects/resources.js';
 import { journaledResourceCommand } from '../src/realtime/resource-workflows.js';
 import { webBody } from '../src/storage/row-schema.js';
+import { config, getConfig } from '../src/config.js';
 
 /** Local descriptor inputs only. No URL, cookie, user argument or shell reaches
  * FFmpeg. MP4 is streamed to disk with an output cap, not accumulated in RAM. */
 async function remux(context: TaskContext, video: string, audio: string | null, output: string, limit: number, signal: AbortSignal) {
-  const fds = [fs.openSync(video, 'r'), ...(audio ? [fs.openSync(audio, 'r')] : [])];
+  // 异步打开:这是 bot 执行链(下载→合并),同步 open 会阻塞整个事件循环。
+  const handles = [await fsp.open(video, 'r'), ...(audio ? [await fsp.open(audio, 'r')] : [])];
+  const fds = handles.map(handle => handle.fd);
   const fdPath = (n: number) => `${process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd'}/${n}`;
   const args = ['-nostdin', '-v', 'error', '-max_alloc', '134217728', '-threads', '1', '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov', '-i', fdPath(3),
     ...(audio ? ['-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov', '-i', fdPath(4)] : []),
@@ -36,7 +39,7 @@ async function remux(context: TaskContext, video: string, audio: string | null, 
   signal.addEventListener('abort', stop, { once: true });
   try {
     signal.throwIfAborted(); context.checkActive();
-    child = spawn(binary, [...prefix, ...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe', ...fds], env: { PATH: process.env.PATH, LANG: 'C.UTF-8', HOME: '/nonexistent' } });
+    child = spawn(binary, [...prefix, ...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe', ...fds], env: { PATH: getConfig().inheritedPath, LANG: 'C.UTF-8', HOME: '/nonexistent' } });
     const finished = new Promise<void>((resolve, reject) => {
       child!.on('error', reject);
       child!.on('close', code => code === 0 ? resolve() : reject(new Error('服务器视频合并失败或超时。')));
@@ -50,7 +53,7 @@ async function remux(context: TaskContext, video: string, audio: string | null, 
     await Promise.all([writing, finished]);
     signal.throwIfAborted(); context.checkActive();
     if (!size) throw new Error('服务器生成了空视频。');
-  } finally { clearTimeout(timer); signal.removeEventListener('abort', stop); stop(); fds.forEach(fd => fs.closeSync(fd)); }
+  } finally { clearTimeout(timer); signal.removeEventListener('abort', stop); stop(); await Promise.allSettled(handles.map(handle => handle.close())); }
 }
 
 export async function serverBilibiliImport(context: TaskContext) {
@@ -63,8 +66,7 @@ export async function serverBilibiliImport(context: TaskContext) {
   const resources = new ResourceFiles(new ProjectRepository(context.store, path.join(context.filesDir, 'projects')), context.filesDir);
   resources.migrate(context.owner);
   const destination = resources.videoImportDestination(context.owner, input.folderId);
-  const configured = Number(process.env.MAX_FILE_BYTES ?? 512 * 1024 * 1024);
-  const limit = Number.isFinite(configured) ? Math.max(1, Math.min(512 * 1024 * 1024, Math.floor(configured))) : 512 * 1024 * 1024;
+  const limit = config().maxFileBytes;
   const staging = path.join(context.filesDir, '.bilibili-imports');
   await fsp.mkdir(staging, { recursive: true, mode: 0o700 });
   const work = await fsp.mkdtemp(path.join(staging, `${context.task.id}-`));

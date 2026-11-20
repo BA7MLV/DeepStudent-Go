@@ -13,18 +13,21 @@ export function registerPracticeExtraction(service: PluginService, resolveMateri
   const { store } = service, records = new CloudRecords(store);
   service.register({ id: 'practice.extract', capability: 'learning', access: 'write', trustedOnly: true,
     schema: { type: 'object', properties: { materialId: { type: 'string', minLength: 1, maxLength: 256 }, clientNonce: { type: 'string', minLength: 1, maxLength: 100 } }, required: ['materialId', 'clientNonce'], additionalProperties: false },
-    run: (a, c) => {
+    // 读取题库 Markdown 需要文件 I/O:整段改为 async,事务内只保留同步 SQL。
+    run: async (a, c) => {
       const id = resolveMaterial(a, c), material = records.get(c.owner, 'videos', id)!;
       if (material.kind !== 'material') throw new Error('plugin_document_required');
       const request = JSON.stringify({ materialId: id });
       const nonce = `plugin:${crypto.createHash('sha256').update(JSON.stringify([c.plugin.id, c.instance.id, 'practice.extract', a.clientNonce])).digest('hex')}`;
+      // 只读校验放在事务外:事务体内不允许 await,否则会把别的写操作也拉进同一事务窗口。
+      const bankId = `__course_questions__${encodeURIComponent(id)}`;
+      const bankRevision = records.get(c.owner, 'videos', bankId)
+        ? (await readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, bankId, service.learningOptions.resources)).revision
+        : null;
       return store.transaction(() => {
         const previous = expectRow<CloudTaskRow & { request: string }>(cloudTaskWithRequestSchema, store.db.prepare('SELECT t.*,l.request FROM cloud_tasks t JOIN plugin_learning_tasks l ON l.task_id=t.id WHERE t.owner_id=? AND t.nonce=?').get(c.owner, nonce), 'cloud_task_row_invalid');
         if (previous) { if (previous.request !== request) throw new Error('plugin_nonce_conflict'); return taskDto(previous); }
         if (store.db.prepare("SELECT 1 FROM plugin_learning_tasks l JOIN cloud_tasks t ON t.id=l.task_id WHERE l.owner_id=? AND l.material_id=? AND l.action_id='practice.extract' AND t.status IN ('queued','running','waiting_user')").get(c.owner, id)) throw new Error('plugin_generation_conflict');
-        let bankRevision: string | null = null;
-        const bankId = `__course_questions__${encodeURIComponent(id)}`;
-        if (records.get(c.owner, 'videos', bankId)) bankRevision = readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, bankId, service.learningOptions.resources).revision;
         const taskId = crypto.randomUUID(), sessionId = newRecordId(), now = new Date().toISOString();
         const text = '请按「原题题库」技能，逐页提取这份资料的原题，保留题号、题干、选项和原图引用，核对原文答案及解析，并用 edit 保存到 /courses/current/questions.md。已有题库就 read 最新版后继续，不覆盖用户修改。缺答案和无法辨读的题明确标注；预算不足先保存已完成部分并说明尚未覆盖范围，不要重新编题。保存后给我题库链接，说明实际覆盖范围，不要把任务执行结束说成全文已提取。';
         const input = { videoId: id, sessionId, videoName: material.name, materialFormat: material.materialFormat, materialKind: material.materialFormat === 'pdf' ? 'page' : 'para', text, pluginExtraction: true, bankRevision };
@@ -39,7 +42,7 @@ export function registerPracticeExtraction(service: PluginService, resolveMateri
 
 /** Durable completion projection. Only an actual changed, valid Markdown bank
  * earns an artifact receipt; a model's prose or a completed run is not evidence. */
-export function reconcilePracticeExtractions(service: PluginService) {
+export async function reconcilePracticeExtractions(service: PluginService) {
   const { store } = service;
   const rows = store.db.prepare(`SELECT l.*,t.input,t.status,t.progress FROM plugin_learning_tasks l JOIN cloud_tasks t ON t.id=l.task_id
     LEFT JOIN plugin_learning_receipts r ON r.task_id=l.task_id WHERE l.action_id='practice.extract' AND l.delivered_at IS NULL AND r.task_id IS NULL
@@ -48,7 +51,7 @@ export function reconcilePracticeExtractions(service: PluginService) {
     try {
       if (JSON.parse(row.progress ?? '{}')?.questionBankSaved !== true) throw new Error('plugin_extraction_save_unconfirmed');
       const bankId = `__course_questions__${encodeURIComponent(row.material_id)}`;
-      const file = readLearningMarkdown(store, service.learningOptions.filesDir, row.owner_id, bankId, service.learningOptions.resources);
+      const file = await readLearningMarkdown(store, service.learningOptions.filesDir, row.owner_id, bankId, service.learningOptions.resources);
       if (file.revision === JSON.parse(row.input).bankRevision) throw new Error('plugin_extraction_no_new_bank');
       const bank = parseQuestionBank(file.text);
       const ownsSource = (q: typeof bank.questions[number]): boolean => q.source?.courseId === row.material_id && (!q.parts || q.parts.every(ownsSource));

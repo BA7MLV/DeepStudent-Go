@@ -45,8 +45,10 @@ function references(directory: string) {
     if (!stat) return;
     if (stat.isSymbolicLink()) throw new Error('invalid_skill_reference');
     if (stat.isDirectory()) { for (const name of fs.readdirSync(filename).sort()) if (!name.startsWith('.')) visit(`${relative}/${name}`); }
+    // 内置 references 同样只在启动期装载一次。
     else if (stat.isFile() && referencePath(relative) && /\.(md|markdown|txt|csv|json|ya?ml)$/i.test(relative)) {
       if (stat.size > 2 * 1024 * 1024) throw new Error('skill_package_too_large');
+      // 内置技能包在首次同步(syncBuiltins)时整体装载并缓存,属启动期一次性读取。
       result.set(relative, fs.readFileSync(filename, 'utf8'));
     }
   };
@@ -56,6 +58,7 @@ function references(directory: string) {
 let bundled: Array<{ slug: string; skill: SkillFile; text: string; refs: Map<string, string> }> | undefined;
 function builtins() {
   return bundled ??= builtinSlugs.map(slug => {
+    // builtins() 缓存已装载的包;首次调用发生在启动期的同步迁移里。
     const directory = path.join(builtinRoot, slug), text = fs.readFileSync(path.join(directory, 'SKILL.md'), 'utf8');
     return { slug, text, skill: parseSkillMarkdown('SKILL.md', text), refs: references(directory) };
   });

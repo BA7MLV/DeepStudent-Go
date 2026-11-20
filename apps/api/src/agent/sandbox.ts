@@ -1,4 +1,17 @@
 import { agentHttpInit } from './http.js';
+import { getConfig } from '../config.js';
+
+/** broker 地址与 token 走惰性读取:测试会在用例内临时起停 broker 并改写这两项,
+ * 启动快照会把第一次的值永久钉死。 */
+function broker() {
+  const settings = getConfig();
+  return { url: settings.sandboxUrl, token: settings.sandboxToken };
+}
+
+export function sandboxConfigured(): boolean {
+  const { url, token } = broker();
+  return Boolean(url && token);
+}
 
 export type SandboxRequest = { owner: string; threadId: string; projectId?: string; executionId: string; command: string; network?: boolean; timeoutSeconds?: number; systemWrite?: boolean };
 export function shellTimeoutSeconds(value?: number) {
@@ -28,7 +41,7 @@ export type SandboxFileReader = (request: SandboxFileRequest, signal: AbortSigna
 
 /** Binary transfer is independent of shell stdout (which is deliberately truncated). */
 export const readSandboxFile: SandboxFileReader = async (request, signal) => {
-  const url = process.env.SANDBOX_URL, token = process.env.SANDBOX_TOKEN;
+  const { url, token } = broker();
   if (!url || !token) throw new Error('sandbox_unavailable');
   const response = await fetch(`${url}/files/read`, {
     method: 'POST', signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
@@ -58,8 +71,7 @@ export const readSandboxFile: SandboxFileReader = async (request, signal) => {
 // A disconnected execute request is not proof that its container has exited.
 // The broker acknowledges cancellation only after removing the container.
 export const cancelSandbox: SandboxCleanup = async executionId => {
-  const url = process.env.SANDBOX_URL;
-  const token = process.env.SANDBOX_TOKEN;
+  const { url, token } = broker();
   if (!url || !token) throw new Error('sandbox_not_configured');
   const response = await fetch(`${url}/cancel`, {
     method: 'POST', signal: AbortSignal.timeout(30_000),
@@ -72,8 +84,7 @@ export const cancelSandbox: SandboxCleanup = async executionId => {
 // Only the broker has Docker access. Neither the API nor model commands get its socket.
 export const executeSandbox: SandboxExecutor = async (request, signal, output) => {
   const timeoutMs = shellTimeoutSeconds(request.timeoutSeconds) * 1000 + 30_000;
-  const url = process.env.SANDBOX_URL;
-  const token = process.env.SANDBOX_TOKEN;
+  const { url, token } = broker();
   if (!url || !token) throw new SandboxFailure('sandbox_not_configured');
   const deadline = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
   const response = await fetch(`${url}/execute`, agentHttpInit({

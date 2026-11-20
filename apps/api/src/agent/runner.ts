@@ -30,6 +30,7 @@ import { prepareAndRequest } from './runner-round.js';
 import { settleRunFailure } from './runner-failure.js';
 import { runStudyTool } from './runner-study.js';
 import { now, queuedRunRows, type Run, type RunnerOptions } from './runner-state.js';
+import { config as startupConfig, getConfig } from '../config.js';
 
 /** 工具 schema、提示词片段、上下文组装、工具分发、持久化与沙箱执行已拆到同目录
  * runner-*.ts;本类保留调度编排(认领/退避/恢复/排空)并作为对外的唯一门面,
@@ -167,7 +168,8 @@ export class BotRunner {
       // Cleanup yields to shutdown: never claim a run after admission was closed.
       if (this.stopped || this.quiescing) return;
       this.syncChildren();
-      const concurrency = Math.max(1, Math.min(8, Number(process.env.BOT_CONCURRENCY) || 1));
+      // 并发是测试用例级开关(见 config.ts 惰性清单),必须每次调度重读。
+      const concurrency = getConfig().botConcurrency;
       // 认领前提是这些列存在;缺列即库结构漂移,直接失败而不是跑一个半截 run。
       const rows = queuedRunRows(this.store.db.prepare("SELECT * FROM runs WHERE mode='bot' AND status='queued' AND (wake_at IS NULL OR wake_at<=?) ORDER BY created_at").all(now()));
       for (const run of rows) {
@@ -271,7 +273,7 @@ export class BotRunner {
       signal = AbortSignal.any([signal, ...(timeLimit ? [timeLimit] : []), lifecycle.signal]);
       checkActive();
       let selected = gateway.target({ owner, purpose: 'bot', frozenModel });
-      const maxSteps = config?.policy.maxSteps ?? Math.max(1, Math.min(1000, Number(process.env.BOT_MAX_STEPS) || 100));
+      const maxSteps = config?.policy.maxSteps ?? startupConfig().botMaxSteps;
       const modelKey = JSON.stringify([selected.providerId, selected.protocol, selected.model, config?.modelRevision]);
       this.store.transaction(() => {
         checkActive();

@@ -12,6 +12,7 @@ import { ProjectRepository } from '../projects/repository.js';
 import { CloudRecords } from '../cloud/records.js';
 import { RecordProjections } from '../realtime/record-projections.js';
 import { ProjectError } from '../projects/files.js';
+import { config } from '../config.js';
 
 function unavailableScope(error: unknown): boolean {
   return error instanceof Error && error.message === 'plugin_material_not_found'
@@ -24,7 +25,7 @@ export class PluginFiles {
   readonly projects: ProjectRepository;
   nativeAvailable?: (id: string) => boolean;
   nativePackages?: () => PluginPackage[];
-  constructor(readonly store: DatabaseStore, projects?: ProjectRepository, filesDir = process.env.FILES_DIR ?? path.resolve(process.env.DATA_DIR ?? 'data', 'files')) {
+  constructor(readonly store: DatabaseStore, projects?: ProjectRepository, filesDir = config().filesDir) {
     this.board = new BoardFiles(store);
     this.projects = projects ?? new ProjectRepository(store, path.join(filesDir, 'projects'));
   }

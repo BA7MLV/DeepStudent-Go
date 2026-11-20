@@ -9,6 +9,7 @@ import { migrateMessageSync } from './message-sync-migration.js';
 import { migrateClientRuntime } from '../realtime/migration.js';
 import { ensureLearningResults } from '../plugins/learning-results.js';
 import { sqlIdentifier } from './sql.js';
+import { config } from '../config.js';
 import { migrateFileIntents } from './file-intents.js';
 import { migrateTaskModels } from './task-model.js';
 import { attachmentImageSchema } from '../cloud/attachment-images.js';
@@ -533,7 +534,8 @@ export class DatabaseStore {
   readonly skillRecords: SystemSkillRecords;
   readonly artifactFilesDir: string;
 
-  constructor(filename = process.env.DB_PATH ?? '/data/db/wangke.sqlite', systemFilesDir = path.join(path.dirname(filename), 'system-files')) {
+  // 存储层在自己被构造时读取启动快照:数据库路径属于启动期决定,不允许运行中漂移。
+  constructor(filename = config().dbPath, systemFilesDir = path.join(path.dirname(filename), 'system-files')) {
     fs.mkdirSync(path.dirname(filename), { recursive: true });
     this.db = new Database(filename);
     this.artifactFilesDir = path.resolve(path.dirname(filename), `${path.basename(filename)}.outputs`);

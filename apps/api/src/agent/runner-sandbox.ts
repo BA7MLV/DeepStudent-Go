@@ -2,7 +2,7 @@
  * 从 runner.ts 搬出:systemWrite 与落盘参数逐字段核对、执行租约的开始/结束、
  * 产出捕获。顺序与拒绝码都保持原样。 */
 import { WorkspaceHandoff } from './workspace-handoff.js';
-import { executeSandbox, SandboxFailure, type SandboxExecutor } from './sandbox.js';
+import { executeSandbox, sandboxConfigured, SandboxFailure, type SandboxExecutor } from './sandbox.js';
 import { ProjectError } from '../projects/files.js';
 import { BotArtifacts } from './artifacts.js';
 import { shellDecision } from './permissions.js';
@@ -24,7 +24,7 @@ export async function runSandboxTool(deps: BotFacade, request: Parameters<Sandbo
     if (decision.permission === 'deny' || request.network && policy.network !== 'allow') throw new ProjectError('system_write_denied', 403);
     if (decision.permission === 'ask' && !step?.approved) throw new ProjectError('system_write_approval_required', 403);
   }
-  if (deps.sandbox === executeSandbox && (!process.env.SANDBOX_URL || !process.env.SANDBOX_TOKEN)) throw new SandboxFailure('sandbox_not_configured');
+  if (deps.sandbox === executeSandbox && !sandboxConfigured()) throw new SandboxFailure('sandbox_not_configured');
   if (request.projectId) {
     const step = deps.store.db.prepare('SELECT run_id FROM run_steps WHERE id=?').get(request.executionId) as { run_id: string } | undefined;
     if (step) new WorkspaceHandoff(deps.store, deps.projects).observe(step.run_id, request.projectId);

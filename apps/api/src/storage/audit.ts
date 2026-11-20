@@ -1,10 +1,11 @@
 import type { DatabaseStore } from './database.js';
+import { getConfig } from '../config.js';
 
 /** Diagnostics are bounded observers, never an authorization decision. */
 export function appendAudit(store: DatabaseStore, owner: string, action: string, detail: unknown, at = new Date().toISOString()) {
   try {
-    const configured = Number(process.env.BOT_AUDIT_LIMIT);
-    const limit = Number.isSafeInteger(configured) && configured >= 1000 ? Math.min(configured, 1000000) : 100000;
+    // 审计上限是测试用例级开关(test-gateway-retention 在用例内改小),惰性读取。
+    const limit = getConfig().botAuditLimit;
     const json = JSON.stringify(detail);
     const value = json.length <= 16000 ? json : JSON.stringify({ truncated: true, sizeChars: json.length });
     store.transaction(() => {

@@ -40,10 +40,10 @@ try {
   const messages = [attachmentMessage({ role: 'user', content: 'read this', attachments })];
   assert.ok(JSON.stringify(messages).includes(`attachment-file:${file.id}`));
   const context = { store, owner, filesDir, checkActive() {} };
-  const resolved = resolveAttachmentMessages(context, messages);
+  const resolved = await resolveAttachmentMessages(context, messages);
   assert.equal(resolved[0].content[1].image_url.url, `data:image/png;base64,${bytes.toString('base64')}`);
   assert.ok(!JSON.stringify(messages).includes('base64'));
-  assert.throws(() => resolveAttachmentMessages({ ...context, owner: other }, messages), /unavailable/);
+  await assert.rejects(() => resolveAttachmentMessages({ ...context, owner: other }, messages), /unavailable/);
   assert.equal(attachmentFileInUse(store, owner, file.id), false);
   put(1, { id: 1, role: 'user', content: 'preserve', attachments });
   assert.equal(attachmentFileInUse(store, owner, file.id), true);
@@ -97,6 +97,6 @@ try {
   assert.equal(records.get(blockedOwner, 'chats', 1).attachments[0].dataUrl, 'data:image/png;base64,invalid');
   const source = store.db.prepare('SELECT storage_name FROM files WHERE id=?').get(file.id);
   fs.writeFileSync(path.join(filesDir, source.storage_name), Buffer.from('corrupt'));
-  assert.throws(() => resolveAttachmentMessages(context, messages), /corrupt/);
+  await assert.rejects(() => resolveAttachmentMessages(context, messages), /corrupt/);
   console.log('PASS attachment references: original/preview, bounds, ownership, normalization, original model bytes, revocation, trace migration, retry/idempotency, failure preservation, corruption');
 } finally { store.close(); fs.rmSync(directory, { recursive: true, force: true }); }

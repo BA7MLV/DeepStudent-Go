@@ -32,8 +32,16 @@ export function registerLearningPersistence(service: PluginService) {
       JOIN cloud_tasks t ON t.id=l.task_id AND t.owner_id=l.owner_id WHERE l.owner_id=? AND l.plugin_id=? AND l.instance_id=? AND l.material_id=? ORDER BY t.created_at DESC LIMIT 50`).all(c.owner, c.plugin.id, c.instance.id, id) as any[];
     return { tasks: rows.map(r => ({ ...taskDto(r), origin: { pluginId: c.plugin.id, instanceId: c.instance.id, actionId: r.action_id, contextRef: { materialId: id } }, artifacts: r.artifacts ? JSON.parse(r.artifacts) : null, deliveredAt: r.delivered_at, deliveryError: r.delivery_error })) };
   } });
-  reconcilePracticeExtractions(service); reconcileLearningResults(store);
+  // 对账会读题库 Markdown(异步):失败只影响投递,不阻塞插件注册。
+  void reconcilePracticeExtractions(service).catch(() => { console.error('plugin_result_delivery_unavailable'); }); reconcileLearningResults(store);
   const stopPractice = startNotebookDelivery(service);
-  const timer = setInterval(() => { try { reconcilePracticeExtractions(service); reconcileLearningResults(store); } catch { console.error('plugin_result_delivery_unavailable'); } }, 1000); timer.unref();
+  // 单轮未完成就不再叠一个新的;错误在 promise 上收口,不能变成未处理的 rejection。
+  let reconciling = false;
+  const timer = setInterval(() => {
+    if (reconciling) return;
+    reconciling = true;
+    try { reconcileLearningResults(store); } catch { console.error('plugin_result_delivery_unavailable'); }
+    void reconcilePracticeExtractions(service).catch(() => { console.error('plugin_result_delivery_unavailable'); }).finally(() => { reconciling = false; });
+  }, 1000); timer.unref();
   return async () => { clearInterval(timer); await stopPractice(); };
 }

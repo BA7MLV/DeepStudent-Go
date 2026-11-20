@@ -1,12 +1,16 @@
-import fs from 'node:fs';
+import { constants } from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import type { DatabaseStore } from '../storage/database.js';
 import { CloudRecords } from '../cloud/records.js';
 import type { ResourceFiles } from '../projects/resources.js';
 
-/** Reads the actual Markdown, not materialBlocks (a lossy search index). */
-export function readLearningMarkdown(store: DatabaseStore, filesDir: string, owner: string, id: string, resources?: ResourceFiles) {
+const textLimit = 4 * 1024 * 1024;
+
+/** Reads the actual Markdown, not materialBlocks (a lossy search index).
+ * 调用链(插件能力、学习任务投递)都在请求或任务执行中,所以走 fs/promises。 */
+export async function readLearningMarkdown(store: DatabaseStore, filesDir: string, owner: string, id: string, resources?: ResourceFiles) {
   const records = new CloudRecords(store), course = records.get(owner, 'videos', id);
   if (!course || course.fileDeleted) throw new Error('plugin_material_not_found');
   if (course.kind !== 'material' || course.materialFormat !== 'md') throw new Error('plugin_markdown_required');
@@ -24,13 +28,14 @@ export function readLearningMarkdown(store: DatabaseStore, filesDir: string, own
     if (!file) throw new Error('plugin_material_file_not_found');
     const filename = path.resolve(filesDir, file.storage_name);
     if (path.dirname(filename) !== path.resolve(filesDir)) throw new Error('plugin_material_denied');
-    const fd = fs.openSync(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    // 与旧同步实现一致:不跟随符号链接、不阻塞在 FIFO 上,先验 nlink/大小再读全文。
+    const handle = await fsp.open(filename, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
-      const stat = fs.fstatSync(fd);
-      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 4 * 1024 * 1024) throw new Error('plugin_markdown_limit');
-      text = fs.readFileSync(fd, 'utf8');
-    } finally { fs.closeSync(fd); }
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size > textLimit) throw new Error('plugin_markdown_limit');
+      text = await handle.readFile('utf8');
+    } finally { await handle.close(); }
   }
-  if (text.length > 4 * 1024 * 1024) throw new Error('plugin_markdown_limit');
+  if (text.length > textLimit) throw new Error('plugin_markdown_limit');
   return { text, revision: crypto.createHash('sha256').update(text).digest('hex') };
 }

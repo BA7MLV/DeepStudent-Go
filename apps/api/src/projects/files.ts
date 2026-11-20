@@ -208,11 +208,13 @@ export class ProjectFiles {
       try { stat = this.stat(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       if (stat?.isDirectory() || (stat ? !this.matches(id, value, expected, revision(stat)) : expected !== null)) throw new ProjectError('project_file_conflict', 409);
       if (this.journal) {
+        // 写事务整体同步(项目文件提交与 SQLite 写锁同段),异步化会把事务窗口拉长并暴露中间态。
         this.journal.replace({ id, path: value }, temporary => { fs.writeFileSync(temporary, text, { flag: 'wx', mode: 0o600 }); this.workspaceOwner(temporary); });
         return { path: value, revision: revision(fs.statSync(file)) };
       }
       const temporary = path.join(path.dirname(file), `.write-${crypto.randomUUID()}`);
       try {
+        // 同上:临时文件写入、传入属主与 rename 必须在同一个同步提交里完成。
         fs.writeFileSync(temporary, text, { flag: 'wx', mode: 0o600 });
         this.workspaceOwner(temporary);
         if (stat) fs.renameSync(temporary, file); else this.installNew(temporary, file);

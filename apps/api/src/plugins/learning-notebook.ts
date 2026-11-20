@@ -18,7 +18,8 @@ export async function deliverNotebookAttempt(service: PluginService, owner: stri
   const beforeVideo = records.get(owner, 'videos', id), beforeFile = records.get(owner, 'files', id);
   if (!beforeVideo && (beforeFile || records.get(owner, 'courseFiles', id))) throw new Error('plugin_notebook_source_conflict');
   const mapped = store.db.prepare('SELECT project_id FROM resource_files WHERE owner_id=? AND course_id=?').get(owner, id);
-  const before = beforeVideo ? readLearningMarkdown(store, filesDir, owner, id, resources).text : EMPTY_WRONGBOOK;
+  // 读取原始 Markdown 是文件 I/O,投递链路本来就是 async,这里一并 await。
+  const before = beforeVideo ? (await readLearningMarkdown(store, filesDir, owner, id, resources)).text : EMPTY_WRONGBOOK;
   const key = existingId ?? await questionId(question, source), entry = parseWrongbook(before).find(q => q.id === key);
   if (existingId && !entry) throw new Error('plugin_review_question_not_found');
   const nextEntry = applyAttempt(entry, key, question, source, attempt);

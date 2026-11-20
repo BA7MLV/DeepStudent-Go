@@ -3,7 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { ToolDef } from '@wangke/study-core/model/client';
 import type { TaskContext } from '../src/cloud/execution.js';
 import { shellDecision } from '../src/agent/permissions.js';
-import { cancelSandbox, executeSandbox, SandboxFailure, shellTimeoutSeconds, shellToolTimeoutMs } from '../src/agent/sandbox.js';
+import { cancelSandbox, executeSandbox, sandboxConfigured, SandboxFailure, shellTimeoutSeconds, shellToolTimeoutMs } from '../src/agent/sandbox.js';
 
 const shellTool: ToolDef = { type: 'function', function: {
   name: 'shell',
@@ -61,7 +61,7 @@ export function sessionShell(context: TaskContext) {
         };
         if (decision() === 'deny') throw new Error('shell_permission_denied');
         const sandbox = context.sandbox ?? executeSandbox;
-        if (sandbox === executeSandbox && (!process.env.SANDBOX_URL || !process.env.SANDBOX_TOKEN)) throw new SandboxFailure('sandbox_not_configured');
+        if (sandbox === executeSandbox && !sandboxConfigured()) throw new SandboxFailure('sandbox_not_configured');
         const id = crypto.randomUUID(), db = context.store.db;
         const serialized = JSON.stringify({ command, description, network, timeoutSeconds, requiresApproval });
         const ask = decision() === 'ask';

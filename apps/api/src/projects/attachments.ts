@@ -97,6 +97,8 @@ export function importBotAttachments(projects: ProjectRepository, filesDir: stri
         let matches = false;
         if (entry.kind === 'file') {
           const file = projects.files.open(receipt.project_id, receipt.path);
+          // 进程内对已打开 fd 的位置读取:哈希校验必须与 open 返回的 inode 一致,
+          // 若改成异步 readFile 会因 fd 的隐式位置变化引入竞态,故保留同步。
           try { matches = crypto.createHash('sha256').update(fs.readFileSync(file.fd)).digest('hex') === source.sha256; }
           finally { fs.closeSync(file.fd); }
         }

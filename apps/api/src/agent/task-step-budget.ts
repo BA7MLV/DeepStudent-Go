@@ -1,6 +1,7 @@
 import type { DatabaseStore } from '../storage/database.js';
 import type { CloudConfiguration } from '../cloud/config.js';
 import { BudgetBlocked } from './budget.js';
+import { config } from '../config.js';
 
 type Scope = { kind: 'run' | 'task'; id: string };
 
@@ -26,7 +27,7 @@ export class TaskStepBudget {
     return native + bot;
   }
   private limit(owner: string) {
-    return this.configuration?.get(owner).policy.maxSteps ?? Math.max(1, Math.min(1000, Number(process.env.BOT_MAX_STEPS) || 100));
+    return this.configuration?.get(owner).policy.maxSteps ?? Math.max(1, Math.min(1000, config().botMaxSteps));
   }
   private check(owner: string, scope: Scope, additional: number) {
     if (this.used(owner, scope) + additional > this.limit(owner)) throw new BudgetBlocked(scope.kind === 'run' ? 'run_step_budget' : 'root_task_step_budget');

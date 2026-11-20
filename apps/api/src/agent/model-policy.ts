@@ -1,4 +1,5 @@
 import type { ModelPurpose } from '@wangke/contracts/cloud';
+import { config } from '../config.js';
 
 export type ModelRequestOptions = {
   attempts?: number; timeoutMs?: number; chainMs?: number; ordinary?: boolean;
@@ -38,14 +39,25 @@ function setting(value: string | undefined, fallback: number, min: number, max: 
 /** The chain covers every attempt and backoff, rather than silently capping a
  * longer per-attempt timeout at an old two-minute deadline. A stream's first
  * token and total-turn limits are deliberately independent of retry policy. */
-export function modelRequestPolicy(options: ModelRequestOptions = {}, env = process.env): ModelRequestPolicy {
+export function modelRequestPolicy(options: ModelRequestOptions = {}, env?: Record<string, string | undefined>): ModelRequestPolicy {
   const profile = profiles[options.purpose ?? 'chat'] ?? profiles.chat;
-  const timeoutMs = options.timeoutMs ?? setting(env.MODEL_TIMEOUT_MS, profile.timeoutMs, 1000, 600_000);
-  const firstTokenMs = options.firstTokenMs ?? setting(env.MODEL_FIRST_TOKEN_TIMEOUT_MS, profile.firstTokenMs, 1000, 600_000);
-  const idleMs = options.idleMs ?? setting(env.MODEL_STREAM_IDLE_TIMEOUT_MS, profile.idleMs, 1000, 600_000);
-  const streamTotalMs = options.streamTotalMs ?? setting(env.MODEL_STREAM_TOTAL_TIMEOUT_MS, profile.streamTotalMs, 1000, 3_600_000);
-  const attempts = options.attempts ?? setting(env.MODEL_MAX_RETRIES, 2, 0, 5) + 1;
-  const chainMs = options.chainMs ?? setting(env.MODEL_CHAIN_TIMEOUT_MS, Math.max(timeoutMs * attempts, streamTotalMs) + 60_000, 1000, 3_660_000);
+  // `env` 是单测直接注入的映射;省略时按启动快照组装等价的一份,键名与旧 env 一致,
+  // 这样既保留原来「非法值回落 profile 缺省」的语义,也不再直接读 process.env。
+  const settings = config();
+  const source = env ?? {
+    MODEL_TIMEOUT_MS: String(settings.modelTimeoutMs),
+    MODEL_FIRST_TOKEN_TIMEOUT_MS: String(settings.modelFirstTokenMs),
+    MODEL_STREAM_IDLE_TIMEOUT_MS: String(settings.modelStreamIdleMs),
+    MODEL_STREAM_TOTAL_TIMEOUT_MS: String(settings.modelStreamTotalMs),
+    MODEL_MAX_RETRIES: String(settings.modelMaxRetries),
+    MODEL_CHAIN_TIMEOUT_MS: settings.modelChainMs === undefined ? undefined : String(settings.modelChainMs),
+  };
+  const timeoutMs = options.timeoutMs ?? setting(source.MODEL_TIMEOUT_MS, profile.timeoutMs, 1000, 600_000);
+  const firstTokenMs = options.firstTokenMs ?? setting(source.MODEL_FIRST_TOKEN_TIMEOUT_MS, profile.firstTokenMs, 1000, 600_000);
+  const idleMs = options.idleMs ?? setting(source.MODEL_STREAM_IDLE_TIMEOUT_MS, profile.idleMs, 1000, 600_000);
+  const streamTotalMs = options.streamTotalMs ?? setting(source.MODEL_STREAM_TOTAL_TIMEOUT_MS, profile.streamTotalMs, 1000, 3_600_000);
+  const attempts = options.attempts ?? setting(source.MODEL_MAX_RETRIES, 2, 0, 5) + 1;
+  const chainMs = options.chainMs ?? setting(source.MODEL_CHAIN_TIMEOUT_MS, Math.max(timeoutMs * attempts, streamTotalMs) + 60_000, 1000, 3_660_000);
   if (![timeoutMs, attempts, chainMs, firstTokenMs, idleMs, streamTotalMs].every(Number.isSafeInteger) || timeoutMs < 1 || timeoutMs > 600_000 || attempts < 1 || attempts > 6 || chainMs < 1 || chainMs > 3_660_000 || firstTokenMs < 1 || firstTokenMs > 600_000 || idleMs < 1 || idleMs > 600_000 || streamTotalMs < 1 || streamTotalMs > 3_600_000) throw new Error('invalid_model_request_policy');
   return { timeoutMs, attempts, chainMs, firstTokenMs, idleMs, streamTotalMs };
 }

@@ -1,10 +1,9 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import { Readable } from 'node:stream';
 import type { DatabaseStore } from '../storage/database.js';
 import type { CloudRecords } from './records.js';
 import { receiveFile, fileOperationId } from './files.js';
-import { ensureImageReference, ownedImagePath } from './attachment-images.js';
+import { ensureImageReference, readOwnedImage } from './attachment-images.js';
 
 /** Explicit controlled writer only. No projection/read path calls this function.
  * Each record is installed only after every embedded image is durable and verified.
@@ -59,7 +58,7 @@ async function rewriteAttachmentImages(store: DatabaseStore, directory: string, 
     const sha = crypto.createHash('sha256').update(bytes).digest('hex');
     const file = await receiveFile(store, directory, owner, Readable.from(bytes), 'history-image', match[1], 32_000_000, bytes.length, undefined, fileOperationId(owner, sha, 'history-image-v1'));
     const stored = store.db.prepare('SELECT storage_name,sha256 FROM files WHERE id=? AND owner_id=?').get(file.id, owner) as { storage_name: string; sha256: string };
-    if (crypto.createHash('sha256').update(fs.readFileSync(ownedImagePath(directory, stored.storage_name))).digest('hex') !== sha) throw new Error('migration_file_verification_failed');
+    if (crypto.createHash('sha256').update(await readOwnedImage(directory, stored.storage_name)).digest('hex') !== sha) throw new Error('migration_file_verification_failed');
     return { serverId: file.id, ...await ensureImageReference(store, directory, owner, file.id) };
   };
   const walk = async (value: any): Promise<any> => {
@@ -72,7 +71,10 @@ async function rewriteAttachmentImages(store: DatabaseStore, directory: string, 
       const inline = await install(value.dataUrl);
       if (typeof value.serverId === 'string') {
         const original = store.db.prepare('SELECT storage_name,sha256 FROM files WHERE id=? AND owner_id=?').get(value.serverId, owner) as { storage_name: string; sha256: string } | undefined;
-        if (!original || crypto.createHash('sha256').update(fs.readFileSync(ownedImagePath(directory, original.storage_name))).digest('hex') !== original.sha256) throw new Error('migration_original_unavailable');
+        // 原图缺失时不能猜:迁移必须逐字节核对才写回记录。
+        if (!original) throw new Error('migration_original_unavailable');
+        const originalBytes = await readOwnedImage(directory, original.storage_name).catch(() => undefined);
+        if (!originalBytes || crypto.createHash('sha256').update(originalBytes).digest('hex') !== original.sha256) throw new Error('migration_original_unavailable');
         Object.assign(out, await ensureImageReference(store, directory, owner, value.serverId));
       } else Object.assign(out, inline);
       delete out.dataUrl;

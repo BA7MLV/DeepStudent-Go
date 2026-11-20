@@ -1,11 +1,10 @@
 import type { DatabaseStore } from '../storage/database.js';
 import { sql } from '../storage/sql.js';
-
-const positive = (value: string | undefined, fallback: number, max: number) => value && Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Math.min(Number(value), max) : fallback;
+import { config } from '../config.js';
 
 /** Events retained per thread beyond the floor. Live consumers replay from a
  * cursor inside this window; anything older heals through snapshot resync. */
-export const journalWindow = () => positive(process.env.BOT_JOURNAL_EVENT_WINDOW, 20000, 200000);
+export const journalWindow = () => config().botJournalEventWindow;
 
 /** Bounded work per pass keeps a small server responsive; the 60s cadence catches up. */
 const THREADS_PER_PASS = 32;

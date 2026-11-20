@@ -27,7 +27,7 @@ export async function editCourseMarkdown(context: TaskContext, args: Record<stri
   checkCourse();
   const resources = context.pluginService?.learningOptions.resources;
   if (!resources) throw new Error('resource_service_unavailable');
-  const original = readLearningMarkdown(context.store, context.filesDir, context.owner, courseId, resources).text;
+  const original = (await readLearningMarkdown(context.store, context.filesDir, context.owner, courseId, resources)).text;
   const text = applyTaskEdits(original, args.edits);
   return withTaskEditPermission(context, args, id => {
     checkCourse();

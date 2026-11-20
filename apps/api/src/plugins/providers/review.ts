@@ -12,10 +12,10 @@ export const reviewProvider = {
   setup(service: PluginService) {
     const { store } = service, records = new CloudRecords(store), resolveMaterial = materialResolver(service);
     registerReviewPresentation(service, resolveMaterial);
-    service.register({ id: 'review.list', capability: 'learning', access: 'read', schema: { type: 'object', properties: { materialId: { type: 'string', minLength: 1, maxLength: 256 } }, required: [], additionalProperties: false }, run: (a, c) => {
+    service.register({ id: 'review.list', capability: 'learning', access: 'read', schema: { type: 'object', properties: { materialId: { type: 'string', minLength: 1, maxLength: 256 } }, required: [], additionalProperties: false }, run: async (a, c) => {
       const id = resolveMaterial(a, c), cards = learningCards(store, c.owner, id);
       const notebook = records.get(c.owner, 'videos', 'wrongbook.md');
-      const source = notebook ? readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, 'wrongbook.md', service.learningOptions.resources) : undefined;
+      const source = notebook ? await readLearningMarkdown(store, service.learningOptions.filesDir, c.owner, 'wrongbook.md', service.learningOptions.resources) : undefined;
       const questions = source ? parseWrongbook(source.text).filter(q => q.source.courseId === id) : [];
       const now = Date.now();
       return { materialId: id, asOf: now, notebookRevision: source?.revision ?? null, cards: { total: cards.length, pending: cards.filter(q => q.status === 0).length, kept: cards.filter(q => q.status === 1).length },

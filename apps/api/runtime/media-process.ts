@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { TaskContext } from '../src/cloud/execution.js';
+import { getConfig } from '../src/config.js';
 
 /** All arguments are server-authored. Input is an inherited, owned descriptor,
  * never a task path/URL. No shell, network protocols or playlist demuxers. */
@@ -10,7 +11,8 @@ export function mediaProcess(context: TaskContext, binary: string, args: string[
     // V8 reserves a large virtual address cage: RLIMIT_AS breaks startup even
     // with a small heap. Node workers instead receive an explicit heap cap.
     const limits = process.platform === 'linux' ? [...(binary === process.execPath ? [] : ['--as=1073741824']), '--cpu=120', '--nofile=64', '--', binary] : [];
-    const child = spawn(command, [...limits, ...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe', fd], env: { PATH: process.env.PATH, LANG: 'C.UTF-8', HOME: '/nonexistent' } });
+    // PATH 取当前值:worker 可能在进程启动后才被拉起,启动快照在这里没有意义。
+    const child = spawn(command, [...limits, ...args], { detached: true, stdio: ['ignore', 'pipe', 'pipe', fd], env: { PATH: getConfig().inheritedPath, LANG: 'C.UTF-8', HOME: '/nonexistent' } });
     const chunks: Buffer[] = []; let size = 0, failure: Error | undefined;
     const stop = (error: Error) => {
       failure ??= error;

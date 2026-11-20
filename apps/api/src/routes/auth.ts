@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import argon2 from 'argon2';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
 // 这些 JSON 类型只作为「客户端提交的凭据」的形状入口;内容由 simplewebauthn 自己校验。
@@ -9,6 +8,7 @@ import type { BootstrapInitializeRequest } from '@wangke/contracts';
 import type { DatabaseStore } from '../storage/database.js';
 import type { BootstrapRepository } from '../storage/bootstrapRepository.js';
 import { authUserRowSchema, expectRow, expectRows, type AuthUserRow } from '../storage/row-schema.js';
+import { removeBootstrapSecret } from '../bootstrap-secret.js';
 
 /** 引导、密码/Bearer 登录、退出、账号重置、设备配对与 Passkey。
  * 从 server.ts 原样搬出:各路由的判定顺序(尤其是 bootstrap 一次性口令
@@ -17,8 +17,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: {
   store: DatabaseStore;
   repo: BootstrapRepository;
   secretFile: string;
-  /** 引导口令只在创建时可见;初始化成功后 secret 为空串。 */
-  bootstrap: { readonly secret: string; readonly createdAt: number };
+  /** 引导口令只在创建时可见;初始化成功后 secret 为空串。
+   * 传取值函数而不是快照:重置账号会整体替换口令对象,快照会变陈旧。 */
+  bootstrap: () => { readonly secret: string; readonly createdAt: number };
+  /** 首次启动时口令可能还在异步落盘,引导接口必须先等到它。 */
+  ensureBootstrapSealed: () => Promise<{ readonly secret: string; readonly createdAt: number }>;
   bootstrapTtlMs: number;
   sessionTtlMs: number;
   tokenTtlMs: number;
@@ -35,7 +38,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: {
   bad: (reply: FastifyReply, code: number, error: string) => FastifyReply;
   resetOwner: () => Promise<void>;
   /** 重置后轮换引导口令并返回新口令,调用方负责返回给客户端。 */
-  replaceBootstrapSecret: () => { secret: string; createdAt: number };
+  replaceBootstrapSecret: () => Promise<{ secret: string; createdAt: number }>;
   publicUser: (user: { id: string; name?: string }) => { id: string; name: string };
 }) {
   const { store, repo, session, checkOrigin, requireAuth, bad, hashToken, issueSession, secureCookie, sameSite, expectedOrigin, rpID, rpName } = deps;
@@ -64,9 +67,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: {
   const dummyHash = argon2.hash('unusable-login-dummy', { type: argon2.argon2id });
   const pruneAttempts = () => { const cutoff = Date.now() - 15 * 60_000; for (const [ip, value] of attempts) if (value.until < cutoff && value.seen < cutoff) attempts.delete(ip); while (attempts.size > 10_000) attempts.delete(attempts.keys().next().value!); };
   const secretFile: string = deps.secretFile;
-  const bootstrap = deps.bootstrap;
+  /** 每次读取当前口令对象:重置会替换它。 */
+  const currentBootstrap = () => deps.bootstrap();
    app.get('/api/v1/bootstrap/status', async () => {
      const initialized = repo.isInitialized();
+     const bootstrap = currentBootstrap();
      const available = !initialized && Date.now() < bootstrap.createdAt + bootstrapTtlMs;
      const hasPasskey = initialized && Boolean(store.db.prepare('SELECT 1 FROM passkey_credentials LIMIT 1').get());
      return { initialized, bootstrapAvailable: available, expiresAt: available ? new Date(bootstrap.createdAt + bootstrapTtlMs).toISOString() : null, botSyncVersion: 1, hasPasskey };
@@ -74,12 +79,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: {
   app.post<{ Body: BootstrapInitializeRequest }>('/api/v1/bootstrap/initialize', async (request, reply) => {
     if (!checkOrigin(request, reply)) return;
     if (repo.isInitialized()) return bad(reply, 410, 'bootstrap_closed');
+    // 首次启动时口令文件可能仍在异步落盘:先等到它,再比对。
+    const bootstrap = await deps.ensureBootstrapSealed();
      if (Date.now() >= bootstrap.createdAt + bootstrapTtlMs || request.headers['x-bootstrap-secret'] !== bootstrap.secret) return bad(reply, 403, 'invalid_or_expired_bootstrap_secret');
     const { adminPassword } = request.body ?? {};
     if (typeof adminPassword !== 'string' || adminPassword.length < 12 || adminPassword.length > 256) return bad(reply, 400, 'admin_password_must_be_12_to_256_characters');
     const initialized = repo.initializeAdmin('Administrator', await argon2.hash(adminPassword, { type: argon2.argon2id }));
     if (!initialized) return bad(reply, 410, 'bootstrap_closed');
-    fs.rmSync(secretFile, { force: true });
+    await removeBootstrapSecret(secretFile);
     return reply.code(201).send({ initialized: true });
   });
 
@@ -126,7 +133,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: {
     const record = await verifyPassword(request);
     if (!record || record.id !== current.id) return bad(reply, 401, 'invalid_credentials');
     await deps.resetOwner();
-    const bootstrap = deps.replaceBootstrapSecret();
+    const bootstrap = await deps.replaceBootstrapSecret();
     attempts.clear();    reply.header('set-cookie', `wangke_session=; Path=/; HttpOnly; SameSite=${sameSite}${secureCookie ? '; Secure' : ''}; Max-Age=0`);
     return { reset: true, initialized: false, bootstrapSecret: bootstrap.secret, expiresAt: new Date(bootstrap.createdAt + bootstrapTtlMs).toISOString() };
   });

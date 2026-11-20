@@ -67,6 +67,7 @@ export class SystemFiles {
   private physical(owner: string, resource: string): string | undefined {
     const filename = this.filename(owner, resource);
     if (!fs.existsSync(filename)) return;
+    // 系统文件读写由同步 SQLite 事务驱动(事务体内不能 await),读取必须与元数据提交同段。
     const text = fs.readFileSync(filename, 'utf8');
     if (text.length > (resource.startsWith(`${SKILLS_PATH}/`) ? 2 * 1024 * 1024 : 100000)) throw new Error('system_file_too_large');
     return text;
@@ -199,6 +200,7 @@ export class SystemFiles {
           try {
             const mode = fs.statSync(filename, { throwIfNoEntry: false })?.mode ?? 0o600;
             const fd = fs.openSync(temporary, 'wx', mode & 0o777);
+            // flush 是崩溃重放:写入 + fsync 必须一次完成,不能在中途让出事件循环。
             try { fs.writeFileSync(fd, entry.content, 'utf8'); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
             const observed = this.physical(entry.owner_id, entry.path) ?? null;
             if (observed !== current) throw this.conflicted(entry, observed);
