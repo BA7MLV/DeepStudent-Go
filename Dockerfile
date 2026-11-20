@@ -43,8 +43,13 @@ COPY --from=build /app/packages/remote-artifacts/generated ./packages/remote-art
 COPY scripts/reset-password.mjs ./scripts/reset-password.mjs
 RUN test ! -d node_modules/react && test ! -d node_modules/react-dom && test ! -d node_modules/vite \
   && test "$(id -u node)" = 1000 && test "$(id -g node)" = 1000 \
+  && chmod -R a+rX,go-w /app/packages/study-core/assets/builtin \
   && mkdir -p /data/db /data/files /data/config && chown -R node:node /data
 USER node
+# 构建源码可能来自私有权限的归档；以实际运行身份验证整个内置技能目录。
+RUN test -r /app/node_modules/@wangke/study-core/assets/builtin/gongwen-writing/SKILL.md \
+  && unreadable="$(find -L /app/node_modules/@wangke/study-core/assets/builtin \( ! -readable -o \( -type d ! -executable \) \) -print)" \
+  && test -z "$unreadable"
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD node -e "fetch('http://127.0.0.1:3000/api/v1/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "apps/api/dist/apps/api/src/server.js"]
