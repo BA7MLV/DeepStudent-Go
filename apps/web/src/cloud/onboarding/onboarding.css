@@ -1,6 +1,6 @@
 /*
  * 「初始化个人云端」引导页。
- * 线稿是 Plotter 语法的蓝图插画：单色 currentColor、1px 描边、透明形面，深浅色自动跟随。
+ * 线稿图形来自 hairline（等轴测 2.5D），颜色映射到 HeroUI 的主题 token，深浅色自动跟随。
  * 动效时长 / 缓动全部取自 transitions.css；prefers-reduced-motion 下只保留淡入。
  */
 .ob {
@@ -14,6 +14,13 @@
   --ob-text-large: 1rem;
   --ob-heading: 1.5rem;
   --ob-heading-line: 1.75rem;
+  /* hairline 的六个主题变量 */
+  --hairline-plate: var(--surface);
+  --hairline-hi: var(--accent);
+  --hairline-edge: color-mix(in oklab, var(--foreground) 62%, transparent);
+  --hairline-mid: color-mix(in oklab, var(--foreground) 34%, transparent);
+  --hairline-lo: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --hairline-stroke: 1;
 
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -143,28 +150,9 @@
 .ob-figure__art {
   position: relative;
   aspect-ratio: 5 / 4;
-  margin: 0;
   border-radius: var(--radius-2xl);
   outline-offset: 4px;
   pointer-events: none;
-}
-
-/* 蓝图线稿铺满留白框；紧凑 viewBox 由 svg 自身的宽高比居中呈现。 */
-.ob-figure__art svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-/* busy（登录中/建号中）时只有位移虚线在流动；reduced-motion 下保持静止。 */
-.ob-figure__art[data-busy] g[opacity='0.5'] {
-  animation: ob-figure-flow 1.1s linear infinite;
-}
-
-@keyframes ob-figure-flow {
-  to {
-    stroke-dashoffset: -4;
-  }
 }
 
 /* 图形底下一圈柔和的影子 + 主题色的地面反光，让它「站」在页面上。 */
@@ -666,7 +654,7 @@
 @keyframes ob-figure-in {
   from {
     opacity: 0;
-    transform: translate3d(var(--distance-medium), var(--distance-base), 0) scale(var(--scale-large));
+    transform: translate3d(var(--distance-medium), var(--distance-base), 0) rotateX(14deg) scale(var(--scale-large));
     filter: blur(var(--blur-medium));
   }
 }
@@ -674,7 +662,7 @@
 @keyframes ob-figure-back {
   from {
     opacity: 0;
-    transform: translate3d(calc(var(--distance-medium) * -1), var(--distance-base), 0) scale(var(--scale-large));
+    transform: translate3d(calc(var(--distance-medium) * -1), var(--distance-base), 0) rotateX(14deg) scale(var(--scale-large));
     filter: blur(var(--blur-medium));
   }
 }
@@ -704,10 +692,6 @@
   }
 
   .ob__group[data-shake] {
-    animation: none;
-  }
-
-  .ob-figure__art[data-busy] g[opacity='0.5'] {
     animation: none;
   }
 

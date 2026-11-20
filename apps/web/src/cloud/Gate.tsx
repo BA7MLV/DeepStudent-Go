@@ -12,7 +12,7 @@ import { Sym } from '../ui/icons';
 // LanguageSelect 的 Select/ListBox(react-aria combobox/overlays)只有登录页用,懒加载。
 const LanguageSelect = lazy(() => import('../components/LanguageSelect'));
 import { consumeBootstrapLink } from './bootstrapLink';
-import OnboardingFigure from './onboarding/OnboardingFigure';
+import OnboardingFigure, { loadFigures } from './onboarding/OnboardingFigure';
 const ModelSetup = lazy(() => import('./onboarding/ModelSetup'));
 import { errorKey, initialStep, previousStep, SETUP_STEPS, STEP_FIGURE, stepForError, stepIndex, type OnboardingStep } from './onboarding/flow';
 import './onboarding/onboarding.css';
@@ -38,7 +38,7 @@ const ACTION = {
 
 /**
  * 云端入口：首次部署走五步引导（欢迎 → 密钥 → 管理员 → 称呼 → 选模型），之后是单页登录。
- * 每一步只有一个标题、一张蓝图线稿和必要的输入框；说明交给布局和图形。
+ * 每一步只有一个标题、一张 2.5D 线稿和必要的输入框；说明交给布局和图形。
  */
 export default function CloudGate({ initialized, authenticated, hasPasskey = false, initialSecret = '', error: initialError = '' }: { initialized: boolean; authenticated: boolean; hasPasskey?: boolean; initialSecret?: string; error?: string }) {
   const { t } = useTranslation('common');
@@ -55,7 +55,8 @@ export default function CloudGate({ initialized, authenticated, hasPasskey = fal
   const [created, setCreated] = useState(initialized);
   const secretFile = useRef<HTMLInputElement>(null);
 
-  // 图形是内联在入口里的少量路径,不再需要单独的图形 chunk。
+  // 欢迎页一出现就开始拉图形 chunk，下一步不用等。
+  useEffect(() => { void loadFigures(); }, []);
 
   useEffect(() => {
     // Opening a fresh setup link in the same tab can be a hash-only navigation.
@@ -136,7 +137,7 @@ export default function CloudGate({ initialized, authenticated, hasPasskey = fal
       <div className="ob__visual" key={step} data-direction={direction} data-figure={figure}>
         <div className="ob__figure" data-compact={configure || undefined}>
           <div className="ob__floor" aria-hidden="true" />
-          <OnboardingFigure name={figure} label={t(`onboarding.figure.${figure}`)} busy={busy || step === 'welcome'} />
+          <OnboardingFigure name={figure} label={t(`onboarding.figure.${figure}`)} intensity={busy ? 0.9 : 0.5} play={step === 'welcome' || busy} />
         </div>
       </div>
       <div className="ob__right">

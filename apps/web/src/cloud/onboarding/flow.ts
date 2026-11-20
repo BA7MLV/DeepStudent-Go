@@ -9,7 +9,7 @@ export type OnboardingStep = 'welcome' | 'key' | 'account' | 'name' | 'login' | 
 /** 首次部署的五步，用来画页码点。login 不在里面：它是单页。 */
 export const SETUP_STEPS = ['welcome', 'key', 'account', 'name', 'models'] as const satisfies readonly OnboardingStep[];
 
-/** 每一步配哪张蓝图线稿：共线的云 → 归位的钥匙 → 闭合的锁 → 选中的路由。 */
+/** 每一步配哪个 hairline 图形：拼好的云 → 保险库 → 挂锁 → 连起来的节点。 */
 export const STEP_FIGURE = {
   welcome: 'settle',
   key: 'vault',
