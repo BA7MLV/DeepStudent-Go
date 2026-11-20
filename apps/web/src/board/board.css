@@ -41,7 +41,7 @@
 .board-manager__footer { flex-shrink: 0; padding: 18px 20px 20px; }
 .board-manager__footer .button { min-height: 44px; }
 .board-manager__sheet { height: var(--visual-viewport-height, 100dvh); }
-.board-manager--mobile { --drawer-enter-duration: var(--duration-fast); --drawer-exit-duration: var(--duration-quick); --drawer-enter-ease: var(--ease-smooth-out); --drawer-exit-ease: var(--ease-smooth-out); width: 100%; max-width: none; max-height: calc(var(--visual-viewport-height, 100dvh) - max(16px, env(safe-area-inset-top))); border-radius: var(--radius-dialog) var(--radius-dialog) 0 0; }
+.board-manager--mobile { --drawer-enter-duration: var(--duration-fast); --drawer-exit-duration: var(--duration-quick); --drawer-enter-ease: var(--ease-smooth-out); --drawer-exit-ease: var(--ease-in); width: 100%; max-width: none; max-height: calc(var(--visual-viewport-height, 100dvh) - max(16px, env(safe-area-inset-top))); border-radius: var(--radius-dialog) var(--radius-dialog) 0 0; }
 .board-manager--mobile .drawer__handle { flex-shrink: 0; padding-top: 10px; }
 .board-manager--mobile .board-manager__header { padding-top: 2px; }
 .board-manager--mobile .board-manager__source { min-width: 44px; min-height: 44px; }

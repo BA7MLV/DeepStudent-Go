@@ -91,7 +91,7 @@
 .sub-item {
   cursor: pointer;
   /* 悬停/聚焦的状态层由 MD3 的 surface 层级表达，不用分隔线（那是 MD2/antd 的惯性） */
-  transition: background-color var(--duration-quick) linear;
+  transition: background-color var(--duration-quick) var(--ease-out);
 }
 
 .sub-item:hover {

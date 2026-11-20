@@ -740,7 +740,7 @@
   margin-top: 4px;
   margin-left: -6px; /* 抵消图标自身的留白，让第一个图标的视觉左缘与正文对齐 */
   opacity: 0;
-  transition: opacity var(--duration-quick) ease;
+  transition: opacity var(--duration-quick) var(--ease-out);
 }
 
 .course-chat__message:hover .course-chat__actions,
