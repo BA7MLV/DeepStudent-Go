@@ -9,6 +9,7 @@ import { CloudRecords } from '../apps/api/src/cloud/records.ts';
 import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { CloudTaskRunner, taskDto, listOwnerTasks } from '../apps/api/src/cloud/tasks.ts';
 import { responseTimeline } from '../packages/study-core/src/utils/responseOrder.ts';
+import { SESSION_TITLE_SYSTEM_PROMPT } from '../apps/api/runtime/session-title.ts';
 
 const temporaryRoot = os.tmpdir();
 fs.mkdirSync(temporaryRoot, { recursive: true });
@@ -51,9 +52,19 @@ const call = (id, query = '') => ({ id, name: 'models_discover', args: { query }
 let script = [], requests = 0;
 const mockFetch = async (url, init) => {
   assert.match(String(url), /^https:\/\/p\d\.invalid/);
-  requests++;
-  const next = script.shift(); assert.ok(next, 'unexpected extra model request');
-  const value = await next(JSON.parse(init.body), init);
+  const body = JSON.parse(init.body);
+  // Title generation must not consume scripted answer rounds or their count.
+  const titleRequest = body.system === SESSION_TITLE_SYSTEM_PROMPT
+    || Array.isArray(body.system) && body.system.some(part => part.text === SESSION_TITLE_SYSTEM_PROMPT)
+    || body.messages?.some(message => message.role === 'system' && message.content === SESSION_TITLE_SYSTEM_PROMPT)
+    || body.input?.some(message => message.role === 'system' && message.content === SESSION_TITLE_SYSTEM_PROMPT);
+  let value;
+  if (titleRequest) value = { text: '学习主题' };
+  else {
+    requests++;
+    const next = script.shift(); assert.ok(next, 'unexpected extra model request');
+    value = await next(body, init);
+  }
   if (value instanceof Response) return value;
   const { text = '', reasoning = '', calls = [], finish = calls.length ? 'tool_calls' : 'stop' } = value;
   if (url.endsWith('/responses')) return Response.json({ output: [

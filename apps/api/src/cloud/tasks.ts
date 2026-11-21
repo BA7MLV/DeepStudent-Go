@@ -235,7 +235,7 @@ export class CloudTaskRunner {
       // Event barriers do not occupy a model call, process promise or concurrency slot.
       // Replayed dependency events only update the saved tool result once per wake.
       this.store.transaction(() => {
-        const parked = expectRows<TaskAgentCheckpointRow & Pick<CloudTaskRow, 'id'>>({ ...taskAgentCheckpointRowSchema, required: ['id', 'payload', 'wait_ids'] }, this.store.db.prepare("SELECT t.id,c.payload,c.wait_ids FROM cloud_tasks t JOIN task_agent_checkpoints c ON c.task_id=t.id WHERE t.status='waiting_event'").all(), 'task_agent_checkpoint_row_invalid');
+        const parked = expectRows<TaskAgentCheckpointRow>(taskAgentCheckpointRowSchema, this.store.db.prepare("SELECT c.task_id,c.payload,c.wait_ids FROM cloud_tasks t JOIN task_agent_checkpoints c ON c.task_id=t.id WHERE t.status='waiting_event'").all(), 'task_agent_checkpoint_row_invalid');
         for (const row of parked) {
           const ids = JSON.parse(row.wait_ids) as string[];
           const tasks = ids.map(id => expectRow<Pick<CloudTaskRow, 'id' | 'status' | 'result' | 'error'>>({ type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, result: { type: ['string', 'null'] }, error: { type: ['string', 'null'] } }, required: ['id', 'status', 'result', 'error'], additionalProperties: true }, this.store.db.prepare('SELECT id,status,result,error FROM cloud_tasks WHERE id=?').get(id), 'cloud_task_row_invalid'));
@@ -245,8 +245,8 @@ export class CloudTaskRunner {
           for (const message of payload.out) if (message.role === 'tool' && message.name === 'task_delegate') {
             try { const value = JSON.parse(message.content); if (value.waiting === true) message.content = JSON.stringify({ waiting: false, tasks: tasks.filter(t => t).map(t => ({ ...t!, result: t!.result ? JSON.parse(t!.result) : null })) }); } catch { /* other tool output */ }
           }
-          this.store.db.prepare('UPDATE task_agent_checkpoints SET payload=?,wait_ids=\'[]\' WHERE task_id=?').run(JSON.stringify(payload), row.id);
-          this.store.db.prepare("UPDATE cloud_tasks SET status='queued',updated_at=? WHERE id=? AND status='waiting_event'").run(new Date().toISOString(), row.id);
+          this.store.db.prepare('UPDATE task_agent_checkpoints SET payload=?,wait_ids=\'[]\' WHERE task_id=?').run(JSON.stringify(payload), row.task_id);
+          this.store.db.prepare("UPDATE cloud_tasks SET status='queued',updated_at=? WHERE id=? AND status='waiting_event'").run(new Date().toISOString(), row.task_id);
         }
         const deliveries = this.store.db.prepare(`SELECT child.id AS child_id,child.status AS child_status,child.result AS child_result,child.error AS child_error,parent.*
           FROM task_delegations d JOIN cloud_tasks child ON child.id=d.task_id JOIN cloud_tasks parent ON parent.id=d.parent_task_id
