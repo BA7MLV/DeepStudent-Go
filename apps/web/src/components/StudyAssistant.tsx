@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type Ref } from 'react';
 import { flushSync } from 'react-dom';
 import { Button, cn, Disclosure, Tabs } from '@heroui/react';
 import { Sym } from '../ui';
@@ -28,7 +28,6 @@ export default function StudyAssistant({ open, onOpenChange, activeTab, onTabCha
   const bodyRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const pendingFocus = useRef<'trigger' | 'panel' | null>(null);
-  const [tabDir, setTabDir] = useState<'left' | 'right'>('right');
   const changeOpen = (expanded: boolean) => {
     pendingFocus.current = expanded ? 'panel' : 'trigger';
     if (!viewTransitionSupported()) {
@@ -66,12 +65,9 @@ export default function StudyAssistant({ open, onOpenChange, activeTab, onTabCha
                 <Sym name="keyboard_arrow_down" />
               </Button>
             </div>
-            <Tabs className="panel-tabs" variant="secondary" align="start" selectedKey={activeTab} data-tab-dir={tabDir}
+            <Tabs className="panel-tabs" variant="secondary" align="start" selectedKey={activeTab}
               onSelectionChange={(key) => {
                 if (!panelKeys.includes(key as StudyPanelKey)) return;
-                const next = panelKeys.indexOf(key as StudyPanelKey);
-                const prev = panelKeys.indexOf(activeTab);
-                if (next !== prev) setTabDir(next > prev ? 'right' : 'left');
                 onTabChange(key as StudyPanelKey);
               }} data-testid="panel-tabs">
               <Tabs.ListContainer>

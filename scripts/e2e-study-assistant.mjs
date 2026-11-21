@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 
+const tabsOnly = process.argv.includes('--tabs-only');
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, reducedMotion: 'reduce' });
@@ -11,7 +12,7 @@ try {
   }));
   const mount = async () => {
     await page.goto(`${process.env.BASE_URL || 'http://localhost:5173'}/__study-assistant-test`);
-    await page.evaluate(async (deps) => {
+    await page.evaluate(async ({ deps, tabsOnly }) => {
       const { default: refresh } = await import('/@react-refresh');
       refresh.injectIntoGlobalHook(window);
       window.$RefreshReg$ = () => {};
@@ -19,11 +20,11 @@ try {
       window.__vite_plugin_react_preamble_installed__ = true;
       const { default: React } = await import(`${deps}/react.js`);
       const { default: ReactDOM } = await import(`${deps}/react-dom_client.js`);
-      await import('/node_modules/@heroui/styles/dist/index.css');
       const { default: StudyAssistant } = await import('/src/components/StudyAssistant.tsx');
       const { default: ChatPanel } = await import('/src/components/ChatPanel.tsx');
       const { db } = await import('/src/store/db.ts');
       await import('/src/theme.css');
+      await import('/src/transitions.css');
       await import('/src/ui/layout.css');
       await db.segments.put({ videoId: 'assistant-test', idx: 0, start: 0, end: 60, text: '课程测试内容', status: 1 });
       const canvas = document.createElement('canvas');
@@ -39,17 +40,40 @@ try {
         return React.createElement(StudyAssistant, {
           open, onOpenChange: setOpen, activeTab, onTabChange: setTab,
           panelKeys: ['chat', 'subs'], panels: {
-            chat: React.createElement(ChatPanel, { videoId: 'assistant-test', videoName: '测试课程', playerRef }),
+            chat: tabsOnly
+              ? React.createElement('input', { 'aria-label': '测试草稿' })
+              : React.createElement(ChatPanel, { videoId: 'assistant-test', videoName: '测试课程', playerRef }),
             subs: React.createElement('p', null, '字幕测试'),
           },
         });
       }
       ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Harness));
-    }, process.env.VITE_DEPS_URL || '/node_modules/.vite/deps');
+    }, { deps: process.env.VITE_DEPS_URL || '/node_modules/.vite/deps', tabsOnly });
+    if (tabsOnly) return;
     await page.getByTestId('panel-chat-add').waitFor();
     await page.waitForFunction(() => !document.querySelector('[data-testid="panel-chat-add"]').disabled);
   };
+  const verifyTabs = async input => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    for (const key of ['subs', 'chat']) {
+      await page.getByTestId(`panel-tab-${key}`).click();
+      const slot = page.getByTestId(`panel-slot-${key}`);
+      await slot.waitFor();
+      assert.deepEqual(await slot.evaluate((element) => {
+        const { opacity, translate, transitionDuration } = getComputedStyle(element);
+        return { opacity, translate, transitionDuration };
+      }), { opacity: '1', translate: 'none', transitionDuration: '0s' }, '切换标签时整块内容直接显示');
+    }
+    assert.equal(await input.inputValue(), '保留这份草稿');
+  };
   await mount();
+  if (tabsOnly) {
+    const draft = page.getByRole('textbox', { name: '测试草稿' });
+    await draft.fill('保留这份草稿');
+    await verifyTabs(draft);
+    assert.deepEqual(errors, []);
+    console.log('PASS: study assistant tabs switch immediately and preserve the mounted draft');
+  } else {
   const panel = page.getByTestId('study-assistant-panel');
   const anchorBox = page.locator('.study-assistant');
   assert.equal(await page.getByTestId('study-assistant-toggle').isVisible(), false, '展开时隐藏悬浮入口');
@@ -148,7 +172,7 @@ try {
   }
   await page.getByTestId('study-assistant-resize-n').focus();
   await page.keyboard.press('Home');
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await verifyTabs(input);
   const anchorBeforeMotion = await anchorBox.boundingBox();
   await page.getByTestId('study-assistant-close').click();
   assert.equal(await panel.evaluate((element) => element.inert), true, '退出过渡期间不再响应点击和键盘');
@@ -180,6 +204,7 @@ try {
   assert.equal(await panel.evaluate((element) => getComputedStyle(element).transitionDuration), '0s');
   assert.deepEqual(errors, []);
   console.log('PASS assistant menus, drafts, resizing, persistence, focus return, narrow viewports, transitions and reduced motion');
+  }
 } finally {
   await browser.close();
 }
