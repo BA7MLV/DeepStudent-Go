@@ -145,7 +145,7 @@ export async function runServerAgent(
       const requestMessages = reconcileSkillMessages(out);
       assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, requestMessages, false);
       const options: ChatOptions = {
-        messages: await prepareModelImages(resolveAttachmentMessages(context, requestMessages), target, context.signal),
+        messages: await prepareModelImages(await resolveAttachmentMessages(context, requestMessages), target, context.signal),
         cacheKey, onRequest,
         tools,
         temperature: 0.3,
@@ -217,7 +217,7 @@ export async function runServerAgent(
       out.pop();
       if (text) out.push({ role: 'assistant', content: text });
       const limits = modelSettings(context.store, context.owner, context.configuration.get(context.owner), target);
-      const messages = await prepareModelImages(resolveAttachmentMessages(context, reconcileSkillMessages(out)), target, context.signal);
+      const messages = await prepareModelImages(await resolveAttachmentMessages(context, reconcileSkillMessages(out)), target, context.signal);
       const available = chatOutputTokens(target, { messages, tools, signal: context.signal, thinkingLevel }, limits);
       const raised = truncationRetryTokens(lastOutputTokens, available, limits.outputSource, raisedRetries);
       if (raised) { nextOutputTokens = raised; raisedRetries++; }
@@ -335,7 +335,7 @@ export async function runServerAgent(
   const finalMessages = reconcileSkillMessages(out);
   assertSkillRequestBudget(target.capabilities?.contextWindow ?? 131072, finalMessages, false);
   try {
-    const options: ChatOptions = { messages: await prepareModelImages(resolveAttachmentMessages(context, finalMessages), target, context.signal), cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, signal: context.signal, thinkingLevel };
+    const options: ChatOptions = { messages: await prepareModelImages(await resolveAttachmentMessages(context, finalMessages), target, context.signal), cacheKey, onRequest, ...(cachePolicy(target) !== 'none' ? { tools, tool_choice: 'none' as const } : {}), temperature: 0.3, signal: context.signal, thinkingLevel };
     options.max_tokens = Math.min(4096, chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target)));
     final = await chatStream(target, options,
       delta => { appendAnswer(delta); report('answer', maxRounds + 1); },

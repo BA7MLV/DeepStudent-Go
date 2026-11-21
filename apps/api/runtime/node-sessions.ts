@@ -255,7 +255,7 @@ export async function continueChat(context: TaskContext) {
   };
   snapshot(true, undefined, true);
   try {
-    const options: ChatOptions = { messages: await prepareModelImages(resolveAttachmentMessages(context, messages), target, context.signal), signal: context.signal, thinkingLevel: taskThinkingLevel(context),
+    const options: ChatOptions = { messages: await prepareModelImages(await resolveAttachmentMessages(context, messages), target, context.signal), signal: context.signal, thinkingLevel: taskThinkingLevel(context),
       cacheKey: `study:${context.owner}:${sessionId}`, onRequest: request => { requests.push(request); } };
     options.max_tokens = chatOutputTokens(target, options, modelSettings(context.store, context.owner, context.configuration.get(context.owner), target));
     const message = await chatStream(target, options,

@@ -12,6 +12,7 @@ import { CloudConfiguration } from '../apps/api/src/cloud/config.ts';
 import { CloudTaskRunner, taskDto } from '../apps/api/src/cloud/tasks.ts';
 import { receiveFile } from '../apps/api/src/cloud/files.ts';
 import { normalizeChatAttachments } from '../apps/api/runtime/chat-attachments.ts';
+import { SESSION_TITLE_SYSTEM_PROMPT } from '../apps/api/runtime/session-title.ts';
 
 const directory = fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/var/tmp', 'opencode', 'server-chat-attachments-'));
 const filesDir = path.join(directory, 'files');
@@ -31,11 +32,18 @@ const rows = sid => store.db.prepare("SELECT value FROM cloud_records WHERE owne
 const session = sid => put('chatSessions', sid, { id: sid, videoId: '__library_assistant__', title: '新会话', createdAt: Date.now() });
 let script = [], requests = 0;
 const runner = new CloudTaskRunner(store, { records, configuration, filesDir, fetch: async (url, init) => {
-  requests++;
   assert.equal(url, 'https://offline.invalid/v1/chat/completions');
+  const body = JSON.parse(init.body);
+  // Title refinement is a separate request, not an attachment answer round.
+  if (body.messages.some(message => message.role === 'system' && message.content === SESSION_TITLE_SYSTEM_PROMPT)) {
+    return Response.json({ choices: [{ message: { role: 'assistant', content: '附件分析' }, finish_reason: 'stop' }] });
+  }
+  requests++;
   assert.ok(script.length, 'unexpected model request');
-  await script.shift()(JSON.parse(init.body));
-  return Response.json({ choices: [{ message: { role: 'assistant', content: '已读取附件。' }, finish_reason: 'stop' }] });
+  assert.ok(Array.isArray(body.messages), 'model requests must receive resolved message arrays');
+  assert.ok(!JSON.stringify(body.messages).includes('attachment-file:'), 'attachment references must be resolved before the model request');
+  const response = await script.shift()(body);
+  return response ?? Response.json({ choices: [{ message: { role: 'assistant', content: '已读取附件。' }, finish_reason: 'stop' }] });
 } });
 
 async function run(sid, input, error) {
@@ -130,6 +138,31 @@ try {
   script = [body => assert.ok(JSON.stringify(body.messages).includes('普通文字消息'))];
   await run(40, { text: '普通文字消息' });
   assert.equal(rows(40).find(row => row.role === 'user').attachments, undefined);
+
+  // Truncated tool arguments must trigger a fresh budget calculation using
+  // resolved attachments, without executing the partial call.
+  session(60);
+  script = [body => {
+    checkAll(body);
+    return Response.json({ choices: [{ message: { role: 'assistant', content: null,
+      tool_calls: [{ id: 'truncated-widget', type: 'function', function: { name: 'show_widget', arguments: '{"action":' } }] }, finish_reason: 'length' }] });
+  }, checkAll];
+  const retried = await run(60, { text: '读取附件后生成图示', attachments: user.attachments });
+  assert.equal(retried.result.tools[0].status, 'error');
+  assert.match(retried.result.tools[0].result, /没有执行/);
+
+  // An empty first turn uses the separate tool-free summary request path.
+  session(70);
+  script = [body => {
+    checkAll(body);
+    return Response.json({ choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'stop' }] });
+  }, body => {
+    checkAll(body);
+    assert.ok(!body.tools || body.tool_choice === 'none');
+    assert.ok(JSON.stringify(body.messages).includes('请停止调用工具'));
+  }];
+  await run(70, { text: '总结附件', attachments: user.attachments });
+
   // Per-model derivative must never replace the original or the persisted trace.
   put('preferences', 'savedModels', { id: 'savedModels', value: [{ providerId: 'offline', model: 'gpt-4.1', imageInput: { maxEdge: 1000 } }] });
   session(50);
@@ -146,7 +179,7 @@ try {
   assert.ok(!JSON.stringify(reducedUser).includes('data:image/'));
   const stored = store.db.prepare('SELECT storage_name FROM files WHERE id=?').get(attachments[3].serverId);
   assert.deepEqual(fs.readFileSync(path.join(filesDir, stored.storage_name)), png);
-  console.log('PASS: server Chat attachments — mixed text/PDF/DOCX/images, attachment-only, persistence, trace + legacy history, continuation, retry, ownership and invalid payload guards, plain text regression');
+  console.log('PASS: server Chat attachments — mixed text/PDF/DOCX/images, attachment-only, persistence, trace + legacy history, continuation, retry, truncated tool retry, tool-free summary, ownership and invalid payload guards, plain text regression');
 } finally {
   await runner.close();
   store.close();
