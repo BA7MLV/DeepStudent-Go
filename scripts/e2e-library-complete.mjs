@@ -1,5 +1,4 @@
 // Full current legacy schema, explicit external-byte mapping and no projection loss.
-import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -65,20 +64,25 @@ try {
   });
   // Every declared top-level field appears at least once, including legacy-only metadata.
   for (const [name, fields] of Object.entries(LIBRARY_IMPORT_FIELDS)) for (const field of fields.split(' ')) assert.ok(fixture.rows[name].some(row => field in row) || name === 'courses' && field === 'fileDeleted', `${name}.${field}`);
-  const importUI = async () => { await page.getByTestId('cloud-sync-card').getByRole('button', { name: '导入', exact: true }).click(); await page.getByTestId('confirm-dialog-confirm').click(); };
+  const runImport = () => page.evaluate(async () => {
+    const { migrateLocalData } = await import('/src/cloud/migrate.ts');
+    try { await migrateLocalData(() => {}); return null; }
+    catch (error) { return error.message; }
+  });
   let uploads = 0; page.on('request', req => { if (req.method() === 'POST' && req.url().includes('/api/v1/files')) uploads++; });
-  await importUI(); await page.getByText(/旧库包含外部文件引用/).waitFor(); assert.equal(uploads, 0);
+  assert.match(await runImport(), /旧库包含外部文件引用/); assert.equal(uploads, 0);
   const staleMapping = await page.evaluate(async reference => {
     try { await (await import('/src/cloud/migrate.ts')).mapLibraryFile('external-md', { ...reference, resourceRevision: 'stale-source' }, new Blob(['wrong mapping'])); return false; }
     catch (error) { return error.message; }
   }, fixture.reference);
   assert.equal(staleMapping, 'library_file_mapping_changed'); assert.equal(uploads, 0, 'stale source CAS rejected without external effect');
-  await page.getByRole('button', { name: '核对导入文件', exact: true }).click();
-  await page.getByLabel('映射文件 external-md').setInputFiles({ name: 'original.md', mimeType: 'text/markdown', buffer: Buffer.from('# Explicit bytes\n\nPersistent original content') });
-  await page.getByText(/bytes · SHA256/).waitFor();
+  await page.evaluate(async reference => {
+    const { mapLibraryFile } = await import('/src/cloud/migrate.ts');
+    await mapLibraryFile('external-md', reference, new File(['# Explicit bytes\n\nPersistent original content'], 'original.md', { type: 'text/markdown' }));
+  }, fixture.reference);
   await page.reload(); await page.getByTestId('cloud-sync-card').waitFor();
-  await page.getByRole('button', { name: '核对导入文件', exact: true }).click(); await page.getByText(/bytes · SHA256/).waitFor();
-  await importUI(); await page.getByText('导入完成', { exact: true }).waitFor({ timeout: 60000 });
+  assert.ok(await page.evaluate(async () => (await (await import('/src/cloud/migrate.ts')).listLibraryFileMappings()).find(row => row.id === 'external-md')?.mapped?.sha256));
+  assert.equal(await runImport(), null);
   assert.equal(uploads, 2, 'one attachment content and one explicitly mapped file, deduped');
   store = new DatabaseStore(path.join(directory, 'db.sqlite'));
   const actual = (table, key) => JSON.parse(store.db.prepare('SELECT value FROM cloud_records WHERE owner_id=? AND table_name=? AND record_key=?').get(owner, table, JSON.stringify(key)).value);

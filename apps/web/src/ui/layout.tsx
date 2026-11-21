@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { buttonVariants } from '@heroui/styles';
 import {
   Alert,
@@ -23,6 +25,7 @@ import { DotBadge, MatrixDots } from '../components/motion';
 import { useChatNotifications } from '../store/chatNotifications';
 import { observeBrowserChrome } from './browserChrome';
 import { overflowTitleProps, updateOverflowTitle } from './overflowTitle';
+import { useRecentDrag } from './useRecentDrag';
 import './layout.css';
 
 /**
@@ -94,7 +97,7 @@ export interface RecentItem {
   /** 正在等待助手回复，优先以点阵代替普通 / 置顶图标。 */
   pendingReply?: boolean;
   pinned?: boolean;
-  onUnpin?: () => void;
+  onUnpin?: () => void | Promise<boolean>;
   /**
    * 行尾菜单的动作。传了就渲染那颗「更多」按钮，并接上右键。
    *
@@ -134,7 +137,7 @@ interface RecentNavigation {
   /** 拖拽投放区在拖动已置顶行时显示的文案（如「取消置顶」）。 */
   dropUnpinLabel?: string;
   /** 按小节内的显示顺序重排置顶会话（拖拽排序 / 拖入置顶区时调用），id 序号即新次序。 */
-  reorderPinned?: (orderedIds: string[]) => void;
+  reorderPinned?: (orderedIds: string[]) => void | Promise<boolean>;
   actionError?: string; dismissError?: () => void; dismissLabel?: string;
   pagination?: { previous?: () => void; next?: () => void; previousLabel: string; nextLabel: string;
     busy: boolean; error?: string; retry: () => void; retryLabel: string };
@@ -266,9 +269,6 @@ function NavigationItem({ item, active, compact = false, onNavigate }: {
   </Button>;
 }
 
-/** 长按拖拽时松手那一刻的落点：置顶小节底部的投放区，或置顶列表里的插入位置。 */
-type DropTarget = { kind: 'zone' } | { kind: 'list'; index: number } | null;
-
 /** 侧栏内部：主导航 / Recent / 底部入口。宽屏就地渲染，窄屏进 Drawer。 */
 function Sidebar({
   rail,
@@ -306,115 +306,19 @@ function Sidebar({
    * 于是自己收一个 id：右键时 `setMenuId(item.id)`，菜单照样锚在那颗「更多」上。
    */
   const [menuId, setMenuId] = useState<string | null>(null);
-  /**
-   * 长按拖拽管理置顶：按住一行约 350ms 进入拖拽。
-   * - 拖已置顶行：在置顶小节内拖到某两行之间 = 重排；拖到小节最下方的「取消置顶」投放区 = 取消置顶。
-   * - 拖未置顶行：拖到置顶小节内的某个位置 = 置顶并插到那里；拖到「取消置顶」投放区（此时显示「置顶」）= 追加到置顶末尾。
-   *
-   * 拖拽期间 RAC 的 press 仍会在 pointerup 补发一次选中（等于「拖完还跳去那个会话」），
-   * 用 `suppressSelectUntilRef` 的时间窗吞掉这一下。
-   */
-  const [dragId, setDragId] = useState<string | null>(null);
-  /** 松手那一刻的落点：投放区，或置顶列表里的插入位置。 */
-  const [dropTarget, setDropTarget] = useState<DropTarget>(null);
-  const dragIdRef = useRef<string | null>(null);
-  const dropTargetRef = useRef<DropTarget>(null);
-  const dropZoneRef = useRef<HTMLDivElement | null>(null);
-  const pinnedAreaRef = useRef<HTMLDivElement | null>(null);
-  const pressRef = useRef<{ x: number; y: number; timer: number } | null>(null);
-  const suppressSelectUntilRef = useRef(0);
-  const setDrag = (id: string | null) => {
-    dragIdRef.current = id;
-    setDragId(id);
-  };
-  const setTarget = (target: DropTarget) => {
-    dropTargetRef.current = target;
-    setDropTarget(target);
-  };
-
-  const beginRecentPress = (item: RecentItem, event: React.PointerEvent) => {
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
-    /** 拖拽激活后接管手势：非被动 touchmove + preventDefault，阻止列表跟着手指继续滚动。 */
-    let onTouchMove: ((touch: TouchEvent) => void) | null = null;
-    pressRef.current = { x: event.clientX, y: event.clientY, timer: window.setTimeout(() => {
-      pressRef.current = null;
-      setDrag(item.id);
-      onTouchMove = (touch) => { if (dragIdRef.current != null) touch.preventDefault(); };
-      window.addEventListener('touchmove', onTouchMove, { passive: false });
-    }, 350) };
-    const inRect = (rect: DOMRect, point: { clientX: number; clientY: number }) =>
-      point.clientX >= rect.left && point.clientX <= rect.right
-      && point.clientY >= rect.top && point.clientY <= rect.bottom;
-    const dropTargetAt = (point: { clientX: number; clientY: number }): DropTarget => {
-      const zoneRect = dropZoneRef.current?.getBoundingClientRect();
-      if (zoneRect && inRect(zoneRect, point)) return { kind: 'zone' };
-      const area = pinnedAreaRef.current;
-      const areaRect = area?.getBoundingClientRect();
-      if (!area || !areaRect || !inRect(areaRect, point)) return null;
-      // 插入位 =（除被拖行外）中点在指针之上的行数；被拖行本身不算，插到「自己身上」等于原地不动。
-      const rows = [...area.querySelectorAll<HTMLElement>('[role="option"]')].filter((el) => el.id !== item.id);
-      const index = rows.filter((el) => {
-        const rect = el.getBoundingClientRect();
-        return point.clientY > rect.top + rect.height / 2;
-      }).length;
-      return { kind: 'list', index };
-    };
-    const cleanup = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onCancel);
-      if (onTouchMove) {
-        window.removeEventListener('touchmove', onTouchMove);
-        onTouchMove = null;
-      }
-      if (pressRef.current) {
-        window.clearTimeout(pressRef.current.timer);
-        pressRef.current = null;
-      }
-      setDrag(null);
-      setTarget(null);
-    };
-    const onMove = (move: PointerEvent) => {
-      if (pressRef.current) {
-        // 350ms 内就挪出 8px，用户是在滚动列表而不是要拖拽。
-        if (Math.hypot(move.clientX - pressRef.current.x, move.clientY - pressRef.current.y) > 8) cleanup();
-        return;
-      }
-      setTarget(dropTargetAt(move));
-    };
-    const onUp = (up: PointerEvent) => {
-      const draggedId = dragIdRef.current;
-      const target = dropTargetRef.current;
-      cleanup();
-      if (draggedId == null || target == null) return;
-      suppressSelectUntilRef.current = Date.now() + 500;
-      const pinnedIds = pinnedItems.map((pinned) => pinned.id);
-      if (target.kind === 'zone') {
-        if (item.pinned) item.onUnpin?.();
-        else recent?.reorderPinned?.([...pinnedIds, draggedId]);
-        return;
-      }
-      // 重排与「拖入置顶」都归结为同一件事：给出置顶小节的完整新顺序。
-      const withoutDragged = pinnedIds.filter((id) => id !== draggedId);
-      withoutDragged.splice(target.index, 0, draggedId);
-      recent?.reorderPinned?.(withoutDragged);
-    };
-    const onCancel = () => cleanup();
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onCancel);
-  };
-
   const items = recent?.items ?? [];
-  const pinnedItems = items.filter((item) => item.pinned);
-  const unpinnedItems = items.filter((item) => !item.pinned);
-  const draggedItem = dragId == null ? undefined : items.find((item) => item.id === dragId);
+  const { t } = useTranslation('interface');
+  const dragHintId = useId();
+  const pinDrag = useRecentDrag(items, recent?.reorderPinned);
+  const { pinnedItems, unpinnedItems, drag, target: dropTarget } = pinDrag;
+  const draggedItem = items.find((item) => item.id === drag?.item.id);
   const listSelection = {
     selectionMode: 'single' as const,
+    shouldSelectOnPressUp: true,
     disallowEmptySelection: true,
     selectedKeys: items.filter((item) => item.active).map((item) => item.id),
     onSelectionChange: (keys: Iterable<unknown>) => {
-      if (Date.now() < suppressSelectUntilRef.current) return;
+      if (pinDrag.suppressSelection()) return;
       const next = [...keys][0];
       if (next == null) return;
       items.find((item) => item.id === String(next))?.onClick();
@@ -430,10 +334,12 @@ function Sidebar({
       id={item.id}
       textValue={item.label}
       data-testid={item.testId}
-      data-dragging={dragId === item.id || undefined}
-      data-drop-before={item.pinned && dropTarget?.kind === 'list'
-        && pinnedItems.filter((pinned) => pinned.id !== dragId).findIndex((pinned) => pinned.id === item.id) === dropTarget.index || undefined}
-      onPointerDown={(event) => beginRecentPress(item, event)}
+      data-recent-id={item.id}
+      data-draggable={!!recent?.reorderPinned || undefined}
+      data-dragging={drag?.item.id === item.id || undefined}
+      style={pinDrag.rowStyle(item.id)}
+      aria-keyshortcuts={recent?.reorderPinned ? 'Shift+Space' : undefined}
+      onPointerDown={(event) => pinDrag.beginPress(item, event)}
       onFocus={(event) => {
         setFocusedRecentId(item.id);
         measureRecentTitle(event.currentTarget);
@@ -445,7 +351,7 @@ function Sidebar({
         item.menu
           ? (event) => {
               event.preventDefault();
-              if (dragIdRef.current == null) setMenuId(item.id);
+               if (!pinDrag.isDragging()) setMenuId(item.id);
             }
           : undefined
       }
@@ -465,7 +371,7 @@ function Sidebar({
             className="sidebar-control size-6 min-w-0 rounded-md text-muted"
             aria-label={`取消置顶 ${item.label}`}
             data-testid={`${item.testId ?? item.id}-unpin`}
-            onPress={item.onUnpin}>
+            onPress={() => { void item.onUnpin?.(); }}>
             <Sym name="pin" />
           </Button>
         </span>
@@ -604,6 +510,13 @@ function Sidebar({
                   的 `.course-chat__bubble--user`）。`--surface` 浅色是纯白、深色是
                   oklch(0.21)，两套主题下都与侧栏分得开。 */}
               <div
+                ref={pinDrag.rootRef}
+                data-recent-reordering={!!drag || undefined}
+                data-recent-saving={pinDrag.saving || undefined}
+                onKeyDownCapture={pinDrag.onKeyDown}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) pinDrag.cancelKeyboard();
+                }}
                 /**
                  * Delete / Backspace = 删掉键盘当前停着的这一行。
                  * ContextMenu / Shift+F10 = 打开这一行的动作菜单（ARIA 规定的
@@ -635,39 +548,40 @@ function Sidebar({
                   target.onDelete();
                 }}
               >
-                {(pinnedItems.length > 0 || draggedItem) && (
-                  <div ref={pinnedAreaRef} data-testid="recent-pinned-area">
-                    <div className="shrink-0 px-3 pb-2 text-[0.8125rem] text-muted" data-testid="recent-pinned-section">
+                  <div ref={pinDrag.areaRef} className="relative" data-testid="recent-pinned-area">
+                    {pinnedItems.length > 0 && <div className="shrink-0 px-3 pb-2 text-[0.8125rem] text-muted" data-testid="recent-pinned-section">
                       {recent.pinnedLabel ?? recent.label}
-                    </div>
+                    </div>}
                     {pinnedItems.length > 0 && (
-                      <ListBox {...listSelection} aria-label={recent.pinnedLabel ?? recent.label}>
+                      <ListBox {...listSelection} aria-describedby={recent.reorderPinned ? dragHintId : undefined} aria-label={recent.pinnedLabel ?? recent.label}>
                         {pinnedItems.map((item) => renderRecentItem(item))}
                       </ListBox>
                     )}
-                    {draggedItem && (
-                      <div
-                        ref={dropZoneRef}
-                        data-testid="recent-drop-zone"
-                        data-hover={dropTarget?.kind === 'zone' || undefined}
-                        className={[
-                          'mx-2 mb-1 flex shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-[0.8125rem] transition-colors',
-                          dropTarget?.kind === 'zone' ? 'border-solid bg-surface text-foreground' : 'border-dashed text-muted',
-                        ].join(' ')}
-                      >
-                        <Sym name={draggedItem.pinned ? 'pin_off' : 'pin'} />
-                        {draggedItem.pinned ? (recent.dropUnpinLabel ?? recent.label) : (recent.dropPinLabel ?? recent.label)}
-                      </div>
-                    )}
-                    <div className="shrink-0 px-3 pb-2 pt-1 text-[0.8125rem] text-muted">{recent.label}</div>
+                    <div aria-hidden="true" className="recent-drop-line"
+                      data-visible={pinDrag.gap !== null} data-glide={pinDrag.glide || undefined} data-testid="recent-drop-line"
+                      style={{ transform: `translateY(${pinDrag.hintTop ?? 0}px)` }}><span /></div>
+                    <div className="relative shrink-0 px-3 pb-2 pt-1 text-[0.8125rem] text-muted">
+                      <span className={draggedItem && !drag?.keyboard ? 'invisible' : undefined}>{recent.label}</span>
+                      {draggedItem && !drag?.keyboard && (
+                        <div ref={pinDrag.zoneRef} data-testid="recent-drop-zone" data-hover={dropTarget?.kind === 'zone' || undefined}
+                          className="recent-drop-zone absolute inset-x-2 inset-y-0 flex items-center justify-center gap-2 rounded-lg border border-dashed">
+                          <Sym name={draggedItem.pinned ? 'pin_off' : 'pin'} />
+                          {draggedItem.pinned ? (recent.dropUnpinLabel ?? recent.label) : (recent.dropPinLabel ?? recent.label)}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
-                {pinnedItems.length === 0 && !draggedItem && (
-                  <div className="shrink-0 px-3 pb-2 text-[0.8125rem] text-muted">{recent.label}</div>
-                )}
-                <ListBox {...listSelection} aria-label={recent.label}>
+                {recent.reorderPinned && <span id={dragHintId} className="sr-only">{t('recentDrag.keys')}</span>}
+                <span role="status" className="sr-only">{drag?.keyboard && draggedItem && dropTarget?.kind === 'list'
+                  ? t('recentDrag.position', { title: draggedItem.label, position: dropTarget.index + 1 }) : ''}</span>
+                <ListBox {...listSelection} aria-describedby={recent.reorderPinned ? dragHintId : undefined} aria-label={recent.label}>
                   {unpinnedItems.map((item) => renderRecentItem(item))}
                 </ListBox>
+                {draggedItem && drag && createPortal(
+                  <div ref={pinDrag.previewRef} aria-hidden="true" className="recent-drag-preview" data-keyboard={drag.keyboard} data-testid="recent-drag-preview" style={{ width: drag.source.width, height: drag.source.height }}>
+                    <div><Sym name={draggedItem.pinned ? 'pin' : 'chat_bubble'} /><span className="min-w-0 truncate">{draggedItem.label}</span></div>
+                  </div>, document.body,
+                )}
 {recent.actionError && <div className="px-3 py-2 text-xs text-danger" role="alert" data-testid="recent-action-error">
                   {recent.actionError}
                   <Button size="sm" variant="ghost" onPress={recent.dismissError}>{recent.dismissLabel}</Button>

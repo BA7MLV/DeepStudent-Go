@@ -4,6 +4,7 @@ import type { ToolDef } from '@wangke/study-core/model/client';
 import type { TaskContext } from '../src/cloud/execution.js';
 import { shellDecision } from '../src/agent/permissions.js';
 import { cancelSandbox, executeSandbox, sandboxConfigured, SandboxFailure, shellTimeoutSeconds, shellToolTimeoutMs } from '../src/agent/sandbox.js';
+import { parseArgs } from './node-common.js';
 
 const shellTool: ToolDef = { type: 'function', function: {
   name: 'shell',
@@ -24,25 +25,41 @@ export function chatShellWorkspace(owner: string, sessionId: number) {
   return `${key.slice(0, 8)}-${key.slice(8, 12)}-${key.slice(12, 16)}-${key.slice(16, 20)}-${key.slice(20)}`;
 }
 
-export function sessionShell(context: TaskContext) {
-  const sessionId = context.task.input.sessionId;
-  const nested = () => Boolean(context.store.db.prepare('SELECT 1 FROM task_delegations WHERE task_id=?').get(context.task.id));
-  const assertScope = () => {
-    context.checkActive();
-    const task = context.store.db.prepare('SELECT kind,parent_run_id,status FROM cloud_tasks WHERE id=? AND owner_id=?').get(context.task.id, context.owner) as { kind: string; parent_run_id: string | null; status: string } | undefined;
-    const session = typeof sessionId === 'number' && Number.isSafeInteger(sessionId) && sessionId > 0
-      ? context.records.get(context.owner, 'chatSessions', sessionId) : null;
-    if (!task || task.kind !== 'chat' || task.parent_run_id || nested() || !['running', 'waiting_user'].includes(task.status)
-      || !session || session.archived || session.videoId !== '__library_assistant__') throw new Error('chat_shell_scope_denied');
+/** Show a bounded terminal receipt, without changing what the model receives. */
+export function chatShellTraceResult(value: string): { text: string; failed: boolean } | undefined {
+  const result = parseArgs(value);
+  const { exitCode, stdout, stderr, terminationReason } = result;
+  if (typeof exitCode !== 'number' || !Number.isInteger(exitCode) || typeof stdout !== 'string' || typeof stderr !== 'string') return;
+  const limit = (text: string) => text.length > 340 ? `${text.slice(0, 340)}…` : text;
+  return {
+    text: [`exit ${exitCode}${typeof terminationReason === 'string' ? ` · ${limit(terminationReason).slice(0, 70)}` : ''}`,
+      stdout.trimEnd() ? limit(stdout.trimEnd()) : '', stderr.trimEnd() ? `stderr:\n${limit(stderr.trimEnd())}` : ''].filter(Boolean).join('\n'),
+    failed: exitCode !== 0,
   };
-  const eligible = context.task.kind === 'chat' && !nested() && !context.store.db.prepare('SELECT 1 FROM cloud_tasks WHERE id=? AND owner_id=? AND parent_run_id IS NOT NULL').get(context.task.id, context.owner);
+}
+
+const delegated = (context: TaskContext) => Boolean(context.store.db.prepare('SELECT 1 FROM task_delegations WHERE task_id=?').get(context.task.id));
+
+export function assertChatShellScope(context: TaskContext): number {
+  context.checkActive();
+  const task = context.store.db.prepare('SELECT kind,parent_run_id,status FROM cloud_tasks WHERE id=? AND owner_id=?').get(context.task.id, context.owner) as { kind: string; parent_run_id: string | null; status: string } | undefined;
+  const sessionId = context.task.input.sessionId;
+  if (typeof sessionId !== 'number' || !Number.isSafeInteger(sessionId) || sessionId < 1 || context.task.input.action === 'continue'
+    || !task || task.kind !== 'chat' || task.parent_run_id || delegated(context) || !['running', 'waiting_user'].includes(task.status)) throw new Error('chat_shell_scope_denied');
+  const session = context.records.get(context.owner, 'chatSessions', sessionId);
+  if (!session || session.archived || session.videoId !== '__library_assistant__') throw new Error('chat_shell_scope_denied');
+  return sessionId;
+}
+
+export function sessionShell(context: TaskContext) {
+  const eligible = context.task.kind === 'chat' && !delegated(context) && !context.store.db.prepare('SELECT 1 FROM cloud_tasks WHERE id=? AND owner_id=? AND parent_run_id IS NOT NULL').get(context.task.id, context.owner);
   return {
     tools: eligible ? [shellTool] : [],
-    prompt: eligible ? '\n\n需要精确计算或执行脚本时可直接调用 shell，结果会返回同一聊天工具循环。工作目录属于本会话，文件保留但进程状态不保留。上传附件只提供已有提取内容，原件不自动挂载；本轮不支持把沙盒产物直接作为聊天下载附件。不要声称未执行的命令已成功，也不要把 /workspace 路径当成用户可下载链接。' : '',
+    prompt: eligible ? '\n\n需要精确计算或执行脚本时可直接调用 shell，结果会返回同一聊天工具循环。工作目录属于本会话，文件保留但进程状态不保留。上传附件只提供已有提取内容，原件不自动挂载。不要声称未执行的命令已成功，也不要把 /workspace 路径当成用户可下载链接。' : '',
     wrap(execute: (name: string, args: Record<string, unknown>) => Promise<string>) {
       return async (name: string, args: Record<string, unknown>) => {
         if (name !== 'shell') return execute(name, args);
-        assertScope();
+        const sessionId = assertChatShellScope(context);
         if (Object.keys(args).some(key => !['command', 'description', 'network', 'timeoutSeconds', 'requiresApproval'].includes(key))
           || typeof args.command !== 'string' || !args.command.trim() || args.command.length > 16000 || args.command.includes('\0')
           || typeof args.description !== 'string' || !args.description.trim() || args.description.length > 2000
@@ -51,7 +68,7 @@ export function sessionShell(context: TaskContext) {
         const timeoutSeconds = shellTimeoutSeconds(args.timeoutSeconds as number | undefined);
         const network = args.network === true, requiresApproval = args.requiresApproval === true;
         const decision = () => {
-          assertScope();
+          assertChatShellScope(context);
           const policy = context.configuration.taskPolicy(context.owner, context.task.id);
           // The broker mounts the owner's notebook read-only. A shell permit
           // must never silently bypass a read denial or a read confirmation.
@@ -87,7 +104,7 @@ export function sessionShell(context: TaskContext) {
           context.configuration.audit(context.owner, 'permission.consumed', { id, taskId: context.task.id, capability: 'shell' });
           const signal = AbortSignal.any([context.signal, AbortSignal.timeout(shellToolTimeoutMs({ timeoutSeconds }))]);
           try {
-            const result = await sandbox({ owner: context.owner, threadId: chatShellWorkspace(context.owner, sessionId as number), executionId: id, command, network, timeoutSeconds }, signal);
+            const result = await sandbox({ owner: context.owner, threadId: chatShellWorkspace(context.owner, sessionId), executionId: id, command, network, timeoutSeconds }, signal);
             context.checkActive();
             // Chat has no Bot artifact journal. Do not advertise an artifact
             // that wasn't saved; large logs should be redirected by the command.

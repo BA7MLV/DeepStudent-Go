@@ -10,8 +10,9 @@ import type { ModelTarget } from '@wangke/study-core/model/types';
 import { beginResponseSegment, nextResponseRound, type ResponseSegment } from '@wangke/study-core/response-order';
 import { PLUGINS_TOOL } from '@wangke/contracts/plugins';
 import { widgetReference, type WidgetPayload } from '@wangke/study-core/widgets';
-import { parseWebSearchResult } from '@wangke/contracts/web-search';
+import { parseWebSearchResult, webFetchTraceResult, webToolDetail } from '@wangke/contracts/web-search';
 import { validateAskUser, askAnswerText } from '@wangke/study-core/ask-user';
+import { chatShellTraceResult } from './chat-shell.js';
 import type { TaskContext } from '../src/cloud/execution.js';
 import { BOARD_TOOL, executeBoardTool, executePluginsTool } from './board.js';
 import { createTaskWidgetExecutor, SERVER_SHOW_WIDGET_TOOL } from './widgets.js';
@@ -251,7 +252,10 @@ export async function runServerAgent(
         }
         seen.add(signature);
         beginProcess();
-        const trace: ServerToolTrace = { id: `${context.task.id}:${round}:${message.tool_calls.indexOf(call)}`, name: toolLabel(call.function.name), status: 'running', detail: JSON.stringify(args).slice(0, 300), reasoningOffset: reasoning.length };
+        const name = call.function.name;
+        const detail = name === 'shell' ? (typeof args.description === 'string' ? args.description.trim() : undefined)
+          : name === 'websearch' || name === 'webfetch' ? webToolDetail(name, args) : JSON.stringify(args);
+        const trace: ServerToolTrace = { id: `${context.task.id}:${round}:${message.tool_calls.indexOf(call)}`, name: toolLabel(name), status: 'running', detail: detail?.slice(0, 300), reasoningOffset: reasoning.length };
         traces.push(trace);
         const started = Date.now();
         report('tool', round + 1, true);
@@ -285,7 +289,11 @@ export async function runServerAgent(
           trace.status = 'error';
         }
         trace.ms = Date.now() - started;
-        trace.result = clip(result, 4_000);
+        trace.result = name === 'webfetch' ? webFetchTraceResult(result) : clip(result, 4_000);
+        if (name === 'shell') {
+          const receipt = chatShellTraceResult(result);
+          if (receipt) { trace.result = receipt.text; if (receipt.failed) trace.status = 'error'; }
+        }
         if (call.function.name === 'websearch') {
           const search = parseWebSearchResult(result);
           if (search) { trace.webSearch = search; trace.result = `${search.sources.length} · ${search.provider}`; trace.detail = search.query; }

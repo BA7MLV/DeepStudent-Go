@@ -14,6 +14,7 @@ import { commitTask, newRecordId, recordMutation, taskRows, type TaskContext } f
 import { sessionSkills, skillHistoryBudget, assertSkillRequestBudget } from './skills.js';
 import { sessionMcp } from './mcp.js';
 import { sessionShell } from './chat-shell.js';
+import { chatPublishFileTool, wrapChatPublish } from './chat-file-publish.js';
 import { refineSessionTitle } from './session-title.js';
 import { taskChatAttachments, resolveAttachmentMessages } from './chat-attachments.js';
 import { effectiveCompressionRows } from './context-compression.js';
@@ -40,7 +41,7 @@ export async function modelHistory(history: Record<string, any>[], session: Reco
   if (index > 0 && checkpoint?.prefixHash && await historyFingerprint(history.slice(0, index) as Array<{ content: string }>) !== checkpoint.prefixHash) index = 0;
   const afterCheckpoint = new Set(history.slice(Math.max(0, index)));
   const rows = effectiveCompressionRows(history, session.contextOmissions).filter(row => afterCheckpoint.has(row));
-  const messages = rows.map(row => replayTrace(row as { content: string }) ?? [attachmentMessage({ role: row.role, content: String(row.content ?? ''), attachments: row.attachments })]);
+  const messages = rows.map(row => replayTrace(row as { content: string }) ?? [attachmentMessage({ role: row.role, content: String(row.content ?? ''), attachments: row.role === 'user' ? row.attachments : undefined })]);
   const costs = messages.map(messageTokens);
   let total = costs.reduce((a, b) => a + b, 0), cut = 0;
   if (total > budget) while (cut < rows.length && total > budget * 0.8) {
@@ -69,7 +70,7 @@ export function addConversationMutations(
   // A delivered widget may already have local state (or a newer source revision)
   // synced by another device while this same server turn is still writing.
   if (previousAssistant) {
-    for (const key of ['widgetState', 'widgetStates']) {
+    for (const key of ['widgetState', 'widgetStates', 'attachments']) {
       if (previousAssistant[key] !== undefined) assistantRow[key] = previousAssistant[key];
     }
     if (Array.isArray(assistantRow.widgets) && Array.isArray(previousAssistant.widgets)) {
@@ -165,7 +166,9 @@ export async function chat(context: TaskContext) {
   const system = `你是 DeepStudent Go 学习资料库助手。服务器负责模型请求、检索、任务和数据保存；你可以通过工具读取用户自己的课程数据。\n\n${courseRule}通用问题直接回答。用简洁自然的中文回答。\n\n${SERVER_WIDGET_RULE}`;
   const project = session.projectFolderId == null ? undefined : context.records.get(context.owner, 'folders', session.projectFolderId);
   const current = attachmentMessage({ role: 'user', content: `${project ? runtimeContext({ project: { folderId: project.id, name: project.name } }) : ''}${text}`, attachments });
-  const systemWithSkills = system + shell.prompt + skills.prompt;
+  const canPublish = shell.tools.length > 0;
+  const systemWithSkills = system + shell.prompt + (canPublish
+    ? '\n\n如需交付沙盒生成的文件，在成品保存到 /workspace 后调用 chat_publish_file；成功时回复里自动出现下载附件。不要在正文伪造链接。' : '') + skills.prompt;
   const target = targetFor(context);
   const recent = await modelHistory(history, session, skillHistoryBudget(target.capabilities?.contextWindow ?? 131072, [{ role: 'system', content: systemWithSkills }, current], skills.messages));
   const messages: ChatMessage[] = skills.reconcile([{ role: 'system', content: systemWithSkills }, ...recent.messages, ...skills.messages, current]);
@@ -190,7 +193,8 @@ export async function chat(context: TaskContext) {
     result.widgets = assistantRow.widgets ?? [];
     return { rowId: assistantId, userRowId: userId, ...widgetFields(result) };
   };
-  const result = await runServerAgent(context, target, messages, [...libraryTools(courseReference && courses.length > 0), ...shell.tools, ...mcp.tools], mcp.wrap(skills.wrap(shell.wrap(libraryExecutor(context, session, courseReference)))), persist, [...skills.traces, ...mcp.traces], mcp.label, webSearchEnabled);
+  const execute = wrapChatPublish(context, assistantId, canPublish, shell.wrap(libraryExecutor(context, session, courseReference)));
+  const result = await runServerAgent(context, target, messages, [...libraryTools(courseReference && courses.length > 0), ...shell.tools, ...(canPublish ? [chatPublishFileTool] : []), ...mcp.tools], mcp.wrap(skills.wrap(execute)), persist, [...skills.traces, ...mcp.traces], mcp.label, webSearchEnabled);
   persist(result, false);
   if (title) await refineSessionTitle(context, sessionId, title, target, text, result.content, modelFetch(context));
   return { content: result.content, reasoning: result.reasoning, tools: result.tools, rowId: assistantId, userRowId: userId, ...(result.ask ? { ask: result.ask } : {}), ...responseFields(result) };

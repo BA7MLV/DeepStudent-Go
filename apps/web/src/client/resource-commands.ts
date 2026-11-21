@@ -196,7 +196,7 @@ export function startResourceCommands() {
     const issues = rows.filter(row => ['failed', 'conflict', 'review'].includes(row.value.state) && row.value.protocol === 1 && !isFact(row.value.request.operation)).map(row => ({
       id: row.id, label: resourceOperationLabel(row.value.request.operation), message: row.value.lastError ?? message(row.value.errorCode ?? ''), hasDraft: 'text' in row.value.request.operation || !!row.value.blob,
     }));
-    useResourceCommands.setState({ pending: waiting.length, issues });
+    useResourceCommands.setState({ pending: waiting.filter(row => row.value.protocol === 1).length, issues });
     clearTimeout(timer);
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
     const due = waiting.filter(row => row.value.state !== 'paused').map(row => row.value.nextAttemptAt ?? 0);

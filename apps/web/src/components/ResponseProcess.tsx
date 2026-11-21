@@ -1,7 +1,7 @@
 import { Sym } from '../ui/icons';
 import type { ChatToolCall } from '../store/db';
 import { processSteps, processTitle, type ProcessPhase } from '../utils/responseProcess';
-import { toolDisplay } from '../utils/toolTrace';
+import { displayToolResult, isShellTool, toolDisplay } from '../utils/toolTrace';
 import ReasoningChain from './ReasoningChain';
 import ReasoningMarkdown from './ReasoningMarkdown';
 import { PendingReply } from './motion';
@@ -46,6 +46,8 @@ export default function ResponseProcess({
         if (step.kind === 'reasoning') return <div key={step.key} className="response-process__text"><ReasoningMarkdown content={step.text} streaming={streaming} /></div>;
         const { call } = step;
         const { label, detail } = toolDisplay(call.name, call.detail);
+        const shell = isShellTool(call.name);
+        const result = displayToolResult(call.name, call.result);
         const pending = call.status === 'running';
         const needsUser = pending && (call.name === 'ask_user' || call.name === 'propose_folder_plan');
         const status = pending
@@ -55,7 +57,7 @@ export default function ResponseProcess({
         return (
           <div key={step.key} className="response-process__tool" data-status={call.status} data-testid="tool-trace-item">
             <span className="response-process__tool-icon" aria-hidden="true">
-              <Sym name={call.status === 'error' ? 'error' : pending ? needsUser ? 'help' : 'more_horiz' : 'check'} />
+              <Sym name={call.status === 'error' ? 'error' : shell ? 'terminal' : pending ? needsUser ? 'help' : 'more_horiz' : 'check'} />
             </span>
             <span className="response-process__action" title={detail}>
               {label}{detail ? ` · ${detail}` : ''}
@@ -63,7 +65,7 @@ export default function ResponseProcess({
             {!pending && <span className="sr-only">{status}</span>}
             {pending && <span className="response-process__state">{status}</span>}
             {call.ms != null && <span className="response-process__duration">{call.ms < 1000 ? `${call.ms} ms` : `${(call.ms / 1000).toFixed(1)} s`}</span>}
-            {call.result && <span className="response-process__result">{call.result}</span>}
+            {result && (shell ? <pre className="response-process__shell">{result}</pre> : <span className="response-process__result">{result}</span>)}
           </div>
         );
       })}

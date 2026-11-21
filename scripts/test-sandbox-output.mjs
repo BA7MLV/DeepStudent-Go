@@ -49,6 +49,8 @@ async function fixture(operation) {
   fs.writeFileSync(docker, `#!${process.execPath}\n` + String.raw`
 const fs = require('node:fs'), path = require('node:path'), { spawn } = require('node:child_process');
 const args = process.argv.slice(2), root = process.env.FAKE_DOCKER_DIR;
+if (args[0] === 'image' && args[1] === 'inspect') { console.log('sha256:fixture'); process.exit(0); }
+if (args[0] === 'run' && args[args.indexOf('--entrypoint') + 1] === 'du') { console.log('0\t/ws'); process.exit(0); }
 if (args[0] === 'run') {
   const name = args[args.indexOf('--name') + 1], command = args.at(-1);
   const child = spawn('bash', ['-lc', command], { stdio: 'inherit', detached: true });
@@ -224,10 +226,6 @@ test('real Bot runner delivers large shell previews and readable full artifacts 
     store.db.prepare('INSERT INTO users VALUES(?,?,?)').run(owner, owner, at);
     const config = new CloudConfiguration(store, path.join(root, 'config')), defaults = config.get(owner, true);
     config.save(owner, { ...defaults, providers: [{ id: 'fake', name: 'Fake', baseUrl: 'https://model.invalid/v1', protocol: 'openai-chat', apiKey: 'fake', serves: ['chat'] }], llmModel: { providerId: 'fake', model: 'fake' }, policy: { ...defaults.policy, shell: 'allow', read: 'allow', write: 'allow' } });
-    const service = new BotApplicationService(store, { enqueue() {}, cancel() {} });
-    const thread = service.create(owner, 'bot', 'Output test');
-    const message = service.send(owner, thread.id, { clientNonce: 'output-test', content: 'Inspect all files' });
-    const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id).id;
     let requests = 0, modelResult;
     const study = new StudyTools(store, config, path.join(root, 'files'));
     runner = new BotRunner(store, { configuration: config, study, fetch: async (_url, init) => {
@@ -235,6 +233,10 @@ test('real Bot runner delivers large shell previews and readable full artifacts 
       modelResult = JSON.parse(JSON.parse(init.body).messages.findLast(m => m.role === 'tool').content);
       return Response.json({ choices: [{ message: { content: 'Inspection finished.' } }], usage: { prompt_tokens: 20, completion_tokens: 20 } });
     } });
+    const service = new BotApplicationService(store, runner);
+    const thread = service.create(owner, 'bot', 'Output test');
+    const message = service.send(owner, thread.id, { clientNonce: 'output-test', content: 'Inspect all files' });
+    const run = store.db.prepare('SELECT id FROM runs WHERE trigger_message_id=?').get(message.id).id;
     runner.start();
     for (let n = 0; n < 500 && !['completed', 'failed'].includes(store.db.prepare('SELECT status FROM runs WHERE id=?').get(run).status); n++) await sleep(10);
     assert.equal(store.db.prepare('SELECT status FROM runs WHERE id=?').get(run).status, 'completed');

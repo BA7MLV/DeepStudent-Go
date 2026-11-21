@@ -9,13 +9,14 @@
   },
   "chatShell": {
     "title": "允许这次聊天运行命令吗？",
+    "publishTitle": "允许把此文件保存为聊天附件吗？",
     "scope": "仅本会话工作目录可写，账户系统资料只读。联网：{{network}} · 时限：{{seconds}}秒",
     "networkOn": "开启",
     "networkOff": "关闭",
     "command": "查看完整命令",
     "approve": "仅允许这一次",
     "reject": "拒绝",
-    "loadFailed": "命令审批暂时无法加载，请重新连接，或停止这轮回答后重试。"
+    "loadFailed": "聊天审批暂时无法加载，请重新连接，或停止这轮回答后重试。"
   },
   "courseMetadata": { "loadFailed": "课程信息暂时无法读取，未加载不表示课程已删除。", "retry": "重试" },
   "appTitle": "DeepStudent Go",
@@ -372,6 +373,18 @@
     "failed": "上传失败",
     "limited": "仅预览部分正文，完整内容请下载原文件。",
     "fallback": "原文件暂时无法读取，当前显示已保存的正文摘要。"
+  },
+  "deliveryPreview": {
+    "title": "交付文件预览",
+    "close": "关闭文件预览",
+    "documentText": "这里仅显示正文；完整排版和图片请查看原文件。",
+    "slide": "第 {{number}} 张幻灯片",
+    "emptySlide": "此页没有可预览的文字。",
+    "empty": "文件没有可预览的文字。",
+    "legacy": "旧版 .doc 和 .ppt 不支持在线预览。可下载后打开，或另存为 .docx / .pptx。",
+    "tooLarge": "文件过大，无法在线预览。请下载原文件。",
+    "failed": "无法读取预览。可以重试或下载原文件。",
+    "retry": "重试"
   },
   "websiteSources": {
     "label": "引用来源",

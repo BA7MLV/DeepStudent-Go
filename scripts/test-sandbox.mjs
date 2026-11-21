@@ -117,6 +117,20 @@ try {
   assert.deepEqual(Buffer.from(await binary.arrayBuffer()), Buffer.from(Array.from({ length: 1024 * 1024 }, (_, i) => i % 256)));
   assert.equal((await readFile('bad-link')).status, 400);
   assert.equal((await readFile('pipe')).status, 400);
+  const exportFile = (filePath, limit, scope = {}) => fetch(`${baseUrl}/files/export`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ threadId, executionId: crypto.randomUUID(), path: filePath, limit, ...scope }) });
+  const exportBytes = 21 * 1024 * 1024;
+  assert.equal((await call('truncate -s 22020096 export.bin')).exitCode, 0);
+  assert.equal((await readFile('export.bin')).status, 413, 'the legacy reader retains its 20 MiB limit');
+  assert.equal((await exportFile('export.bin', exportBytes - 1)).status, 413);
+  assert.equal((await exportFile('export.bin', exportBytes, { projectId })).status, 400);
+  assert.equal((await exportFile('bad-link', exportBytes)).status, 400);
+  const exported = await exportFile('/workspace/export.bin', exportBytes);
+  assert.equal(exported.status, 200);
+  assert.equal(exported.headers.get('x-wangke-export-size'), String(exportBytes));
+  assert.equal(exported.headers.get('content-length'), null);
+  let length = 0;
+  for await (const chunk of exported.body) { assert.ok(chunk.every(byte => byte === 0)); length += chunk.length; }
+  assert.equal(length, exportBytes);
   const projectWrite = await call('printf project-persisted > shared.txt; id -u', { projectId });
   assert.equal(projectWrite.exitCode, 0);
   assert.equal(fs.readFileSync(path.join(projectsRoot, projectId, 'shared.txt'), 'utf8'), 'project-persisted');

@@ -15,7 +15,7 @@
  */
 
 import type { ChatToolCall } from '../store/db';
-import { parseWebSearchResult } from '@wangke/contracts/web-search';
+import { parseWebSearchResult, webFetchTraceResult, webToolDetail } from '@wangke/contracts/web-search';
 
 /** Track invocations rather than tool names: identical tools may finish out of order. */
 export class ToolTraceLedger {
@@ -29,8 +29,10 @@ export class ToolTraceLedger {
   finish(id: string, result: string): void {
     const entry = this.active.get(id);
     if (!entry) return;
-    const webSearch = this.calls[entry.index].name === 'websearch' ? parseWebSearchResult(result) : null;
-    this.calls[entry.index] = { ...this.calls[entry.index], status: isToolFailure(result) ? 'error' : 'done', result: webSearch ? `${webSearch.sources.length} · ${webSearch.provider}` : summarizeToolResult(result), ...(webSearch ? { webSearch } : {}), ms: Date.now() - entry.started };
+    const call = this.calls[entry.index];
+    const webSearch = call.name === 'websearch' ? parseWebSearchResult(result) : null;
+    const summary = webSearch ? `${webSearch.sources.length} · ${webSearch.provider}` : summarizeToolResult(displayToolResult(call.name, result) ?? '');
+    this.calls[entry.index] = { ...call, status: isToolFailure(result) ? 'error' : 'done', result: summary, ...(webSearch ? { webSearch } : {}), ms: Date.now() - entry.started };
     this.active.delete(id);
   }
   get running(): number { return this.active.size; }
@@ -94,8 +96,10 @@ const DETAIL_KEYS: Record<string, string> = {
 
 /** 工具名 → 动作短语。不认识的工具原样返回名字（宁可显示 `foo_bar` 也不要显示空白） */
 export function toolLabel(name: string): string {
-  return TOOL_LABELS[name] ?? name;
+  return isShellTool(name) ? 'Shell' : TOOL_LABELS[name] ?? name;
 }
+
+export const isShellTool = (name: string): boolean => /^(shell|bash)$/i.test(name);
 
 /** 只解码展示文字，不回写工具参数；坏转义也不能让历史消息渲染失败。 */
 function readablePath(path: string): string {
@@ -106,6 +110,19 @@ function readablePath(path: string): string {
 
 /** 实时状态与历史工具行共用。先按原始路径分段，避免名称里的 %2F 被误当成目录。 */
 export function toolDisplay(name: string, detail?: string): { label: string; detail?: string } {
+  if (isShellTool(name)) {
+    const text = detail?.trim();
+    if (text?.startsWith('{')) return { label: toolLabel(name), detail: toolDetail(name, text) };
+    return { label: toolLabel(name), detail: text ? clip(text, 140) : undefined };
+  }
+  if (name === 'webfetch' || name === 'websearch') {
+    // Older server traces stored JSON here, sometimes clipped before the closing brace.
+    const text = detail?.trim();
+    if (text && /^\{\s*(?:"|\}|$)/.test(text)) {
+      return { label: toolLabel(name), detail: toolDetail(name, text) };
+    }
+    return { label: toolLabel(name), detail: text };
+  }
   if (name === 'read' && detail) {
     const parts = detail.split('/');
     if (parts[0] === '' && parts[1] === 'skills') {
@@ -128,11 +145,14 @@ export function toolDisplay(name: string, detail?: string): { label: string; det
  * **不抛错** —— 工具名本身已经够用户看懂发生了什么，为一个副标题让整条消息渲染失败不值得。
  */
 export function toolDetail(name: string, argsJson?: string): string | undefined {
-  const key = DETAIL_KEYS[name];
+  const shell = isShellTool(name);
+  const key = shell ? 'description' : DETAIL_KEYS[name];
   if (!key) return undefined;
   try {
     const args = JSON.parse(argsJson || '{}') as Record<string, unknown>;
+    if (name === 'webfetch' || name === 'websearch') return webToolDetail(name, args);
     const raw = args[key];
+    if (shell) return typeof raw === 'string' && raw.trim() ? clip(raw.trim(), 140) : undefined;
     if (raw == null) return undefined;
     /**
      * 时间类参数（`get_transcript_range.start`）转成 mm:ss —— 用户脑子里的时间轴是
@@ -162,6 +182,10 @@ export function toolDetail(name: string, argsJson?: string): string | undefined 
  */
 export function toolHint(name: string, argsJson?: string, fallback = '正在处理…'): string {
   if (name.startsWith('MCP · ')) return name;
+  if (isShellTool(name)) {
+    const detail = toolDetail(name, argsJson);
+    return detail ? `Shell · ${detail}` : 'Shell…';
+  }
   // 提问卡不是「正在做什么」，它把选择权交回用户：文案要换成等待口吻，否则会读成系统还在忙
   if (name === 'ask_user') return '等待你的回答';
   /**
@@ -196,6 +220,10 @@ export function summarizeToolResult(raw: string, max = 160): string {
     .trim();
   if (!one) return '';
   return clip(one, max);
+}
+
+export function displayToolResult(name: string, result?: string): string | undefined {
+  return name === 'webfetch' && result ? webFetchTraceResult(result) : result;
 }
 
 /**

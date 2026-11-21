@@ -14,8 +14,22 @@ export const fileOperationId = (owner: string, step: string, purpose: string) =>
   return `${key.slice(0, 8)}-${key.slice(8, 12)}-${key.slice(12, 16)}-${key.slice(16, 20)}-${key.slice(20)}`;
 };
 
+/** 只清理由导出专用命名空间留下的崩溃残件；启动时尚未执行任何任务。 */
+export async function cleanChatExportStaging(store: DatabaseStore, directory: string) {
+  const entries = await fs.promises.opendir(directory);
+  for await (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const temporary = /^\.upload-chat-export-[0-9a-f-]{36}\.tmp$/.test(entry.name);
+    if (!temporary && !/^chat-export-[0-9a-f-]{36}\.bin$/.test(entry.name)) continue;
+    if (temporary || !store.db.prepare('SELECT 1 FROM files WHERE storage_name=?').get(entry.name)) {
+      await fs.promises.rm(path.join(directory, entry.name), { force: true });
+    }
+  }
+}
+
 export async function receiveFile(store: DatabaseStore, directory: string, owner: string, stream: Readable,
-  name: string, mime: string, limit: number, declared?: number, checkActive: () => void = () => {}, operationFileId?: string) {
+  name: string, mime: string, limit: number, declared?: number, checkActive: () => void = () => {}, operationFileId?: string,
+  chatExport?: { signal: AbortSignal; commit(file: { id: string; originalName: string; mimeType: string; sizeBytes: number }): void }) {
   const id = operationFileId ?? crypto.randomUUID();
   if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('invalid_file_operation');
   if (operationFileId) {
@@ -28,8 +42,9 @@ export async function receiveFile(store: DatabaseStore, directory: string, owner
   // A competing retry must never remove another upload's temporary/final file.
   if (operationUploads.has(operationKey)) throw new Error('file_operation_inflight');
   operationUploads.add(operationKey);
-  const storageName = `${id}.bin`;
-  const temporaryPath = path.join(directory, `.upload-${id}.tmp`);
+  const storageBase = chatExport ? `chat-export-${id}` : id;
+  const storageName = `${storageBase}.bin`;
+  const temporaryPath = path.join(directory, `.upload-${storageBase}.tmp`);
   const storagePath = path.join(directory, storageName);
   const hash = crypto.createHash('sha256');
   let header = Buffer.alloc(0);
@@ -41,28 +56,40 @@ export async function receiveFile(store: DatabaseStore, directory: string, owner
     hash.update(chunk); done(null, chunk);
   } });
   try {
-    await pipeline(stream, counter, fs.createWriteStream(temporaryPath, { flags: 'wx', mode: 0o600 }));
+    await pipeline(stream, counter, fs.createWriteStream(temporaryPath, { flags: 'wx', mode: 0o600 }), { signal: chatExport?.signal });
     if (bytes < 1 || (declared !== undefined && declared !== bytes)) throw Object.assign(new Error('file_too_large_or_invalid'), { statusCode: 413 });
     const handle = await fs.promises.open(temporaryPath, 'r+');
     try { await handle.sync(); } finally { await handle.close(); }
     const sha256 = hash.digest('hex'); const createdAt = new Date().toISOString();
     // Cache blobs carry application-level metadata and are not user-facing uploads.
     // Sniff only a bounded header; even 512 MiB non-image uploads stay streaming.
-    if (name !== 'cache-blob') {
+    if (chatExport) name = safeFileName(name);
+    else if (name !== 'cache-blob') {
       const detected = await uploadedImageMime(temporaryPath, name, mime, header);
       if (detected) {
         mime = detected;
         name = imageFileName(name, mime, `图片_${createdAt.slice(0, 10).replace(/-/g, '')}_${id.slice(0, 8)}`);
       } else name = safeFileName(name);
     }
-    if (name === 'cache-blob') {
+    if (!chatExport && name === 'cache-blob') {
       const existing = store.db.prepare("SELECT id,original_name AS originalName,mime_type AS mimeType,size_bytes AS sizeBytes,sha256,created_at AS createdAt FROM files WHERE owner_id=? AND sha256=? AND mime_type=? AND original_name='cache-blob' LIMIT 1").get(owner, sha256, mime);
       if (existing) { await fs.promises.rm(temporaryPath, { force: true }); return existing as { id: string; originalName: string; mimeType: string; sizeBytes: number; sha256: string; createdAt: string }; }
     }
     await fs.promises.rename(temporaryPath, storagePath);
+    if (chatExport) {
+      const folder = await fs.promises.open(directory, 'r');
+      try { await folder.sync(); } finally { await folder.close(); }
+    }
     checkActive(); // No asynchronous gap between authority recheck and the database commit.
-    store.db.prepare('INSERT INTO files(id,owner_id,storage_name,original_name,mime_type,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)')
+    const insert = () => store.db.prepare('INSERT INTO files(id,owner_id,storage_name,original_name,mime_type,size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?)')
       .run(id, owner, storageName, name, mime, bytes, sha256, createdAt);
+    // Do not flush unrelated system-file writes after committing; a flush error
+    // must not send this committed file through the failure cleanup below.
+    if (chatExport) store.db.transaction(() => {
+      insert();
+      chatExport.commit({ id, originalName: name, mimeType: mime, sizeBytes: bytes });
+    })();
+    else insert();
     return { id, originalName: name, mimeType: mime, sizeBytes: bytes, sha256, createdAt };
   } catch (error) {
     await Promise.all([fs.promises.rm(temporaryPath, { force: true }), fs.promises.rm(storagePath, { force: true })]);

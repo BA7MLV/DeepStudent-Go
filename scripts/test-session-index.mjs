@@ -1,6 +1,5 @@
 import os from 'node:os';
 import assert from 'node:assert/strict';
-import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -65,7 +64,7 @@ try {
   assert.ok(read({ videoId: 'unrelated-course' }).version > otherCourseVersion);
   assert.equal(read().sessions.some(row => row.id === 120), false);
   const plan = store.db.prepare(`EXPLAIN QUERY PLAN SELECT id FROM client_session_index WHERE owner_id=? AND video_id=? AND archived=0 AND has_user=1
-    ORDER BY pinned DESC,activity DESC,created_at DESC,id DESC LIMIT 51`).all(owner, videoId);
+    ORDER BY pinned DESC,pin_rank DESC,activity DESC,created_at DESC,id DESC LIMIT 51`).all(owner, videoId);
   assert.ok(plan.some(row => row.detail.includes('client_session_index_recent')));
   assert.ok(plan.every(row => !/SCAN |TEMP B-TREE/.test(row.detail)));
   store.transaction(() => {

@@ -1,4 +1,3 @@
-import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -23,9 +22,9 @@ import {serverRuntime,disposeServerRuntime} from '/src/client/bootstrap.ts';
 import {resourceCommand,uploadResource,recordReadingPosition,recordPlayback,readResources} from '/src/client/resources.ts';
 import {startResourceCommands,flushResourceCommands,resumeResourceCommands,useResourceCommands} from '/src/client/resource-commands.ts';
 import {serverClient} from '/src/api/serverClient.ts';
-import Notice from '/src/cloud/ResourceSaveNotice.tsx';import Recovery from '/src/cloud/ResourceRecovery.tsx';
+import Recovery from '/src/cloud/ResourceRecovery.tsx';
 cloud.enabled=true;cloud.userId=window.fixtureOwner;useCloudDatabase(cloud.userId);await db.open();await serverRuntime(cloud.userId);startResourceCommands();
-function Probe(){const [open,setOpen]=useState(false);return React.createElement(React.Fragment,null,React.createElement(Notice),React.createElement('button',{onClick:()=>setOpen(!open)},'Toggle recovery'),open?React.createElement(Recovery):null)}
+function Probe(){const [open,setOpen]=useState(false);return React.createElement(React.Fragment,null,React.createElement('button',{onClick:()=>setOpen(!open)},'Toggle recovery'),open?React.createElement(Recovery):null)}
 createRoot(document.getElementById('root')).render(React.createElement(React.StrictMode,null,React.createElement(Probe)));
 window.probe={resource:resourceCommand,upload:(id)=>uploadResource(id,'retained-upload.txt',new Blob(['original upload bytes'])),reading:recordReadingPosition,playback:recordPlayback,
 flush:flushResourceCommands,resume:resumeResourceCommands,resources:readResources,text:serverClient.projectText,
@@ -55,7 +54,6 @@ async seed(row){await db.table('_cloudMeta').put(row)},dispose(){disposeServerRu
   await page.unroute('**/api/clientRuntime/resourceCommand');
   assert.equal(sends, 1);
   assert.equal((await page.evaluate(() => probe.pending())).length, 0, 'lost responses retire automatically without user recovery');
-  assert.equal(await page.getByRole('alert').count(), 0);
   const completed = (await page.evaluate(() => probe.all())).find(row => row.id.startsWith('resource-completed:'));
   assert.equal(completed.value.request, undefined, 'success keeps a compact receipt, not the original body');
   assert.equal(completed.value.blob, undefined);
@@ -76,7 +74,6 @@ async seed(row){await db.table('_cloudMeta').put(row)},dispose(){disposeServerRu
   const offline = await page.evaluate(() => probe.pending());
   assert.equal(offline.length, 1, 'forty scroll events coalesce to one durable unsent update');
   assert.equal(offline[0].value.request.operation.unit, 40);
-  assert.equal(await page.getByRole('alert').count(), 0, 'offline progress does not become an error/task per scroll');
   let progressSends = 0;
   await page.route('**/api/clientRuntime/resourceCommand', async route => { progressSends++; await route.continue(); });
   await context.setOffline(false); await page.evaluate(() => probe.resume());
@@ -147,8 +144,8 @@ async seed(row){await db.table('_cloudMeta').put(row)},dispose(){disposeServerRu
   assert.equal((await page.evaluate(() => probe.pending())).length, 0, 'a fresh lifetime reconciles the committed receipt');
   assert.equal(lifetimeSends, 1);
 
-  // Known CAS failures preserve the original draft and expose a filename and a
-  // comparison, never a command ID/JSON list or an automatic overwrite.
+  // Known CAS failures preserve the original draft and support an explicit
+  // comparison and merge without an automatic overwrite.
   const original = await page.evaluate(id => probe.text(id, 'progress.md'), project.id);
   await page.evaluate(({ id, revision }) => probe.resource({ kind: 'saveProjectText', projectId: id, path: 'progress.md', text: '# Other device', expectedRevision: revision }), { id: project.id, revision: original.revision });
   const conflict = await page.evaluate(async ({ id, revision }) => {
@@ -156,8 +153,6 @@ async seed(row){await db.table('_cloudMeta').put(row)},dispose(){disposeServerRu
     catch (error) { return error.message; }
   }, { id: project.id, revision: original.revision });
   assert.match(conflict, /已保留/);
-  await page.getByRole('alert', { name: '资料保存提醒' }).waitFor();
-  assert.doesNotMatch(await page.getByRole('alert', { name: '资料保存提醒' }).innerText(), /resource-[0-9a-f]|JSON|原命令/);
   const pendingConflict = (await page.evaluate(() => probe.pending())).find(row => row.value.state === 'conflict');
   assert.equal(pendingConflict.value.request.operation.text, '# My retained draft');
   assert.equal((await page.evaluate(id => probe.text(id, 'progress.md'), project.id)).text, '# Other device');
@@ -209,7 +204,7 @@ async seed(row){await db.table('_cloudMeta').put(row)},dispose(){disposeServerRu
   assert.ok(scopeDrafts.some(row => row.value.errorCode === 'resource_scope_changed' && row.value.request.operation.text === 'keep local only'), JSON.stringify(scopeDrafts));
   assert.equal(fs.existsSync(path.join(directory, 'files/projects', project.id, 'scope-guard.md')), false);
   assert.deepEqual(errors, []);
-  await page.screenshot({ path: path.join(directory, 'business-save-notice.png'), fullPage: true });
+  await page.screenshot({ path: path.join(directory, 'resource-recovery.png'), fullPage: true });
   console.log('PASS browser lost receipts/uploads, coalesced offline progress, stable identities, human-readable conflicts/merge, permanent failure isolation, legacy preservation and database-scope fence', directory);
 } catch (error) {
   if (page && !page.isClosed()) { await page.screenshot({ path: path.join(directory, 'failure.png'), fullPage: true }); fs.writeFileSync(path.join(directory, 'failure.html'), await page.content()); }

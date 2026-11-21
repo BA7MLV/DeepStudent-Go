@@ -5,8 +5,9 @@
 ## 按需边界
 
 - 正常 `startCloud`、同步/Activity 不加载历史迁移，也不扫描旧库、计算历史 Blob 摘要或转换旧命令。
-- 设置 → 数据 → 历史数据恢复，点击“打开历史恢复”才动态加载 `HistoryRecovery`。此时只做本地保全与读取；关闭页面释放列表订阅。
-- 登录页、首次设置及服务不可用的未认证入口不提供资料导出，也不挂载 `LocalHistoryExport` 或扫描本机历史库。历史恢复只能从登录后的设置进入；独立导出组件的隔离 fixture 不代表产品提供未认证入口。
+- 普通设置不再提供旧版浏览器数据恢复、导入或导出入口，也不加载对应组件；仅在当前资料有保存问题时提供保存详情。旧库及原稿不会因此删除或迁移。
+- 当前资料的保存错误由发起操作的界面反馈，不再显示全站资料保存提醒；原稿、命令状态及设置中的保存详情仍然保留。
+- 登录页、首次设置及服务不可用的未认证入口也不提供旧版资料导出。下文的历史恢复组件和导出行为由隔离测试验证，不代表有产品入口。
 - 打开后先按原事务完整复制旧 outbox 到 `_historyTransactions`，保留行 ID、transaction、before/after、许可、executorTaskId 和 Blob。源库始终只读，不改 schema、不删数据。
 - 旧 task/resource/preference journal 的原值与完整 Blob 按摘要版本归档；**不复制进活动 `_cloudMeta`，不唤醒旧命令重播**。同键新字节成为新证据，旧 completed 收据不能确认新版本。原库所有表仍可整库导出。
 - 查看与完整导出不依赖服务器。复制失败仍展示旧库只读入口，原库未改变；失败不导致清库或降级为本地业务权威。
@@ -15,7 +16,7 @@
 
 ## 本轮实际验证
 
-- `node scripts/e2e-history-recovery-demand.mjs`：真实 Chromium + 当前源码 Vite + 隔离 IDB，无 API，验证点击前不加载历史模块/不扫描；打开真实恢复组件后离线保全、列表及原 journal Blob 导出，活动 `_cloudMeta` 与 `_learningCommands` 未获得旧命令；复用现有 8 MiB+17 逐字节 fixture，覆盖源库写入为零、列表不读取完整附件、同键 metadata 更新、不可验证附件/原始收据、A→B→A 旧详情拒绝。该入口 fixture 使用与设置相同的 React.lazy 条件挂载，不声称完成整页设置或已登录应用验收。
+- `node scripts/e2e-history-recovery-demand.mjs`：真实 Chromium + 当前源码 Vite + 隔离 IDB，无 API，验证点击前不加载历史模块/不扫描；打开真实恢复组件后离线保全、列表及原 journal Blob 导出，活动 `_cloudMeta` 与 `_learningCommands` 未获得旧命令；复用现有 8 MiB+17 逐字节 fixture，覆盖源库写入为零、列表不读取完整附件、同键 metadata 更新、不可验证附件/原始收据、A→B→A 旧详情拒绝。该入口是隔离 fixture，不声称完成整页设置或已登录应用验收。
 - 同一专项曾在独立 fixture 的无账户页面点击 `LocalHistoryExport`，下载原库 JSON，核对原 outbox 文件与变化后的 journal Blob；模块请求证明未加载业务账户 runtime，API 请求仍为 0。该 fixture 仅验证底层导出能力，不是允许登录页提供导出的验收。证据目录包含 `evidence.json` 与 `cold-original.json`。这是 **API 不可达、Web 静态资源仍由本机测试 Vite 提供** 的测试，不代表首次访问无任何缓存资源时能完全离线下载恢复 chunk。真实断网需要已缓存应用资源。
 - 最终专项证据：`/private/var/folders/2r/zv45t_9d6ljfqfj6l1r0yvtr0000gn/T/opencode/history-demand-WVAGQH/`，无页面错误；原 executor 库恢复写入 0、API 请求 0、8,388,625 字节逐字节保全。另有同键 journal 新字节版本化/可重入与身份收据不能隐藏新证据断言。
 - `node --import tsx --test --test-name-pattern='legacy transactions preserve' scripts/test-cloud-transactions.mjs`：原事务、许可、原 ID、完整 Blob、同键新字节版本及可重入保全通过。

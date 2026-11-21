@@ -6,7 +6,7 @@ import { inspectResourceCommand, archiveResourceCommand, exportResourceCommand, 
 import { resourceOperationLabel, type ResourceDraft } from '../client/resource-commands';
 
 /** Settings-only: mounting observes local drafts, never replays a file effect. */
-export default function ResourceRecovery() {
+export default function ResourceRecovery({ currentOnly = false }: { currentOnly?: boolean }) {
   const [drafts, setDrafts] = useState<ResourceDraft[]>([]);
   const [detail, setDetail] = useState<Awaited<ReturnType<typeof inspectResourceCommand>>>();
   const [error, setError] = useState('');
@@ -15,10 +15,12 @@ export default function ResourceRecovery() {
   useEffect(() => {
     const database = db, owner = cloud.userId;
     const subscription = liveQuery(() => database.table('_cloudMeta').where('id').startsWith('resource-command:').toArray()).subscribe({ next: rows => {
-      if (database === db && owner === cloud.userId) setDrafts(rows.map(row => row.value));
+      if (database === db && owner === cloud.userId) {
+        setDrafts(rows.map(row => row.value).filter(draft => !currentOnly || draft.protocol === 1));
+      }
     }, error: error => { if (database === db && owner === cloud.userId) setError(String(error)); } });
     return () => subscription.unsubscribe();
-  }, []);
+  }, [currentOnly]);
   const run = async (id: string, archive = false) => {
     const database = db, owner = cloud.userId;
     setBusy(true); setError('');
@@ -51,7 +53,7 @@ export default function ResourceRecovery() {
   if (!drafts.length && !detail && !error) return null;
   return <section className="bg-surface p-3" aria-label="资源命令恢复">
     <h3>尚未完成的资料改动</h3>
-    <p>系统会自动确认可恢复的保存。旧记录或无法确认的文件操作不会盲目重试，原稿和附件会保留。</p>
+    <p>系统会继续确认可重试的保存。无法确认结果时，原稿和附件会保留。</p>
     <div className="max-h-64 overflow-auto">
       {drafts.map(draft => <div key={draft.request.operationId} className="py-2">
         <p>{resourceOperationLabel(draft.request.operation)} · {draft.state === 'conflict' ? '存在冲突' : draft.state === 'failed' ? '未完成' : draft.state === 'review' ? '结果待确认' : '等待确认'}</p>

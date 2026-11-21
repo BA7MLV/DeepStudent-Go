@@ -10,7 +10,6 @@ import { useCloudActivity } from './activityStore';
 import FileIntentRecovery from './FileIntentRecovery';
 import PreferenceRecovery from './PreferenceRecovery';
 import LearningRecovery from './LearningRecovery';
-import ResourceSaveNotice from './ResourceSaveNotice';
 import { useSustained } from './quiet';
 import './activity.css';
 
@@ -99,7 +98,6 @@ export default function CloudActivity() {
     <FileIntentRecovery />
     <PreferenceRecovery />
     <LearningRecovery />
-    <ResourceSaveNotice />
     {error ? <p role="alert" className="bg-surface p-3 text-danger">{error}</p> : null}
   </div>;
 }

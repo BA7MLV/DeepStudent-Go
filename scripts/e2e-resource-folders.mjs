@@ -275,8 +275,7 @@ try {
     await resourceToDelete.waitFor({ state: 'detached' });
     assert.equal(fs.existsSync(markdownPath), false, 'Resource Library deletion removes the source file');
     assert.equal((await call('GET', `/cloud/record?table=videos&key=${encodeURIComponent(JSON.stringify(indexed.courseId))}`)).value, null, 'Resource Library deletion removes the learning record');
-    // The deliberate save conflict stays recoverable, but its reminder must
-    // not trap narrow-screen toolbar actions underneath a permanent card.
+    // Reload retains the draft without resurfacing the save failure elsewhere.
     const retainedConflict = await page.evaluate(async () => {
       const { useResourceCommands } = await import('/src/client/resource-commands.ts');
       const { db } = await import('/src/store/db.ts');
@@ -285,14 +284,9 @@ try {
     });
     assert.equal(retainedConflict.issues.length, 1);
     assert.equal(retainedConflict.rows[0]?.value.request.operation.text, draft);
-    await page.getByRole('button', { name: '收起提醒', exact: true }).click();
-    await page.getByRole('alert', { name: '资料保存提醒' }).waitFor({ state: 'hidden' });
-    assert.deepEqual(await page.evaluate(async () => {
-      const { useResourceCommands } = await import('/src/client/resource-commands.ts');
-      const { db } = await import('/src/store/db.ts');
-      const issues = useResourceCommands.getState().issues;
-      return { issues, rows: await db.table('_cloudMeta').bulkGet(issues.map(issue => issue.id)) };
-    }), retainedConflict, 'collapsing the notice retains conflict commands and original drafts');
+    const activity = page.getByTestId('cloud-activity');
+    assert.equal(await activity.getByRole('alert', { name: '资料保存提醒' }).count(), 0);
+    assert.equal(await activity.getByText('查看未保存的资料', { exact: true }).count(), 0);
     await page.getByRole('button', { name: '更多操作', exact: true }).click();
     await page.getByRole('menuitem', { name: '导入课程 / B 站视频' }).click();
     await dialog.getByTestId('btn-bili-import').click();

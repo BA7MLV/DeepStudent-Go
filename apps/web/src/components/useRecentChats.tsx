@@ -28,7 +28,10 @@ export function useRecentChats(showActive = false) {
   const [actionError, setActionError] = useState<string>();
   const guard = (action: () => Promise<unknown>) => {
     setActionError(undefined);
-    void action().catch(error => setActionError(error instanceof Error ? error.message : String(error)));
+    return action().then(() => true, error => {
+      setActionError(error instanceof Error ? error.message : String(error));
+      return false;
+    });
   };
 
   useEffect(() => {

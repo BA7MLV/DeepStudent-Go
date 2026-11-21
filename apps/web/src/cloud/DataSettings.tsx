@@ -10,14 +10,13 @@ import ArchivedSessionsCard from '../components/settings/ArchivedSessionsCard';
 import { logoutCloud } from './logout';
 import ServerStorageCard from './ServerStorageCard';
 import { resumeResourceCommands, useResourceCommands } from '../client/resource-commands';
-const HistoryRecovery = lazy(() => import('./HistoryRecovery'));
+const ResourceRecovery = lazy(() => import('./ResourceRecovery'));
 const ConflictRecovery = lazy(() => import('./ConflictRecovery'));
-const LibraryImportFiles = lazy(() => import('./LibraryImportFiles'));
 
 /**
  * 设置 → 数据（云端）。
  *
- * 只放「已积累的东西」：服务器存储、同步状态、旧数据导入、已归档会话、登录凭据，最后是退出与重置。
+ * 只放当前账号的服务器存储、保存与同步状态、已归档会话、登录凭据，最后是退出与重置。
  * Bot 权限、消息渠道、任务各回各的模块，不再全部堆在这一屏。
  *
  * 处理逻辑：
@@ -31,7 +30,7 @@ export default function DataSettings() {
   const degradedSince = useCloudSync(s => s.degradedSince);
   const pending = useCloudSync(s => s.pending);
   const [busy, setBusy] = useState<string | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [saveDetailsOpen, setSaveDetailsOpen] = useState(false);
   const resourceIssues = useResourceCommands(state => state.issues);
   const resourcePending = useResourceCommands(state => state.pending);
   const [passkeys, setPasskeys] = useState<Array<{ id: string; createdAt: string }>>([]);
@@ -52,13 +51,6 @@ export default function DataSettings() {
   const conflict = syncError.includes('冲突');
   // Settings is where the user asked to look, so degradation is shown as-is here.
   const syncLabel = conflict ? '有冲突' : syncError ? '同步失败' : degradedSince ? '连接中断，正在自动重试' : pending ? `${pending} 项待同步` : '已同步';
-
-  const importLegacy = () => run('import', async () => {
-    if (!await confirmDialog({ headline: '导入此浏览器的旧数据？', description: '仅支持空的云端库，旧数据保留在本机。', confirmText: '导入' })) return;
-    const { migrateLocalData } = await import('./migrate');
-    await migrateLocalData(() => {});
-    toast.success('导入完成');
-  });
 
   const addPasskey = () => run('passkey', async () => {
     if (!browserSupportsWebAuthn()) throw new Error('这个浏览器不支持 Passkey');
@@ -102,16 +94,12 @@ export default function DataSettings() {
       {resourceIssues.length || resourcePending ? <SectionCard title="资料保存状态" testId="resource-save-status">
         {resourcePending ? <p className="text-sm text-muted">有 {resourcePending} 项资料改动等待确认。系统会在恢复连接后继续处理，不会重复创建文件。</p> : null}
         {resourceIssues.length ? <p className="text-sm">有 {resourceIssues.length} 项改动尚未完成。原稿保留在此浏览器。</p> : null}
-        <Button size="sm" variant="secondary" onPress={() => setHistoryOpen(true)}>查看保存详情</Button>
-        <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('resources', resumeResourceCommands)}>重新连接并确认</Button>
-      </SectionCard> : null}
-      <SectionCard title="历史数据恢复" testId="cloud-history-recovery">
-        <p className="text-sm text-muted">旧库仅按需读取，原稿和附件保留在此浏览器。查看与完整导出不要求服务器在线，不会自动重放历史操作。</p>
-        <Button size="sm" variant="secondary" onPress={() => setHistoryOpen(value => !value)}>
-          {historyOpen ? '关闭历史恢复' : '打开历史恢复'}
+        <Button size="sm" variant="secondary" aria-expanded={saveDetailsOpen} onPress={() => setSaveDetailsOpen(value => !value)}>
+          {saveDetailsOpen ? '关闭保存详情' : '查看保存详情'}
         </Button>
-        {historyOpen ? <Suspense fallback={<p role="status">正在加载历史恢复…</p>}><HistoryRecovery /></Suspense> : null}
-      </SectionCard>
+        <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('resources', resumeResourceCommands)}>重新连接并确认</Button>
+        {saveDetailsOpen ? <Suspense fallback={<p role="status">正在加载保存详情…</p>}><ResourceRecovery currentOnly /></Suspense> : null}
+      </SectionCard> : null}
       <SectionCard title="同步" testId="cloud-sync-card">
         <SettingRow label="状态">
           <span className={`text-sm ${syncError ? 'text-danger' : 'text-muted'}`} role="status">{syncLabel}</span>
@@ -126,13 +114,7 @@ export default function DataSettings() {
           <Suspense fallback={<p role="status">正在加载冲突处理…</p>}><ConflictRecovery /></Suspense>
           </div>
           )}
-          <SettingRow label="旧版浏览器数据">
-            <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void importLegacy()}>导入</Button>
-            <Button size="sm" variant="secondary" isDisabled={busy !== null} onPress={() => void run('export-import', async () => (await import('./migrate')).exportLibraryImport())}>导出导入快照</Button>
-          </SettingRow>
       </SectionCard>
-
-      <Suspense fallback={null}><LibraryImportFiles /></Suspense>
 
       <ArchivedSessionsCard />
 

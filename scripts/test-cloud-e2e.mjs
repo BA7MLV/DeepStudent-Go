@@ -1,4 +1,3 @@
-import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -132,9 +131,8 @@ try {
   assert.ok(!(await (await a.request.get(`${origin}/api/v1/cloud/config`)).text()).includes('test-secret'));
   assert.equal(await page.evaluate(() => localStorage.getItem('wangke-settings')), legacySettings, 'cloud login preserves legacy settings');
   await page.goto(`${origin}/#/settings/data`);
-  await page.getByTestId('cloud-sync-card').getByRole('button', { name: '导入', exact: true }).click();
-  await page.getByTestId('confirm-dialog-confirm').click();
-  await page.getByText('导入完成', { exact: true }).waitFor({ timeout: 30000 });
+   await page.getByTestId('cloud-sync-card').waitFor();
+   await page.evaluate(async () => (await import('/src/cloud/migrate.ts')).migrateLocalData(() => {}));
   const attachment = (await (await a.request.get(`${origin}/api/v1/cloud/record?table=files&key=%22legacy-attachment%22`)).json()).value;
   assert.equal(await (await a.request.get(`${origin}/api/v1/files/${attachment.blob.$file}`)).text(), '旧聊天附件');
    await page.getByTestId('cloud-passkeys').getByRole('button', { name: '添加', exact: true }).click();

@@ -1,4 +1,5 @@
 {
+  "recentDrag": { "keys": "Shift+Space to pick up a conversation, Up or Down to move it, Enter or Space to drop it, and Escape to cancel.", "position": "{{title}}, pinned position {{position}}" },
   "feedback": {
     "subtitleServer": "The server processes subtitles, preferring Bilibili subtitles when available, otherwise using your speech recognition model. Once accepted, tasks continue after you close this page. Recognition may incur charges.",
     "dismiss": "Dismiss",

@@ -678,19 +678,107 @@
   transform: translateX(0);
 }
 
-/* ── Recent 行的长按拖拽：拖拽中不选中文本，被拖的那一行半透明。 ── */
+/* 拖拽时保留静止的命中坐标，位移只发生在画面上。 */
 .recent-item {
   -webkit-user-select: none;
   user-select: none;
 }
 
-.recent-item[data-dragging='true'] {
-  opacity: 0.5;
+.recent-item[data-draggable] {
+  cursor: pointer;
 }
 
-/* 置顶小节内拖动时的插入指示线：落在哪两行之间，就在那行上缘亮一条主线。 */
-.recent-item[data-drop-before='true'] {
-  box-shadow: inset 0 2px 0 var(--accent);
+body:has([data-recent-reordering]):not(:has(.recent-drag-preview[data-keyboard='true'])),
+body:has([data-recent-reordering]):not(:has(.recent-drag-preview[data-keyboard='true'])) * {
+  cursor: grabbing !important;
+}
+
+.recent-drop-line {
+  position: absolute;
+  inset: 0 12px auto;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.recent-drop-line > span {
+  display: block;
+  height: 1px;
+  background: color-mix(in srgb, var(--foreground) 15%, transparent);
+  transform: scaleX(0);
+}
+
+.recent-drop-line[data-visible='true'] > span {
+  transform: scaleX(1);
+}
+
+.recent-drop-zone[data-hover] {
+  border-style: solid;
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.recent-drag-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.recent-drag-preview > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: var(--foreground);
+  background: var(--surface);
+  box-shadow: 0 6px 20px #0002, 0 0 0 1px color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 0.8125rem;
+  transform: scale(0.9);
+}
+
+.recent-drag-preview[data-keyboard='true'] > div {
+  outline: 2px solid var(--accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-recent-reordering] .recent-item {
+    transition: translate 250ms linear(0, .25 12%, .74 32%, .97 53%, 1.025 71%, 1);
+  }
+
+  .recent-item[data-dragging] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .recent-drop-line[data-visible='true'][data-glide] {
+    transition: transform 135ms var(--ease-smooth-out, cubic-bezier(.22, 1, .36, 1));
+  }
+
+  .recent-drop-line > span {
+    transition: transform 125ms var(--ease-smooth-out, cubic-bezier(.22, 1, .36, 1));
+  }
+
+  .recent-drag-preview {
+    transition: transform 52ms cubic-bezier(.15, .55, .45, 1);
+  }
+
+  .recent-drag-preview > div {
+    animation: recent-drag-lift 165ms cubic-bezier(.3, 1.35, .55, 1) both;
+  }
+}
+
+@keyframes recent-drag-lift {
+  from { transform: scale(0.97); opacity: 0.55; }
+  to { transform: scale(0.9); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-recent-reordering] .recent-item { translate: none !important; }
+  .recent-drag-preview { display: none; }
 }
 
 .recent-title[data-overflow='true'] > span {

@@ -1,5 +1,5 @@
 import type { ChatToolCall } from '../store/db';
-import { toolDisplay } from './toolTrace';
+import { isShellTool, toolDisplay } from './toolTrace';
 
 /** 仅用于流式视图；结束状态由 streaming 决定，不持久化瞬态。 */
 export type ProcessPhase = 'preparing' | 'thinking' | 'tool' | 'answering';
@@ -48,6 +48,7 @@ export function processTitle({ streaming, phase, calls, hint, waiting }: {
     if (acting.name === 'ask_user') return '等待你的回答';
     if (activeCalls.length > 1) return `正在并行调用 ${activeCalls.length} 个工具…`;
     const { label, detail } = toolDisplay(acting.name, acting.detail);
+    if (isShellTool(acting.name)) return detail ? `${label} · ${detail}` : `${label}…`;
     return `正在${label}${detail ? `：${detail}` : '…'}`;
   }
   if (phase === 'thinking') return '正在思考';

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { sandboxArgs, commandTimeoutSeconds, seccompProfile, uuid } from './arguments.mjs';
-import { workspacePath, workspaceFileLimit } from './file-read.mjs';
+import { workspacePath, workspaceFileLimit, workspaceExportLimit } from './file-read.mjs';
 import { OutputPreview, outputLimitBytes } from './output.mjs';
 import { removeContainer } from './cleanup.mjs';
 import { directoryBytes, volumeBytes, workspaceQuotaBytes } from './quota.mjs';
@@ -72,8 +72,9 @@ const server = http.createServer(async (req, res) => {
   const supplied = Buffer.from(req.headers.authorization || '');
   const expected = Buffer.from(`Bearer ${token}`);
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return reply(401, { error: 'unauthorized' });
-  if (!['/execute', '/cancel', '/files/read'].includes(req.url) || req.method !== 'POST') return reply(404, { error: 'not_found' });
-  const readingFile = req.url === '/files/read';
+  if (!['/execute', '/cancel', '/files/read', '/files/export'].includes(req.url) || req.method !== 'POST') return reply(404, { error: 'not_found' });
+  const exportingFile = req.url === '/files/export';
+  const readingFile = exportingFile || req.url === '/files/read';
   let body;
   try {
     let bytes = 0; const chunks = [];
@@ -82,7 +83,8 @@ const server = http.createServer(async (req, res) => {
     if (!body || !uuid.test(body.executionId)) throw new Error();
     if (req.url !== '/cancel' && (!uuid.test(body.threadId) || (body.projectId !== undefined && !uuid.test(body.projectId)))) throw new Error();
     if ((body.systemWrite !== undefined && typeof body.systemWrite !== 'boolean') || (readingFile && body.systemWrite === true)) throw new Error();
-    if (readingFile) body = { threadId: body.threadId, projectId: body.projectId, executionId: body.executionId, filePath: workspacePath(body.path) };
+    if (exportingFile && (body.projectId !== undefined || !Number.isSafeInteger(body.limit) || body.limit < 1 || body.limit > workspaceExportLimit)) throw new Error();
+    if (readingFile) body = { threadId: body.threadId, projectId: body.projectId, executionId: body.executionId, filePath: workspacePath(body.path), exportLimit: exportingFile ? body.limit : undefined };
     else if (req.url === '/execute') {
       if (!uuid.test(body.owner) || (body.network !== undefined && typeof body.network !== 'boolean') || typeof body.command !== 'string' || !body.command.trim() || body.command.length > 16_000 || body.filePath !== undefined) throw new Error();
       body.timeoutSeconds = commandTimeoutSeconds(body.timeoutSeconds);
@@ -134,6 +136,8 @@ const server = http.createServer(async (req, res) => {
   const send = value => { if (!res.destroyed) return res.write(`${JSON.stringify(value)}\n`); return false; };
   if (streaming) res.writeHead(200, { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store', 'x-accel-buffering': 'no' });
   const fileChunks = []; let fileBytes = 0; let fileOverflow = false;
+  const exportHeader = Buffer.alloc(4);
+  let exportHeaderBytes = 0, exportSize = 0;
   const child = spawn('docker', args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let removing;
   const stop = reason => {
@@ -144,9 +148,30 @@ const server = http.createServer(async (req, res) => {
   const disconnected = () => { if (!res.writableEnded) stop('cancelled'); };
   res.on('close', disconnected);
   res.on('error', disconnected);
-  timer = setTimeout(() => stop('command_timeout'), (readingFile ? 120 : body.timeoutSeconds) * 1000 + 10_000);
+  timer = setTimeout(() => stop('command_timeout'), (exportingFile ? 600 : readingFile ? 120 : body.timeoutSeconds) * 1000 + 10_000);
   const collect = (kind, chunk) => {
     if (readingFile && kind === 'stdout') {
+      if (exportingFile) {
+        if (terminationReason || res.destroyed) return;
+        if (exportHeaderBytes < exportHeader.length) {
+          const bytes = Math.min(exportHeader.length - exportHeaderBytes, chunk.length);
+          chunk.copy(exportHeader, exportHeaderBytes, 0, bytes);
+          exportHeaderBytes += bytes;
+          if (exportHeaderBytes < exportHeader.length) return;
+          exportSize = exportHeader.readUInt32BE();
+          if (!exportSize || exportSize > body.exportLimit) { fileOverflow = true; stop('output_limit_exceeded'); return; }
+          // 不设 Content-Length：只有容器成功退出且清理完成，才发送 HTTP chunked 的结束帧。
+          res.writeHead(200, { 'content-type': 'application/octet-stream', 'x-wangke-export-size': exportSize, 'cache-control': 'no-store' });
+          chunk = chunk.subarray(bytes);
+        }
+        fileBytes += chunk.length;
+        if (fileBytes > exportSize) { fileOverflow = true; stop('output_limit_exceeded'); return; }
+        if (chunk.length && !res.write(chunk)) {
+          child.stdout.pause();
+          res.once('drain', () => child.stdout.resume());
+        }
+        return;
+      }
       fileBytes += chunk.length;
       if (fileBytes > workspaceFileLimit) { fileOverflow = true; stop('output_limit_exceeded'); return; }
       fileChunks.push(chunk); return;
@@ -174,6 +199,11 @@ const server = http.createServer(async (req, res) => {
       await remove(name);
       finish();
       if (readingFile) {
+        if (exportingFile && res.headersSent) {
+          if (code === 0 && !terminationReason && !fileOverflow && fileBytes === exportSize) res.end();
+          else res.destroy();
+          return;
+        }
         if (code === 4 || fileOverflow) return reply(413, { error: 'workspace_file_too_large_or_empty' });
         if (code === 2) return reply(404, { error: 'workspace_file_not_found' });
         if (code !== 0 || !fileBytes) return reply(400, { error: 'workspace_file_unavailable' });
@@ -194,7 +224,8 @@ const server = http.createServer(async (req, res) => {
       console.error(JSON.stringify({ event: 'sandbox.cleanup_pending', executionId: body.executionId, terminationReason }));
       const retry = () => { const retryTimer = setTimeout(() => remove(name).then(finish, retry), 1000); retryTimer.unref(); };
       retry();
-      if (streaming) { send({ type: 'error', error: 'sandbox_cleanup_pending', terminationReason }); res.end(); }
+      if (exportingFile && res.headersSent) res.destroy();
+      else if (streaming) { send({ type: 'error', error: 'sandbox_cleanup_pending', terminationReason }); res.end(); }
       else reply(503, { error: 'sandbox_cleanup_pending', terminationReason });
     }
   });

@@ -6,7 +6,7 @@ import { clearStudyTimeMutations } from '../learning/clear-study-time.js';
 
 const schemas = {
   conversationMessage: ['chats', 'id taskId videoId sessionId role content createdAt modelTrace modelRequests explicitSkillIds images attachments reasoning reasoningMs tools responseSegments quiz ask folderPlan resume interrupted interruptReason widget widgets legacyHtmlWorks widgetState widgetStates'],
-  conversationSession: ['chatSessions', 'id videoId title createdAt contextCourseIds courseReferenceEnabled webSearchEnabled projectFolderId skillIds pinnedSkillIds mcpServerIds pinned archived promptCacheKey contextCheckpoint contextOmissions defaultModel'],
+  conversationSession: ['chatSessions', 'id videoId title createdAt contextCourseIds courseReferenceEnabled webSearchEnabled projectFolderId skillIds pinnedSkillIds mcpServerIds pinned pinnedOrder archived promptCacheKey contextCheckpoint contextOmissions defaultModel'],
   skillDefinition: ['skills', 'id name description body enabled builtin updatedAt mcpRequired'],
   skillReference: ['skillRefs', 'id skillId path body'],
   materialAnnotation: ['materialInk', 'id materialId surface tool color width height points createdAt renderer nib opacity smoothing input anchor rects'],
@@ -61,6 +61,7 @@ export function clientLearningMutations(records: CloudRecords, owner: string, ed
       if (!value) continue;
       const item = value as unknown as Record<string, any>;
       if (item.id !== key || Object.keys(item).some(field => !fields.split(' ').includes(field))) throw new Error('invalid_learning_schema');
+      if (table === 'chatSessions' && item.pinnedOrder !== undefined && !Number.isSafeInteger(item.pinnedOrder)) throw new Error('invalid_learning_schema');
       if (table === 'materialInk') course(item.materialId);
       if (table === 'handouts') {
         course(item.videoId);

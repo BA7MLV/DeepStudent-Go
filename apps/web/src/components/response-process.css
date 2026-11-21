@@ -64,6 +64,17 @@
   font-size: 0.6875rem;
 }
 
+.response-process__shell {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-lg);
+  background: var(--background-secondary);
+  font-size: 0.6875rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .response-process__tool[data-status='error'] {
   color: var(--danger);
 }

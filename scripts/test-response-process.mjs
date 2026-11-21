@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { processSteps, processTitle } from '../apps/web/src/utils/responseProcess.ts';
+import { displayToolResult, toolDisplay } from '../apps/web/src/utils/toolTrace.ts';
+import { webToolDetail } from '@wangke/contracts/web-search';
 
 test('分析与重复工具按真实先后交错，连续工具不生成空分析', () => {
   const calls = [
@@ -45,4 +47,29 @@ test('确认和失败场景不会伪装成成功或继续思考', () => {
   assert.equal(processTitle({ streaming: false, calls: [{ name: 'ask_user', status: 'running' }], waiting: true }), '等待你的回答');
   assert.equal(processTitle({ streaming: true, calls: [{ name: 'propose_folder_plan', status: 'running' }], waiting: true }), '等待你的确认');
   assert.equal(processTitle({ streaming: false, calls: [{ name: 'read', status: 'error' }] }), '思考过程');
+});
+
+test('联网工具的实时标题和历史记录只显示网址或搜索词', () => {
+  const url = 'https://www.qsl.qa';
+  const title = (name, detail) => processTitle({ streaming: true, phase: 'tool', calls: [{ name, detail, status: 'running' }] });
+  assert.equal(title('webfetch', webToolDetail('webfetch', { url })), `正在读取网页：${url}`);
+  assert.equal(title('webfetch', JSON.stringify({ url })), `正在读取网页：${url}`);
+  assert.equal(title('webfetch', '{"url":"https://www.qsl.qa'), '正在读取网页…');
+  assert.equal(title('webfetch', '{"url":{"url":"https://www.qsl.qa"}}'), '正在读取网页…');
+  assert.equal(title('websearch', '{"query":"世界杯赛程","limit":4}'), '正在搜索网页：世界杯赛程');
+  assert.deepEqual(toolDisplay('webfetch', JSON.stringify({ url })), { label: '读取网页', detail: url });
+});
+
+test('网页读取结果不显示原始 JSON，保留正常错误提示', () => {
+  const raw = JSON.stringify({ kind: 'web_fetch', title: 'Qatar Stars League', content: 'Article body' });
+  assert.equal(displayToolResult('webfetch', raw), 'Qatar Stars League');
+  assert.equal(displayToolResult('webfetch', raw.slice(0, -1)), undefined);
+  assert.equal(displayToolResult('webfetch', '工具执行失败：web_fetch_failed'), '工具执行失败：web_fetch_failed');
+});
+
+test('Shell 调用使用终端名称和执行目的，不直接显示工具参数 JSON', () => {
+  const detail = JSON.stringify({ command: 'printf 42', description: '计算结果' });
+  assert.deepEqual(toolDisplay('shell', detail), { label: 'Shell', detail: '计算结果' });
+  assert.deepEqual(toolDisplay('bash', '{"command":"printf'), { label: 'Shell', detail: undefined });
+  assert.equal(processTitle({ streaming: true, phase: 'tool', calls: [{ name: 'shell', detail: '计算结果', status: 'running' }] }), 'Shell · 计算结果');
 });

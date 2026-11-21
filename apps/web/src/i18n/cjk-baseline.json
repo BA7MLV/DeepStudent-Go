@@ -30,7 +30,6 @@
   "cloud/modelSettings.ts": 11,
   "cloud/PreferenceRecovery.tsx": 1,
   "cloud/ResourceRecovery.tsx": 8,
-  "cloud/ResourceSaveNotice.tsx": 1,
   "cloud/sync.ts": 4,
   "cloud/tasks.ts": 1,
   "components/AppLayout.tsx": 3,

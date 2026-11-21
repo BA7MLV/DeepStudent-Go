@@ -71,6 +71,11 @@ try {
   await page.getByText('计算完成，结果是42。', { exact: false }).first().waitFor();
   await page.getByTestId('chat-stop').waitFor({ state: 'detached' });
   assert.equal(executions.length, 1);
+  const processToggle = page.getByTestId('response-process-toggle').last();
+  if (await processToggle.getAttribute('aria-expanded') !== 'true') await processToggle.click();
+  const trace = page.getByTestId('tool-trace-item').filter({ hasText: /Shell · 精确计算6乘7/ });
+  await trace.waitFor();
+  assert.equal(await trace.locator('pre').textContent(), 'exit 0\n42');
   assert.equal((await context.request.post(origin + `/api/v1/cloud/permissions/${pending.id}/resolve`, { data: { approved: true } })).status(), 409);
   await send('再算一次，但我要拒绝'); await card.waitFor();
   await page.getByTestId('chat-shell-reject').click();

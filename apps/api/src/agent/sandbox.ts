@@ -1,3 +1,5 @@
+import { Readable } from 'node:stream';
+import type { ReadableStream } from 'node:stream/web';
 import { agentHttpInit } from './http.js';
 import { getConfig } from '../config.js';
 
@@ -67,6 +69,33 @@ export const readSandboxFile: SandboxFileReader = async (request, signal) => {
     return Buffer.concat(chunks);
   } finally { await reader.cancel(); }
 };
+
+export const sandboxExportMaxBytes = 512 * 1024 * 1024;
+
+/** 私有 broker 在读进程及容器清理成功后才正常结束响应。收到响应头不代表文件完成。 */
+export async function streamSandboxExport(request: Omit<SandboxFileRequest, 'projectId'> & { limit: number }, signal: AbortSignal) {
+  const { url, token } = broker();
+  if (!url || !token) throw new SandboxFailure('sandbox_not_configured');
+  const deadline = AbortSignal.any([signal, AbortSignal.timeout(630_000)]);
+  const response = await fetch(`${url}/files/export`, agentHttpInit({
+    method: 'POST', signal: deadline, redirect: 'error',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+    body: JSON.stringify(request),
+  }));
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    const code = body?.error;
+    throw new Error(code === 'workspace_file_not_found' || code === 'workspace_file_too_large_or_empty' || code === 'sandbox_busy' || code === 'sandbox_cleanup_pending' || code === 'workspace_file_unavailable'
+      ? code : code === 'not_found' ? 'sandbox_export_unsupported' : 'workspace_file_unavailable');
+  }
+  const size = Number(response.headers.get('x-wangke-export-size'));
+  if (!response.body || !Number.isSafeInteger(size) || size < 1 || size > request.limit || response.headers.get('content-type') !== 'application/octet-stream'
+    || response.headers.has('content-length') || response.headers.has('content-encoding')) {
+    await response.body?.cancel();
+    throw new Error('sandbox_export_protocol_error');
+  }
+  return { size, stream: Readable.fromWeb(response.body as ReadableStream<Uint8Array>, { signal: deadline }) };
+}
 
 // A disconnected execute request is not proof that its container has exited.
 // The broker acknowledges cancellation only after removing the container.

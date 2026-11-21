@@ -4,7 +4,7 @@ import { Sym } from '../ui';
 import { MatrixDots } from './motion';
 import { IconSwap, Shimmer, TextSwap } from './motion';
 import type { ChatToolCall } from '../store/db';
-import { toolDisplay } from '../utils/toolTrace';
+import { displayToolResult, isShellTool, toolDisplay } from '../utils/toolTrace';
 import './tool-trace.css';
 import WebSources from '../web-search/WebSources';
 
@@ -68,7 +68,7 @@ export default function ToolTrace({
   const activeCalls = calls.filter((c) => c.status === 'running');
   const acting = activeCalls[0];
   const waitingForUser = acting?.name === 'ask_user';
-  const displays = calls.map((call) => toolDisplay(call.name, call.detail));
+  const displays = calls.map((call) => ({ ...toolDisplay(call.name, call.detail), result: displayToolResult(call.name, call.result) }));
   const loadedSkills = [...new Set(displays.flatMap((display, i) =>
     calls[i].status === 'done' && display.label === '加载技能' && display.detail ? [display.detail] : []))];
   const activeDisplay = acting ? toolDisplay(acting.name, acting.detail) : undefined;
@@ -112,8 +112,8 @@ export default function ToolTrace({
               >
                 <span className="tool-trace__state" aria-hidden="true">
                   <IconSwap
-                    a={call.name === 'ask_user' ? <Sym name="help" /> : <MatrixDots />}
-                    b={<Sym name={call.status === 'error' ? 'error' : 'check'} />}
+                    a={call.name === 'ask_user' ? <Sym name="help" /> : isShellTool(call.name) ? <Sym name="terminal" /> : <MatrixDots />}
+                    b={<Sym name={call.status === 'error' ? 'error' : isShellTool(call.name) ? 'terminal' : 'check'} />}
                     active={call.status === 'running' ? 'a' : 'b'}
                   />
                 </span>
@@ -122,7 +122,7 @@ export default function ToolTrace({
                   {displays[i].detail && <span className="tool-trace__detail">{displays[i].detail}</span>}
                 </span>
                 {call.ms != null && <span className="tool-trace__ms">{fmtMs(call.ms)}</span>}
-                {call.result && <span className="tool-trace__result">{call.result}</span>}
+                {displays[i].result && <span className="tool-trace__result">{displays[i].result}</span>}
                 {call.webSearch ? <div className="tool-trace__sources"><WebSources result={call.webSearch} /></div> : null}
               </li>
             ))}

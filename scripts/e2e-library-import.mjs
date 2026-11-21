@@ -1,4 +1,3 @@
-import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -40,40 +39,23 @@ try {
       await legacy.table('_cloudOutbox').put({ id: 'unknown-original-operation', table: 'unknown', blob: new Blob(['原事务']), operationId: 'keep-original' });
     });
     legacy.close();
-    window.readImportDraft = async () => {
-      const name = '/src/store/db.ts';
-      const { db } = await import(performance.getEntriesByType('resource').findLast(e => new URL(e.name).pathname === name)?.name ?? name);
-      const draft = (await db.table('_cloudMeta').get('library-import'))?.value;
-      return draft ? { operationId: draft.operationId, sourceId: draft.source.sourceId, state: draft.state, uploads: Object.values(draft.uploads).map(row => ({ operationId: row.request.operationId, state: row.state })) } : null;
-    };
   });
-  const readDraft = () => page.evaluate(async owner => {
-    const request = indexedDB.open(`wangke-cloud-${owner}`);
-    const database = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-    try {
-      const draft = (await new Promise((resolve, reject) => { const get = database.transaction('_cloudMeta').objectStore('_cloudMeta').get('library-import'); get.onsuccess = () => resolve(get.result); get.onerror = () => reject(get.error); }))?.value;
-      return draft ? { operationId: draft.operationId, sourceId: draft.source.sourceId, state: draft.state, uploads: Object.values(draft.uploads).map(row => ({ operationId: row.request.operationId, state: row.state })) } : null;
-    } finally { database.close(); }
-  }, login.json().user.id);
-  const importUI = async () => {
-    await page.getByTestId('cloud-sync-card').getByRole('button', { name: '导入', exact: true }).click();
-    await page.getByTestId('confirm-dialog-confirm').click();
-  };
-  // A sync error toast does not prove that the separate import action stopped.
-  const importStopped = () => page.waitForFunction(() => [...document.querySelectorAll('[data-testid="cloud-sync-card"] button')].some(button => button.textContent.trim() === '导入' && !button.disabled), null, { timeout: 30000 });
+  const readDraft = () => page.evaluate(async () => {
+    const { db } = await import('/src/store/db.ts');
+    const draft = (await db.table('_cloudMeta').get('library-import'))?.value;
+    return draft ? { operationId: draft.operationId, sourceId: draft.source.sourceId, state: draft.state, uploads: Object.values(draft.uploads).map(row => ({ operationId: row.request.operationId, state: row.state })) } : null;
+  });
+  // Migration is retained for isolated testing, not exposed in normal settings.
+  const runImport = tab => tab.evaluate(async () => {
+    const { migrateLocalData } = await import('/src/cloud/migrate.ts');
+    try { await migrateLocalData(() => {}); return null; }
+    catch (error) { return error.message; }
+  });
+  const exportImport = tab => tab.evaluate(async () => (await import('/src/cloud/migrate.ts')).exportLibraryImport());
   // True browser offline: persist snapshot and identity without a server write.
   await page.evaluate(() => import('/src/cloud/migrate.ts'));
   await context.setOffline(true);
-  await importUI();
-  await page.getByText(/Failed to fetch|fetch|网络|offline/i).last().waitFor({ timeout: 30000 });
-  try { await page.waitForFunction(async owner => {
-    const request = indexedDB.open(`wangke-cloud-${owner}`);
-    const database = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-    try { const row = await new Promise((resolve, reject) => { const get = database.transaction('_cloudMeta').objectStore('_cloudMeta').get('library-import'); get.onsuccess = () => resolve(get.result); get.onerror = () => reject(get.error); }); return !!row?.value?.operationId; }
-    finally { database.close(); }
-  }, login.json().user.id); }
-  catch (error) { console.error(await page.locator('body').innerText()); throw error; }
-  await importStopped();
+  assert.match(await runImport(page), /Failed to fetch|fetch|网络|offline/i);
   const offline = await readDraft();
   assert.ok(offline?.operationId);
   assert.equal(network.length, 0, 'offline attempt finishes without a binary request');
@@ -90,10 +72,9 @@ try {
     const response = await route.fetch(); assert.equal(response.status(), 201, await response.text());
     if (uploads === 1) { await route.abort('failed'); binaryLost(); } else await route.fulfill({ response });
   });
-  await importUI();
+  const binaryAttempt = runImport(page);
   await bounded(binaryFailure);
-  await page.getByText(/Failed to fetch|fetch|网络/i).last().waitFor({ timeout: 30000 });
-  await importStopped();
+  assert.match(await binaryAttempt, /Failed to fetch|fetch|网络/i);
   assert.equal(uploads, 1);
   await page.reload(); await page.getByTestId('cloud-sync-card').waitFor();
   let releaseSnapshot;
@@ -108,16 +89,14 @@ try {
     await snapshotBarrier;
     await route.abort('failed');
   });
-  await importUI();
+  const snapshotAttempt = runImport(page);
   await bounded(snapshotFailure);
   assert.equal(uploads, 2, 'both distinct blobs uploaded before the snapshot fault');
   releaseSnapshot();
-  await page.getByText(/Failed to fetch|fetch|网络/i).last().waitFor({ timeout: 30000 });
-  await importStopped();
+  assert.match(await snapshotAttempt, /Failed to fetch|fetch|网络/i);
   assert.equal(commands, 1); assert.equal(uploads, 2, 'successful first binary was resolved by receipt, not retransmitted');
   await page.reload(); await page.getByTestId('cloud-sync-card').waitFor();
-  await importUI();
-  await page.getByText('导入完成', { exact: true }).waitFor({ timeout: 30000 });
+  assert.equal(await runImport(page), null);
   const final = await readDraft();
   assert.equal(final.state, 'completed'); assert.equal(final.operationId, offline.operationId); assert.equal(final.sourceId, offline.sourceId);
   assert.deepEqual(commandIds, [offline.operationId]); assert.equal(uploads, 2);
@@ -146,11 +125,9 @@ try {
   });
   const reviewWrites = [];
   reviewPage.on('request', request => { if (request.method() === 'POST' && /\/api\/(clientRuntime\/resourceCommand|v1\/files)/.test(request.url())) reviewWrites.push(request.url()); });
-  await reviewPage.getByTestId('cloud-sync-card').getByRole('button', { name: '导入', exact: true }).click();
-  await reviewPage.getByTestId('confirm-dialog-confirm').click();
-  await reviewPage.getByText(/旧库字段需显式转换/).waitFor();
+  assert.match(await runImport(reviewPage), /旧库字段需显式转换/);
   const downloadEvent = reviewPage.waitForEvent('download');
-  await reviewPage.getByRole('button', { name: '导出导入快照', exact: true }).click();
+  await exportImport(reviewPage);
   const download = await downloadEvent;
   const exportPath = path.join(directory, 'unsupported-legacy-export.json'); await download.saveAs(exportPath);
   const exported = JSON.parse(fs.readFileSync(exportPath, 'utf8'));
@@ -171,16 +148,15 @@ try {
   });
   const nestedWrites = [];
   nestedPage.on('request', request => { if (request.method() === 'POST' && /\/api\/(clientRuntime\/resourceCommand|v1\/files)/.test(request.url())) nestedWrites.push(request.url()); });
-  await nestedPage.getByTestId('cloud-sync-card').getByRole('button', { name: '导入', exact: true }).click(); await nestedPage.getByTestId('confirm-dialog-confirm').click();
-  await nestedPage.getByText(/未声明的嵌套字段/).waitFor();
+  assert.match(await runImport(nestedPage), /未声明的嵌套字段/);
   const nestedDownloadEvent = nestedPage.waitForEvent('download');
-  await nestedPage.getByRole('button', { name: '导出导入快照', exact: true }).click();
+  await exportImport(nestedPage);
   const nestedPath = path.join(directory, 'unsupported-nested-export.json'); await (await nestedDownloadEvent).saveAs(nestedPath);
   const nestedExport = JSON.parse(fs.readFileSync(nestedPath, 'utf8'));
   assert.deepEqual(nestedExport.draft.source.archive.videos[0].biliSource.futureNested, { retain: 'nested-original' });
   assert.equal(Buffer.from(nestedExport.draft.source.archive.files[0].blob.$blob, 'base64').toString(), 'nested');
   assert.deepEqual(nestedWrites, [], 'projecting codec cannot silently drop nested fields before binary admission');
   await nestedContext.close();
-  fs.writeFileSync(path.join(directory, 'evidence.json'), JSON.stringify({ pass: true, offline, final, uploads, commands, original, checks: ['real settings UI', 'true offline', 'binary committed response lost', 'snapshot committed response lost', 'reload', 'same command identity', 'zero successful binary retransmission', 'source IDB/outbox unchanged', 'real resource authority'] }, null, 2));
-  console.log(`PASS legacy library UI/offline/lost-response/reload and unsupported-field lossless export (${directory})`);
+  fs.writeFileSync(path.join(directory, 'evidence.json'), JSON.stringify({ pass: true, offline, final, uploads, commands, original, checks: ['isolated legacy migration in authenticated browser', 'true offline', 'binary committed response lost', 'snapshot committed response lost', 'reload', 'same command identity', 'zero successful binary retransmission', 'source IDB/outbox unchanged', 'real resource authority'] }, null, 2));
+  console.log(`PASS legacy library migration/offline/lost-response/reload and unsupported-field lossless export (${directory})`);
 } finally { fs.writeFileSync(path.join(directory, 'network.json'), JSON.stringify(network, null, 2)); await browser?.close(); await vite?.close(); await api.close(); }

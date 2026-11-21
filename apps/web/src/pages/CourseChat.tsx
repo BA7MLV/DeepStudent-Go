@@ -27,7 +27,7 @@ import ChatShellApproval from '../components/ChatShellApproval';
 import { projectDisplayName } from '../projects/chatProjects';
 import ComposerExpand from '../components/ComposerExpand';
 import { ChatComposer, ChatComposerTools } from '../components/ChatComposer';
-import { ChatAttachmentDraft, ChatMessageAttachments } from '../components/ChatAttachments';
+import { ChatAttachmentDraft, ChatMessageAttachments, ChatPublishedFiles } from '../components/ChatAttachments';
 import { useChatAttachments } from '../store/chatAttachments';
 import { MAX_CHAT_ATTACHMENTS } from '../chat/attachments';
 import { pastedTextAttachment } from '../chat/paste';
@@ -970,6 +970,7 @@ export default function CourseChat() {
                         )}
                         </WebsiteCitations>
                         </ArtifactEditProvider>
+                        {message.attachments?.length ? <ChatPublishedFiles files={message.attachments} /> : null}
                         {!message.content && (message.ask || message.folderPlan) && <div aria-hidden="true" data-chat-answer-start="" />}
                         {/* 提问卡在 ResponseTimeline 里按提问 trace 落位：用户回应后的续跑正文与
                             思考链必须在卡片之后。目录方案卡仍在当前输出之后。 */}

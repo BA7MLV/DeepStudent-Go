@@ -12,6 +12,7 @@ import { settleWithin } from '../lifecycle.js';
 import type { WebSearchService } from '../web-search/service.js';
 import { executeDelegatedTask } from './delegation.js';
 import { cleanBiliStaging } from '../bilibili/staging.js';
+import { cleanChatExportStaging } from './files.js';
 import { config, getConfig } from '../config.js';
 import {
   taskDtoRow, cloudTaskRowSchema, expectRow, expectRows, taskAgentCheckpointRowSchema, taskDelegationRowSchema,
@@ -226,6 +227,7 @@ export class CloudTaskRunner {
           this.store.db.prepare("UPDATE cloud_permissions SET status='expired' WHERE status IN ('pending','approved','consumed') AND task_id IN (SELECT id FROM cloud_tasks WHERE status NOT IN ('running','waiting_user'))").run();
         });
         void cleanBiliStaging(this.store, this.options.filesDir ?? config().filesDir).catch(() => { /* 清理失败不阻塞恢复 */ });
+        await cleanChatExportStaging(this.store, this.options.filesDir ?? config().filesDir).catch(() => {});
         this.recovered = true;
       }
       for (const [id, controller] of this.active) {

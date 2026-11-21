@@ -140,6 +140,18 @@
 
 /* ── Bot 栏 ───────────────────────────────────────────── */
 
+.bot-delivery-layout {
+  --delivery-preview-width: clamp(320px, 26vw, 520px);
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.bot-delivery-layout > :is(.bot-panel, .bh) { flex: 1; min-width: 0; }
+.app-aside:has(.delivery-preview--inline) { width: calc(clamp(340px, 30vw, 420px) + clamp(320px, 26vw, 520px)); }
+.page-project .delivery-preview--inline { margin-top: var(--app-bar-h, 60px); }
+
 .bot-panel {
   --app-edge-color: var(--background-secondary);
   --app-edge-solid-height: max(env(safe-area-inset-top, 0px), 4px);
@@ -635,6 +647,23 @@
   color: var(--muted);
   font-size: 0.75rem;
 }
+
+.imsg-bubble--file[data-preview] {
+  grid-template-columns: 36px minmax(0, 1fr) 32px;
+  grid-template-areas: 'icon name download' 'icon size download';
+}
+
+.imsg-file__preview { text-align: start; cursor: pointer; }
+.imsg-file__preview:hover { text-decoration: underline; }
+.imsg-file__download {
+  grid-area: download;
+  display: grid;
+  place-items: center;
+  height: 32px;
+  border-radius: var(--radius-full);
+  color: var(--muted);
+}
+.imsg-file__download:hover { background: var(--sidebar-hover); color: var(--foreground); }
 
 /* 审批 / 提问：一张卡，操作是两颗等宽按钮（HIG：破坏性在前、确认在后） */
 .imsg-bubble--action {

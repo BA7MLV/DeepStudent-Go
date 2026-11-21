@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useChatAttachments } from '../store/chatAttachments';
 import { attachmentSize, type ChatAttachment } from '../chat/attachments';
 import { downloadAttachment } from '../chat/prepareAttachment';
+import { apiUrl } from '../api/base';
 import { isImageAttachment, type ImageAttachment } from '../chat/attachmentMedia';
 import { useAttachmentImage } from '../chat/useAttachmentImage';
 import { accountLifecycle } from '../client/account-lifecycle';
@@ -167,5 +168,21 @@ export function ChatMessageAttachments({ files }: { files?: ChatAttachment[] }) 
   return <div className="chat-attachments chat-attachments--compact" data-testid="chat-message-attachments">
     {images.length > 0 && <ImageGallery count={images.length}><ChatImage key={images[0].id} file={images[0]} images={images} /></ImageGallery>}
     {files.filter((file) => !isImageAttachment(file)).map((file) => <div key={file.id} className="chat-attachments__item chat-document"><ChatDocument file={file} /></div>)}
+  </div>;
+}
+
+/** 成品只走原生下载；不触发预览、Blob 缓存或模型附件读取。 */
+export function ChatPublishedFiles({ files }: { files?: ChatAttachment[] }) {
+  const { t } = useTranslation();
+  if (!files?.length) return null;
+  return <div className="chat-attachments chat-attachments--compact" data-testid="chat-published-files">
+    {files.map(file => file.serverId ? <div key={file.id} className="chat-attachments__item chat-document">
+      <a className="chat-document__open" href={apiUrl(`/api/v1/files/${encodeURIComponent(file.serverId)}`)} download={file.name}
+        aria-label={t('chatAttachment.downloadNamed', { name: file.name })}>
+        <span className="chat-document__icon"><Sym name="download" /></span>
+        <span className="chat-attachments__info"><span className="truncate" title={file.name}>{file.name}</span>
+          <small>{attachmentSize(file.size)} · {t('chatAttachment.download')}</small></span>
+      </a>
+    </div> : null)}
   </div>;
 }

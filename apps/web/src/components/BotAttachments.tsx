@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button, Spinner } from '@heroui/react';
+import { useTranslation } from 'react-i18next';
 import type { BotAttachment } from '@wangke/contracts';
 import { serverClient } from '../api/serverClient';
 import { attachmentSize } from '../chat/attachments';
@@ -11,6 +12,7 @@ import AttachmentUploadStatus from './AttachmentUploadStatus';
 import ImageCropButton from './ImageCropButton';
 import './chat-attachments.css';
 import { acquireBotImage, invalidateBotImage } from './botImageCache';
+import { deliveryPreviewKind, type DeliveryPreviewFile } from './deliveryPreviewFile';
 
 export interface BotDraftFile {
   id: string;
@@ -93,7 +95,11 @@ function AttachmentImagePreview({ image: { name, url, local }, onClose, navigati
       onDownload={source ? () => { const link = document.createElement('a'); link.href = source; link.download = name; link.click(); } : undefined} />
 }
 
-export function BotMessageAttachments({ files, projectId, compact = false }: { files: BotAttachment[]; projectId?: string; compact?: boolean }) {
+export function BotMessageAttachments({ files, projectId, compact = false, onPreview }: {
+  files: BotAttachment[]; projectId?: string; compact?: boolean;
+  onPreview?: (file: DeliveryPreviewFile, trigger: HTMLButtonElement) => void;
+}) {
+  const { t } = useTranslation();
   // Only consecutive images belong to an album; keep other attachments in order.
   const groups: BotAttachment[][] = [];
   for (const file of files) {
@@ -105,14 +111,18 @@ export function BotMessageAttachments({ files, projectId, compact = false }: { f
     {groups.map((group, index) => {
       const file = group[0];
       const name = nameOf(file), url = urlOf(file, projectId);
+      const kind = onPreview && url ? deliveryPreviewKind(name, file.mimeType) : undefined;
       return isImage(file) ? <ImageGallery count={group.length} key={`${file.fileId ?? file.projectPath ?? 'image'}:${index}`}
         cards={group.slice(1, 3).map((item, depth) => <AttachmentImageCard key={`${item.fileId ?? item.projectPath}:${depth}`} url={urlOf(item, projectId)} />)}>
         <AttachmentImage name={name} url={url} images={group.map(item => ({ name: nameOf(item), url: urlOf(item, projectId) }))} />
       </ImageGallery>
-        : <div className="imsg-bubble imsg-bubble--file" key={index}>
+        : <div className="imsg-bubble imsg-bubble--file" data-preview={kind || undefined} key={index}>
           <span className="imsg-file__icon" aria-hidden="true"><Sym name="description" /></span>
-          {url ? <a className="imsg-file__name" href={url} download>{name}</a> : <span className="imsg-file__name">{name}</span>}
+          {kind && url ? <button type="button" className="imsg-file__name imsg-file__preview" title={name} aria-label={t('chatAttachment.preview', { name })}
+            onClick={event => onPreview?.({ name, url, kind, size: file.sizeBytes }, event.currentTarget)}>{name}</button>
+            : url ? <a className="imsg-file__name" href={url} download>{name}</a> : <span className="imsg-file__name">{name}</span>}
           <span className="imsg-file__size">{file.sizeBytes === undefined ? '' : attachmentSize(file.sizeBytes)}</span>
+          {kind && url && <a className="imsg-file__download" href={url} download aria-label={t('chatAttachment.downloadNamed', { name })} title={t('chatAttachment.download')}><Sym name="download" /></a>}
         </div>;
     })}
   </div>;

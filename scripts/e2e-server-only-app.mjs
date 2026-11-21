@@ -1,5 +1,4 @@
 /** Full authenticated entry and lazy routes, rather than isolated components. */
-import os from 'node:os';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -32,7 +31,7 @@ try {
   page.on('pageerror', error => evidence.errors.push(error.message));
   page.on('response', response => { if (response.status() >= 400 && /\/src\//.test(response.url())) evidence.failedModules.push(response.url()); });
   const historyRequests = [];
-   page.on('request', request => { if (/\/src\/cloud\/(HistoryRecovery|ResourceRecovery|LocalHistoryExport|legacy-migration)\./.test(request.url())) historyRequests.push(request.url()); });
+   page.on('request', request => { if (/\/src\/cloud\/(HistoryRecovery|LocalHistoryExport|LibraryImportFiles|legacy-migration|migrate)\./.test(request.url())) historyRequests.push(request.url()); });
   await page.goto(origin);
   await page.getByTestId('course-chat-page').waitFor({ timeout: 60000 });
   evidence.routes.push('authenticated main entry / course chat');
@@ -43,7 +42,7 @@ try {
      const { db } = await import('/src/store/db.ts');
      await db.table('_cloudMeta').bulkPut(Array.from({ length: 39 }, (_, index) => {
        const operationId = `resource-retained-${index}`;
-       return { id: `resource-command:${operationId}`, value: { state: 'uncertain', request: {
+       return { id: `resource-command:${operationId}`, value: { state: 'review', request: {
          operationId, operation: { kind: 'saveProjectText', projectId: 'retained-project', path: `original-${index}.md`, text: `retained draft ${index}`, expectedRevision: null },
        } } };
      }));
@@ -76,28 +75,70 @@ try {
   await page.getByTestId('card-context-compression').waitFor();
   evidence.routes.push('retired settings deep link falls back to models');
   await page.evaluate(() => { location.hash = '/settings/data'; });
-  await page.getByTestId('cloud-history-recovery').waitFor();
-   assert.deepEqual(historyRequests, [], 'opening data settings must not load recovery');
+   await page.getByTestId('cloud-sync-card').waitFor();
+   assert.equal(await page.getByTestId('cloud-history-recovery').count(), 0);
+   assert.equal(await page.getByText('旧版浏览器数据', { exact: true }).count(), 0);
+   assert.equal(await page.getByRole('button', { name: '核对导入文件', exact: true }).count(), 0);
+   assert.equal(await page.getByTestId('resource-save-status').count(), 0, 'old drafts alone must not show save status');
+   const duplicate = await page.evaluate(async () => {
+     const { db } = await import('/src/store/db.ts');
+     const { resourceCommand, uploadResource } = await import('/src/client/resources.ts');
+     const { id } = await resourceCommand({ kind: 'createFolder', name: 'Duplicate upload fixture' });
+     const name = 'cache-blob.webp';
+     const canvas = document.createElement('canvas');
+     const drawing = canvas.getContext('2d');
+     const makeImage = async color => {
+       drawing.fillStyle = color;
+       drawing.fillRect(0, 0, canvas.width, canvas.height);
+       return new Promise(resolve => canvas.toBlob(resolve, 'image/webp'));
+     };
+     const original = await makeImage('red');
+     const replacement = await makeImage('blue');
+     await uploadResource(id, name, original);
+     try {
+       await uploadResource(id, name, replacement);
+       throw new Error('Duplicate upload should have failed');
+     } catch (error) {
+       if (error.code !== 'project_file_exists') throw error;
+       const retained = await db.table('_cloudMeta').get(`resource-command:${error.operationId}`);
+       return { id, name, operationId: error.operationId, state: retained.value.state,
+         original: Array.from(new Uint8Array(await original.arrayBuffer())),
+         replacement: Array.from(new Uint8Array(await replacement.arrayBuffer())),
+         retained: Array.from(new Uint8Array(await retained.value.blob.arrayBuffer())),
+       };
+     }
+   });
+   assert.equal(duplicate.state, 'conflict');
+   assert.deepEqual(duplicate.retained, duplicate.replacement, 'the rejected upload retains the original draft bytes');
+   const file = await context.request.get(`${origin}/api/v1/projects/${duplicate.id}/download?path=${duplicate.name}`);
+   assert.equal(file.status(), 200);
+   assert.deepEqual(await file.body(), Buffer.from(duplicate.original), 'the server file is not overwritten');
+   const saveStatus = page.getByTestId('resource-save-status');
+   await saveStatus.waitFor();
+   const activity = page.getByTestId('cloud-activity');
+   assert.equal(await activity.count(), 1, 'the global activity surface is mounted');
+   assert.equal(await activity.getByText(duplicate.name, { exact: false }).count(), 0);
+   assert.equal(await activity.getByText('查看未保存的资料', { exact: true }).count(), 0);
+   assert.equal(await activity.getByRole('button', { name: '收起提醒', exact: true }).count(), 0);
    const resourceWrites = [];
    page.on('request', request => { if (/\/api\/clientRuntime\/resourceCommand$/.test(request.url())) resourceWrites.push(request.url()); });
-   await page.getByRole('button', { name: '打开历史恢复', exact: true }).click();
-   await page.getByRole('button', { name: '核对历史收据并恢复可验证时长命令', exact: true }).waitFor();
-   await page.locator('button[data-operation-id="resource-retained-38"]').waitFor();
-   assert.equal(await page.locator('button[data-operation-id]').count(), 39, 'all originals remain accessible in explicit recovery');
-   assert.deepEqual(resourceWrites, [], 'opening recovery must not replay file operations');
-   evidence.routes.push('data settings / explicit history recovery');
-   await page.screenshot({ path: path.join(directory, 'authenticated-history.png'), fullPage: true });
-   await page.getByRole('button', { name: '关闭历史恢复', exact: true }).click();
+   await saveStatus.getByRole('button', { name: '查看保存详情', exact: true }).click();
+   await page.locator(`button[data-operation-id="${duplicate.operationId}"]`).waitFor();
+   assert.equal(await page.locator('button[data-operation-id]').count(), 1, 'only current saves appear in the details');
+   assert.deepEqual(historyRequests, [], 'settings must not load legacy recovery or import code');
+   assert.deepEqual(resourceWrites, [], 'opening save details must not replay file operations');
+   evidence.routes.push('data settings / current save details only');
+   await saveStatus.getByRole('button', { name: '关闭保存详情', exact: true }).click();
    assert.equal(await page.locator('button[data-operation-id]').count(), 0);
    assert.equal(await page.evaluate(async () => {
      const { db } = await import('/src/store/db.ts');
-     const rows = await db.table('_cloudMeta').where('id').startsWith('resource-command:').toArray();
+     const rows = await db.table('_cloudMeta').where('id').startsWith('resource-command:resource-retained-').toArray();
      if (rows.some(row => row.value.request.operation.text !== `retained draft ${row.value.request.operationId.split('-').at(-1)}`)) throw new Error('original draft changed');
      return rows.length;
    }), 39, 'closing recovery must retain every original draft');
   assert.deepEqual(evidence.failedModules, []);
   assert.deepEqual(evidence.errors, []);
-  console.log(`PASS authenticated full app, lazy routes/settings and demand-only recovery: ${directory}`);
+   console.log(`PASS authenticated full app, lazy routes/settings and current save details: ${directory}`);
 } catch (error) {
   if (page && !page.isClosed()) {
     await page.screenshot({ path: path.join(directory, 'failure.png'), fullPage: true });

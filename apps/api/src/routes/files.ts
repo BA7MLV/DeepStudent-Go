@@ -101,10 +101,12 @@ export function registerFileRoutes(app: FastifyInstance, deps: {
     const etag = `"${file.sha256}"`;
     reply.header('cache-control', 'private, no-cache').header('etag', etag);
     if (request.headers['if-none-match']?.split(',').some(value => value.trim() === '*' || value.trim().replace(/^W\//, '') === etag)) return reply.code(304).send();
-    reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.original_name)}`);
+    const filename = encodeURIComponent(file.original_name).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
+    reply.header('content-disposition', `attachment; filename*=UTF-8''${filename}`);
     reply.type(file.mime_type);
     reply.header('accept-ranges', 'bytes');
-    const range = byteRange(request.headers.range, file.size_bytes);
+    const ifRange = request.headers['if-range'];
+    const range = byteRange(ifRange === undefined || ifRange === etag ? request.headers.range : undefined, file.size_bytes);
     if (range === false) return reply.code(416).header('content-range', `bytes */${file.size_bytes}`).send();
     if (range) {
       reply.code(206).header('content-range', `bytes ${range.start}-${range.end}/${file.size_bytes}`).header('content-length', range.end - range.start + 1);

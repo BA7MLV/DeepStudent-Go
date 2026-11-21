@@ -1,4 +1,5 @@
 {
+  "recentDrag": { "keys": "按 Shift+空格拿起会话，上下方向键移动，回车或空格放下，Esc 取消。", "position": "{{title}}，置顶第 {{position}} 位" },
   "feedback": {
     "subtitleServer": "字幕由服务器处理：优先使用 B 站自带字幕，否则使用配置的语音识别模型。任务提交成功后，关闭页面不影响处理；识别服务可能收费。",
     "dismiss": "关闭提示",

@@ -31,7 +31,7 @@ function PendingShellApprovals({ taskIds }: { taskIds: string }) {
         const snapshot = model.getSnapshot();
         if (snapshot.status === 'ready') {
           const data = snapshot.data as unknown as { permissions: Permission[] };
-          setPermissions(data.permissions.filter(p => p.capability === 'shell' && p.status === 'pending' && ids.has(p.taskId)));
+          setPermissions(data.permissions.filter(p => (p.capability === 'shell' || p.capability === 'chat_publish_file') && p.status === 'pending' && ids.has(p.taskId)));
           setError('');
         } else if (snapshot.status === 'error') setError(t('chatShell.loadFailed'));
       };
@@ -51,16 +51,20 @@ function PendingShellApprovals({ taskIds }: { taskIds: string }) {
 
   if (error) return <p role="alert" className="text-sm text-danger">{error}</p>;
   return <>{permissions.map(permission => {
-    let args: { description?: string; command?: string; network?: boolean; timeoutSeconds?: number };
+    let args: { description?: string; command?: string; network?: boolean; timeoutSeconds?: number; path?: string };
     try { args = JSON.parse(permission.arguments); } catch { return null; }
-    return <section key={permission.id} data-testid="chat-shell-approval" aria-label={t('chatShell.title')}
+    const publishing = permission.capability === 'chat_publish_file';
+    const title = t(publishing ? 'chatShell.publishTitle' : 'chatShell.title');
+    return <section key={permission.id} data-testid={publishing ? 'chat-publish-approval' : 'chat-shell-approval'} aria-label={title}
       className="relative flex max-h-72 flex-col gap-2 overflow-auto rounded-xl bg-background-secondary p-3">
-      <p className="text-sm font-medium">{t('chatShell.title')}</p>
-      <p className="text-sm">{args.description}</p>
-      <p className="text-xs text-muted-foreground">{t('chatShell.scope', { network: t(args.network ? 'chatShell.networkOn' : 'chatShell.networkOff'), seconds: args.timeoutSeconds })}</p>
-      <details><summary className="cursor-pointer text-xs">{t('chatShell.command')}</summary>
-        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all text-xs">{args.command}</pre>
-      </details>
+      <p className="text-sm font-medium">{title}</p>
+      {publishing ? <p className="break-all text-sm">{args.path}</p> : <>
+        <p className="text-sm">{args.description}</p>
+        <p className="text-xs text-muted-foreground">{t('chatShell.scope', { network: t(args.network ? 'chatShell.networkOn' : 'chatShell.networkOff'), seconds: args.timeoutSeconds })}</p>
+        <details><summary className="cursor-pointer text-xs">{t('chatShell.command')}</summary>
+          <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all text-xs">{args.command}</pre>
+        </details>
+      </>}
       <div className="flex gap-2">
         <Button size="sm" variant="secondary" isDisabled={resolving != null} data-testid="chat-shell-reject" onPress={() => void resolve(permission.id, false)}>{t('chatShell.reject')}</Button>
         <Button size="sm" variant="primary" isDisabled={resolving != null} data-testid="chat-shell-approve" onPress={() => void resolve(permission.id, true)}>{t('chatShell.approve')}</Button>

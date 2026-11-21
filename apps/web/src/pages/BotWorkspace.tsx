@@ -28,11 +28,15 @@ import { useTranslation } from 'react-i18next';
 import ProjectSettings from '../projects/ProjectSettings';
 import ProjectFiles from '../projects/ProjectFiles';
 import { projectError } from '../projects/errors';
+import { useMediaQuery } from '../utils/useMobile';
+import { isShellTool } from '../utils/toolTrace';
+import type { DeliveryPreviewFile } from '../components/deliveryPreviewFile';
 import '../projects/projects.css';
 
 /** 富内容渲染器（Markdown / 代码 / 表格 / HTML artifact）按需加载，纯文字聊天不下载它。 */
 const BotRich = lazy(() => import('./BotRich'));
 const WebSources = lazy(() => import('../web-search/WebSources'));
+const DeliveryPreview = lazy(() => import('../components/DeliveryPreview').then(module => ({ default: module.DeliveryPreview })));
 import { parseWebSearchResult } from '@wangke/contracts/web-search';
 /** 看起来像 Markdown 的回复才走富渲染：普通聊天句子保持轻量的纯文本气泡。 */
 const looksRich = (text: string) => /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|\|.*\|)|```|\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|\$\$?[^$]+\$/.test(text);
@@ -130,14 +134,15 @@ function BotActivity({ active, activity, progress }: { active: boolean; activity
   if (!active) return null;
   // 真实状态优先；泛化的 running / 无进度时才显示不冒充实际工作的可爱动作。
   const reported = botProgressText(progress ?? '', i18n.language).replace(/\s+/g, ' ').trim();
-  const tools = activity?.tools.map(tool => tool.name).join(' · ');
+  const tools = activity?.tools.map(tool => isShellTool(tool.name) ? 'Shell' : tool.name).join(' · ');
+  const shell = activity?.phase === 'tools' && activity.tools.some(tool => isShellTool(tool.name));
   const text = (activity && activity.phase !== 'running' ? activity.phase === 'tools'
     ? t(activity.activeTools > 1 ? 'botHome.activity.parallel' : 'botHome.activity.tools', { tools, count: activity.activeTools })
     : t(`botHome.activity.${activity.phase}`)
     : (activity === undefined && reported) || '').slice(0, 200);
   return (
     <div className="bot-activity" role="status" aria-live={text ? 'polite' : 'off'} aria-label={text ? undefined : t('botHome.activity.waiting')} data-phase={activity?.phase ?? 'idle'}>
-      <span className="bot-activity__spark" aria-hidden="true">✦</span>
+      <span className="bot-activity__spark" aria-hidden="true">{shell ? <Sym name="terminal" size={14} /> : '✦'}</span>
       {text ? <span className="bot-activity__text" key={text} title={text}>{text}</span> : <BotIdleAction />}
       {activity && activity.completedTools > 0 && <span className="bot-activity__count">{t('botHome.activity.returned', { count: activity.completedTools })}</span>}
     </div>
@@ -153,6 +158,7 @@ const Bubble = memo(function Bubble({
   onReact,
   onResolve,
   onAnswer,
+  onPreview,
   projectId,
   rich,
   error,
@@ -164,6 +170,7 @@ const Bubble = memo(function Bubble({
   onReact: (messageId: string) => void;
   onResolve: (approvalId: string, approved: boolean) => void;
   onAnswer: (question: ThreadQuestionDto) => void;
+  onPreview: (file: DeliveryPreviewFile, trigger: HTMLButtonElement) => void;
   projectId?: string;
   /** 项目里 Bot 的文字回复一律走富渲染；聊天里只有像 Markdown 的才走。 */
   rich?: boolean;
@@ -194,7 +201,7 @@ const Bubble = memo(function Bubble({
   } else if (attachment) {
     body = (
       <div className="bot-attachment-message">
-        <BotMessageAttachments files={attachment.files} projectId={projectId} compact={mine} />
+        <BotMessageAttachments files={attachment.files} projectId={projectId} compact={mine} onPreview={mine ? undefined : onPreview} />
         {attachment.text && <div className="imsg-bubble"><p className="imsg-text">{attachment.text}</p></div>}
       </div>
     );
@@ -312,6 +319,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const setThreadParam = (value: Record<string, string>) => { if (!embedded) setSearch(value, { replace: true }); };
   const filesOpen = Boolean(projectId && location.pathname.endsWith('/files'));
   const narrow = useNarrow();
+  const inlinePreview = useMediaQuery(embedded ? '(min-width: 1440px)' : '(min-width: 1100px)');
   /** 窄屏时显示哪一屏。宽屏两栏并排，这个值不起作用。 */
   const [pane, setPane] = useState<'list' | 'chat'>(() => (initialThreadId.current || filesOpen ? 'chat' : 'list'));
   const [mcpOpen, setMcpOpen] = useState(false);
@@ -342,6 +350,18 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   /** 线程列表只拿摘要；详情（消息）只为当前打开的线程拉。 */
   const [threads, setThreads] = useState<ThreadDto[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [previewSelection, setPreviewSelection] = useState<{ threadId: string; file: DeliveryPreviewFile }>();
+  const previewTrigger = useRef<HTMLButtonElement | null>(null);
+  const openPreview = useCallback((file: DeliveryPreviewFile, trigger: HTMLButtonElement) => {
+    if (activeId) { previewTrigger.current = trigger; setPreviewSelection({ threadId: activeId, file }); }
+  }, [activeId]);
+  const closePreview = useCallback(() => {
+    setPreviewSelection(undefined);
+    const trigger = previewTrigger.current;
+    previewTrigger.current = null;
+    requestAnimationFrame(() => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); });
+  }, []);
+  useEffect(() => { setPreviewSelection(undefined); previewTrigger.current = null; }, [activeId, filesOpen]);
   const history = useBotHistory(session?.authenticated ? session.user?.id ?? null : null, activeId, !filesOpen, status?.botSyncVersion === 1);
   const { details, setDetails, patchActive, detailError } = history;
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -769,6 +789,8 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
   const landing = !activeId && !filesOpen;
   const chatTitle = filesOpen ? tp('files') : activeSummary?.title && activeSummary.title !== tp('newTitle') ? compactThreadTitle(activeSummary.title) : currentAgent?.name ?? '';
   const fullChatTitle = filesOpen ? tp('files') : activeSummary?.title || chatTitle;
+  const previewFile = !filesOpen && previewSelection?.threadId === activeId ? previewSelection.file : undefined;
+  const preview = previewFile && <Suspense fallback={null}><DeliveryPreview file={previewFile} inline={inlinePreview} onClose={closePreview} /></Suspense>;
 
   /* ── 对话区（Bot 栏与项目共用） ── */
 
@@ -809,6 +831,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
                 onReact={react}
                 onResolve={resolveApproval}
                 onAnswer={answerQuestion}
+                onPreview={openPreview}
                 projectId={projectId}
                  rich={Boolean(projectId)}
                  error={actionErrors[`message:${row.message.id}`] || (approvalByMessage.get(row.message.id) ? actionErrors[`approval:${approvalByMessage.get(row.message.id)!.id}`] : '')}
@@ -918,6 +941,7 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
       </Dropdown>
     );
     return (
+      <div className="bot-delivery-layout">
       <section className="bot-panel" data-landing={landing || undefined} aria-label="Bot" data-testid="bot-panel">
         <BotTopBar className="bot-panel__bar">
           <div className="bot-panel__identity">
@@ -943,6 +967,8 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
         {conversation}
         {modals}
       </section>
+      {preview}
+      </div>
     );
   }
 
@@ -1047,10 +1073,13 @@ function Workspace({ projectId, embedded = false, onClose }: { projectId?: strin
         </Button>
       </>}
     >
-      <div className="bh" data-pane={pane} data-narrow={narrow || undefined}>
-        {listPane}
-        {chatPane}
-        {modals}
+      <div className="bot-delivery-layout">
+        <div className="bh" data-pane={pane} data-narrow={narrow || undefined}>
+          {listPane}
+          {chatPane}
+          {modals}
+        </div>
+        {preview}
       </div>
     </PageShell>
   );

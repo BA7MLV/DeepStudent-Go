@@ -151,8 +151,10 @@ try {
     llmModel: { providerId: 'offline', model: 'gpt-4.1' } });
   let script = [], modelCalls = 0;
   runner = new CloudTaskRunner(store, { records, configuration, sandbox, sandboxCleanup: cleanup, filesDir: path.join(directory, 'files'), fetch: async (_, init) => {
+    const body = JSON.parse(init.body);
+    if (body.messages[0]?.content.includes('会话标题生成器')) return Response.json({ choices: [{ message: { role: 'assistant', content: '精确计算' }, finish_reason: 'stop' }] });
     modelCalls++; assert.ok(script.length, 'unexpected model call');
-    return Response.json({ choices: [{ message: script.shift()(JSON.parse(init.body)), finish_reason: 'stop' }] });
+    return Response.json({ choices: [{ message: script.shift()(body), finish_reason: 'stop' }] });
   } });
   runner.start('http://127.0.0.1:1');
   async function turn(text, check) {

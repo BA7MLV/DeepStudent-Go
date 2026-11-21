@@ -78,11 +78,11 @@ const stringValueSchema = { type: 'object', properties: { value: { type: 'string
 const numberValueSchema = { type: 'object', properties: { version: { type: 'number' } }, required: ['version'] } as const;
 /** 只取 `metadata` 列的行(JSON 文本)。 */
 const metadataOf = (row: unknown, invalid: string) => expectRow<{ metadata: string }>({ type: 'object', properties: { metadata: { type: 'string' } }, required: ['metadata'] }, row, invalid)?.metadata ?? 'null';
-interface SessionIndexRow { id: number; video_id: string; title: string; pinned: number; archived: number; created_at: number; activity: number; has_user: number }
+interface SessionIndexRow { id: number; video_id: string; title: string; pinned: number; pin_rank: number; archived: number; created_at: number; activity: number; has_user: number }
 const sessionIndexRowSchema = {
   type: 'object',
-  properties: { id: { type: 'integer' }, video_id: { type: 'string' }, title: { type: 'string' }, pinned: { type: 'integer' }, archived: { type: 'integer' }, created_at: { type: 'integer' }, activity: { type: 'integer' }, has_user: { type: 'integer' } },
-  required: ['id', 'video_id', 'title', 'pinned', 'archived', 'created_at', 'activity', 'has_user'],
+  properties: { id: { type: 'integer' }, video_id: { type: 'string' }, title: { type: 'string' }, pinned: { type: 'integer' }, pin_rank: { type: 'integer' }, archived: { type: 'integer' }, created_at: { type: 'integer' }, activity: { type: 'integer' }, has_user: { type: 'integer' } },
+  required: ['id', 'video_id', 'title', 'pinned', 'pin_rank', 'archived', 'created_at', 'activity', 'has_user'],
 } as const;
 
 function dto(row: RecordRow): RuntimeRecord {
@@ -284,7 +284,8 @@ export class RecordProjections {
         if (cursor.epoch !== epoch || cursor.version !== version) throw new Error('projection_cursor_expired');
         const position = JSON.parse(cursor.key);
         order = position.order; backwards = position.direction === 'before';
-        if (!['before', 'after'].includes(position.direction) || !Array.isArray(order) || order.length !== 4 || !order.every(Number.isSafeInteger)) throw new Error('invalid_projection_cursor');
+        if (Array.isArray(order) && order.length === 4) throw new Error('projection_cursor_expired');
+        if (!['before', 'after'].includes(position.direction) || !Array.isArray(order) || order.length !== 5 || !order.every(Number.isSafeInteger)) throw new Error('invalid_projection_cursor');
       }
       // 范围条件只在「常看」索引页出现;时间排序方向只由 request.recentOnly/backwards 决定两种固定文本。
       const scope = sqlFixed('WHERE owner_id=? AND video_id=? AND archived=?', 3, request.recentOnly ? [sqlVariant('AND has_user=1')] : []);
@@ -294,17 +295,17 @@ export class RecordProjections {
       const latest = request.recentOnly ? undefined : expectRow<{ id: number }>({ type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] },
         this.store.db.prepare(sqlFixed(`SELECT id FROM client_session_index
         WHERE owner_id=? AND video_id=? AND archived=? ORDER BY created_at DESC,id DESC LIMIT 1`, 3).sql).get(...parameters), 'session_index_row_invalid');
-      // 键集比较(元组 >/<)与排序方向只来自固定模板,游标值是另外 4 个绑定值。
-      const keyset = order ? `AND (pinned,activity,created_at,id)${backwards ? '>' : '<'}(?,?,?,?)` : '';
+      // 键集比较(元组 >/<)与排序方向只来自固定模板,游标值单独绑定。
+      const keyset = order ? `AND (pinned,pin_rank,activity,created_at,id)${backwards ? '>' : '<'}(?,?,?,?,?)` : '';
       const sort = backwards ? 'ASC' : 'DESC';
       const rows = expectRows<SessionIndexRow>(sessionIndexRowSchema,
-        this.store.db.prepare(sqlFixed(`SELECT id,video_id,title,pinned,archived,created_at,activity,has_user FROM client_session_index
-        ${scope.sql} ${keyset} ORDER BY pinned ${sort},activity ${sort},created_at ${sort},id ${sort} LIMIT 50`, 3 + (order ? 4 : 0)).sql)
+        this.store.db.prepare(sqlFixed(`SELECT id,video_id,title,pinned,pin_rank,archived,created_at,activity,has_user FROM client_session_index
+        ${scope.sql} ${keyset} ORDER BY pinned ${sort},pin_rank ${sort},activity ${sort},created_at ${sort},id ${sort} LIMIT 50`, 3 + (order ? 5 : 0)).sql)
           .all(...parameters, ...(order ?? [])), 'session_index_row_invalid');
       const page = backwards ? rows.reverse() : rows, first = page[0], last = page.at(-1);
-      const position = (row: typeof rows[number]) => [row.pinned, row.activity, row.created_at, row.id];
+      const position = (row: typeof rows[number]) => [row.pinned, row.pin_rank, row.activity, row.created_at, row.id];
       const more = (row: SessionIndexRow | undefined, comparison: '<' | '>') => !!row && !!this.store.db.prepare(
-        sqlFixed(`SELECT 1 FROM client_session_index ${scope.sql} AND (pinned,activity,created_at,id)${comparison}(?,?,?,?) LIMIT 1`, 7).sql)
+        sqlFixed(`SELECT 1 FROM client_session_index ${scope.sql} AND (pinned,pin_rank,activity,created_at,id)${comparison}(?,?,?,?,?) LIMIT 1`, 8).sql)
         .get(...parameters, ...position(row));
       const cursorFor = (row: typeof rows[number], direction: 'before' | 'after') => this.encode({ owner, table: 'chatSessions', parent, epoch, version,
         key: JSON.stringify({ direction, order: position(row) }) });

@@ -9,13 +9,14 @@
   },
   "chatShell": {
     "title": "Allow this chat to run a command?",
+    "publishTitle": "Allow this file to be saved as a chat attachment?",
     "scope": "Only this chat’s workspace is writable; the account notebook is read-only. Network: {{network}} · Deadline: {{seconds}}s",
     "networkOn": "on",
     "networkOff": "off",
     "command": "View exact command",
     "approve": "Allow once",
     "reject": "Reject",
-    "loadFailed": "Command approval could not be loaded. Reconnect or stop this response and retry."
+    "loadFailed": "Chat approvals could not be loaded. Reconnect or stop this response and retry."
   },
   "courseMetadata": { "loadFailed": "Course details could not be loaded. This does not mean the courses were deleted.", "retry": "Retry" },
   "appTitle": "DeepStudent Go",
@@ -372,6 +373,18 @@
     "failed": "Upload failed",
     "limited": "Only part of the text is shown. Download the original for the full content.",
     "fallback": "The original is unavailable. Showing the saved text excerpt."
+  },
+  "deliveryPreview": {
+    "title": "Delivered file preview",
+    "close": "Close file preview",
+    "documentText": "This preview shows text only. Download the original for layout and images.",
+    "slide": "Slide {{number}}",
+    "emptySlide": "No previewable text on this slide.",
+    "empty": "This file has no previewable text.",
+    "legacy": "Legacy .doc and .ppt files cannot be previewed. Download the file or save it as .docx / .pptx.",
+    "tooLarge": "This file is too large to preview. Download the original instead.",
+    "failed": "The preview could not be loaded. Try again or download the original.",
+    "retry": "Try again"
   },
   "websiteSources": {
     "label": "Sources",

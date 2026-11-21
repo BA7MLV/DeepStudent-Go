@@ -1,4 +1,5 @@
 export const workspaceFileLimit = 20 * 1024 * 1024;
+export const workspaceExportLimit = 512 * 1024 * 1024;
 
 export function workspacePath(value) {
   if (typeof value !== 'string' || value.length > 2048 || /[\\\u0000-\u001f\u007f]/.test(value)) throw new Error('invalid_workspace_path');
@@ -23,12 +24,27 @@ try:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
             sys.exit(3)
-        if info.st_size < 1 or info.st_size > ${workspaceFileLimit}:
+        exporting = len(sys.argv) == 3
+        limit = int(sys.argv[2]) if exporting else ${workspaceFileLimit}
+        if info.st_size < 1 or info.st_size > limit:
             sys.exit(4)
-        data = stream.read(${workspaceFileLimit + 1})
-        if len(data) < 1 or len(data) > ${workspaceFileLimit}:
-            sys.exit(4)
-    sys.stdout.buffer.write(data)
+        if exporting:
+            sys.stdout.buffer.write(info.st_size.to_bytes(4, 'big'))
+            remaining = info.st_size
+            while remaining:
+                data = stream.read(min(remaining, 65536))
+                if not data:
+                    sys.exit(3)
+                remaining -= len(data)
+                sys.stdout.buffer.write(data)
+            current = os.fstat(stream.fileno())
+            if stream.read(1) or current.st_size != info.st_size or current.st_mtime_ns != info.st_mtime_ns:
+                sys.exit(3)
+        else:
+            data = stream.read(limit + 1)
+            if len(data) < 1 or len(data) > limit:
+                sys.exit(4)
+            sys.stdout.buffer.write(data)
 except FileNotFoundError:
     sys.exit(2)
 except OSError:
